@@ -5,17 +5,44 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Result;
+use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite};
 use uuid::Uuid;
 
 use crate::app::sftp::model::SftpDirectoryEntry;
 
 pub type SftpOperationFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
+pub type SftpReaderFuture<'a> = Pin<Box<dyn Future<Output = Result<BoxedSftpReader>> + Send + 'a>>;
+pub type SftpWriterFuture<'a> = Pin<Box<dyn Future<Output = Result<BoxedSftpWriter>> + Send + 'a>>;
+
+pub trait SftpAsyncReader: AsyncRead + AsyncSeek + Send + Unpin {}
+impl<T> SftpAsyncReader for T where T: AsyncRead + AsyncSeek + Send + Unpin {}
+
+pub trait SftpAsyncWriter: AsyncWrite + AsyncSeek + Send + Unpin {}
+impl<T> SftpAsyncWriter for T where T: AsyncWrite + AsyncSeek + Send + Unpin {}
+
+pub type BoxedSftpReader = Pin<Box<dyn SftpAsyncReader>>;
+pub type BoxedSftpWriter = Pin<Box<dyn SftpAsyncWriter>>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SftpRemoteMetadata {
+    pub size_bytes: Option<u64>,
+    pub modified_unix_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SftpWriteMode {
+    CreateOrTruncate,
+    CreateOrAppend,
+}
 
 pub trait SftpBackend: Send + Sync {
     fn read_dir<'a>(&'a self, path: &'a str) -> SftpOperationFuture<'a, Vec<SftpDirectoryEntry>>;
     fn mkdir<'a>(&'a self, path: &'a str) -> SftpOperationFuture<'a, ()>;
     fn rename<'a>(&'a self, from: &'a str, to: &'a str) -> SftpOperationFuture<'a, ()>;
     fn path_exists<'a>(&'a self, path: &'a str) -> SftpOperationFuture<'a, bool>;
+    fn stat<'a>(&'a self, path: &'a str) -> SftpOperationFuture<'a, SftpRemoteMetadata>;
+    fn open_file_reader<'a>(&'a self, path: &'a str) -> SftpReaderFuture<'a>;
+    fn open_file_writer<'a>(&'a self, path: &'a str, mode: SftpWriteMode) -> SftpWriterFuture<'a>;
     fn upload_file<'a>(
         &'a self,
         remote_path: &'a str,
@@ -58,6 +85,18 @@ impl SftpRuntimeHandle {
 
     pub async fn path_exists(&self, path: &str) -> Result<bool> {
         self.backend.path_exists(path).await
+    }
+
+    pub async fn stat(&self, path: &str) -> Result<SftpRemoteMetadata> {
+        self.backend.stat(path).await
+    }
+
+    pub async fn open_file_reader(&self, path: &str) -> Result<BoxedSftpReader> {
+        self.backend.open_file_reader(path).await
+    }
+
+    pub async fn open_file_writer(&self, path: &str, mode: SftpWriteMode) -> Result<BoxedSftpWriter> {
+        self.backend.open_file_writer(path, mode).await
     }
 
     pub async fn upload_file(&self, remote_path: &str, data: Vec<u8>) -> Result<u64> {

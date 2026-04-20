@@ -9,8 +9,9 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::app::sftp::{
-    DownloadTransferEntry, SftpDirectoryEntry, SftpDirectoryEntryKind, SftpRuntimeHandle,
-    SftpSessionBinding, SftpSessionBindingState, TransferQueue, collect_download_targets,
+    BoxedSftpReader, BoxedSftpWriter, DownloadTransferEntry, SftpDirectoryEntry,
+    SftpDirectoryEntryKind, SftpRemoteMetadata, SftpRuntimeHandle, SftpSessionBinding,
+    SftpSessionBindingState, SftpWriteMode, TransferQueue, collect_download_targets,
     delete_entries as delete_sftp_entries, execute_queued_transfers,
     execute_queued_transfers_with_progress, move_entry_between_directories,
 };
@@ -394,6 +395,34 @@ impl SessionManager {
     ) -> Result<u64> {
         self.runtime_handle
             .block_on(self.sftp_upload_file_async(session_id, remote_path, data))
+    }
+
+    pub async fn sftp_stat_async(
+        &self,
+        session_id: Uuid,
+        remote_path: &str,
+    ) -> Result<SftpRemoteMetadata> {
+        let runtime = self.sftp_runtime(session_id)?;
+        runtime.stat(remote_path).await
+    }
+
+    pub async fn sftp_open_file_reader_async(
+        &self,
+        session_id: Uuid,
+        remote_path: &str,
+    ) -> Result<BoxedSftpReader> {
+        let runtime = self.sftp_runtime(session_id)?;
+        runtime.open_file_reader(remote_path).await
+    }
+
+    pub async fn sftp_open_file_writer_async(
+        &self,
+        session_id: Uuid,
+        remote_path: &str,
+        mode: SftpWriteMode,
+    ) -> Result<BoxedSftpWriter> {
+        let runtime = self.sftp_runtime(session_id)?;
+        runtime.open_file_writer(remote_path, mode).await
     }
 
     pub async fn sftp_create_directory_async(&self, session_id: Uuid, path: &str) -> Result<()> {

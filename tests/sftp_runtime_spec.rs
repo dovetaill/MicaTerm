@@ -1,11 +1,81 @@
 use std::future::Future;
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 
 use anyhow::{Result, anyhow};
-use mica_term::app::sftp::{
-    SftpBackend, SftpDirectoryEntry, SftpDirectoryEntryKind, SftpRuntimeHandle,
+use tokio::io::{
+    AsyncRead, AsyncReadExt, AsyncSeek, AsyncSeekExt, AsyncWrite, AsyncWriteExt, ReadBuf,
 };
+use mica_term::app::sftp::{
+    BoxedSftpReader, BoxedSftpWriter, SftpBackend, SftpDirectoryEntry, SftpDirectoryEntryKind,
+    SftpRemoteMetadata, SftpRuntimeHandle, SftpWriteMode,
+};
+
+struct MemoryFileHandle {
+    cursor: Cursor<Vec<u8>>,
+}
+
+impl MemoryFileHandle {
+    fn new(bytes: Vec<u8>) -> Self {
+        Self {
+            cursor: Cursor::new(bytes),
+        }
+    }
+}
+
+impl AsyncRead for MemoryFileHandle {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let mut chunk = vec![0; buf.remaining()];
+        let read = Read::read(&mut self.cursor, &mut chunk)?;
+        buf.put_slice(&chunk[..read]);
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl AsyncWrite for MemoryFileHandle {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let written = Write::write(&mut self.cursor, buf)?;
+        Poll::Ready(Ok(written))
+    }
+
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl AsyncSeek for MemoryFileHandle {
+    fn start_seek(mut self: Pin<&mut Self>, position: SeekFrom) -> std::io::Result<()> {
+        Seek::seek(&mut self.cursor, position)?;
+        Ok(())
+    }
+
+    fn poll_complete(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<std::io::Result<u64>> {
+        Poll::Ready(Ok(self.cursor.position()))
+    }
+}
 
 #[derive(Default)]
 struct RecordingBackend {
@@ -13,6 +83,9 @@ struct RecordingBackend {
     mkdir_requests: Mutex<Vec<String>>,
     rename_requests: Mutex<Vec<(String, String)>>,
     exists_requests: Mutex<Vec<String>>,
+    stat_requests: Mutex<Vec<String>>,
+    open_reader_requests: Mutex<Vec<String>>,
+    open_writer_requests: Mutex<Vec<(String, SftpWriteMode)>>,
     upload_requests: Mutex<Vec<(String, Vec<u8>)>>,
     download_requests: Mutex<Vec<String>>,
     remove_file_requests: Mutex<Vec<String>>,
@@ -74,6 +147,49 @@ impl SftpBackend for RecordingBackend {
                 .expect("lock exists requests")
                 .push(path.to_string());
             Ok(path.ends_with("existing"))
+        })
+    }
+
+    fn stat<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<SftpRemoteMetadata>> + Send + 'a>> {
+        Box::pin(async move {
+            self.stat_requests
+                .lock()
+                .expect("lock stat requests")
+                .push(path.to_string());
+            Ok(SftpRemoteMetadata {
+                size_bytes: Some(9),
+                modified_unix_seconds: Some(1_710_000_000),
+            })
+        })
+    }
+
+    fn open_file_reader<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<BoxedSftpReader>> + Send + 'a>> {
+        Box::pin(async move {
+            self.open_reader_requests
+                .lock()
+                .expect("lock open reader requests")
+                .push(path.to_string());
+            Ok(Box::pin(MemoryFileHandle::new(b"abcdefghi".to_vec())) as BoxedSftpReader)
+        })
+    }
+
+    fn open_file_writer<'a>(
+        &'a self,
+        path: &'a str,
+        mode: SftpWriteMode,
+    ) -> Pin<Box<dyn Future<Output = Result<BoxedSftpWriter>> + Send + 'a>> {
+        Box::pin(async move {
+            self.open_writer_requests
+                .lock()
+                .expect("lock open writer requests")
+                .push((path.to_string(), mode));
+            Ok(Box::pin(MemoryFileHandle::new(Vec::new())) as BoxedSftpWriter)
         })
     }
 
@@ -162,6 +278,28 @@ impl SftpBackend for FailingBackend {
         _path: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>> {
         Box::pin(async move { Err(anyhow!("exists failed")) })
+    }
+
+    fn stat<'a>(
+        &'a self,
+        _path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<SftpRemoteMetadata>> + Send + 'a>> {
+        Box::pin(async move { Err(anyhow!("stat failed")) })
+    }
+
+    fn open_file_reader<'a>(
+        &'a self,
+        _path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<BoxedSftpReader>> + Send + 'a>> {
+        Box::pin(async move { Err(anyhow!("open reader failed")) })
+    }
+
+    fn open_file_writer<'a>(
+        &'a self,
+        _path: &'a str,
+        _mode: SftpWriteMode,
+    ) -> Pin<Box<dyn Future<Output = Result<BoxedSftpWriter>> + Send + 'a>> {
+        Box::pin(async move { Err(anyhow!("open writer failed")) })
     }
 
     fn upload_file<'a>(
@@ -330,5 +468,87 @@ async fn runtime_supports_transfer_and_delete_operations() {
             .expect("lock remove dir requests")
             .as_slice(),
         &["/srv/app/releases".to_string()]
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn runtime_can_open_seekable_reader_and_writer() {
+    let backend = Arc::new(RecordingBackend::default());
+    let runtime = SftpRuntimeHandle::new(backend.clone());
+
+    let mut writer = runtime
+        .open_file_writer("/srv/app/report.zip.part", SftpWriteMode::CreateOrAppend)
+        .await
+        .expect("open writer");
+    writer
+        .seek(SeekFrom::Start(3))
+        .await
+        .expect("seek writer");
+    writer.write_all(b"xyz").await.expect("write bytes");
+
+    let mut reader = runtime
+        .open_file_reader("/srv/app/report.zip.part")
+        .await
+        .expect("open reader");
+    reader
+        .seek(SeekFrom::Start(3))
+        .await
+        .expect("seek reader");
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes).await.expect("read bytes");
+
+    assert_eq!(
+        backend
+            .open_writer_requests
+            .lock()
+            .expect("lock open writer requests")
+            .as_slice(),
+        &[(
+            "/srv/app/report.zip.part".to_string(),
+            SftpWriteMode::CreateOrAppend,
+        )]
+    );
+    assert_eq!(
+        backend
+            .open_reader_requests
+            .lock()
+            .expect("lock open reader requests")
+            .as_slice(),
+        &["/srv/app/report.zip.part".to_string()]
+    );
+    assert_eq!(bytes, b"defghi".to_vec());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn runtime_loads_remote_metadata_without_downloading_file() {
+    let backend = Arc::new(RecordingBackend::default());
+    let runtime = SftpRuntimeHandle::new(backend.clone());
+
+    let metadata = runtime
+        .stat("/srv/app/report.zip.part")
+        .await
+        .expect("load metadata");
+
+    assert_eq!(
+        metadata,
+        SftpRemoteMetadata {
+            size_bytes: Some(9),
+            modified_unix_seconds: Some(1_710_000_000),
+        }
+    );
+    assert_eq!(
+        backend
+            .stat_requests
+            .lock()
+            .expect("lock stat requests")
+            .as_slice(),
+        &["/srv/app/report.zip.part".to_string()]
+    );
+    assert!(
+        backend
+            .download_requests
+            .lock()
+            .expect("lock download requests")
+            .is_empty()
     );
 }
