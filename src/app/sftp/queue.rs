@@ -207,6 +207,37 @@ impl TransferQueue {
         true
     }
 
+    pub fn pause_task(&mut self, task_id: &str) -> bool {
+        let Some(task) = self.tasks.iter_mut().find(|task| task.id == task_id) else {
+            return false;
+        };
+        task.state = TransferTaskState::Paused;
+        task.error_message = None;
+        true
+    }
+
+    pub fn interrupt_task(&mut self, task_id: &str, message: impl Into<String>) -> bool {
+        let Some(task) = self.tasks.iter_mut().find(|task| task.id == task_id) else {
+            return false;
+        };
+        task.state = TransferTaskState::Interrupted;
+        task.error_message = Some(message.into());
+        true
+    }
+
+    pub fn restart_task(&mut self, task_id: &str) -> bool {
+        let Some(task) = self.tasks.iter_mut().find(|task| task.id == task_id) else {
+            return false;
+        };
+        task.state = TransferTaskState::Queued;
+        task.bytes_transferred = 0;
+        task.bytes_confirmed = 0;
+        task.temp_target_path = None;
+        task.resume_mode = TransferResumeMode::ResumeIfPossible;
+        task.error_message = None;
+        true
+    }
+
     pub fn mark_completed(&mut self, task_id: &str, bytes_transferred: u64) -> bool {
         let Some(task) = self.tasks.iter_mut().find(|task| task.id == task_id) else {
             return false;

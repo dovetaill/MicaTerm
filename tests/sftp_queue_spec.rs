@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use mica_term::app::sftp::{
     DownloadTransferEntry, SftpDirectoryEntryKind, TransferConflictPolicy, TransferDirection,
-    TransferQueue, TransferQueueSummary, TransferTask, TransferTaskAction, TransferTaskState,
-    scan_local_sources,
+    TransferQueue, TransferQueueSummary, TransferResumeMode, TransferTask, TransferTaskAction,
+    TransferTaskState, scan_local_sources,
 };
 use uuid::Uuid;
 
@@ -22,6 +22,9 @@ fn task(id: &str, session_id: &str, state: TransferTaskState) -> TransferTask {
         state,
         bytes_total: 1_024,
         bytes_transferred: 512,
+        bytes_confirmed: 256,
+        temp_target_path: Some(PathBuf::from(format!("/tmp/{id}.part"))),
+        resume_mode: TransferResumeMode::ResumeIfPossible,
         conflict_policy: None,
         error_message: None,
     }
@@ -67,10 +70,75 @@ fn transfer_task_state_reports_active_states() {
     assert!(TransferTaskState::Queued.is_active());
     assert!(TransferTaskState::Running.is_active());
     assert!(TransferTaskState::Paused.is_active());
+    assert!(TransferTaskState::VerifyingResume.is_active());
+    assert!(!TransferTaskState::Interrupted.is_active());
     assert!(!TransferTaskState::Completed.is_active());
     assert!(!TransferTaskState::Failed.is_active());
     assert!(!TransferTaskState::Cancelled.is_active());
     assert!(!TransferTaskState::Conflict.is_active());
+}
+
+#[test]
+fn pause_task_preserves_confirmed_progress_checkpoint() {
+    let mut queue = TransferQueue {
+        tasks: vec![task(
+            "paused-candidate",
+            "session-a",
+            TransferTaskState::Running,
+        )],
+    };
+
+    assert!(queue.pause_task("paused-candidate"));
+
+    let task = queue.task("paused-candidate").expect("paused task");
+    assert_eq!(task.state, TransferTaskState::Paused);
+    assert_eq!(task.bytes_transferred, 512);
+    assert_eq!(task.bytes_confirmed, 256);
+}
+
+#[test]
+fn interrupt_task_marks_task_interrupted_without_discarding_checkpoint() {
+    let mut queue = TransferQueue {
+        tasks: vec![task(
+            "interrupt-candidate",
+            "session-a",
+            TransferTaskState::VerifyingResume,
+        )],
+    };
+
+    assert!(queue.interrupt_task("interrupt-candidate", "network dropped"));
+
+    let task = queue.task("interrupt-candidate").expect("interrupted task");
+    assert_eq!(task.state, TransferTaskState::Interrupted);
+    assert_eq!(task.bytes_transferred, 512);
+    assert_eq!(task.bytes_confirmed, 256);
+    assert_eq!(task.error_message.as_deref(), Some("network dropped"));
+}
+
+#[test]
+fn restart_task_resets_progress_error_and_temp_target_path() {
+    let mut queue = TransferQueue {
+        tasks: vec![TransferTask {
+            error_message: Some("resume failed".into()),
+            state: TransferTaskState::Interrupted,
+            resume_mode: TransferResumeMode::RestartOnly,
+            ..task(
+                "restart-candidate",
+                "session-a",
+                TransferTaskState::Interrupted,
+            )
+        }],
+    };
+
+    assert!(queue.restart_task("restart-candidate"));
+
+    let task = queue.task("restart-candidate").expect("restarted task");
+    assert_eq!(task.state, TransferTaskState::Queued);
+    assert_eq!(task.bytes_transferred, 0);
+    assert_eq!(task.bytes_confirmed, 0);
+    assert!(task.temp_target_path.is_none());
+    assert_eq!(task.resume_mode, TransferResumeMode::ResumeIfPossible);
+    assert!(task.error_message.is_none());
 }
 
 #[test]
