@@ -635,6 +635,15 @@ pub struct SftpRequestLatencyTrace {
     pub path: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingSftpUiSyncLatencyTrace {
+    pub flow: &'static str,
+    pub started_at: Instant,
+    pub browser_session_id: String,
+    pub path: String,
+    pub request_id: u64,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellViewModel {
     pub show_welcome: bool,
@@ -676,6 +685,7 @@ pub struct ShellViewModel {
     pub pending_sftp_panel_open_latency_started_at: Option<Instant>,
     pub pending_sftp_panel_switch_latency: Option<PendingSftpSwitchLatencyTrace>,
     pub sftp_request_latency_traces: HashMap<u64, SftpRequestLatencyTrace>,
+    pub pending_sftp_ui_sync_latency_trace: Option<PendingSftpUiSyncLatencyTrace>,
     pub quick_browser_session_id: Option<String>,
     pub quick_browser_state: QuickBrowserState,
     pub sftp_queue_summary: TransferQueueSummary,
@@ -759,6 +769,7 @@ impl Default for ShellViewModel {
             pending_sftp_panel_open_latency_started_at: None,
             pending_sftp_panel_switch_latency: None,
             sftp_request_latency_traces: HashMap::new(),
+            pending_sftp_ui_sync_latency_trace: None,
             quick_browser_session_id: None,
             quick_browser_state: QuickBrowserState::default(),
             sftp_queue_summary: TransferQueueSummary::default(),

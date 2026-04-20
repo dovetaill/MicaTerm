@@ -5077,7 +5077,19 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let (width, height) = current_window_size(&window);
-        state.toggle_right_panel();
+        let started = (!state.show_right_panel).then(Instant::now);
+        if let Some(started_at) = started {
+            if session_bridge_ref.as_ref().is_some()
+                && active_workspace_session_uuid(&state).is_some()
+            {
+                state.begin_sftp_panel_open_latency(started_at);
+            } else {
+                state.clear_sftp_panel_open_latency();
+            }
+            state.open_sftp_panel();
+        } else {
+            state.toggle_right_panel();
+        }
         shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         sftp::sync_right_panel_state(&window, &mut state);
         sync_shell_layout(&window, &mut state, width, height);
@@ -5087,6 +5099,18 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
+        if let Some(started_at) = started {
+            tracing::debug!(
+                target: "app.async_latency",
+                flow = "sftp-panel-open",
+                stage = "ui-return",
+                elapsed_ms = started_at.elapsed().as_millis() as u64,
+                elapsed_us = started_at.elapsed().as_micros() as u64,
+                browser_session_id = state.quick_browser_session_id().unwrap_or_default(),
+                path = state.sftp_panel_path().as_str(),
+                "measured SFTP panel open UI handoff latency"
+            );
+        }
     });
 
     let state = Rc::clone(&view_model);

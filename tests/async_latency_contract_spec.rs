@@ -14,6 +14,10 @@ fn sftp_sources_expose_open_and_switch_latency_markers() {
         "sftp-panel-open",
         "sftp-panel-switch",
         "ui-return",
+        "result-drained",
+        "browser-state-applied",
+        "right-panel-sync-start",
+        "right-panel-sync-finished",
         "request-finished",
     ] {
         assert!(
@@ -21,6 +25,35 @@ fn sftp_sources_expose_open_and_switch_latency_markers() {
             "SFTP async latency instrumentation should expose `{expected}` so slow right-panel open/switch paths can be timed end-to-end instead of guessed from UI hitches"
         );
     }
+}
+
+#[test]
+fn sftp_toggle_open_path_is_instrumented() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    for expected in [
+        "on_toggle_right_panel_requested",
+        "begin_sftp_panel_open_latency",
+        "flow = \"sftp-panel-open\"",
+        "stage = \"ui-return\"",
+    ] {
+        assert!(
+            bootstrap_source.contains(expected),
+            "the generic right-panel toggle path should expose `{expected}` so opening SFTP from the titlebar toggle emits the same latency flow as the explicit Open SFTP action"
+        );
+    }
+}
+
+#[test]
+fn sftp_sources_recover_manager_runtime_before_blocking_fallback() {
+    let bootstrap_sftp =
+        fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp source");
+
+    assert!(
+        bootstrap_sftp.contains("async_runtime")
+            && bootstrap_sftp.contains("unwrap_or_else(|| manager.runtime_handle())"),
+        "SFTP browser requests should recover the SessionManager runtime handle before considering any blocking fallback so a missing optional UI handle cannot freeze the main thread"
+    );
 }
 
 #[test]
@@ -84,6 +117,9 @@ fn docs_plan_describes_async_latency_probe_points() {
         "SSH open",
         "app.async_latency",
         "ui-return",
+        "result-drained",
+        "browser-state-applied",
+        "right-panel-sync-finished",
         "request-finished",
         "session-connected",
         "ssh-modal-connect",

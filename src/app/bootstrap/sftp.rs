@@ -152,8 +152,37 @@ pub(super) fn sync_sftp_panel_state(window: &AppWindow, state: &mut ShellViewMod
 }
 
 pub(super) fn sync_right_panel_state(window: &AppWindow, state: &mut ShellViewModel) {
+    let pending_latency_trace = state.take_sftp_ui_sync_latency_trace();
+    if let Some(trace) = pending_latency_trace.as_ref() {
+        log_sftp_async_latency(
+            trace.flow,
+            "right-panel-sync-start",
+            trace.started_at,
+            trace.browser_session_id.as_str(),
+            Some(trace.request_id),
+            trace.path.as_str(),
+            None,
+            state
+                .quick_browser_session()
+                .map(|session| session.entries.len()),
+        );
+    }
     window.set_right_panel_view(state.right_panel_view_id().into());
     sync_sftp_panel_state(window, state);
+    if let Some(trace) = pending_latency_trace {
+        log_sftp_async_latency(
+            trace.flow,
+            "right-panel-sync-finished",
+            trace.started_at,
+            trace.browser_session_id.as_str(),
+            Some(trace.request_id),
+            trace.path.as_str(),
+            None,
+            state
+                .quick_browser_session()
+                .map(|session| session.entries.len()),
+        );
+    }
 }
 
 pub(super) fn sync_sftp_remote_file_modal_state(window: &AppWindow, state: &ShellViewModel) {
@@ -707,6 +736,7 @@ pub(super) fn project_sftp_browser_state_into_view_model(
     true
 }
 
+#[allow(dead_code)]
 pub(super) fn execute_sftp_browser_request(
     state: &mut ShellViewModel,
     controller: &mut SftpBrowserController,
@@ -777,9 +807,9 @@ fn queue_sftp_browser_request(
         );
     }
 
-    let Some(runtime_handle) = async_runtime.cloned() else {
-        return pending_changed | execute_sftp_browser_request(state, controller, manager, request);
-    };
+    let runtime_handle = async_runtime
+        .cloned()
+        .unwrap_or_else(|| manager.runtime_handle());
     crate::app::sftp::dispatch_sftp_load_dir_operation(
         &runtime_handle,
         manager.clone(),
@@ -802,6 +832,18 @@ pub(super) fn apply_sftp_browser_background_message(
         "error"
     };
     let row_count = message.result.as_ref().ok().map(Vec::len);
+    if let Some(trace) = state.sftp_request_latency_traces.get(&request_id) {
+        log_sftp_async_latency(
+            trace.flow,
+            "result-drained",
+            trace.started_at,
+            trace.browser_session_id.as_str(),
+            Some(request_id),
+            trace.path.as_str(),
+            Some(request_result),
+            row_count,
+        );
+    }
     controller.complete_request(request_id);
     if message.kind != crate::app::sftp::SftpOperationKind::LoadDir {
         return false;
@@ -831,7 +873,30 @@ pub(super) fn apply_sftp_browser_background_message(
         }
     }
 
+    let projected_changed = project_pending_sftp_browser_request(
+        state,
+        controller,
+        message.request.file_browser_session_id.as_str(),
+    );
+
     if let Some(trace) = state.finish_sftp_request_latency_trace(request_id) {
+        log_sftp_async_latency(
+            trace.flow,
+            "browser-state-applied",
+            trace.started_at,
+            trace.browser_session_id.as_str(),
+            Some(request_id),
+            trace.path.as_str(),
+            Some(request_result),
+            row_count,
+        );
+        state.stage_sftp_ui_sync_latency_trace(
+            request_id,
+            trace.flow,
+            trace.browser_session_id.as_str(),
+            trace.path.as_str(),
+            trace.started_at,
+        );
         log_sftp_async_latency(
             trace.flow,
             "request-finished",
@@ -844,11 +909,7 @@ pub(super) fn apply_sftp_browser_background_message(
         );
     }
 
-    project_pending_sftp_browser_request(
-        state,
-        controller,
-        message.request.file_browser_session_id.as_str(),
-    )
+    projected_changed
 }
 
 pub(super) fn drain_sftp_browser_background_messages(
