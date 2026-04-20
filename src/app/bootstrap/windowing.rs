@@ -27,6 +27,7 @@ pub(super) fn bind_windows_window_state_tracking(
     window: &AppWindow,
     state: Rc<RefCell<ShellViewModel>>,
     _effects: Rc<dyn PlatformWindowEffects>,
+    _ui_preferences_store: Option<Rc<UiPreferencesStore>>,
     session_bridge: Option<Rc<ShellSessionBridge>>,
     pending_workspace_paste_warning: Rc<RefCell<Option<PendingWorkspacePasteWarning>>>,
 ) {
@@ -178,6 +179,10 @@ pub(super) fn bind_windows_window_state_tracking(
                             &window,
                             &state,
                             _effects.as_ref(),
+                            winit_window,
+                        );
+                        save_restored_window_bounds_for_window(
+                            &_ui_preferences_store,
                             winit_window,
                         );
                     });

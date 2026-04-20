@@ -140,6 +140,10 @@ use crate::app::vault::sync_service::RemoteHeadSnapshot;
 use crate::app::window_effects::{
     PlatformWindowEffects, build_native_window_appearance_request, default_platform_window_effects,
 };
+#[cfg(target_os = "windows")]
+use crate::app::window_geometry::{
+    MonitorWorkArea, persisted_window_bounds_for_placement, resolve_startup_bounds,
+};
 use crate::app::window_state::WindowPlacementKind;
 use crate::app::windowing::{
     ModalDragState, WindowController, apply_restored_window_size, parse_resize_direction,
@@ -148,6 +152,7 @@ use crate::app::windowing::{
 #[cfg(target_os = "windows")]
 use crate::app::windows_frame::{
     CaptionButtonGeometry, install_window_frame_adapter, query_true_window_placement,
+    work_area_from_hmonitor,
 };
 use crate::app::windows_icon;
 use crate::shell::assets::{
@@ -577,10 +582,18 @@ pub fn startup_failure_message(profile: AppRuntimeProfile, err: &str) -> Option<
 }
 
 pub fn default_window_size() -> (u32, u32) {
-    (
-        ShellMetrics::WINDOW_DEFAULT_WIDTH,
-        ShellMetrics::WINDOW_DEFAULT_HEIGHT,
-    )
+    #[cfg(target_os = "windows")]
+    {
+        (1600, 960)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        (
+            ShellMetrics::WINDOW_DEFAULT_WIDTH,
+            ShellMetrics::WINDOW_DEFAULT_HEIGHT,
+        )
+    }
 }
 
 fn apply_pending_snippet_activation(
@@ -3662,6 +3675,62 @@ fn install_windows_frame_adapter(window: &AppWindow) {
 fn install_windows_frame_adapter(_window: &AppWindow) {}
 
 #[cfg(target_os = "windows")]
+fn windows_monitor_work_areas(window: &AppWindow) -> Vec<MonitorWorkArea> {
+    use slint::winit_030::WinitWindowAccessor;
+    use slint::winit_030::winit::platform::windows::MonitorHandleExtWindows;
+
+    let mut monitors = Vec::new();
+    let mut seen = HashSet::new();
+    let _ = window.window().with_winit_window(|winit_window| {
+        let preferred = winit_window
+            .current_monitor()
+            .or_else(|| winit_window.primary_monitor());
+
+        if let Some(monitor) = preferred
+            .and_then(|monitor| work_area_from_hmonitor(monitor.hmonitor()))
+            && seen.insert((monitor.x, monitor.y, monitor.width, monitor.height))
+        {
+            monitors.push(monitor);
+        }
+
+        for monitor in winit_window.available_monitors() {
+            if let Some(work_area) = work_area_from_hmonitor(monitor.hmonitor())
+                && seen.insert((work_area.x, work_area.y, work_area.width, work_area.height))
+            {
+                monitors.push(work_area);
+            }
+        }
+    });
+    monitors
+}
+
+#[cfg(target_os = "windows")]
+fn apply_startup_window_bounds(window: &AppWindow, prefs: &UiPreferences) -> (u32, u32) {
+    use slint::winit_030::WinitWindowAccessor;
+    use slint::winit_030::winit::dpi::PhysicalPosition;
+
+    let desired_size = default_window_size();
+    let monitors = windows_monitor_work_areas(window);
+    let Some(bounds) = resolve_startup_bounds(prefs.window_bounds, desired_size, &monitors) else {
+        apply_restored_window_size(window, desired_size);
+        return desired_size;
+    };
+
+    apply_restored_window_size(window, (bounds.width, bounds.height));
+    let _ = window.window().with_winit_window(|winit_window| {
+        winit_window.set_outer_position(PhysicalPosition::new(bounds.x, bounds.y));
+    });
+    (bounds.width, bounds.height)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_startup_window_bounds(window: &AppWindow, _prefs: &UiPreferences) -> (u32, u32) {
+    let size = default_window_size();
+    apply_restored_window_size(window, size);
+    size
+}
+
+#[cfg(target_os = "windows")]
 fn query_true_window_placement_from_app(window: &AppWindow) -> WindowPlacementKind {
     use slint::winit_030::WinitWindowAccessor;
 
@@ -3729,6 +3798,7 @@ fn save_ui_preferences(store: &Option<Rc<UiPreferencesStore>>, state: &ShellView
     }
 }
 
+#[cfg(target_os = "windows")]
 fn save_window_bounds_preference(
     store: &Option<Rc<UiPreferencesStore>>,
     bounds: PersistedWindowBounds,
@@ -3744,6 +3814,31 @@ fn save_window_bounds_preference(
             );
         }
     }
+}
+
+#[cfg(target_os = "windows")]
+fn save_restored_window_bounds_for_window(
+    store: &Option<Rc<UiPreferencesStore>>,
+    winit_window: &slint::winit_030::winit::window::Window,
+) {
+    let Some(placement) = query_true_window_placement(winit_window) else {
+        return;
+    };
+    let Ok(position) = winit_window.outer_position() else {
+        return;
+    };
+    let size = winit_window.outer_size();
+    let Some(bounds) = persisted_window_bounds_for_placement(
+        placement,
+        position.x,
+        position.y,
+        size.width,
+        size.height,
+    ) else {
+        return;
+    };
+
+    save_window_bounds_preference(store, bounds);
 }
 
 fn save_quick_launch_preferences(
@@ -4300,11 +4395,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         *surface.borrow_mut() = None;
     });
 
-    apply_restored_window_size(window, default_window_size());
+    let startup_window_size = apply_startup_window_bounds(window, &prefs);
     windowing::bind_windows_window_state_tracking(
         window,
         Rc::clone(&view_model),
         Rc::clone(&effects),
+        store.clone(),
         session_bridge.clone(),
         Rc::clone(&pending_workspace_paste_warning),
     );
@@ -4320,8 +4416,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         sync_shell_layout(
             window,
             &mut state,
-            ShellMetrics::WINDOW_DEFAULT_WIDTH,
-            ShellMetrics::WINDOW_DEFAULT_HEIGHT,
+            startup_window_size.0,
+            startup_window_size.1,
         );
     }
     install_windows_frame_adapter(window);

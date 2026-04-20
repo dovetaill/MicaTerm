@@ -1,4 +1,5 @@
 use crate::app::ui_preferences::PersistedWindowBounds;
+use crate::app::window_state::WindowPlacementKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MonitorWorkArea {
@@ -33,6 +34,25 @@ pub fn resolve_startup_bounds(
     }
 
     Some(center_bounds_in_monitor(desired_size, fallback_monitor))
+}
+
+pub fn persisted_window_bounds_for_placement(
+    placement: WindowPlacementKind,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Option<PersistedWindowBounds> {
+    if placement != WindowPlacementKind::Restored || width == 0 || height == 0 {
+        return None;
+    }
+
+    Some(PersistedWindowBounds {
+        x,
+        y,
+        width,
+        height,
+    })
 }
 
 fn first_intersecting_monitor(
@@ -139,5 +159,67 @@ mod tests {
             .expect("resolved bounds");
 
         assert_eq!(resolved, saved);
+    }
+
+    #[test]
+    fn resolve_startup_bounds_clamps_saved_bounds_into_work_area() {
+        let monitors = [MonitorWorkArea::new(0, 0, 1920, 1040)];
+        let saved = PersistedWindowBounds {
+            x: 600,
+            y: 400,
+            width: 1800,
+            height: 980,
+        };
+
+        let resolved = resolve_startup_bounds(Some(saved), (1600, 960), &monitors)
+            .expect("resolved bounds");
+
+        assert_eq!(resolved.x, 120);
+        assert_eq!(resolved.y, 60);
+        assert_eq!(resolved.width, 1800);
+        assert_eq!(resolved.height, 980);
+    }
+
+    #[test]
+    fn persisted_window_bounds_for_placement_skips_non_restored_states() {
+        assert_eq!(
+            persisted_window_bounds_for_placement(
+                WindowPlacementKind::Maximized,
+                10,
+                20,
+                1200,
+                800,
+            ),
+            None
+        );
+        assert_eq!(
+            persisted_window_bounds_for_placement(
+                WindowPlacementKind::SnappedLeft,
+                10,
+                20,
+                1200,
+                800,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn persisted_window_bounds_for_placement_keeps_restored_bounds() {
+        assert_eq!(
+            persisted_window_bounds_for_placement(
+                WindowPlacementKind::Restored,
+                160,
+                120,
+                1680,
+                980,
+            ),
+            Some(PersistedWindowBounds {
+                x: 160,
+                y: 120,
+                width: 1680,
+                height: 980,
+            })
+        );
     }
 }
