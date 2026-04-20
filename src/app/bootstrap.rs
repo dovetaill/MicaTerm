@@ -97,7 +97,7 @@ use crate::app::terminal_renderer::{
 use crate::app::terminal_theme::{
     TerminalThemePreset, preset_for_theme_mode, selection_overlay_rgba,
 };
-use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
+use crate::app::ui_preferences::{PersistedWindowBounds, UiPreferences, UiPreferencesStore};
 use crate::app::vault::bootstrap::{
     LocalVaultBootstrapState, bootstrap_provider_credential_ref, load_local_vault_bootstrap_state,
     load_provider_credential, load_runtime_vault_key, persist_provider_credential,
@@ -3708,15 +3708,41 @@ fn load_quick_launch_preferences(
     }
 }
 
+fn merge_ui_preferences(existing: UiPreferences, mut next: UiPreferences) -> UiPreferences {
+    if next.window_bounds.is_none() {
+        next.window_bounds = existing.window_bounds;
+    }
+    next
+}
+
 fn save_ui_preferences(store: &Option<Rc<UiPreferencesStore>>, state: &ShellViewModel) {
-    if let Some(store) = store
-        && let Err(err) = store.save(&UiPreferences::from(state))
-    {
-        tracing::error!(
-            target: "config.preferences",
-            error = %err,
-            "failed to save ui preferences"
-        );
+    if let Some(store) = store {
+        let existing = store.load_or_default().unwrap_or_default();
+        let next = merge_ui_preferences(existing, UiPreferences::from(state));
+        if let Err(err) = store.save(&next) {
+            tracing::error!(
+                target: "config.preferences",
+                error = %err,
+                "failed to save ui preferences"
+            );
+        }
+    }
+}
+
+fn save_window_bounds_preference(
+    store: &Option<Rc<UiPreferencesStore>>,
+    bounds: PersistedWindowBounds,
+) {
+    if let Some(store) = store {
+        let mut prefs = store.load_or_default().unwrap_or_default();
+        prefs.window_bounds = Some(bounds);
+        if let Err(err) = store.save(&prefs) {
+            tracing::error!(
+                target: "config.preferences",
+                error = %err,
+                "failed to save window bounds preference"
+            );
+        }
     }
 }
 
@@ -6531,6 +6557,30 @@ mod tests {
     struct CacheTrackingPresenter {
         cached_rows: usize,
         clear_calls: usize,
+    }
+
+    #[test]
+    fn merge_ui_preferences_preserves_existing_window_bounds() {
+        let existing = UiPreferences {
+            window_bounds: Some(PersistedWindowBounds {
+                x: 100,
+                y: 80,
+                width: 1500,
+                height: 920,
+            }),
+            ..UiPreferences::default()
+        };
+
+        let next = UiPreferences {
+            theme_mode: ThemeMode::Light,
+            ..UiPreferences::default()
+        };
+        let expected_window_bounds = existing.window_bounds;
+
+        let merged = merge_ui_preferences(existing, next);
+
+        assert_eq!(merged.theme_mode, ThemeMode::Light);
+        assert_eq!(merged.window_bounds, expected_window_bounds);
     }
 
     #[test]
