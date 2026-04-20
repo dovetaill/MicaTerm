@@ -346,8 +346,8 @@ fn new_ssh_modal_is_a_grouped_single_page_form() {
         "ssh modal should remove the legacy clear-secret affordance"
     );
     assert!(ssh_modal.contains("label: \"Password\""));
-    assert!(ssh_modal.contains("text: \"Proxy\""));
-    assert!(ssh_modal.contains("text: \"Proxy Type\""));
+    assert!(ssh_modal.contains("title: \"Proxy chain\""));
+    assert!(ssh_modal.contains("text: \"Proxy type\""));
     assert!(
         ssh_modal.contains("trailing-action-text: root.password-visible ? \"Hide\" : \"Show\"")
     );

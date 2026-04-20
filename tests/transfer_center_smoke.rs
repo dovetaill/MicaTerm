@@ -768,7 +768,7 @@ fn conflict_modal_uses_elevated_shell_and_separate_footer_structure() {
         "conflict modal should move to a clear header/body/footer structure instead of the old absolutely positioned cancel cluster"
     );
     assert!(
-        shell.contains("modal-glow := Rectangle {")
+        shell.contains("modal-glow-frame := Rectangle {")
             && shell.contains("modal-shadow-far := Rectangle {")
             && shell.contains("modal-shadow-near := Rectangle {"),
         "blocking modal shell should expose elevated glow and shadow layers for the redesigned conflict modal"
@@ -793,7 +793,7 @@ fn conflict_modal_light_theme_tokens_stay_soft_and_fluent() {
         ) && tokens.contains(
             "out property <brush> conflict-dialog-border: dark-mode ? #ffffff2d : #8ea4bf36;"
         ) && tokens.contains(
-            "out property <brush> conflict-dialog-glow: dark-mode ? #7da8d91a : #7c9fc914;"
+            "out property <brush> conflict-dialog-glow: dark-mode ? #7da8d914 : #7c9fc90c;"
         ),
         "light-theme conflict dialog tokens should stay soft and elevated instead of drifting into stark white cards or noisy blue glow"
     );
