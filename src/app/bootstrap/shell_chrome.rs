@@ -14,11 +14,13 @@ fn transfer_state_priority(state: crate::app::sftp::TransferTaskState) -> usize 
     match state {
         crate::app::sftp::TransferTaskState::Running => 0,
         crate::app::sftp::TransferTaskState::Queued => 1,
-        crate::app::sftp::TransferTaskState::Paused => 2,
-        crate::app::sftp::TransferTaskState::Failed => 3,
-        crate::app::sftp::TransferTaskState::Conflict => 4,
-        crate::app::sftp::TransferTaskState::Completed => 5,
-        crate::app::sftp::TransferTaskState::Cancelled => 6,
+        crate::app::sftp::TransferTaskState::VerifyingResume => 2,
+        crate::app::sftp::TransferTaskState::Paused => 3,
+        crate::app::sftp::TransferTaskState::Interrupted => 4,
+        crate::app::sftp::TransferTaskState::Failed => 5,
+        crate::app::sftp::TransferTaskState::Conflict => 6,
+        crate::app::sftp::TransferTaskState::Completed => 7,
+        crate::app::sftp::TransferTaskState::Cancelled => 8,
     }
 }
 
@@ -26,11 +28,22 @@ fn transfer_status_label(task: &crate::app::sftp::TransferTask) -> &'static str 
     if transfer_was_skipped(task) {
         return "Skipped";
     }
+    if matches!(
+        task.state,
+        crate::app::sftp::TransferTaskState::Paused
+            | crate::app::sftp::TransferTaskState::Interrupted
+            | crate::app::sftp::TransferTaskState::Failed
+    ) && task.resume_mode == crate::app::sftp::TransferResumeMode::RestartOnly
+    {
+        return "Restart required";
+    }
 
     match task.state {
         crate::app::sftp::TransferTaskState::Queued => "Queued",
         crate::app::sftp::TransferTaskState::Running => "Running",
         crate::app::sftp::TransferTaskState::Paused => "Paused",
+        crate::app::sftp::TransferTaskState::VerifyingResume => "Verifying",
+        crate::app::sftp::TransferTaskState::Interrupted => "Interrupted",
         crate::app::sftp::TransferTaskState::Completed => "Completed",
         crate::app::sftp::TransferTaskState::Failed => "Failed",
         crate::app::sftp::TransferTaskState::Cancelled => "Cancelled",
@@ -42,9 +55,11 @@ fn transfer_status_tone(state: crate::app::sftp::TransferTaskState) -> &'static 
     match state {
         crate::app::sftp::TransferTaskState::Queued
         | crate::app::sftp::TransferTaskState::Running
-        | crate::app::sftp::TransferTaskState::Paused => "busy",
+        | crate::app::sftp::TransferTaskState::Paused
+        | crate::app::sftp::TransferTaskState::VerifyingResume => "busy",
         crate::app::sftp::TransferTaskState::Completed => "success",
-        crate::app::sftp::TransferTaskState::Failed
+        crate::app::sftp::TransferTaskState::Interrupted
+        | crate::app::sftp::TransferTaskState::Failed
         | crate::app::sftp::TransferTaskState::Conflict => "error",
         crate::app::sftp::TransferTaskState::Cancelled => "muted",
     }
@@ -95,6 +110,8 @@ fn transfer_progress_label(task: &crate::app::sftp::TransferTask) -> String {
         crate::app::sftp::TransferTaskState::Queued => "Pending".into(),
         crate::app::sftp::TransferTaskState::Running => "Working".into(),
         crate::app::sftp::TransferTaskState::Paused => "Paused".into(),
+        crate::app::sftp::TransferTaskState::VerifyingResume => "Verifying resume".into(),
+        crate::app::sftp::TransferTaskState::Interrupted => "Resume available".into(),
         crate::app::sftp::TransferTaskState::Completed => "Done".into(),
         crate::app::sftp::TransferTaskState::Cancelled => {
             if transfer_was_skipped(task) {
@@ -148,6 +165,36 @@ fn transfer_error_summary(task: &crate::app::sftp::TransferTask) -> String {
 
 fn transfer_show_error(task: &crate::app::sftp::TransferTask) -> bool {
     task.state.needs_attention() && !transfer_error_summary(task).trim().is_empty()
+}
+
+fn transfer_attention_projection(
+    state: &ShellViewModel,
+    task: &crate::app::sftp::TransferTask,
+) -> Option<(&'static str, &'static str)> {
+    match task.state {
+        crate::app::sftp::TransferTaskState::Running => Some(("pause", "Pause")),
+        crate::app::sftp::TransferTaskState::Paused => {
+            if task.resume_mode == crate::app::sftp::TransferResumeMode::RestartOnly {
+                Some(("restart", "Restart"))
+            } else {
+                Some(("resume", "Resume"))
+            }
+        }
+        crate::app::sftp::TransferTaskState::Interrupted
+        | crate::app::sftp::TransferTaskState::Failed => state
+            .transfer_task_retry_label(task.id.as_str())
+            .map(|label| {
+                (
+                    if label == "Restart" {
+                        "restart"
+                    } else {
+                        "resume"
+                    },
+                    label,
+                )
+            }),
+        _ => None,
+    }
 }
 
 fn transfer_can_open_file(task: &crate::app::sftp::TransferTask) -> bool {
@@ -232,6 +279,8 @@ fn project_transfer_center_items(state: &ShellViewModel) -> Vec<TransferCenterIt
         .into_iter()
         .map(|(_, task)| {
             let session_ready = state.has_connected_terminal_session(task.session_id.as_str());
+            let (attention_action, attention_label) =
+                transfer_attention_projection(state, task).unwrap_or(("", ""));
             TransferCenterItem {
                 id: task.id.clone().into(),
                 title: transfer_task_title(task).into(),
@@ -248,8 +297,9 @@ fn project_transfer_center_items(state: &ShellViewModel) -> Vec<TransferCenterIt
                 error_tooltip: transfer_error_summary(task).into(),
                 show_error: transfer_show_error(task),
                 can_show_error: transfer_show_error(task),
-                can_retry: session_ready
-                    && task.state == crate::app::sftp::TransferTaskState::Failed,
+                attention_action: attention_action.into(),
+                attention_label: attention_label.into(),
+                can_retry: state.transfer_task_can_retry(task.id.as_str()),
                 can_resolve_conflict: session_ready
                     && task.state == crate::app::sftp::TransferTaskState::Conflict,
                 can_open_workspace: session_ready

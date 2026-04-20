@@ -4,10 +4,12 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs;
 use std::future::Future;
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
@@ -26,6 +28,7 @@ use mica_term::app::bootstrap::{
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_private_key_importer,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_terminal_defaults,
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_transfer_store,
     build_shared_app_credential_store_for_paths, default_window_size,
 };
 use mica_term::app::keychain::KeychainCatalog;
@@ -33,7 +36,9 @@ use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
 use mica_term::app::logging::paths::{LoggingPaths, LoggingRootSource};
 use mica_term::app::logging::runtime::build_test_logging_runtime;
 use mica_term::app::sftp::{
-    SftpBackend, SftpDirectoryEntry, SftpDirectoryEntryKind, SftpRuntimeHandle,
+    BoxedSftpReader, BoxedSftpWriter, RedbTransferStore, SftpBackend, SftpDirectoryEntry,
+    SftpDirectoryEntryKind, SftpRemoteMetadata, SftpRuntimeHandle, SftpWriteMode,
+    TransferDirection, TransferResumeMode, TransferTask, TransferTaskAction, TransferTaskState,
 };
 use mica_term::app::ssh::connection_progress::{
     ConnectionProgressEvent, ConnectionStepState, ConnectionStepStateItem,
@@ -82,6 +87,7 @@ use russh::keys::{HashAlg, PublicKey};
 use secrecy::SecretString;
 use slint::platform::{Key, PointerEventButton, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition, Model, ModelRc, SharedString, VecModel};
+use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -557,6 +563,104 @@ struct UnavailableCredentialStore;
 
 struct NoopRuntimeControl;
 
+struct MemoryFileReader {
+    cursor: Cursor<Vec<u8>>,
+}
+
+impl MemoryFileReader {
+    fn new(bytes: Vec<u8>) -> Self {
+        Self {
+            cursor: Cursor::new(bytes),
+        }
+    }
+}
+
+impl AsyncRead for MemoryFileReader {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let mut chunk = vec![0; buf.remaining()];
+        let read = Read::read(&mut self.cursor, &mut chunk)?;
+        buf.put_slice(&chunk[..read]);
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl AsyncSeek for MemoryFileReader {
+    fn start_seek(mut self: Pin<&mut Self>, position: SeekFrom) -> std::io::Result<()> {
+        Seek::seek(&mut self.cursor, position)?;
+        Ok(())
+    }
+
+    fn poll_complete(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<u64>> {
+        Poll::Ready(Ok(self.cursor.position()))
+    }
+}
+
+struct MemoryFileWriter {
+    path: String,
+    files: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
+    cursor: Cursor<Vec<u8>>,
+}
+
+impl MemoryFileWriter {
+    fn new(path: String, files: Arc<Mutex<BTreeMap<String, Vec<u8>>>>, bytes: Vec<u8>) -> Self {
+        Self {
+            path,
+            files,
+            cursor: Cursor::new(bytes),
+        }
+    }
+
+    fn persist(&self) {
+        self.files
+            .lock()
+            .expect("lock remote files")
+            .insert(self.path.clone(), self.cursor.get_ref().clone());
+    }
+}
+
+impl Drop for MemoryFileWriter {
+    fn drop(&mut self) {
+        self.persist();
+    }
+}
+
+impl AsyncWrite for MemoryFileWriter {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let written = Write::write(&mut self.cursor, buf)?;
+        self.persist();
+        Poll::Ready(Ok(written))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        self.persist();
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        self.persist();
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl AsyncSeek for MemoryFileWriter {
+    fn start_seek(mut self: Pin<&mut Self>, position: SeekFrom) -> std::io::Result<()> {
+        Seek::seek(&mut self.cursor, position)?;
+        Ok(())
+    }
+
+    fn poll_complete(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<u64>> {
+        Poll::Ready(Ok(self.cursor.position()))
+    }
+}
+
 struct PendingConnectionRuntimeControl {
     event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
 }
@@ -1004,6 +1108,31 @@ impl SftpBackend for RecordingSftpBackend {
         let from = from.to_string();
         let to = to.to_string();
         Box::pin(async move {
+            let staged_bytes = state
+                .remote_files
+                .lock()
+                .expect("lock remote files")
+                .get(&from)
+                .cloned();
+            if from.ends_with(".part")
+                && let Some(bytes) = staged_bytes.clone()
+            {
+                state
+                    .upload_file_calls
+                    .lock()
+                    .expect("lock sftp upload file calls")
+                    .push((to.clone(), bytes));
+                let mut failures = state
+                    .upload_failures_remaining
+                    .lock()
+                    .expect("lock upload failure injection state");
+                if let Some(remaining) = failures.get_mut(&to)
+                    && *remaining > 0
+                {
+                    *remaining -= 1;
+                    return Err(anyhow!("simulated upload failure"));
+                }
+            }
             state
                 .rename_calls
                 .lock()
@@ -1029,6 +1158,74 @@ impl SftpBackend for RecordingSftpBackend {
             let directory_exists = responses.contains_key(&path);
             let listed_entry_exists = responses.values().flatten().any(|entry| entry.path == path);
             Ok(file_exists || directory_exists || listed_entry_exists)
+        })
+    }
+
+    fn stat<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<SftpRemoteMetadata>> + Send + 'a>> {
+        let state = self.state.clone();
+        let path = path.to_string();
+        Box::pin(async move {
+            let size_bytes = state
+                .remote_files
+                .lock()
+                .expect("lock remote files")
+                .get(&path)
+                .map(|bytes| bytes.len() as u64);
+            if size_bytes.is_none() {
+                return Err(anyhow!("missing remote file: {path}"));
+            }
+
+            Ok(SftpRemoteMetadata {
+                size_bytes,
+                modified_unix_seconds: Some(1_710_000_000),
+            })
+        })
+    }
+
+    fn open_file_reader<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<BoxedSftpReader>> + Send + 'a>> {
+        let state = self.state.clone();
+        let path = path.to_string();
+        Box::pin(async move {
+            let bytes = state
+                .remote_files
+                .lock()
+                .expect("lock remote files")
+                .get(&path)
+                .cloned()
+                .ok_or_else(|| anyhow!("missing remote file: {path}"))?;
+            Ok(Box::pin(MemoryFileReader::new(bytes)) as BoxedSftpReader)
+        })
+    }
+
+    fn open_file_writer<'a>(
+        &'a self,
+        path: &'a str,
+        mode: SftpWriteMode,
+    ) -> Pin<Box<dyn Future<Output = Result<BoxedSftpWriter>> + Send + 'a>> {
+        let state = self.state.clone();
+        let path = path.to_string();
+        Box::pin(async move {
+            let initial = match mode {
+                SftpWriteMode::CreateOrTruncate => Vec::new(),
+                SftpWriteMode::CreateOrAppend => state
+                    .remote_files
+                    .lock()
+                    .expect("lock remote files")
+                    .get(&path)
+                    .cloned()
+                    .unwrap_or_default(),
+            };
+            Ok(Box::pin(MemoryFileWriter::new(
+                path,
+                Arc::clone(&state.remote_files),
+                initial,
+            )) as BoxedSftpWriter)
         })
     }
 
@@ -1174,6 +1371,31 @@ impl SftpBackend for DelayedRecordingSftpBackend {
         let from = from.to_string();
         let to = to.to_string();
         Box::pin(async move {
+            let staged_bytes = state
+                .remote_files
+                .lock()
+                .expect("lock delayed remote files")
+                .get(&from)
+                .cloned();
+            if from.ends_with(".part")
+                && let Some(bytes) = staged_bytes.clone()
+            {
+                state
+                    .upload_file_calls
+                    .lock()
+                    .expect("lock delayed sftp upload file calls")
+                    .push((to.clone(), bytes));
+                let mut failures = state
+                    .upload_failures_remaining
+                    .lock()
+                    .expect("lock delayed upload failure injection state");
+                if let Some(remaining) = failures.get_mut(&to)
+                    && *remaining > 0
+                {
+                    *remaining -= 1;
+                    return Err(anyhow!("simulated upload failure"));
+                }
+            }
             state
                 .rename_calls
                 .lock()
@@ -1199,6 +1421,74 @@ impl SftpBackend for DelayedRecordingSftpBackend {
             let directory_exists = responses.contains_key(&path);
             let listed_entry_exists = responses.values().flatten().any(|entry| entry.path == path);
             Ok(file_exists || directory_exists || listed_entry_exists)
+        })
+    }
+
+    fn stat<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<SftpRemoteMetadata>> + Send + 'a>> {
+        let state = self.state.clone();
+        let path = path.to_string();
+        Box::pin(async move {
+            let size_bytes = state
+                .remote_files
+                .lock()
+                .expect("lock delayed remote files")
+                .get(&path)
+                .map(|bytes| bytes.len() as u64);
+            if size_bytes.is_none() {
+                return Err(anyhow!("missing remote file: {path}"));
+            }
+
+            Ok(SftpRemoteMetadata {
+                size_bytes,
+                modified_unix_seconds: Some(1_710_000_000),
+            })
+        })
+    }
+
+    fn open_file_reader<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<BoxedSftpReader>> + Send + 'a>> {
+        let state = self.state.clone();
+        let path = path.to_string();
+        Box::pin(async move {
+            let bytes = state
+                .remote_files
+                .lock()
+                .expect("lock delayed remote files")
+                .get(&path)
+                .cloned()
+                .ok_or_else(|| anyhow!("missing remote file: {path}"))?;
+            Ok(Box::pin(MemoryFileReader::new(bytes)) as BoxedSftpReader)
+        })
+    }
+
+    fn open_file_writer<'a>(
+        &'a self,
+        path: &'a str,
+        mode: SftpWriteMode,
+    ) -> Pin<Box<dyn Future<Output = Result<BoxedSftpWriter>> + Send + 'a>> {
+        let state = self.state.clone();
+        let path = path.to_string();
+        Box::pin(async move {
+            let initial = match mode {
+                SftpWriteMode::CreateOrTruncate => Vec::new(),
+                SftpWriteMode::CreateOrAppend => state
+                    .remote_files
+                    .lock()
+                    .expect("lock delayed remote files")
+                    .get(&path)
+                    .cloned()
+                    .unwrap_or_default(),
+            };
+            Ok(Box::pin(MemoryFileWriter::new(
+                path,
+                Arc::clone(&state.remote_files),
+                initial,
+            )) as BoxedSftpWriter)
         })
     }
 
@@ -3358,6 +3648,36 @@ fn lock_known_hosts_env() -> std::sync::MutexGuard<'static, ()> {
     KNOWN_HOSTS_ENV_LOCK
         .lock()
         .unwrap_or_else(|err| err.into_inner())
+}
+
+fn sample_persisted_interrupted_download_task(
+    app_root: &std::path::Path,
+    temp_target_exists: bool,
+) -> TransferTask {
+    let download_root = app_root.join("downloads");
+    fs::create_dir_all(&download_root).expect("create persisted transfer download root");
+    let local_path = download_root.join("release.env");
+    let temp_target_path = download_root.join("release.env.part");
+    if temp_target_exists {
+        fs::write(&temp_target_path, vec![b'x'; 512]).expect("write persisted transfer .part");
+    }
+
+    TransferTask {
+        id: "persisted-download-task".into(),
+        session_id: "persisted-session".into(),
+        source_path: "/srv/app/release.env".into(),
+        target_path: local_path.to_string_lossy().to_string(),
+        direction: TransferDirection::Download,
+        action: TransferTaskAction::Download { local_path },
+        state: TransferTaskState::Interrupted,
+        bytes_total: 1024,
+        bytes_transferred: 512,
+        bytes_confirmed: 512,
+        temp_target_path: Some(temp_target_path),
+        resume_mode: TransferResumeMode::ResumeIfPossible,
+        conflict_policy: None,
+        error_message: Some("network interrupted".into()),
+    }
 }
 
 #[test]
@@ -9484,13 +9804,15 @@ fn workspace_terminal_scroll_callbacks_update_active_session_surface() {
     slint::platform::update_timers_and_animations();
 
     app.invoke_workspace_session_scroll_jump_requested(1.0);
-    settle_terminal_projection();
-    assert_eq!(app.get_workspace_session_viewport_offset_lines(), 8);
+    wait_for_condition(Duration::from_secs(1), || {
+        app.get_workspace_session_viewport_offset_lines() == 8
+    });
     assert!(!app.get_workspace_session_viewport_at_bottom());
 
     app.invoke_workspace_session_scroll_thumb_drag_requested(0.0);
-    settle_terminal_projection();
-    assert_eq!(app.get_workspace_session_viewport_offset_lines(), 0);
+    wait_for_condition(Duration::from_secs(1), || {
+        app.get_workspace_session_viewport_offset_lines() == 0
+    });
     assert!(app.get_workspace_session_viewport_at_bottom());
 }
 
@@ -11233,6 +11555,79 @@ fn transfer_center_failed_rows_expose_retry_and_retry_real_transfer() {
                 .map(|row| row.status_label.as_str() == "Completed")
                 .unwrap_or(false)
     });
+}
+
+#[test]
+fn bootstrap_loads_interrupted_transfer_tasks_from_store() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app_root = sample_vault_runtime_root("transfer-bootstrap-load");
+    let _ = fs::remove_dir_all(&app_root);
+    let store = Arc::new(RedbTransferStore::new(app_root.join("data")));
+    store
+        .save_tasks(&[sample_persisted_interrupted_download_task(
+            app_root.as_path(),
+            true,
+        )])
+        .expect("persist interrupted transfer task");
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_transfer_store(
+        &app,
+        None,
+        default_platform_window_effects(),
+        None,
+        Arc::new(FakeLauncher),
+        Arc::new(MemoryCredentialStore::default()),
+        Arc::clone(&store),
+    );
+    flush_runtime_projection();
+
+    assert_eq!(app.get_transfer_queue_total(), 1);
+    let row = app
+        .get_transfer_center_items()
+        .row_data(0)
+        .expect("restored transfer-center row");
+    assert_eq!(row.status_label.as_str(), "Interrupted");
+    assert!(row.can_retry);
+}
+
+#[test]
+fn bootstrap_marks_invalid_resume_tasks_as_restart_required() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app_root = sample_vault_runtime_root("transfer-bootstrap-restart-required");
+    let _ = fs::remove_dir_all(&app_root);
+    let store = Arc::new(RedbTransferStore::new(app_root.join("data")));
+    store
+        .save_tasks(&[sample_persisted_interrupted_download_task(
+            app_root.as_path(),
+            false,
+        )])
+        .expect("persist invalid interrupted transfer task");
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_transfer_store(
+        &app,
+        None,
+        default_platform_window_effects(),
+        None,
+        Arc::new(FakeLauncher),
+        Arc::new(MemoryCredentialStore::default()),
+        Arc::clone(&store),
+    );
+    flush_runtime_projection();
+
+    assert_eq!(app.get_transfer_queue_total(), 1);
+    let row = app
+        .get_transfer_center_items()
+        .row_data(0)
+        .expect("restored transfer-center row");
+    assert!(
+        row.status_label.as_str().contains("Restart"),
+        "invalid persisted checkpoints should degrade to an explicit restart-required state"
+    );
+    assert!(row.can_retry);
 }
 
 #[test]

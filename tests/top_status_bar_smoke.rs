@@ -477,6 +477,31 @@ fn titlebar_shows_semantic_transfer_summary_without_numeric_badge() {
 }
 
 #[test]
+fn interrupted_transfer_rows_use_resume_restart_and_pause_projection_contract() {
+    let shell_chrome = std::fs::read_to_string("src/app/bootstrap/shell_chrome.rs").unwrap();
+    let bootstrap_sftp = std::fs::read_to_string("src/app/bootstrap/sftp.rs").unwrap();
+
+    assert!(
+        shell_chrome.contains("attention_action:")
+            && shell_chrome.contains("attention_label:")
+            && shell_chrome.contains("TransferTaskState::Running => Some((\"pause\", \"Pause\"))")
+            && shell_chrome.contains("TransferTaskState::Paused =>")
+            && shell_chrome.contains("Some((\"resume\", \"Resume\"))")
+            && shell_chrome.contains("Some((\"restart\", \"Restart\"))")
+            && shell_chrome.contains("TransferTaskState::Interrupted")
+            && shell_chrome.contains("TransferTaskState::Failed")
+            && shell_chrome.contains("transfer_task_retry_label(task.id.as_str())"),
+        "shell chrome should project pause/resume/restart copy for running, paused, interrupted, and failed transfer-center rows"
+    );
+    assert!(
+        bootstrap_sftp.contains("window.on_transfer_center_resume_requested")
+            && bootstrap_sftp.contains("window.on_transfer_center_restart_requested")
+            && bootstrap_sftp.contains("window.on_transfer_center_pause_requested"),
+        "bootstrap sftp bindings should forward transfer-center pause/resume/restart callbacks into transfer scheduling"
+    );
+}
+
+#[test]
 fn clicking_transfer_icon_opens_transfer_center_surface() {
     i_slint_backend_testing::init_no_event_loop();
 

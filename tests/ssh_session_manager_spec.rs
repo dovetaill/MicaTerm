@@ -1,13 +1,18 @@
 use std::fs;
 use std::future::Future;
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
 use mica_term::app::async_runtime::AppAsyncRuntime;
-use mica_term::app::sftp::{SftpBackend, SftpDirectoryEntry, SftpRuntimeHandle};
+use mica_term::app::sftp::{
+    BoxedSftpReader, BoxedSftpWriter, SftpBackend, SftpDirectoryEntry, SftpRemoteMetadata,
+    SftpRuntimeHandle, SftpWriteMode,
+};
 use mica_term::app::ssh::connection_progress::{
     ConnectionHeadlineState, ConnectionProgressEvent, ConnectionStepState,
 };
@@ -29,7 +34,9 @@ use russh::keys::PrivateKey;
 use russh::keys::ssh_key::rand_core::OsRng;
 use russh::server::{Auth, Session};
 use russh::{Channel, ChannelId, server};
-use tokio::io::{AsyncReadExt, AsyncWriteExt, copy_bidirectional};
+use tokio::io::{
+    AsyncRead, AsyncReadExt, AsyncSeek, AsyncWrite, AsyncWriteExt, ReadBuf, copy_bidirectional,
+};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -56,6 +63,60 @@ struct RuntimeBackedLauncher;
 struct TrackingLauncher {
     disconnects: Arc<AtomicUsize>,
     terminal_releases: Arc<AtomicUsize>,
+}
+
+struct NoopFileHandle {
+    cursor: Cursor<Vec<u8>>,
+}
+
+impl NoopFileHandle {
+    fn new() -> Self {
+        Self {
+            cursor: Cursor::new(Vec::new()),
+        }
+    }
+}
+
+impl AsyncRead for NoopFileHandle {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let mut chunk = vec![0; buf.remaining()];
+        let read = Read::read(&mut self.cursor, &mut chunk)?;
+        buf.put_slice(&chunk[..read]);
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl AsyncWrite for NoopFileHandle {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Poll::Ready(Write::write(&mut self.cursor, buf))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl AsyncSeek for NoopFileHandle {
+    fn start_seek(mut self: Pin<&mut Self>, position: SeekFrom) -> std::io::Result<()> {
+        Seek::seek(&mut self.cursor, position)?;
+        Ok(())
+    }
+
+    fn poll_complete(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<u64>> {
+        Poll::Ready(Ok(self.cursor.position()))
+    }
 }
 
 #[derive(Clone, Default)]
@@ -716,6 +777,28 @@ impl SftpBackend for NoopSftpBackend {
         _path: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>> {
         Box::pin(async move { Ok(true) })
+    }
+
+    fn stat<'a>(
+        &'a self,
+        _path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<SftpRemoteMetadata>> + Send + 'a>> {
+        Box::pin(async move { Ok(SftpRemoteMetadata::default()) })
+    }
+
+    fn open_file_reader<'a>(
+        &'a self,
+        _path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<BoxedSftpReader>> + Send + 'a>> {
+        Box::pin(async move { Ok(Box::pin(NoopFileHandle::new()) as BoxedSftpReader) })
+    }
+
+    fn open_file_writer<'a>(
+        &'a self,
+        _path: &'a str,
+        _mode: SftpWriteMode,
+    ) -> Pin<Box<dyn Future<Output = Result<BoxedSftpWriter>> + Send + 'a>> {
+        Box::pin(async move { Ok(Box::pin(NoopFileHandle::new()) as BoxedSftpWriter) })
     }
 
     fn upload_file<'a>(
@@ -3175,16 +3258,26 @@ fn runtime_error_marks_session_reconnectable() {
         )
         .expect("open session");
 
-    runtime.block_on(async {
-        tokio::time::sleep(Duration::from_millis(150)).await;
-    });
+    let started = Instant::now();
+    loop {
+        let updated = manager
+            .session(handle.session_id)
+            .expect("resolve failed runtime session");
 
-    let updated = manager
-        .session(handle.session_id)
-        .expect("resolve failed runtime session");
+        if matches!(updated.state, SessionState::Error(_)) {
+            assert!(updated.can_reconnect);
+            break;
+        }
 
-    assert!(matches!(updated.state, SessionState::Error(_)));
-    assert!(updated.can_reconnect);
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "runtime-backed session did not transition into an error state in time"
+        );
+
+        runtime.block_on(async {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        });
+    }
 }
 
 #[test]

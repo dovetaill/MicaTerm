@@ -9,8 +9,10 @@ use uuid::Uuid;
 use crate::app::sftp::{
     DownloadTransferEntry, SftpDirectoryEntry, SftpDirectoryEntryKind, SftpPanelMode,
     SftpRuntimeHandle, SftpSessionBindingState, TransferConflictPolicy, TransferQueue,
-    TransferTaskAction,
+    TransferTask, TransferTaskAction,
 };
+
+use super::transfer_engine::{execute_download_task, execute_upload_task};
 
 #[derive(Clone)]
 pub struct SftpSessionBinding {
@@ -65,7 +67,7 @@ pub async fn execute_queued_transfers(
     runtime: &SftpRuntimeHandle,
     queue: &mut TransferQueue,
 ) -> Result<()> {
-    execute_queued_transfers_with_progress(runtime, queue, |_| {}).await
+    execute_queued_transfers_with_progress(runtime, queue, |_| true).await
 }
 
 pub async fn execute_queued_transfers_with_progress<F>(
@@ -74,7 +76,7 @@ pub async fn execute_queued_transfers_with_progress<F>(
     mut on_queue_updated: F,
 ) -> Result<()>
 where
-    F: FnMut(&TransferQueue),
+    F: FnMut(&TransferQueue) -> bool,
 {
     let task_ids = queue.queued_task_ids();
     for task_id in task_ids {
@@ -237,7 +239,7 @@ async fn execute_transfer(
     runtime: &SftpRuntimeHandle,
     queue: &mut TransferQueue,
     task_id: &str,
-    on_queue_updated: &mut impl FnMut(&TransferQueue),
+    on_queue_updated: &mut impl FnMut(&TransferQueue) -> bool,
 ) -> Result<()> {
     let Some(task) = queue.task(task_id).cloned() else {
         return Ok(());
@@ -274,18 +276,30 @@ async fn execute_transfer(
             queue.mark_running(task_id);
             on_queue_updated(queue);
             ensure_remote_parent_dirs(runtime, &task.target_path).await?;
-            let bytes = fs::read(&local_path).with_context(|| {
-                format!(
-                    "failed to read local upload source `{}`",
-                    local_path.display()
-                )
-            })?;
-            let transferred = runtime
-                .upload_file(&task.target_path, bytes)
-                .await
-                .with_context(|| format!("failed to upload `{}`", local_path.display()))?;
-            queue.mark_completed(task_id, transferred);
-            on_queue_updated(queue);
+            let Some(mut queued_task) = queue.task(task_id).cloned() else {
+                return Ok(());
+            };
+            if !matches!(queued_task.action, TransferTaskAction::Upload { .. }) {
+                return Ok(());
+            }
+            if queued_task.source_path != local_path.to_string_lossy() {
+                queued_task.source_path = local_path.to_string_lossy().to_string();
+            }
+
+            let mut sync_progress = |updated_task: &TransferTask| {
+                let _ = queue.replace_task(updated_task.clone());
+                on_queue_updated(queue)
+            };
+
+            let result = execute_upload_task(runtime, &mut queued_task, &mut sync_progress).await;
+            let _ = queue.replace_task(queued_task);
+
+            match result {
+                Ok(()) => {
+                    let _ = on_queue_updated(queue);
+                }
+                Err(err) => return Err(err),
+            }
         }
         TransferTaskAction::UploadDirectory {
             local_path: _local_path,
@@ -377,23 +391,30 @@ async fn execute_transfer(
 
             queue.mark_running(task_id);
             on_queue_updated(queue);
-            let bytes = runtime
-                .download_file(&task.source_path)
-                .await
-                .with_context(|| format!("failed to download `{}`", task.source_path))?;
-            if let Some(parent) = local_path.parent() {
-                fs::create_dir_all(parent).with_context(|| {
-                    format!(
-                        "failed to create local download directory `{}`",
-                        parent.display()
-                    )
-                })?;
+            let Some(mut queued_task) = queue.task(task_id).cloned() else {
+                return Ok(());
+            };
+            if !matches!(queued_task.action, TransferTaskAction::Download { .. }) {
+                return Ok(());
             }
-            fs::write(&local_path, &bytes).with_context(|| {
-                format!("failed to write local download `{}`", local_path.display())
-            })?;
-            queue.mark_completed(task_id, bytes.len() as u64);
-            on_queue_updated(queue);
+            if queued_task.target_path != local_path.to_string_lossy() {
+                queued_task.target_path = local_path.to_string_lossy().to_string();
+            }
+
+            let mut sync_progress = |updated_task: &TransferTask| {
+                let _ = queue.replace_task(updated_task.clone());
+                on_queue_updated(queue)
+            };
+
+            let result = execute_download_task(runtime, &mut queued_task, &mut sync_progress).await;
+            let _ = queue.replace_task(queued_task);
+
+            match result {
+                Ok(()) => {
+                    let _ = on_queue_updated(queue);
+                }
+                Err(err) => return Err(err),
+            }
         }
         TransferTaskAction::DownloadDirectory { local_path } => {
             let mut local_path = local_path;

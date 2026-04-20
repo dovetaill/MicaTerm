@@ -943,6 +943,23 @@ impl ShellViewModel {
             .find(|task| task.id == task_id)
     }
 
+    pub fn transfer_task_can_retry(&self, task_id: &str) -> bool {
+        self.transfer_task_retry_label(task_id).is_some()
+    }
+
+    pub fn transfer_task_retry_label(&self, task_id: &str) -> Option<&'static str> {
+        let task = self.transfer_task_by_id(task_id)?;
+        match task.state {
+            crate::app::sftp::TransferTaskState::Paused
+            | crate::app::sftp::TransferTaskState::Interrupted
+            | crate::app::sftp::TransferTaskState::Failed => Some(match task.resume_mode {
+                crate::app::sftp::TransferResumeMode::ResumeIfPossible => "Resume",
+                crate::app::sftp::TransferResumeMode::RestartOnly => "Restart",
+            }),
+            _ => None,
+        }
+    }
+
     pub fn open_transfer_conflict_modal(&mut self, task_id: &str) -> bool {
         let Some(task) = self.transfer_task_by_id(task_id).cloned() else {
             return false;

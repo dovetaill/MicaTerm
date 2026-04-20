@@ -310,6 +310,8 @@ export struct TransferCenterItem {
     error_tooltip: string,
     show_error: bool,
     can_show_error: bool,
+    attention_action: string,
+    attention_label: string,
     can_retry: bool,
     can_resolve_conflict: bool,
     can_open_workspace: bool,
@@ -339,6 +341,9 @@ export component TransferCenter inherits Rectangle {
     callback collapse-toggle-requested();
     callback open-sftp-requested();
     callback filter-toggle-requested(string);
+    callback transfer-row-resume-requested(string);
+    callback transfer-row-restart-requested(string);
+    callback transfer-row-pause-requested(string);
     callback retry-requested(string);
     callback resolve-conflict-requested(string);
     callback open-workspace-requested(string);
@@ -796,8 +801,9 @@ export component TransferCenter inherits Rectangle {
 
                     for item in root.items : row := Rectangle {
                         private property <bool> show-completed-actions: item.status_label == "Completed";
+                        private property <bool> show-attention-action: item.attention_action != "";
                         private property <bool> show-actions: self.show-completed-actions
-                            || item.can_retry
+                            || self.show-attention-action
                             || item.can_resolve_conflict
                             || item.can_open_workspace
                             || item.can_remove
@@ -1110,14 +1116,24 @@ export component TransferCenter inherits Rectangle {
                                 x: row.action-start-x;
                                 y: row.action-row-y;
                                 width: row.attention-primary-width;
-                                visible: item.can_retry;
+                                visible: row.show-attention-action;
                                 emphasized: true;
                                 icon-source: root.retry-icon;
-                                label: "Retry";
-                                tooltip-text: "Retry failed transfer";
+                                label: item.attention_label;
+                                tooltip-text: item.attention_action == "pause"
+                                    ? "Pause after the current transfer chunk"
+                                    : item.attention_action == "restart"
+                                        ? "Restart this transfer from the beginning"
+                                        : "Resume this transfer from the saved checkpoint";
                                 tooltip-source-id: item.id + "-retry";
                                 clicked => {
-                                    root.retry-requested(item.id);
+                                    if item.attention_action == "pause" {
+                                        root.transfer-row-pause-requested(item.id);
+                                    } else if item.attention_action == "restart" {
+                                        root.transfer-row-restart-requested(item.id);
+                                    } else {
+                                        root.transfer-row-resume-requested(item.id);
+                                    }
                                 }
                                 tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
                                     root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);
@@ -1181,7 +1197,7 @@ export component TransferCenter inherits Rectangle {
                             if row.show-actions : remove-action := TransferCenterRowActionButton {
                                 x: item.can_open_workspace || (item.can_show_error && !item.can_open_workspace)
                                     ? row.attention-tertiary-x
-                                    : item.can_retry || item.can_resolve_conflict
+                                    : row.show-attention-action || item.can_resolve_conflict
                                         ? row.attention-secondary-x
                                         : row.action-start-x;
                                 y: row.action-row-y;

@@ -388,6 +388,9 @@ export component AppWindow inherits Window {
     callback transfer-center-pin-toggle-requested();
     callback transfer-center-collapse-toggle-requested();
     callback transfer-center-filter-toggle-requested(string);
+    callback transfer-center-resume-requested(string);
+    callback transfer-center-restart-requested(string);
+    callback transfer-center-pause-requested(string);
     callback transfer-center-retry-requested(string);
     callback transfer-center-resolve-conflict-requested(string);
     callback transfer-center-open-workspace-requested(string);
@@ -1172,6 +1175,15 @@ export component AppWindow inherits Window {
                         }
                         filter-toggle-requested(filter-id) => {
                             root.transfer-center-filter-toggle-requested(filter-id);
+                        }
+                        transfer-row-resume-requested(task-id) => {
+                            root.transfer-center-resume-requested(task-id);
+                        }
+                        transfer-row-restart-requested(task-id) => {
+                            root.transfer-center-restart-requested(task-id);
+                        }
+                        transfer-row-pause-requested(task-id) => {
+                            root.transfer-center-pause-requested(task-id);
                         }
                         retry-requested(task-id) => {
                             root.transfer-center-retry-requested(task-id);

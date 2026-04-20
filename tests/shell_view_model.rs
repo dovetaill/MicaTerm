@@ -8,7 +8,7 @@ use mica_term::app::keychain::{
     KeychainCatalog, KeychainNode, KeychainNodeKind, KeychainNodePayload,
 };
 use mica_term::app::sftp::{
-    TransferDirection, TransferTask, TransferTaskAction, TransferTaskState,
+    TransferDirection, TransferResumeMode, TransferTask, TransferTaskAction, TransferTaskState,
 };
 use mica_term::app::window_state::WindowPlacementKind;
 use mica_term::shell::assets::{
@@ -346,8 +346,8 @@ fn new_ssh_modal_is_a_grouped_single_page_form() {
         "ssh modal should remove the legacy clear-secret affordance"
     );
     assert!(ssh_modal.contains("label: \"Password\""));
-    assert!(ssh_modal.contains("text: \"Proxy\""));
-    assert!(ssh_modal.contains("text: \"Proxy Type\""));
+    assert!(ssh_modal.contains("title: \"Proxy chain\""));
+    assert!(ssh_modal.contains("text: \"Proxy type\""));
     assert!(
         ssh_modal.contains("trailing-action-text: root.password-visible ? \"Hide\" : \"Show\"")
     );
@@ -2020,9 +2020,113 @@ fn completed_download_task(local_path: PathBuf) -> TransferTask {
         state: TransferTaskState::Completed,
         bytes_total: 8,
         bytes_transferred: 8,
+        bytes_confirmed: 8,
+        temp_target_path: None,
+        resume_mode: TransferResumeMode::ResumeIfPossible,
         conflict_policy: None,
         error_message: None,
     }
+}
+
+fn transfer_task_for_action_projection(
+    id: &str,
+    state: TransferTaskState,
+    resume_mode: TransferResumeMode,
+) -> TransferTask {
+    TransferTask {
+        id: id.into(),
+        session_id: "session-1".into(),
+        source_path: "/srv/app/archive.zip".into(),
+        target_path: "/tmp/archive.zip".into(),
+        direction: TransferDirection::Download,
+        action: TransferTaskAction::Download {
+            local_path: PathBuf::from("/tmp/archive.zip"),
+        },
+        state,
+        bytes_total: 1024,
+        bytes_transferred: 512,
+        bytes_confirmed: 512,
+        temp_target_path: Some(PathBuf::from("/tmp/archive.zip.part")),
+        resume_mode,
+        conflict_policy: None,
+        error_message: Some("interrupted".into()),
+    }
+}
+
+#[test]
+fn paused_transfer_projects_resume_action_label() {
+    let mut view_model = ShellViewModel::default();
+    view_model.sftp_transfer_tasks = vec![transfer_task_for_action_projection(
+        "paused-task",
+        TransferTaskState::Paused,
+        TransferResumeMode::ResumeIfPossible,
+    )];
+
+    assert!(view_model.transfer_task_can_retry("paused-task"));
+    assert_eq!(
+        view_model.transfer_task_retry_label("paused-task"),
+        Some("Resume")
+    );
+}
+
+#[test]
+fn interrupted_transfer_prefers_resume_unless_restart_is_required() {
+    let mut view_model = ShellViewModel::default();
+    view_model.sftp_transfer_tasks = vec![
+        transfer_task_for_action_projection(
+            "resume-task",
+            TransferTaskState::Interrupted,
+            TransferResumeMode::ResumeIfPossible,
+        ),
+        transfer_task_for_action_projection(
+            "restart-task",
+            TransferTaskState::Interrupted,
+            TransferResumeMode::RestartOnly,
+        ),
+    ];
+
+    assert!(view_model.transfer_task_can_retry("resume-task"));
+    assert_eq!(
+        view_model.transfer_task_retry_label("resume-task"),
+        Some("Resume")
+    );
+    assert!(view_model.transfer_task_can_retry("restart-task"));
+    assert_eq!(
+        view_model.transfer_task_retry_label("restart-task"),
+        Some("Restart")
+    );
+    assert!(
+        !view_model.open_transfer_conflict_modal("resume-task"),
+        "interrupted transfers should not route through the conflict-resolution modal"
+    );
+}
+
+#[test]
+fn failed_transfer_projects_resume_or_restart_based_on_capability() {
+    let mut view_model = ShellViewModel::default();
+    view_model.sftp_transfer_tasks = vec![
+        transfer_task_for_action_projection(
+            "failed-resume-task",
+            TransferTaskState::Failed,
+            TransferResumeMode::ResumeIfPossible,
+        ),
+        transfer_task_for_action_projection(
+            "failed-restart-task",
+            TransferTaskState::Failed,
+            TransferResumeMode::RestartOnly,
+        ),
+    ];
+
+    assert!(view_model.transfer_task_can_retry("failed-resume-task"));
+    assert_eq!(
+        view_model.transfer_task_retry_label("failed-resume-task"),
+        Some("Resume")
+    );
+    assert!(view_model.transfer_task_can_retry("failed-restart-task"));
+    assert_eq!(
+        view_model.transfer_task_retry_label("failed-restart-task"),
+        Some("Restart")
+    );
 }
 
 #[test]

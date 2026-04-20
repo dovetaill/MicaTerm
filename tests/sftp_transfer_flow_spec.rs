@@ -2,27 +2,130 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::future::Future;
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 
 use anyhow::{Result, anyhow};
 use mica_term::app::sftp::{
-    LocalTransferEntry, SftpBackend, SftpDirectoryEntry, SftpDirectoryEntryKind, SftpPanelMode,
-    SftpRuntimeHandle, SftpSessionBindingState, TransferConflictPolicy, TransferQueue,
-    TransferTask, TransferTaskAction, TransferTaskState, collect_download_targets, delete_entries,
-    execute_queued_transfers, move_entry_between_directories, scan_local_sources,
+    BoxedSftpReader, BoxedSftpWriter, LocalTransferEntry, SftpBackend, SftpDirectoryEntry,
+    SftpDirectoryEntryKind, SftpPanelMode, SftpRemoteMetadata, SftpRuntimeHandle,
+    SftpSessionBindingState, SftpWriteMode, TransferConflictPolicy, TransferQueue,
+    TransferResumeMode, TransferTask, TransferTaskAction, TransferTaskState,
+    collect_download_targets, delete_entries, execute_queued_transfers,
+    execute_queued_transfers_with_progress, move_entry_between_directories, scan_local_sources,
 };
+use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 use uuid::Uuid;
+
+struct MemoryFileReader {
+    cursor: Cursor<Vec<u8>>,
+}
+
+impl MemoryFileReader {
+    fn new(bytes: Vec<u8>) -> Self {
+        Self {
+            cursor: Cursor::new(bytes),
+        }
+    }
+}
+
+impl AsyncRead for MemoryFileReader {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let mut chunk = vec![0; buf.remaining()];
+        let read = Read::read(&mut self.cursor, &mut chunk)?;
+        buf.put_slice(&chunk[..read]);
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl AsyncSeek for MemoryFileReader {
+    fn start_seek(mut self: Pin<&mut Self>, position: SeekFrom) -> std::io::Result<()> {
+        Seek::seek(&mut self.cursor, position)?;
+        Ok(())
+    }
+
+    fn poll_complete(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<u64>> {
+        Poll::Ready(Ok(self.cursor.position()))
+    }
+}
+
+struct MemoryFileWriter {
+    path: String,
+    files: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    cursor: Cursor<Vec<u8>>,
+}
+
+impl MemoryFileWriter {
+    fn new(path: String, files: Arc<Mutex<HashMap<String, Vec<u8>>>>, bytes: Vec<u8>) -> Self {
+        Self {
+            path,
+            files,
+            cursor: Cursor::new(bytes),
+        }
+    }
+
+    fn persist(&self) {
+        self.files
+            .lock()
+            .expect("lock files")
+            .insert(self.path.clone(), self.cursor.get_ref().clone());
+    }
+}
+
+impl Drop for MemoryFileWriter {
+    fn drop(&mut self) {
+        self.persist();
+    }
+}
+
+impl AsyncWrite for MemoryFileWriter {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let written = Write::write(&mut self.cursor, buf)?;
+        self.persist();
+        Poll::Ready(Ok(written))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        self.persist();
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        self.persist();
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl AsyncSeek for MemoryFileWriter {
+    fn start_seek(mut self: Pin<&mut Self>, position: SeekFrom) -> std::io::Result<()> {
+        Seek::seek(&mut self.cursor, position)?;
+        Ok(())
+    }
+
+    fn poll_complete(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<u64>> {
+        Poll::Ready(Ok(self.cursor.position()))
+    }
+}
 
 #[derive(Default)]
 struct MemoryBackend {
-    files: Mutex<HashMap<String, Vec<u8>>>,
-    directories: Mutex<HashSet<String>>,
-    directory_entries: Mutex<HashMap<String, Vec<SftpDirectoryEntry>>>,
-    mkdir_requests: Mutex<Vec<String>>,
-    rename_requests: Mutex<Vec<(String, String)>>,
-    delete_requests: Mutex<Vec<String>>,
+    files: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    directories: Arc<Mutex<HashSet<String>>>,
+    directory_entries: Arc<Mutex<HashMap<String, Vec<SftpDirectoryEntry>>>>,
+    mkdir_requests: Arc<Mutex<Vec<String>>>,
+    rename_requests: Arc<Mutex<Vec<(String, String)>>>,
+    delete_requests: Arc<Mutex<Vec<String>>>,
 }
 
 impl MemoryBackend {
@@ -119,6 +222,58 @@ impl SftpBackend for MemoryBackend {
         })
     }
 
+    fn stat<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<SftpRemoteMetadata>> + Send + 'a>> {
+        Box::pin(async move {
+            let size_bytes = self
+                .files
+                .lock()
+                .expect("lock files")
+                .get(path)
+                .map(|bytes| bytes.len() as u64);
+            if size_bytes.is_none() {
+                return Err(anyhow!("missing remote file: {path}"));
+            }
+
+            Ok(SftpRemoteMetadata {
+                size_bytes,
+                modified_unix_seconds: Some(1_710_000_000),
+            })
+        })
+    }
+
+    fn open_file_reader<'a>(
+        &'a self,
+        remote_path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<BoxedSftpReader>> + Send + 'a>> {
+        Box::pin(async move {
+            let bytes = self
+                .file_bytes(remote_path)
+                .ok_or_else(|| anyhow!("missing remote file: {remote_path}"))?;
+            Ok(Box::pin(MemoryFileReader::new(bytes)) as BoxedSftpReader)
+        })
+    }
+
+    fn open_file_writer<'a>(
+        &'a self,
+        remote_path: &'a str,
+        mode: SftpWriteMode,
+    ) -> Pin<Box<dyn Future<Output = Result<BoxedSftpWriter>> + Send + 'a>> {
+        Box::pin(async move {
+            let initial = match mode {
+                SftpWriteMode::CreateOrTruncate => Vec::new(),
+                SftpWriteMode::CreateOrAppend => self.file_bytes(remote_path).unwrap_or_default(),
+            };
+            Ok(Box::pin(MemoryFileWriter::new(
+                remote_path.to_string(),
+                Arc::clone(&self.files),
+                initial,
+            )) as BoxedSftpWriter)
+        })
+    }
+
     fn upload_file<'a>(
         &'a self,
         remote_path: &'a str,
@@ -211,6 +366,75 @@ fn task_local_download_path(task: &TransferTask) -> Option<PathBuf> {
     }
 }
 
+fn resumable_runtime_with_remote_bytes(bytes: &[u8]) -> SftpRuntimeHandle {
+    let backend = Arc::new(MemoryBackend::with_directories(&["/srv", "/srv/app"]));
+    backend.insert_remote_file("/srv/app/archive.zip", bytes);
+    SftpRuntimeHandle::new(backend)
+}
+
+fn seeded_download_queue(part_path: PathBuf, confirmed: u64) -> TransferQueue {
+    let final_path = PathBuf::from(format!(
+        "{}{}",
+        part_path
+            .to_string_lossy()
+            .strip_suffix(".part")
+            .expect("part file suffix"),
+        ""
+    ));
+
+    let mut queue = TransferQueue::default();
+    queue.tasks.push(TransferTask {
+        id: "download-1".into(),
+        session_id: "session-a".into(),
+        source_path: "/srv/app/archive.zip".into(),
+        target_path: final_path.to_string_lossy().to_string(),
+        direction: mica_term::app::sftp::TransferDirection::Download,
+        action: TransferTaskAction::Download {
+            local_path: final_path,
+        },
+        state: TransferTaskState::Queued,
+        bytes_total: confirmed,
+        bytes_transferred: confirmed,
+        bytes_confirmed: confirmed,
+        temp_target_path: Some(part_path),
+        resume_mode: TransferResumeMode::ResumeIfPossible,
+        conflict_policy: None,
+        error_message: None,
+    });
+    queue
+}
+
+fn resumable_runtime_with_remote_part(path: &str, bytes: &[u8]) -> Arc<MemoryBackend> {
+    let backend = Arc::new(MemoryBackend::with_directories(&["/srv", "/srv/app"]));
+    backend.insert_remote_file(path, bytes);
+    backend
+}
+
+fn seeded_upload_queue(local_path: PathBuf, confirmed: u64) -> TransferQueue {
+    let remote_target = "/srv/app/archive.zip";
+    let bytes_total = fs::metadata(&local_path)
+        .expect("stat local upload source")
+        .len();
+    let mut queue = TransferQueue::default();
+    queue.tasks.push(TransferTask {
+        id: "upload-1".into(),
+        session_id: "session-a".into(),
+        source_path: local_path.to_string_lossy().to_string(),
+        target_path: remote_target.into(),
+        direction: mica_term::app::sftp::TransferDirection::Upload,
+        action: TransferTaskAction::Upload { local_path },
+        state: TransferTaskState::Queued,
+        bytes_total,
+        bytes_transferred: confirmed,
+        bytes_confirmed: confirmed,
+        temp_target_path: Some(PathBuf::from("/srv/app/archive.zip.part")),
+        resume_mode: TransferResumeMode::ResumeIfPossible,
+        conflict_policy: Some(TransferConflictPolicy::Overwrite),
+        error_message: None,
+    });
+    queue
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn upload_and_download_tasks_reach_completed_and_update_session_summary() {
     let root = temp_test_root("transfer-flow");
@@ -293,6 +517,109 @@ async fn upload_and_download_tasks_reach_completed_and_update_session_summary() 
     assert_eq!(summary.active_count, 0);
     assert_eq!(summary.failed_count, 0);
     assert_eq!(summary.current_session_count, 2);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn interrupted_download_resumes_from_local_part_file() {
+    let root = temp_test_root("resume-download");
+    let part_path = root.join("archive.zip.part");
+    fs::write(&part_path, b"abc").expect("seed local part file");
+    let mut queue = seeded_download_queue(part_path.clone(), 3);
+    let runtime = resumable_runtime_with_remote_bytes(b"abcdefghi");
+
+    execute_queued_transfers_with_progress(&runtime, &mut queue, |_| true)
+        .await
+        .expect("resume download");
+
+    assert_eq!(
+        fs::read(root.join("archive.zip")).expect("read completed download"),
+        b"abcdefghi".to_vec()
+    );
+    assert!(
+        !part_path.exists(),
+        "completed resumable download should rename the part file into the final target"
+    );
+    let task = queue.task("download-1").expect("resumed download task");
+    assert_eq!(task.state, TransferTaskState::Completed);
+    assert_eq!(task.bytes_confirmed, 9);
+    assert!(task.temp_target_path.is_none());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn download_resume_falls_back_to_restart_when_remote_shrinks() {
+    let root = temp_test_root("resume-download-shrunk");
+    let part_path = root.join("archive.zip.part");
+    fs::write(&part_path, b"abcde").expect("seed oversized local part file");
+    let mut queue = seeded_download_queue(part_path.clone(), 5);
+    let runtime = resumable_runtime_with_remote_bytes(b"abc");
+
+    let error = execute_queued_transfers_with_progress(&runtime, &mut queue, |_| true)
+        .await
+        .expect_err("shrunk remote should reject resume");
+
+    assert!(error.to_string().contains("restart required"));
+    let task = queue.task("download-1").expect("failed download task");
+    assert_eq!(task.state, TransferTaskState::Failed);
+    assert_eq!(task.resume_mode, TransferResumeMode::RestartOnly);
+    assert!(part_path.exists());
+    assert!(
+        !root.join("archive.zip").exists(),
+        "invalid resume should not silently overwrite the final target"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn interrupted_upload_resumes_from_remote_part_file() {
+    let root = temp_test_root("resume-upload");
+    let local_path = root.join("archive.zip");
+    fs::write(&local_path, b"abcdefghi").expect("write local upload source");
+    let backend = resumable_runtime_with_remote_part("/srv/app/archive.zip.part", b"abc");
+    let runtime = SftpRuntimeHandle::new(backend.clone());
+    let mut queue = seeded_upload_queue(local_path, 3);
+
+    execute_queued_transfers_with_progress(&runtime, &mut queue, |_| true)
+        .await
+        .expect("resume upload");
+
+    assert_eq!(
+        backend.file_bytes("/srv/app/archive.zip"),
+        Some(b"abcdefghi".to_vec())
+    );
+    assert!(
+        backend.file_bytes("/srv/app/archive.zip.part").is_none(),
+        "completed resumable upload should rename the remote part file into the final target"
+    );
+    let task = queue.task("upload-1").expect("resumed upload task");
+    assert_eq!(task.state, TransferTaskState::Completed);
+    assert_eq!(task.bytes_confirmed, 9);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn upload_resume_requires_restart_when_local_source_changes() {
+    let root = temp_test_root("resume-upload-changed-source");
+    let local_path = root.join("archive.zip");
+    fs::write(&local_path, b"abc").expect("write original upload source");
+    let backend = resumable_runtime_with_remote_part("/srv/app/archive.zip.part", b"abc");
+    let runtime = SftpRuntimeHandle::new(backend.clone());
+    let mut queue = seeded_upload_queue(local_path.clone(), 3);
+    fs::write(&local_path, b"abcdefghi").expect("mutate local upload source");
+
+    let error = execute_queued_transfers_with_progress(&runtime, &mut queue, |_| true)
+        .await
+        .expect_err("changed local source should reject resume");
+
+    assert!(error.to_string().contains("restart required"));
+    let task = queue.task("upload-1").expect("failed upload task");
+    assert_eq!(task.state, TransferTaskState::Failed);
+    assert_eq!(task.resume_mode, TransferResumeMode::RestartOnly);
+    assert_eq!(
+        backend.file_bytes("/srv/app/archive.zip.part"),
+        Some(b"abc".to_vec())
+    );
+    assert!(
+        backend.file_bytes("/srv/app/archive.zip").is_none(),
+        "invalid upload resume should not silently finalize the remote target"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

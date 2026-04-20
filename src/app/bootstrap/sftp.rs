@@ -3,8 +3,53 @@
 use super::*;
 use crate::app::sftp::SftpDirectoryEntry;
 use crate::shell::view_model::PendingSftpContextAction;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex, OnceLock};
 
 const SFTP_PARENT_ITEM_ID: &str = "__sftp_parent__";
+
+#[derive(Clone, Default)]
+struct TransferPauseRegistry {
+    task_ids: Arc<Mutex<HashSet<String>>>,
+}
+
+impl TransferPauseRegistry {
+    fn request_pause(&self, task_id: &str) -> bool {
+        let mut task_ids = self.task_ids.lock().expect("lock transfer pause registry");
+        task_ids.insert(task_id.to_string())
+    }
+
+    fn consume_for_queue(&self, queue: &crate::app::sftp::TransferQueue) -> bool {
+        let Some(active_task_id) = queue
+            .tasks
+            .iter()
+            .find(|task| {
+                matches!(
+                    task.state,
+                    crate::app::sftp::TransferTaskState::Running
+                        | crate::app::sftp::TransferTaskState::VerifyingResume
+                )
+            })
+            .map(|task| task.id.as_str())
+        else {
+            return false;
+        };
+
+        let mut task_ids = self.task_ids.lock().expect("lock transfer pause registry");
+        task_ids.remove(active_task_id)
+    }
+}
+
+fn transfer_pause_registry() -> TransferPauseRegistry {
+    static REGISTRY: OnceLock<TransferPauseRegistry> = OnceLock::new();
+    REGISTRY.get_or_init(TransferPauseRegistry::default).clone()
+}
+
+#[derive(Clone, Copy)]
+enum TransferReplayAction {
+    Resume,
+    Restart,
+}
 
 fn project_sftp_panel_item(row: &crate::shell::view_model::SftpPanelRenderRow) -> SftpPanelItem {
     SftpPanelItem {
@@ -175,6 +220,25 @@ pub(super) enum SftpLocalActionBackgroundMessage {
     },
 }
 
+fn persist_transfer_tasks_snapshot(
+    transfer_store: Option<&Arc<crate::app::sftp::RedbTransferStore>>,
+    tasks: &[crate::app::sftp::TransferTask],
+) {
+    let Some(transfer_store) = transfer_store.cloned() else {
+        return;
+    };
+    let tasks = tasks.to_vec();
+    std::thread::spawn(move || {
+        if let Err(err) = transfer_store.save_tasks(&tasks) {
+            tracing::error!(
+                target: "config.sftp_transfer_store",
+                error = %err,
+                "failed to persist SFTP transfer snapshot"
+            );
+        }
+    });
+}
+
 fn apply_download_conflict_default(
     tasks: &mut [crate::app::sftp::TransferTask],
     default: crate::app::ui_preferences::DownloadConflictDefault,
@@ -200,6 +264,51 @@ fn apply_download_conflict_default(
     }
 }
 
+fn project_transfer_queue_update(
+    result_tx: &std::sync::mpsc::Sender<SftpTransferBackgroundMessage>,
+    session_id_text: &str,
+    queue: &crate::app::sftp::TransferQueue,
+) {
+    let _ = result_tx.send(SftpTransferBackgroundMessage {
+        session_id: session_id_text.into(),
+        tasks: queue.tasks.clone(),
+        refresh_remote_path: None,
+        error: None,
+    });
+}
+
+fn run_transfer_queue_in_background(
+    manager: SessionManager,
+    session_id: Uuid,
+    mut queue: crate::app::sftp::TransferQueue,
+    refresh_remote_path: Option<String>,
+    result_tx: std::sync::mpsc::Sender<SftpTransferBackgroundMessage>,
+    pause_registry: TransferPauseRegistry,
+) {
+    let session_id_text = session_id.to_string();
+    std::thread::spawn(move || {
+        project_transfer_queue_update(&result_tx, session_id_text.as_str(), &queue);
+        let error = manager
+            .sftp_execute_queued_transfers_with_progress(session_id, &mut queue, {
+                let result_tx = result_tx.clone();
+                let session_id_text = session_id_text.clone();
+                let pause_registry = pause_registry.clone();
+                move |queue| {
+                    project_transfer_queue_update(&result_tx, session_id_text.as_str(), queue);
+                    !pause_registry.consume_for_queue(queue)
+                }
+            })
+            .err()
+            .map(|err| err.to_string());
+        let _ = result_tx.send(SftpTransferBackgroundMessage {
+            session_id: session_id_text,
+            tasks: queue.tasks.clone(),
+            refresh_remote_path,
+            error,
+        });
+    });
+}
+
 pub(super) fn schedule_sftp_upload_paths(
     manager: &SessionManager,
     session_id: Uuid,
@@ -220,33 +329,14 @@ pub(super) fn schedule_sftp_upload_paths(
         match crate::app::sftp::scan_local_sources(&local_paths) {
             Ok(sources) if !sources.is_empty() => {
                 queue.enqueue_upload(session_id_text.as_str(), target_dir.as_str(), &sources);
-                let _ = result_tx.send(SftpTransferBackgroundMessage {
-                    session_id: session_id_text.clone(),
-                    tasks: queue.tasks.clone(),
-                    refresh_remote_path: None,
-                    error: None,
-                });
-                let error = manager
-                    .sftp_execute_queued_transfers_with_progress(session_id, &mut queue, {
-                        let result_tx = result_tx.clone();
-                        let session_id_text = session_id_text.clone();
-                        move |queue| {
-                            let _ = result_tx.send(SftpTransferBackgroundMessage {
-                                session_id: session_id_text.clone(),
-                                tasks: queue.tasks.clone(),
-                                refresh_remote_path: None,
-                                error: None,
-                            });
-                        }
-                    })
-                    .err()
-                    .map(|err| err.to_string());
-                let _ = result_tx.send(SftpTransferBackgroundMessage {
-                    session_id: session_id_text,
-                    tasks: queue.tasks.clone(),
-                    refresh_remote_path: Some(target_dir),
-                    error,
-                });
+                run_transfer_queue_in_background(
+                    manager,
+                    session_id,
+                    queue,
+                    Some(target_dir),
+                    result_tx,
+                    transfer_pause_registry(),
+                );
             }
             Ok(_) => {}
             Err(err) => {
@@ -296,33 +386,14 @@ pub(super) fn schedule_sftp_download_entries(
             };
         queue.enqueue_download_targets(session_id_text.as_str(), &download_targets);
         apply_download_conflict_default(&mut queue.tasks, download_conflict_default);
-        let _ = result_tx.send(SftpTransferBackgroundMessage {
-            session_id: session_id_text.clone(),
-            tasks: queue.tasks.clone(),
-            refresh_remote_path: None,
-            error: None,
-        });
-        let error = manager
-            .sftp_execute_queued_transfers_with_progress(session_id, &mut queue, {
-                let result_tx = result_tx.clone();
-                let session_id_text = session_id_text.clone();
-                move |queue| {
-                    let _ = result_tx.send(SftpTransferBackgroundMessage {
-                        session_id: session_id_text.clone(),
-                        tasks: queue.tasks.clone(),
-                        refresh_remote_path: None,
-                        error: None,
-                    });
-                }
-            })
-            .err()
-            .map(|err| err.to_string());
-        let _ = result_tx.send(SftpTransferBackgroundMessage {
-            session_id: session_id_text,
-            tasks: queue.tasks.clone(),
-            refresh_remote_path: None,
-            error,
-        });
+        run_transfer_queue_in_background(
+            manager,
+            session_id,
+            queue,
+            None,
+            result_tx,
+            transfer_pause_registry(),
+        );
     });
     true
 }
@@ -359,14 +430,48 @@ fn remote_parent_dir(path: &str) -> Option<String> {
     }
 }
 
-pub(super) fn retry_transfer_task(
+fn prepare_task_for_replay(
+    task: &crate::app::sftp::TransferTask,
+    action: TransferReplayAction,
+) -> Option<crate::app::sftp::TransferTask> {
+    let eligible_for_resume = matches!(
+        task.state,
+        crate::app::sftp::TransferTaskState::Paused
+            | crate::app::sftp::TransferTaskState::Interrupted
+            | crate::app::sftp::TransferTaskState::Failed
+    ) && task.resume_mode
+        == crate::app::sftp::TransferResumeMode::ResumeIfPossible;
+    let eligible_for_restart = matches!(
+        task.state,
+        crate::app::sftp::TransferTaskState::Paused
+            | crate::app::sftp::TransferTaskState::Interrupted
+            | crate::app::sftp::TransferTaskState::Failed
+    );
+
+    match action {
+        TransferReplayAction::Resume if !eligible_for_resume => None,
+        TransferReplayAction::Restart if !eligible_for_restart => None,
+        _ => {
+            let mut replay_task = task.clone();
+            replay_task.state = crate::app::sftp::TransferTaskState::Queued;
+            replay_task.error_message = None;
+            if matches!(action, TransferReplayAction::Restart) {
+                replay_task.bytes_transferred = 0;
+                replay_task.bytes_confirmed = 0;
+                replay_task.temp_target_path = None;
+                replay_task.resume_mode = crate::app::sftp::TransferResumeMode::ResumeIfPossible;
+            }
+            Some(replay_task)
+        }
+    }
+}
+
+fn replay_transfer_task(
     manager: &SessionManager,
     task: &crate::app::sftp::TransferTask,
+    action: TransferReplayAction,
     result_tx: &std::sync::mpsc::Sender<SftpTransferBackgroundMessage>,
 ) -> bool {
-    if task.state != crate::app::sftp::TransferTaskState::Failed {
-        return false;
-    }
     let Ok(session_id) = Uuid::parse_str(task.session_id.as_str()) else {
         return false;
     };
@@ -376,48 +481,38 @@ pub(super) fn retry_transfer_task(
     {
         return false;
     }
+    let Some(replay_task) = prepare_task_for_replay(task, action) else {
+        return false;
+    };
 
     let manager = manager.clone();
     let result_tx = result_tx.clone();
-    let session_id_text = task.session_id.clone();
     let refresh_remote_path = transfer_task_refresh_remote_path(task);
-    let mut retry_task = task.clone();
-    retry_task.state = crate::app::sftp::TransferTaskState::Queued;
-    retry_task.bytes_transferred = 0;
-    retry_task.error_message = None;
-    std::thread::spawn(move || {
-        let mut queue = crate::app::sftp::TransferQueue {
-            tasks: vec![retry_task],
-        };
-        let _ = result_tx.send(SftpTransferBackgroundMessage {
-            session_id: session_id_text.clone(),
-            tasks: queue.tasks.clone(),
-            refresh_remote_path: None,
-            error: None,
-        });
-        let error = manager
-            .sftp_execute_queued_transfers_with_progress(session_id, &mut queue, {
-                let result_tx = result_tx.clone();
-                let session_id_text = session_id_text.clone();
-                move |queue| {
-                    let _ = result_tx.send(SftpTransferBackgroundMessage {
-                        session_id: session_id_text.clone(),
-                        tasks: queue.tasks.clone(),
-                        refresh_remote_path: None,
-                        error: None,
-                    });
-                }
-            })
-            .err()
-            .map(|err| err.to_string());
-        let _ = result_tx.send(SftpTransferBackgroundMessage {
-            session_id: session_id_text,
-            tasks: queue.tasks.clone(),
-            refresh_remote_path,
-            error,
-        });
-    });
+    let queue = crate::app::sftp::TransferQueue {
+        tasks: vec![replay_task],
+    };
+    run_transfer_queue_in_background(
+        manager,
+        session_id,
+        queue,
+        refresh_remote_path,
+        result_tx,
+        transfer_pause_registry(),
+    );
     true
+}
+
+pub(super) fn retry_transfer_task(
+    manager: &SessionManager,
+    task: &crate::app::sftp::TransferTask,
+    result_tx: &std::sync::mpsc::Sender<SftpTransferBackgroundMessage>,
+) -> bool {
+    let action = if task.resume_mode == crate::app::sftp::TransferResumeMode::RestartOnly {
+        TransferReplayAction::Restart
+    } else {
+        TransferReplayAction::Resume
+    };
+    replay_transfer_task(manager, task, action, result_tx)
 }
 
 pub(super) fn resolve_conflict_transfer_tasks(
@@ -460,40 +555,18 @@ pub(super) fn resolve_conflict_transfer_tasks(
 
     let manager = manager.clone();
     let result_tx = result_tx.clone();
-    let session_id_text = first_task.session_id.clone();
     let refresh_remote_path = transfer_task_refresh_remote_path(first_task);
-    std::thread::spawn(move || {
-        let mut queue = crate::app::sftp::TransferQueue {
-            tasks: resumed_tasks,
-        };
-        let _ = result_tx.send(SftpTransferBackgroundMessage {
-            session_id: session_id_text.clone(),
-            tasks: queue.tasks.clone(),
-            refresh_remote_path: None,
-            error: None,
-        });
-        let error = manager
-            .sftp_execute_queued_transfers_with_progress(session_id, &mut queue, {
-                let result_tx = result_tx.clone();
-                let session_id_text = session_id_text.clone();
-                move |queue| {
-                    let _ = result_tx.send(SftpTransferBackgroundMessage {
-                        session_id: session_id_text.clone(),
-                        tasks: queue.tasks.clone(),
-                        refresh_remote_path: None,
-                        error: None,
-                    });
-                }
-            })
-            .err()
-            .map(|err| err.to_string());
-        let _ = result_tx.send(SftpTransferBackgroundMessage {
-            session_id: session_id_text,
-            tasks: queue.tasks.clone(),
-            refresh_remote_path,
-            error,
-        });
-    });
+    let queue = crate::app::sftp::TransferQueue {
+        tasks: resumed_tasks,
+    };
+    run_transfer_queue_in_background(
+        manager,
+        session_id,
+        queue,
+        refresh_remote_path,
+        result_tx,
+        TransferPauseRegistry::default(),
+    );
     true
 }
 
@@ -797,18 +870,22 @@ pub(super) fn drain_sftp_browser_background_messages(
 pub(super) fn drain_sftp_transfer_background_messages(
     state: &mut ShellViewModel,
     controller: &mut SftpBrowserController,
+    transfer_store: Option<&Arc<crate::app::sftp::RedbTransferStore>>,
     manager: &SessionManager,
     async_runtime: Option<&tokio::runtime::Handle>,
     browser_result_tx: &std::sync::mpsc::Sender<SftpBrowserBackgroundMessage>,
     result_rx: &std::sync::mpsc::Receiver<SftpTransferBackgroundMessage>,
 ) -> bool {
     let mut changed = false;
+    let mut tasks_changed = false;
     loop {
         let Ok(message) = result_rx.try_recv() else {
             break;
         };
 
-        changed |= state.merge_sftp_transfer_tasks(&message.tasks);
+        let merged = state.merge_sftp_transfer_tasks(&message.tasks);
+        changed |= merged;
+        tasks_changed |= merged;
         changed |= state.recompute_sftp_queue_summary();
         if state.settings_modal_download_conflict_default()
             == crate::app::ui_preferences::DownloadConflictDefault::Ask
@@ -851,14 +928,20 @@ pub(super) fn drain_sftp_transfer_background_messages(
         }
     }
 
+    if tasks_changed {
+        persist_transfer_tasks_snapshot(transfer_store, state.sftp_transfer_tasks());
+    }
+
     changed
 }
 
 pub(super) fn drain_sftp_local_action_background_messages(
     state: &mut ShellViewModel,
+    transfer_store: Option<&Arc<crate::app::sftp::RedbTransferStore>>,
     result_rx: &std::sync::mpsc::Receiver<SftpLocalActionBackgroundMessage>,
 ) -> bool {
     let mut changed = false;
+    let mut tasks_changed = false;
     loop {
         let Ok(message) = result_rx.try_recv() else {
             break;
@@ -893,9 +976,14 @@ pub(super) fn drain_sftp_local_action_background_messages(
                         );
                     }
                     changed = true;
+                    tasks_changed = true;
                 }
             }
         }
+    }
+
+    if tasks_changed {
+        persist_transfer_tasks_snapshot(transfer_store, state.sftp_transfer_tasks());
     }
     changed
 }
@@ -1728,6 +1816,7 @@ pub(super) fn bind_sftp_callbacks(
     view_model: &Rc<RefCell<ShellViewModel>>,
     store: &Option<Rc<UiPreferencesStore>>,
     effects: &Rc<dyn PlatformWindowEffects>,
+    transfer_store: Option<&Arc<crate::app::sftp::RedbTransferStore>>,
     session_bridge: &Option<Rc<ShellSessionBridge>>,
     async_runtime: Option<&tokio::runtime::Handle>,
     sftp_result_tx: &std::sync::mpsc::Sender<SftpBrowserBackgroundMessage>,
@@ -1740,6 +1829,7 @@ pub(super) fn bind_sftp_callbacks(
     let sftp_result_tx = sftp_result_tx.clone();
     let sftp_transfer_result_tx = sftp_transfer_result_tx.clone();
     let sftp_local_action_result_tx = sftp_local_action_result_tx.clone();
+    let transfer_store = transfer_store.cloned();
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
     let store_ref = store.clone();
@@ -1784,10 +1874,75 @@ pub(super) fn bind_sftp_callbacks(
     let handle = window.as_weak();
     let effects_ref = Rc::clone(effects);
     let session_bridge_ref = session_bridge.clone();
+    let transfer_resume_result_tx = sftp_transfer_result_tx.clone();
+    window.on_transfer_center_resume_requested(move |task_id| {
+        let window = handle.unwrap();
+        let state = state.borrow();
+        let resumed = session_bridge_ref.as_ref().is_some_and(|session_bridge| {
+            state
+                .transfer_task_by_id(task_id.as_str())
+                .cloned()
+                .is_some_and(|task| {
+                    replay_transfer_task(
+                        &session_bridge.manager,
+                        &task,
+                        TransferReplayAction::Resume,
+                        &transfer_resume_result_tx,
+                    )
+                })
+        });
+        if resumed {
+            super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        }
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
+    let transfer_restart_result_tx = sftp_transfer_result_tx.clone();
+    window.on_transfer_center_restart_requested(move |task_id| {
+        let window = handle.unwrap();
+        let state = state.borrow();
+        let restarted = session_bridge_ref.as_ref().is_some_and(|session_bridge| {
+            state
+                .transfer_task_by_id(task_id.as_str())
+                .cloned()
+                .is_some_and(|task| {
+                    replay_transfer_task(
+                        &session_bridge.manager,
+                        &task,
+                        TransferReplayAction::Restart,
+                        &transfer_restart_result_tx,
+                    )
+                })
+        });
+        if restarted {
+            super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        }
+    });
+
+    let state = Rc::clone(view_model);
+    let session_bridge_ref = session_bridge.clone();
+    window.on_transfer_center_pause_requested(move |task_id| {
+        let state = state.borrow();
+        let can_pause = session_bridge_ref.as_ref().is_some()
+            && state
+                .transfer_task_by_id(task_id.as_str())
+                .is_some_and(|task| task.state == crate::app::sftp::TransferTaskState::Running);
+        if can_pause {
+            let _ = transfer_pause_registry().request_pause(task_id.as_str());
+        }
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
     let transfer_retry_result_tx = sftp_transfer_result_tx.clone();
     window.on_transfer_center_retry_requested(move |task_id| {
         let window = handle.unwrap();
-        let state = state.borrow_mut();
+        let state = state.borrow();
         let retried = session_bridge_ref.as_ref().is_some_and(|session_bridge| {
             state
                 .transfer_task_by_id(task_id.as_str())
@@ -1900,10 +2055,15 @@ pub(super) fn bind_sftp_callbacks(
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
     let effects_ref = Rc::clone(effects);
+    let transfer_store_ref = transfer_store.clone();
     window.on_transfer_center_clear_completed_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         if state.clear_completed_transfer_tasks() {
+            persist_transfer_tasks_snapshot(
+                transfer_store_ref.as_ref(),
+                state.sftp_transfer_tasks(),
+            );
             super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
             sync_sftp_conflict_modal_state(&window, &state);
         }

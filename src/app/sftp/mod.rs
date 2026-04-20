@@ -10,6 +10,8 @@ pub mod operation_dispatch;
 pub mod queue;
 pub mod runtime;
 pub mod session_binding;
+pub mod transfer_engine;
+pub mod transfer_store;
 pub mod working_copy;
 
 pub use browser_controller::{SftpBrowserController, SftpBrowserLoadRequest};
@@ -38,13 +40,19 @@ pub use operation_dispatch::{
 };
 pub use queue::{
     DownloadTransferEntry, TransferConflictPolicy, TransferDirection, TransferQueue,
-    TransferQueueSummary, TransferTask, TransferTaskAction, TransferTaskState,
+    TransferQueueSummary, TransferResumeMode, TransferTask, TransferTaskAction, TransferTaskState,
+    download_part_path,
 };
-pub use runtime::{SftpBackend, SftpOperationFuture, SftpRuntimeHandle};
+pub use runtime::{
+    BoxedSftpReader, BoxedSftpWriter, SftpAsyncReader, SftpAsyncWriter, SftpBackend,
+    SftpOperationFuture, SftpReaderFuture, SftpRemoteMetadata, SftpRuntimeHandle, SftpWriteMode,
+    SftpWriterFuture,
+};
 pub use session_binding::{
     SftpSessionBinding, collect_download_targets, delete_entries, execute_queued_transfers,
     execute_queued_transfers_with_progress, move_entry_between_directories,
 };
+pub use transfer_store::{RedbTransferStore, restore_tasks_for_bootstrap};
 pub use working_copy::{
     SftpWorkingCopy, WorkingCopySnapshot, snapshot_working_copy, working_copy_has_changed,
 };

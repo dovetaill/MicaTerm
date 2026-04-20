@@ -5,9 +5,13 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use russh::client;
 use russh_sftp::client::SftpSession;
+use russh_sftp::protocol::OpenFlags;
 use tokio::io::AsyncWriteExt;
 
-use crate::app::sftp::{SftpBackend, SftpDirectoryEntry, SftpOperationFuture};
+use crate::app::sftp::{
+    BoxedSftpReader, BoxedSftpWriter, SftpBackend, SftpDirectoryEntry, SftpOperationFuture,
+    SftpReaderFuture, SftpRemoteMetadata, SftpWriteMode, SftpWriterFuture,
+};
 
 use super::auth::RuntimeClientHandler;
 
@@ -95,6 +99,50 @@ impl SftpBackend for RusshSftpBackend {
             sftp.try_exists(path)
                 .await
                 .with_context(|| format!("failed to check remote path `{path}`"))
+        })
+    }
+
+    fn stat<'a>(&'a self, path: &'a str) -> SftpOperationFuture<'a, SftpRemoteMetadata> {
+        Box::pin(async move {
+            let sftp = self.open_sftp_session().await?;
+            let metadata = sftp
+                .metadata(path)
+                .await
+                .with_context(|| format!("failed to stat remote path `{path}`"))?;
+            Ok(SftpRemoteMetadata {
+                size_bytes: metadata.size,
+                modified_unix_seconds: metadata.mtime.map(u64::from),
+            })
+        })
+    }
+
+    fn open_file_reader<'a>(&'a self, path: &'a str) -> SftpReaderFuture<'a> {
+        Box::pin(async move {
+            let sftp = self.open_sftp_session().await?;
+            let file = sftp
+                .open(path)
+                .await
+                .with_context(|| format!("failed to open remote file `{path}` for reading"))?;
+            Ok(Box::pin(file) as BoxedSftpReader)
+        })
+    }
+
+    fn open_file_writer<'a>(&'a self, path: &'a str, mode: SftpWriteMode) -> SftpWriterFuture<'a> {
+        Box::pin(async move {
+            let sftp = self.open_sftp_session().await?;
+            let flags = match mode {
+                SftpWriteMode::CreateOrTruncate => {
+                    OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE
+                }
+                SftpWriteMode::CreateOrAppend => {
+                    OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::APPEND
+                }
+            };
+            let file = sftp
+                .open_with_flags(path, flags)
+                .await
+                .with_context(|| format!("failed to open remote file `{path}` for writing"))?;
+            Ok(Box::pin(file) as BoxedSftpWriter)
         })
     }
 

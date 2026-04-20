@@ -56,8 +56,8 @@ use crate::app::quick_launch_preferences::{
 };
 use crate::app::runtime_profile::{AppBuildFlavor, AppRuntimeProfile, TerminalRenderMode};
 use crate::app::sftp::{
-    SftpBrowserController, SftpBrowserLoadRequest, SftpBrowserSessionState, SftpDirectoryEntryKind,
-    SftpFollowMode, SftpPanelMode,
+    RedbTransferStore, SftpBrowserController, SftpBrowserLoadRequest, SftpBrowserSessionState,
+    SftpDirectoryEntryKind, SftpFollowMode, SftpPanelMode, restore_tasks_for_bootstrap,
 };
 use crate::app::ssh::connection_progress::{
     ConnectionAttemptState, ConnectionHeadlineState, ConnectionStepState, ConnectionStepStateItem,
@@ -3876,6 +3876,11 @@ fn keychain_catalog_repository_for_app() -> Result<Rc<dyn KeychainCatalogReposit
     Ok(Rc::new(RedbKeychainCatalogStore::new(app_paths.data_dir)))
 }
 
+fn transfer_store_for_app() -> Result<Arc<RedbTransferStore>> {
+    let app_paths = app_root_paths_for_app()?;
+    Ok(Arc::new(RedbTransferStore::new(app_paths.data_dir)))
+}
+
 fn quick_launch_preferences_store_for_app() -> Result<QuickLaunchPreferencesStore> {
     let app_paths = app_root_paths_for_app()?;
     Ok(QuickLaunchPreferencesStore::new(
@@ -3943,6 +3948,7 @@ pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher(
         credential_store,
         Arc::new(LivePrivateKeyImporter),
         VaultRuntimeOptions::default(),
+        None,
     );
 }
 
@@ -3962,6 +3968,48 @@ pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_an
         launcher,
         credential_store,
         Arc::new(LivePrivateKeyImporter),
+    );
+}
+
+pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_transfer_store(
+    window: &AppWindow,
+    store: Option<UiPreferencesStore>,
+    effects: Rc<dyn PlatformWindowEffects>,
+    asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
+    launcher: Arc<dyn SessionRuntimeLauncher>,
+    credential_store: Arc<dyn CredentialStore>,
+    transfer_store: Arc<RedbTransferStore>,
+) {
+    let (session_runtime_guard, session_bridge) = match AppAsyncRuntime::new() {
+        Ok(runtime) => {
+            let session_bridge = Rc::new(ShellSessionBridge {
+                terminal_defaults: TerminalRuntimeDefaults::default(),
+                manager: SessionManager::new_with_launcher(runtime.handle(), launcher),
+            });
+            (Some(runtime), Some(session_bridge))
+        }
+        Err(err) => {
+            tracing::error!(
+                target: "app.ssh",
+                error = %err,
+                "failed to create app async runtime for injected shell services"
+            );
+            (None, None)
+        }
+    };
+
+    bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
+        window,
+        store,
+        AppRuntimeProfile::mainline(),
+        effects,
+        asset_repo,
+        session_bridge,
+        session_runtime_guard,
+        credential_store,
+        Arc::new(LivePrivateKeyImporter),
+        VaultRuntimeOptions::default(),
+        Some(transfer_store),
     );
 }
 
@@ -4074,6 +4122,7 @@ pub fn bind_top_status_bar_with_injected_services_and_vault_runtime_and_terminal
         credential_store,
         private_key_importer,
         vault_runtime,
+        None,
     );
 }
 
@@ -4104,6 +4153,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
                 credential_store,
                 Arc::new(LivePrivateKeyImporter),
                 VaultRuntimeOptions::default(),
+                None,
             );
         }
         Err(err) => {
@@ -4123,6 +4173,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
                 shared_app_credential_store(),
                 Arc::new(LivePrivateKeyImporter),
                 VaultRuntimeOptions::default(),
+                None,
             );
         }
     }
@@ -4140,6 +4191,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     credential_store: Arc<dyn CredentialStore>,
     private_key_importer: Arc<dyn PrivateKeyImporter>,
     vault_runtime: VaultRuntimeOptions,
+    injected_transfer_store: Option<Arc<RedbTransferStore>>,
 ) {
     let store = store.map(Rc::new);
     let quick_launch_store = match quick_launch_preferences_store_for_app() {
@@ -4168,6 +4220,23 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     } else {
         None
     };
+    let transfer_store = injected_transfer_store.or_else(|| {
+        if asset_repo.is_some() || std::env::var_os("MICA_TERM_APP_DIR").is_some() {
+            match transfer_store_for_app() {
+                Ok(store) => Some(store),
+                Err(err) => {
+                    tracing::error!(
+                        target: "config.sftp_transfer_store",
+                        error = %err,
+                        "failed to resolve SFTP transfer store"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    });
     let prefs = load_ui_preferences(&store);
     let mut initial_view_model = ShellViewModel::default();
     if let Some(repo) = asset_repo.as_ref() {
@@ -4191,6 +4260,31 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         filtered
     };
     initial_view_model.apply_quick_launch_preferences(quick_launch_preferences);
+    if let Some(transfer_store) = transfer_store.as_ref() {
+        match transfer_store.load_tasks() {
+            Ok(tasks) => {
+                let restored = restore_tasks_for_bootstrap(tasks.clone());
+                if restored != tasks
+                    && let Err(err) = transfer_store.save_tasks(&restored)
+                {
+                    tracing::error!(
+                        target: "config.sftp_transfer_store",
+                        error = %err,
+                        "failed to persist normalized SFTP transfer recovery snapshot"
+                    );
+                }
+                initial_view_model.sftp_transfer_tasks = restored;
+                let _ = initial_view_model.recompute_sftp_queue_summary();
+            }
+            Err(err) => {
+                tracing::error!(
+                    target: "config.sftp_transfer_store",
+                    error = %err,
+                    "failed to load persisted SFTP transfers"
+                );
+            }
+        }
+    }
     initial_view_model.theme_mode = prefs.theme_mode;
     initial_view_model.is_always_on_top = prefs.always_on_top;
     initial_view_model.set_right_panel_view(RightPanelView::from_id(&prefs.right_panel_view));
@@ -4353,6 +4447,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
         let active_ssh_modal_test_request_id_ref = Rc::clone(&active_ssh_modal_test_request_id);
         let sftp_browser_async_runtime_ref = sftp_browser_async_runtime.clone();
+        let transfer_store_ref = transfer_store.clone();
         let workspace_terminal_active_surface_fingerprint_ref =
             Rc::clone(&workspace_terminal_active_surface_fingerprint);
         let workspace_terminal_active_surface_since_ref =
@@ -4379,6 +4474,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 sftp::drain_sftp_transfer_background_messages(
                     &mut state,
                     &mut controller,
+                    transfer_store_ref.as_ref(),
                     &manager,
                     sftp_browser_async_runtime_ref.as_ref(),
                     &sftp_browser_result_tx_ref,
@@ -4387,7 +4483,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             };
             let sftp_local_action_changed = {
                 let receiver = sftp_local_action_result_rx_ref.borrow();
-                sftp::drain_sftp_local_action_background_messages(&mut state, &receiver)
+                sftp::drain_sftp_local_action_background_messages(
+                    &mut state,
+                    transfer_store_ref.as_ref(),
+                    &receiver,
+                )
             };
             let ssh_modal_changed = {
                 let receiver = ssh_modal_result_rx_ref.borrow();
@@ -5297,6 +5397,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         &view_model,
         &store,
         &effects,
+        transfer_store.as_ref(),
         &session_bridge,
         sftp_browser_async_runtime.as_ref(),
         &sftp_browser_result_tx,
@@ -6445,6 +6546,7 @@ fn bind_top_status_bar_with_profile_and_async_handle(
                 credential_store,
                 Arc::new(LivePrivateKeyImporter),
                 VaultRuntimeOptions::default(),
+                None,
             );
         }
         None => {
