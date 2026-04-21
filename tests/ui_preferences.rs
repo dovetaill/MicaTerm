@@ -2,9 +2,10 @@
 
 use std::fs;
 
+use mica_term::app::terminal_semantic::OutputRuleProfile;
 use mica_term::app::ui_preferences::{DownloadConflictDefault, UiPreferences, UiPreferencesStore};
 use mica_term::shell::view_model::RightPanelView;
-use mica_term::theme::ThemeMode;
+use mica_term::theme::{ThemeMode, ThemeVariant};
 
 #[test]
 fn ui_preferences_default_to_dark_and_not_pinned() {
@@ -94,6 +95,25 @@ fn ui_preferences_roundtrip_download_conflict_default() {
 
     assert_eq!(loaded, prefs);
     let _ = std::fs::remove_file(temp_path);
+}
+
+#[test]
+fn ui_preferences_round_trip_terminal_redesign_settings() {
+    let prefs = UiPreferences {
+        theme_variant: ThemeVariant::PremiumDefault,
+        terminal_input_highlighting_enabled: true,
+        terminal_output_rule_highlighting_enabled: true,
+        terminal_output_rule_profile: OutputRuleProfile::Default,
+        terminal_command_decorations_enabled: true,
+        terminal_overview_markers_enabled: true,
+        ..UiPreferences::default()
+    };
+
+    let json = serde_json::to_string(&prefs).unwrap();
+    let decoded: UiPreferences = serde_json::from_str(&json).unwrap();
+
+    assert!(decoded.terminal_input_highlighting_enabled);
+    assert!(decoded.terminal_overview_markers_enabled);
 }
 
 #[test]

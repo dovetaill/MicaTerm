@@ -31,6 +31,7 @@ use crate::app::ssh::credentials::{
     ssh_credential_ref,
 };
 use crate::app::ssh::runtime::TerminalSurfaceState;
+use crate::app::terminal_semantic::OutputRuleProfile;
 use crate::app::ui_preferences::DownloadConflictDefault;
 use crate::app::window_state::WindowPlacementKind;
 use crate::shell::assets::{
@@ -249,6 +250,12 @@ pub struct SettingsModalViewState {
     pub open: bool,
     pub terminal_scrollback_limit: usize,
     pub terminal_active_idle_shrink_enabled: bool,
+    pub terminal_input_highlighting_enabled: bool,
+    pub terminal_output_rule_highlighting_enabled: bool,
+    pub terminal_output_rule_profile: OutputRuleProfile,
+    pub terminal_command_decorations_enabled: bool,
+    pub terminal_overview_markers_enabled: bool,
+    pub terminal_search_match_highlight: String,
     pub download_conflict_default: DownloadConflictDefault,
 }
 
@@ -258,6 +265,12 @@ impl Default for SettingsModalViewState {
             open: false,
             terminal_scrollback_limit: 1500,
             terminal_active_idle_shrink_enabled: true,
+            terminal_input_highlighting_enabled: true,
+            terminal_output_rule_highlighting_enabled: true,
+            terminal_output_rule_profile: OutputRuleProfile::Default,
+            terminal_command_decorations_enabled: true,
+            terminal_overview_markers_enabled: true,
+            terminal_search_match_highlight: "default".into(),
             download_conflict_default: DownloadConflictDefault::Ask,
         }
     }

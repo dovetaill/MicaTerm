@@ -4451,6 +4451,24 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     initial_view_model.set_settings_modal_terminal_active_idle_shrink_enabled(
         prefs.terminal_active_idle_shrink_enabled,
     );
+    initial_view_model.set_settings_modal_terminal_input_highlighting_enabled(
+        prefs.terminal_input_highlighting_enabled,
+    );
+    initial_view_model.set_settings_modal_terminal_output_rule_highlighting_enabled(
+        prefs.terminal_output_rule_highlighting_enabled,
+    );
+    initial_view_model.set_settings_modal_terminal_output_rule_profile(
+        prefs.terminal_output_rule_profile.as_str(),
+    );
+    initial_view_model.set_settings_modal_terminal_command_decorations_enabled(
+        prefs.terminal_command_decorations_enabled,
+    );
+    initial_view_model.set_settings_modal_terminal_overview_markers_enabled(
+        prefs.terminal_overview_markers_enabled,
+    );
+    initial_view_model.set_settings_modal_terminal_search_match_highlight(
+        prefs.terminal_search_match_highlight.as_str(),
+    );
     initial_view_model
         .set_settings_modal_download_conflict_default(prefs.download_conflict_default.as_str());
     let vault_root_dir = vault_runtime

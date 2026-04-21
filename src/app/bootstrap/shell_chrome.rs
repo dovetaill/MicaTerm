@@ -432,11 +432,34 @@ pub(super) fn sync_top_status_bar_state(
     window.set_is_window_active(state.is_window_active);
     window.set_is_window_always_on_top(state.is_always_on_top);
     window.set_settings_modal_open(state.settings_modal_open());
+    window.set_settings_modal_theme_variant(state.theme_variant_id().into());
     window.set_settings_modal_terminal_scrollback_limit(
         i32::try_from(state.settings_modal_terminal_scrollback_limit()).unwrap_or(i32::MAX),
     );
     window.set_settings_modal_terminal_active_idle_shrink_enabled(
         state.settings_modal_terminal_active_idle_shrink_enabled(),
+    );
+    window.set_settings_modal_terminal_input_highlighting_enabled(
+        state.settings_modal_terminal_input_highlighting_enabled(),
+    );
+    window.set_settings_modal_terminal_output_rule_highlighting_enabled(
+        state.settings_modal_terminal_output_rule_highlighting_enabled(),
+    );
+    window.set_settings_modal_terminal_output_rule_profile(
+        state
+            .settings_modal_terminal_output_rule_profile_id()
+            .into(),
+    );
+    window.set_settings_modal_terminal_command_decorations_enabled(
+        state.settings_modal_terminal_command_decorations_enabled(),
+    );
+    window.set_settings_modal_terminal_overview_markers_enabled(
+        state.settings_modal_terminal_overview_markers_enabled(),
+    );
+    window.set_settings_modal_terminal_search_match_highlight(
+        state
+            .settings_modal_terminal_search_match_highlight()
+            .into(),
     );
     window.set_settings_modal_download_conflict_default(
         state.settings_modal_download_conflict_default_id().into(),
@@ -493,6 +516,26 @@ pub(super) fn bind_shell_chrome_callbacks(
     let store_ref = store.clone();
     let effects_ref = Rc::clone(effects);
     let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
+    window.on_settings_modal_theme_variant_changed(move |value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.set_theme_variant_id(value.as_str());
+        sync_shell_side_regions(
+            &window,
+            &mut state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
     window.on_settings_modal_terminal_scrollback_limit_changed(move |value| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -514,6 +557,78 @@ pub(super) fn bind_shell_chrome_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.set_settings_modal_terminal_active_idle_shrink_enabled(value);
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(effects);
+    window.on_settings_modal_terminal_input_highlighting_enabled_changed(move |value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.set_settings_modal_terminal_input_highlighting_enabled(value);
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(effects);
+    window.on_settings_modal_terminal_output_rule_highlighting_enabled_changed(move |value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.set_settings_modal_terminal_output_rule_highlighting_enabled(value);
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(effects);
+    window.on_settings_modal_terminal_output_rule_profile_changed(move |value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.set_settings_modal_terminal_output_rule_profile(value.as_str());
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(effects);
+    window.on_settings_modal_terminal_command_decorations_enabled_changed(move |value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.set_settings_modal_terminal_command_decorations_enabled(value);
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(effects);
+    window.on_settings_modal_terminal_overview_markers_enabled_changed(move |value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.set_settings_modal_terminal_overview_markers_enabled(value);
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(effects);
+    window.on_settings_modal_terminal_search_match_highlight_changed(move |value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.set_settings_modal_terminal_search_match_highlight(value.as_str());
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         save_ui_preferences(&store_ref, &state);
     });

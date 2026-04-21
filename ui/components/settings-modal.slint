@@ -14,11 +14,25 @@ export component SettingsModal inherits Rectangle {
     callback drag-moved(length, length);
     callback drag-ended();
     callback focus-restore-requested();
+    in property <string> theme-variant: "premium-default";
     in property <int> terminal-scrollback-limit: 1500;
     in property <bool> terminal-active-idle-shrink-enabled: true;
+    in property <bool> terminal-input-highlighting-enabled: true;
+    in property <bool> terminal-output-rule-highlighting-enabled: true;
+    in property <string> terminal-output-rule-profile: "default";
+    in property <bool> terminal-command-decorations-enabled: true;
+    in property <bool> terminal-overview-markers-enabled: true;
+    in property <string> terminal-search-match-highlight: "default";
     in property <string> download-conflict-default: "ask";
+    callback theme-variant-changed(string);
     callback terminal-scrollback-limit-changed(int);
     callback terminal-active-idle-shrink-enabled-changed(bool);
+    callback terminal-input-highlighting-enabled-changed(bool);
+    callback terminal-output-rule-highlighting-enabled-changed(bool);
+    callback terminal-output-rule-profile-changed(string);
+    callback terminal-command-decorations-enabled-changed(bool);
+    callback terminal-overview-markers-enabled-changed(bool);
+    callback terminal-search-match-highlight-changed(string);
     callback download-conflict-default-changed(string);
 
     background: transparent;
@@ -125,6 +139,267 @@ export component SettingsModal inherits Rectangle {
 
                                 clicked => {
                                     root.terminal-scrollback-limit-changed(root.terminal-scrollback-limit + 500);
+                                }
+                            }
+                        }
+                    }
+
+                    DialogFormSection {
+                        width: parent.width;
+                        title: "Terminal appearance preset";
+                        description: "Keep the Premium Default calm hierarchy as the default, with the legacy preset available for compatibility only.";
+
+                        Text {
+                            width: parent.width;
+                            text: root.theme-variant == "legacy-hacker-green"
+                                ? "Legacy Hacker Green"
+                                : "Premium Default";
+                            color: ThemeTokens.text-primary;
+                            font-size: 18px;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            width: parent.width;
+                            text: "Use product-level preset selectors only. No raw per-color tuning is exposed here.";
+                            color: ThemeTokens.text-muted;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 38px;
+                            spacing: 10px;
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Premium Default";
+                                active: root.theme-variant == "premium-default";
+
+                                clicked => {
+                                    root.theme-variant-changed("premium-default");
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Legacy";
+                                active: root.theme-variant == "legacy-hacker-green";
+
+                                clicked => {
+                                    root.theme-variant-changed("legacy-hacker-green");
+                                }
+                            }
+                        }
+                    }
+
+                    DialogFormSection {
+                        width: parent.width;
+                        title: "Semantic highlighting";
+                        description: "Keep semantic detection and theme coloring decoupled while exposing only high-value product toggles.";
+
+                        Text {
+                            width: parent.width;
+                            text: root.terminal-input-highlighting-enabled
+                                ? "Input command highlighting is enabled."
+                                : "Input command highlighting is disabled.";
+                            color: ThemeTokens.text-primary;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 34px;
+                            spacing: 8px;
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Input On";
+                                active: root.terminal-input-highlighting-enabled;
+
+                                clicked => {
+                                    root.terminal-input-highlighting-enabled-changed(true);
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Input Off";
+                                active: !root.terminal-input-highlighting-enabled;
+
+                                clicked => {
+                                    root.terminal-input-highlighting-enabled-changed(false);
+                                }
+                            }
+                        }
+
+                        Text {
+                            width: parent.width;
+                            text: root.terminal-output-rule-highlighting-enabled
+                                ? "Output rule highlighting is enabled."
+                                : "Output rule highlighting is disabled.";
+                            color: ThemeTokens.text-primary;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 34px;
+                            spacing: 8px;
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Rules On";
+                                active: root.terminal-output-rule-highlighting-enabled;
+
+                                clicked => {
+                                    root.terminal-output-rule-highlighting-enabled-changed(true);
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Rules Off";
+                                active: !root.terminal-output-rule-highlighting-enabled;
+
+                                clicked => {
+                                    root.terminal-output-rule-highlighting-enabled-changed(false);
+                                }
+                            }
+                        }
+
+                        Text {
+                            width: parent.width;
+                            text: "Output rule profile";
+                            color: ThemeTokens.text-muted;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 34px;
+                            spacing: 8px;
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Default";
+                                active: root.terminal-output-rule-profile == "default";
+
+                                clicked => {
+                                    root.terminal-output-rule-profile-changed("default");
+                                }
+                            }
+                        }
+
+                        Text {
+                            width: parent.width;
+                            text: "Search match highlight";
+                            color: ThemeTokens.text-muted;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 34px;
+                            spacing: 8px;
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Default";
+                                active: root.terminal-search-match-highlight == "default";
+
+                                clicked => {
+                                    root.terminal-search-match-highlight-changed("default");
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Subtle";
+                                active: root.terminal-search-match-highlight == "subtle";
+
+                                clicked => {
+                                    root.terminal-search-match-highlight-changed("subtle");
+                                }
+                            }
+                        }
+                    }
+
+                    DialogFormSection {
+                        width: parent.width;
+                        title: "Command decorations";
+                        description: "Expose command block strips and overview markers as restrained product toggles.";
+
+                        Text {
+                            width: parent.width;
+                            text: root.terminal-command-decorations-enabled
+                                ? "Command block decorations are enabled."
+                                : "Command block decorations are disabled.";
+                            color: ThemeTokens.text-primary;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 34px;
+                            spacing: 8px;
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Decorations On";
+                                active: root.terminal-command-decorations-enabled;
+
+                                clicked => {
+                                    root.terminal-command-decorations-enabled-changed(true);
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Decorations Off";
+                                active: !root.terminal-command-decorations-enabled;
+
+                                clicked => {
+                                    root.terminal-command-decorations-enabled-changed(false);
+                                }
+                            }
+                        }
+
+                        Text {
+                            width: parent.width;
+                            text: root.terminal-overview-markers-enabled
+                                ? "Overview markers are enabled."
+                                : "Overview markers are disabled.";
+                            color: ThemeTokens.text-primary;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 34px;
+                            spacing: 8px;
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Markers On";
+                                active: root.terminal-overview-markers-enabled;
+
+                                clicked => {
+                                    root.terminal-overview-markers-enabled-changed(true);
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Markers Off";
+                                active: !root.terminal-overview-markers-enabled;
+
+                                clicked => {
+                                    root.terminal-overview-markers-enabled-changed(false);
                                 }
                             }
                         }

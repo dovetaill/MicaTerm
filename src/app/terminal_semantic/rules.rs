@@ -13,6 +13,21 @@ pub enum OutputRuleProfile {
     Default,
 }
 
+impl OutputRuleProfile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Self {
+        match value {
+            "default" => Self::Default,
+            _ => Self::Default,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputRule {
     Url,
@@ -95,7 +110,6 @@ pub fn analyze_output_rules_with_config(
     }
     analyze_json_blocks(frame, &analyzed_rows, &mut spans);
     analyze_xml_blocks(frame, &analyzed_rows, &mut spans);
-    analyze_log_rows(frame, &analyzed_rows, &mut spans);
 
     OutputRuleAnalysis {
         spans,
@@ -288,38 +302,6 @@ fn analyze_xml_blocks(
     }
 }
 
-fn analyze_log_rows(
-    frame: &TerminalModelFrame,
-    analyzed_rows: &[u32],
-    spans: &mut Vec<SemanticSpan>,
-) {
-    for row in analyzed_rows {
-        let Some(model_row) = frame.rows.get(*row as usize) else {
-            continue;
-        };
-        let trimmed = model_row.text.trim_start();
-        let role = if trimmed.starts_with("[ERROR]") || trimmed.starts_with("ERROR ") {
-            Some(SemanticStyleRole::OutputLevelError)
-        } else if trimmed.starts_with("[WARN]") || trimmed.starts_with("WARN ") {
-            Some(SemanticStyleRole::OutputLevelWarn)
-        } else if trimmed.starts_with("[INFO]") || trimmed.starts_with("INFO ") {
-            Some(SemanticStyleRole::OutputLevelInfo)
-        } else if trimmed.starts_with("[DEBUG]")
-            || trimmed.starts_with("DEBUG ")
-            || trimmed.starts_with("[TRACE]")
-            || trimmed.starts_with("TRACE ")
-        {
-            Some(SemanticStyleRole::OutputLevelDebug)
-        } else {
-            None
-        };
-
-        if let Some(role) = role {
-            push_full_line_span(model_row, role, SemanticPriority::High, spans);
-        }
-    }
-}
-
 fn analyze_inline_json(row: &TerminalModelRow, spans: &mut Vec<SemanticSpan>) {
     let trimmed = row.text.trim();
     if !(trimmed.starts_with('{') || trimmed.starts_with('[')) {
@@ -392,7 +374,7 @@ fn detect_json_block(rows: &[TerminalModelRow], start_index: usize) -> Option<(u
     if !(first_line.starts_with('{') || first_line.starts_with('[')) {
         return None;
     }
-    if first_line.starts_with('[') && first_line.starts_with("[INFO]") {
+    if first_line.starts_with('[') && is_bracketed_log_level(first_line) {
         return None;
     }
 
@@ -437,6 +419,18 @@ fn detect_xml_block(rows: &[TerminalModelRow], start_index: usize) -> Option<(us
     }
 
     None
+}
+
+fn is_bracketed_log_level(line: &str) -> bool {
+    matches!(
+        line,
+        value
+            if value.starts_with("[TRACE]")
+                || value.starts_with("[DEBUG]")
+                || value.starts_with("[INFO]")
+                || value.starts_with("[WARN]")
+                || value.starts_with("[ERROR]")
+    )
 }
 
 fn update_json_depths(line: &str, curly_depth: &mut i32, square_depth: &mut i32) {
@@ -505,7 +499,7 @@ fn find_url_range(line: &str) -> Option<(u32, u32)> {
 
 fn find_path_reference(line: &str) -> Option<(u32, u32, Option<u32>)> {
     for token in line.split_whitespace() {
-        if !looks_like_path(token) {
+        if token.starts_with('<') || token.contains('>') || !looks_like_path(token) {
             continue;
         }
         let start_byte = line.find(token)?;
