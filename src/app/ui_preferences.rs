@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::app::app_paths::app_root_paths_for_app;
 use crate::app::vault::model::SnapshotUiPreferences;
 use crate::shell::view_model::{RightPanelView, ShellViewModel};
-use crate::theme::ThemeMode;
+use crate::theme::{ThemeMode, ThemeVariant};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
@@ -48,6 +48,8 @@ pub struct PersistedWindowBounds {
 pub struct UiPreferences {
     #[serde(default = "default_theme_mode")]
     pub theme_mode: ThemeMode,
+    #[serde(default = "default_theme_variant")]
+    pub theme_variant: ThemeVariant,
     #[serde(default)]
     pub always_on_top: bool,
     #[serde(default = "default_right_panel_view")]
@@ -66,6 +68,10 @@ fn default_theme_mode() -> ThemeMode {
     ThemeMode::Dark
 }
 
+fn default_theme_variant() -> ThemeVariant {
+    ThemeVariant::PremiumDefault
+}
+
 fn default_right_panel_view() -> String {
     RightPanelView::Sftp.id().into()
 }
@@ -82,6 +88,7 @@ impl Default for UiPreferences {
     fn default() -> Self {
         Self {
             theme_mode: ThemeMode::Dark,
+            theme_variant: ThemeVariant::PremiumDefault,
             always_on_top: false,
             right_panel_view: default_right_panel_view(),
             terminal_scrollback_limit: default_terminal_scrollback_limit(),
@@ -130,6 +137,7 @@ impl From<&ShellViewModel> for UiPreferences {
     fn from(value: &ShellViewModel) -> Self {
         Self {
             theme_mode: value.theme_mode,
+            theme_variant: value.theme_variant,
             always_on_top: value.is_always_on_top,
             right_panel_view: value.right_panel_view_id().into(),
             terminal_scrollback_limit: value.settings_modal_terminal_scrollback_limit(),
@@ -161,6 +169,7 @@ pub fn ui_preferences_from_snapshot(snapshot: &SnapshotUiPreferences) -> UiPrefe
 
     UiPreferences {
         theme_mode,
+        theme_variant: default_theme_variant(),
         always_on_top: snapshot.always_on_top.unwrap_or(false),
         right_panel_view: default_right_panel_view(),
         terminal_scrollback_limit: default_terminal_scrollback_limit(),
@@ -195,7 +204,10 @@ mod tests {
         let decoded: UiPreferences = serde_json::from_str(&json).expect("deserialize preferences");
         let reencoded = serde_json::to_value(&decoded).expect("serialize preferences");
 
-        assert_eq!(reencoded["window_bounds"], serde_json::json!({ "x": 160, "y": 120 }));
+        assert_eq!(
+            reencoded["window_bounds"],
+            serde_json::json!({ "x": 160, "y": 120 })
+        );
     }
 
     #[test]
