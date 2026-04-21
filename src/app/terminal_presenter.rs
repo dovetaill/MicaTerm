@@ -4,7 +4,7 @@ use anyhow::Result;
 use slint::Image;
 
 #[cfg(feature = "terminal-native-renderer")]
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 #[cfg(feature = "terminal-native-renderer")]
 use std::time::Instant;
 
@@ -32,10 +32,12 @@ use crate::app::terminal_renderer::wgpu_renderer::{
 };
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
-use crate::app::terminal_semantic::{CommandBlock, OverviewMarker, SemanticSpan};
+use crate::app::terminal_semantic::{
+    CommandBlock, OutputRuleAnalysis, OverviewMarker, SemanticSpan,
+};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_semantic::{
-    command_blocks_from_frame, detect_input_line_spans, detect_output_block_spans,
+    analyze_output_rules, command_blocks_from_frame, detect_input_line_spans,
 };
 
 #[allow(dead_code)]
@@ -454,6 +456,7 @@ pub struct WindowsNativePresenter {
     raster_scale: f32,
     previous_frame: Option<TerminalModelFrame>,
     previous_shaped_rows: Option<Vec<crate::app::terminal_layout::ShapedRow>>,
+    previous_output_rule_spans: Option<Vec<SemanticSpan>>,
     shaped_row_cache: PresenterShapedRowCache,
 }
 
@@ -475,6 +478,7 @@ impl WindowsNativePresenter {
             raster_scale: 1.0,
             previous_frame: None,
             previous_shaped_rows: None,
+            previous_output_rule_spans: None,
             shaped_row_cache: PresenterShapedRowCache::default(),
         })
     }
@@ -486,6 +490,7 @@ impl WindowsNativePresenter {
         log_terminal_font_diagnostics("directwrite-d2d", request.px_size, &snapshot);
         self.previous_frame = None;
         self.previous_shaped_rows = None;
+        self.previous_output_rule_spans = None;
         self.shaped_row_cache.clear();
         Ok(())
     }
@@ -495,6 +500,7 @@ impl WindowsNativePresenter {
         self.font_system.set_emoji_renderer_for_tests(renderer);
         self.previous_frame = None;
         self.previous_shaped_rows = None;
+        self.previous_output_rule_spans = None;
         self.shaped_row_cache.clear();
     }
 }
@@ -532,6 +538,7 @@ impl TerminalPresenter for WindowsNativePresenter {
             &self.loaded_font,
             &mut self.previous_frame,
             &mut self.previous_shaped_rows,
+            &mut self.previous_output_rule_spans,
             &mut self.shaped_row_cache,
         );
         let (frame, diagnostics) =
@@ -569,6 +576,7 @@ impl TerminalPresenter for WindowsNativePresenter {
     fn clear_transient_caches(&mut self) {
         self.previous_frame = None;
         self.previous_shaped_rows = None;
+        self.previous_output_rule_spans = None;
         self.shaped_row_cache.clear();
         self.renderer.clear_transient_caches();
     }
@@ -586,6 +594,7 @@ struct NativeFramePreparationContext<'a> {
     loaded_font: &'a LoadedFont,
     previous_frame: &'a mut Option<TerminalModelFrame>,
     previous_shaped_rows: &'a mut Option<Vec<crate::app::terminal_layout::ShapedRow>>,
+    previous_output_rule_spans: &'a mut Option<Vec<SemanticSpan>>,
     shaped_row_cache: &'a mut PresenterShapedRowCache,
 }
 
@@ -598,6 +607,7 @@ impl<'a> NativeFramePreparationContext<'a> {
         loaded_font: &'a LoadedFont,
         previous_frame: &'a mut Option<TerminalModelFrame>,
         previous_shaped_rows: &'a mut Option<Vec<crate::app::terminal_layout::ShapedRow>>,
+        previous_output_rule_spans: &'a mut Option<Vec<SemanticSpan>>,
         shaped_row_cache: &'a mut PresenterShapedRowCache,
     ) -> Self {
         Self {
@@ -607,6 +617,7 @@ impl<'a> NativeFramePreparationContext<'a> {
             loaded_font,
             previous_frame,
             previous_shaped_rows,
+            previous_output_rule_spans,
             shaped_row_cache,
         }
     }
@@ -685,7 +696,13 @@ fn prepare_native_terminal_frame_with_diagnostics(
         }
         None => NativeSelectionOverlay::default(),
     };
-    let semantic_output_spans = detect_output_block_spans(&frame_model);
+    let semantic_output_analysis = analyze_output_rules(&frame_model, &frame_model.dirty_rows);
+    let semantic_output_spans = merge_semantic_output_spans(
+        context.previous_output_rule_spans.as_deref(),
+        &semantic_output_analysis,
+        &frame_model,
+    );
+    let cached_semantic_output_spans = semantic_output_spans.clone();
     let semantic_input_spans = detect_input_line_spans(&frame_model);
     let command_ledger = command_blocks_from_frame(&frame_model);
     let cursor = NativeCursorFrameState {
@@ -758,6 +775,7 @@ fn prepare_native_terminal_frame_with_diagnostics(
         },
     };
     *context.previous_shaped_rows = Some(rows);
+    *context.previous_output_rule_spans = Some(cached_semantic_output_spans);
     *context.previous_frame = Some(frame_model);
 
     let shaped_row_count = presentable_frame.shaped_row_count;
@@ -785,6 +803,33 @@ fn prepare_native_terminal_frame_with_diagnostics(
         },
         diagnostics,
     ))
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+fn merge_semantic_output_spans(
+    previous: Option<&[SemanticSpan]>,
+    analysis: &OutputRuleAnalysis,
+    frame: &TerminalModelFrame,
+) -> Vec<SemanticSpan> {
+    let valid_rows = frame
+        .rows
+        .iter()
+        .map(|row| row.row_index)
+        .collect::<HashSet<_>>();
+    let analyzed_rows = analysis
+        .analyzed_rows
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
+    let mut spans = previous
+        .unwrap_or(&[])
+        .iter()
+        .copied()
+        .filter(|span| valid_rows.contains(&span.row) && !analyzed_rows.contains(&span.row))
+        .collect::<Vec<_>>();
+    spans.extend(analysis.spans.iter().copied());
+    spans.sort_by_key(|span| (span.row, span.start_col, span.end_col));
+    spans
 }
 
 #[cfg(feature = "terminal-native-renderer")]
