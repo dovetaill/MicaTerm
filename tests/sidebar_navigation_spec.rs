@@ -134,6 +134,67 @@ fn reopening_right_panel_restores_last_resized_width() {
 }
 
 #[test]
+fn entering_workspace_focus_mode_hides_both_side_regions_without_resetting_width_memory() {
+    let mut view_model = ShellViewModel::default();
+
+    assert!(view_model.set_assets_sidebar_expanded_width(364.0));
+    view_model.toggle_right_panel();
+    assert!(view_model.set_right_panel_expanded_width(456.0));
+
+    view_model.toggle_workspace_focus_mode();
+
+    assert!(view_model.workspace_focus_mode);
+    assert!(!view_model.show_assets_sidebar);
+    assert!(!view_model.show_right_panel);
+    assert_eq!(view_model.assets_sidebar_expanded_width_px() as u32, 364);
+    assert_eq!(view_model.right_panel_expanded_width_px() as u32, 456);
+}
+
+#[test]
+fn exiting_workspace_focus_mode_restores_the_pre_focus_requested_visibility() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.toggle_assets_sidebar();
+    view_model.toggle_right_panel();
+    assert!(!view_model.show_assets_sidebar);
+    assert!(view_model.show_right_panel);
+
+    view_model.toggle_workspace_focus_mode();
+    assert!(view_model.workspace_focus_mode);
+    assert!(!view_model.show_assets_sidebar);
+    assert!(!view_model.show_right_panel);
+
+    view_model.toggle_workspace_focus_mode();
+
+    assert!(!view_model.workspace_focus_mode);
+    assert!(!view_model.show_assets_sidebar);
+    assert!(view_model.show_right_panel);
+}
+
+#[test]
+fn manually_reopening_either_side_exits_workspace_focus_mode_immediately() {
+    let mut reopen_left = ShellViewModel::default();
+    reopen_left.toggle_right_panel();
+    reopen_left.toggle_workspace_focus_mode();
+
+    reopen_left.toggle_assets_sidebar();
+
+    assert!(!reopen_left.workspace_focus_mode);
+    assert!(reopen_left.show_assets_sidebar);
+    assert!(reopen_left.show_right_panel);
+
+    let mut reopen_right = ShellViewModel::default();
+    reopen_right.toggle_right_panel();
+    reopen_right.toggle_workspace_focus_mode();
+
+    reopen_right.toggle_right_panel();
+
+    assert!(!reopen_right.workspace_focus_mode);
+    assert!(reopen_right.show_assets_sidebar);
+    assert!(reopen_right.show_right_panel);
+}
+
+#[test]
 fn dragging_below_collapse_threshold_hides_panels_without_forgetting_widths() {
     let mut view_model = ShellViewModel::default();
 

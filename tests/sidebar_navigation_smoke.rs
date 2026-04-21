@@ -203,3 +203,27 @@ fn edge_handle_callbacks_resize_restore_and_collapse_shell_panels() {
     assert!(app.get_show_right_panel());
     assert_eq!(app.get_right_panel_expanded_width() as u32, 452);
 }
+
+#[test]
+fn titlebar_focus_mode_action_hides_both_side_regions_and_restores_the_prior_layout() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_toggle_right_panel_requested();
+    assert!(app.get_show_assets_sidebar());
+    assert!(app.get_show_right_panel());
+
+    app.invoke_toggle_workspace_focus_mode_requested();
+
+    assert!(app.get_workspace_focus_mode());
+    assert!(!app.get_show_assets_sidebar());
+    assert!(!app.get_show_right_panel());
+
+    app.invoke_toggle_workspace_focus_mode_requested();
+
+    assert!(!app.get_workspace_focus_mode());
+    assert!(app.get_show_assets_sidebar());
+    assert!(app.get_show_right_panel());
+}
