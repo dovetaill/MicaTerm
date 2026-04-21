@@ -2,7 +2,7 @@
 
 use wezterm_term::color::{ColorPalette, RgbColor, SrgbaTuple};
 
-use crate::theme::{ThemeMode, terminal_palette_spec};
+use crate::theme::{ThemeMode, ThemeTerminalPaletteSpec, ThemeVariant, terminal_palette_spec, terminal_palette_spec_for};
 
 #[derive(Debug, Clone, Copy)]
 pub struct TerminalThemePreset {
@@ -41,8 +41,7 @@ impl TerminalThemePreset {
     }
 }
 
-fn preset_from_theme_mode(theme_mode: ThemeMode) -> TerminalThemePreset {
-    let spec = terminal_palette_spec(theme_mode);
+fn preset_from_spec(spec: ThemeTerminalPaletteSpec) -> TerminalThemePreset {
     TerminalThemePreset {
         name: spec.name,
         background: spec.default_bg,
@@ -59,12 +58,25 @@ fn preset_from_theme_mode(theme_mode: ThemeMode) -> TerminalThemePreset {
     }
 }
 
+pub fn preset_for_theme(theme_mode: ThemeMode, variant: ThemeVariant) -> TerminalThemePreset {
+    preset_from_spec(terminal_palette_spec_for(theme_mode, variant))
+}
+
 pub fn preset_for_theme_mode(theme_mode: ThemeMode) -> TerminalThemePreset {
-    preset_from_theme_mode(theme_mode)
+    preset_from_spec(terminal_palette_spec(theme_mode))
+}
+
+pub fn palette_for_theme(theme_mode: ThemeMode, variant: ThemeVariant) -> ColorPalette {
+    preset_for_theme(theme_mode, variant).to_color_palette()
 }
 
 pub fn palette_for_theme_mode(theme_mode: ThemeMode) -> ColorPalette {
     preset_for_theme_mode(theme_mode).to_color_palette()
+}
+
+pub fn selection_overlay_rgba_for_theme(theme_mode: ThemeMode, variant: ThemeVariant) -> u32 {
+    let preset = preset_for_theme(theme_mode, variant);
+    rgba_hex(preset.selection_bg)
 }
 
 pub fn selection_overlay_rgba(theme_mode: ThemeMode) -> u32 {

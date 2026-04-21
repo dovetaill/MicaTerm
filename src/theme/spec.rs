@@ -173,31 +173,31 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
             terminal: TerminalTheme {
                 name: "Mica Graphite",
                 background: TerminalBackgroundTheme {
-                    base: 0x08_13_1d,
-                    gradient_top: 0x0b_18_24,
-                    gradient_bottom: 0x08_13_1d,
+                    base: 0x0c_14_1c,
+                    gradient_top: 0x10_19_24,
+                    gradient_bottom: 0x0c_14_1c,
                 },
                 foreground: TerminalForegroundTheme {
-                    default: 0xe5_eb_f5,
-                    dim: 0x92_9d_ab,
-                    soft: 0xc7_d0_db,
+                    default: 0xe3_ea_f2,
+                    dim: 0x93_a0_b2,
+                    soft: 0xc8_d1_dc,
                 },
                 cursor: TerminalCursorTheme {
-                    background: 0xe5_eb_f5,
-                    foreground: 0x08_13_1d,
+                    background: 0xdc_e6_f3,
+                    foreground: 0x0c_14_1c,
                 },
                 selection: TerminalOverlayTheme {
-                    rgb: 0x7c_92_af,
-                    alpha: 0.25,
+                    rgb: 0x6c_88_ae,
+                    alpha: 66.0 / 255.0,
                 },
                 scrollbar: TerminalScrollbarTheme {
-                    thumb: 0x4a_58_6a,
-                    thumb_active: 0x5c_6d_82,
+                    thumb: 0x53_62_74,
+                    thumb_active: 0x66_78_8e,
                 },
                 ansi: [
-                    0x45_47_5a, 0xf3_8b_a8, 0xa6_e3_a1, 0xf9_e2_af, 0x89_b4_fa, 0xf5_c2_e7,
-                    0x94_e2_d5, 0xba_c2_de, 0x58_5b_70, 0xf3_8b_a8, 0xa6_e3_a1, 0xf9_e2_af,
-                    0x89_b4_fa, 0xf5_c2_e7, 0x94_e2_d5, 0xa6_ad_c8,
+                    0x4a_52_60, 0xc3_7a_86, 0x86_b4_8f, 0xc6_a5_6a, 0x7d_9b_c2, 0xa7_8c_bf,
+                    0x78_af_ae, 0xc8_d1_dc, 0x66_71_80, 0xd6_94_9f, 0x9b_c6_a4, 0xd8_ba_83,
+                    0x94_ae_d0, 0xb7_9c_cb, 0x8e_c0_c0, 0xe7_ed_f4,
                 ],
             },
             decoration: DecorationTheme {
@@ -222,31 +222,31 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
             terminal: TerminalTheme {
                 name: "Mica Canvas",
                 background: TerminalBackgroundTheme {
-                    base: 0xf2_f4_f7,
-                    gradient_top: 0xf6_f7_f9,
-                    gradient_bottom: 0xf2_f4_f7,
+                    base: 0xf8_fa_fc,
+                    gradient_top: 0xfb_fc_fd,
+                    gradient_bottom: 0xf6_f8_fb,
                 },
                 foreground: TerminalForegroundTheme {
-                    default: 0x24_31_42,
-                    dim: 0x74_83_95,
-                    soft: 0x4c_59_6b,
+                    default: 0x26_32_40,
+                    dim: 0x75_83_95,
+                    soft: 0x4b_59_6a,
                 },
                 cursor: TerminalCursorTheme {
-                    background: 0x24_31_42,
-                    foreground: 0xf2_f4_f7,
+                    background: 0x2c_39_48,
+                    foreground: 0xf8_fa_fc,
                 },
                 selection: TerminalOverlayTheme {
-                    rgb: 0x95_ad_d3,
-                    alpha: 0.30,
+                    rgb: 0x7f_9b_c2,
+                    alpha: 51.0 / 255.0,
                 },
                 scrollbar: TerminalScrollbarTheme {
-                    thumb: 0xbc_c8_da,
-                    thumb_active: 0xa8_b8_ce,
+                    thumb: 0xb7_c3_d0,
+                    thumb_active: 0x9f_af_be,
                 },
                 ansi: [
-                    0x5c_5f_77, 0xd2_0f_39, 0x40_a0_2b, 0xdf_8e_1d, 0x1e_66_f5, 0xea_76_cb,
-                    0x17_92_99, 0xac_b0_be, 0x6c_6f_85, 0xd2_0f_39, 0x40_a0_2b, 0xdf_8e_1d,
-                    0x1e_66_f5, 0xea_76_cb, 0x17_92_99, 0x7c_7f_93,
+                    0x5a_65_73, 0xb8_64_70, 0x5f_8d_69, 0x9d_7c_41, 0x5b_80_ae, 0x8f_73_aa,
+                    0x4e_90_90, 0xaa_b5_c1, 0x73_80_90, 0xc7_7a_85, 0x76_9e_7e, 0xb0_8d_53,
+                    0x72_95_bf, 0xa2_86_bb, 0x68_a4_a3, 0xd5_dc_e4,
                 ],
             },
             decoration: DecorationTheme {
