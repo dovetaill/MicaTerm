@@ -7,14 +7,14 @@ fn dark_theme_maps_terminal_palette_to_premium_default_graphite() {
     let preset = preset_for_theme_mode(ThemeMode::Dark);
 
     assert_eq!(preset.name, "Mica Graphite");
-    assert_eq!(preset.background, 0x0c_141c);
-    assert_eq!(preset.foreground, 0xe3_eaf2);
-    assert_eq!(preset.cursor_bg, 0xdc_e6_f3);
-    assert_eq!(preset.cursor_fg, 0x0c_141c);
-    assert_eq!(preset.scrollbar_thumb, (0x53, 0x62, 0x74));
-    assert_eq!(preset.scrollbar_thumb_active, (0x66, 0x78, 0x8e));
-    assert_eq!(preset.split, (0x34, 0x47, 0x5c));
-    assert_eq!(preset.ansi[4], (0x7d, 0x9b, 0xc2));
+    assert_eq!(preset.background, 0x08_131d);
+    assert_eq!(preset.foreground, 0xd7_e0e8);
+    assert_eq!(preset.cursor_bg, 0xdc_e6ee);
+    assert_eq!(preset.cursor_fg, 0x08_131d);
+    assert_eq!(preset.scrollbar_thumb, (0x5a, 0x6a, 0x79));
+    assert_eq!(preset.scrollbar_thumb_active, (0x72, 0x84, 0x95));
+    assert_eq!(preset.split, (0x2d, 0x3a, 0x48));
+    assert_eq!(preset.ansi[4], (0x7f, 0x9e, 0xc4));
 }
 
 #[test]
@@ -22,14 +22,14 @@ fn light_theme_maps_terminal_palette_to_premium_default_mist() {
     let preset = preset_for_theme_mode(ThemeMode::Light);
 
     assert_eq!(preset.name, "Mica Canvas");
-    assert_eq!(preset.background, 0xf8_fa_fc);
-    assert_eq!(preset.foreground, 0x26_32_40);
-    assert_eq!(preset.cursor_bg, 0x2c_39_48);
-    assert_eq!(preset.cursor_fg, 0xf8_fa_fc);
-    assert_eq!(preset.scrollbar_thumb, (0xb7, 0xc3, 0xd0));
-    assert_eq!(preset.scrollbar_thumb_active, (0x9f, 0xaf, 0xbe));
-    assert_eq!(preset.split, (0xc7, 0xd4, 0xe6));
-    assert_eq!(preset.ansi[4], (0x5b, 0x80, 0xae));
+    assert_eq!(preset.background, 0xf4_f6f8);
+    assert_eq!(preset.foreground, 0x1f_2933);
+    assert_eq!(preset.cursor_bg, 0x24_313c);
+    assert_eq!(preset.cursor_fg, 0xf4_f6f8);
+    assert_eq!(preset.scrollbar_thumb, (0xb6, 0xc0, 0xca));
+    assert_eq!(preset.scrollbar_thumb_active, (0x9f, 0xac, 0xb8));
+    assert_eq!(preset.split, (0xc9, 0xd3, 0xdd));
+    assert_eq!(preset.ansi[4], (0x56, 0x7c, 0xa8));
 }
 
 #[test]
@@ -63,16 +63,16 @@ fn slint_terminal_tokens_match_shared_no_frame_defaults() {
     let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
 
     assert!(
-        tokens.contains("terminal-default-fg: dark-mode ? #e3eaf2 : #263240;"),
+        tokens.contains("terminal-default-fg: dark-mode ? #d7e0e8 : #1f2933;"),
         "Slint no-frame terminal foreground tokens should match the shared Mica Graphite/Canvas defaults used by the Rust fallback preset projection"
     );
     assert!(
-        tokens.contains("terminal-default-bg: dark-mode ? #0c141c : #f8fafc;"),
+        tokens.contains("terminal-default-bg: dark-mode ? #08131d : #f4f6f8;"),
         "Slint no-frame terminal background tokens should match the shared Mica Graphite/Canvas defaults used by the Rust fallback preset projection"
     );
     assert!(
-        tokens.contains("terminal-cursor-fg: dark-mode ? #0c141c : #f8fafc;")
-            && tokens.contains("terminal-cursor-bg: dark-mode ? #dce6f3 : #2c3948;"),
+        tokens.contains("terminal-cursor-fg: dark-mode ? #08131d : #f4f6f8;")
+            && tokens.contains("terminal-cursor-bg: dark-mode ? #dce6ee : #24313c;"),
         "Slint cursor tokens should stay aligned with the terminal fallback preset so no-frame terminal states do not drift from the live terminal palette"
     );
     assert!(
