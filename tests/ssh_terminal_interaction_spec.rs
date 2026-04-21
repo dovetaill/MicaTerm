@@ -282,10 +282,10 @@ fn light_theme_palette_preserves_active_ansi_black_bright_white_and_default_back
     let mut session = TerminalSession::new(24, 80);
     let preset = preset_for_theme_mode(ThemeMode::Light);
 
-    assert_eq!(preset.background, 0xf8_fafc);
-    assert_eq!(preset.foreground, 0x26_3240);
-    assert_eq!(preset.ansi[0], (0x5a, 0x65, 0x73));
-    assert_eq!(preset.ansi[15], (0xd5, 0xdc, 0xe4));
+    assert_eq!(preset.background, 0xf4_f6f8);
+    assert_eq!(preset.foreground, 0x1f_2933);
+    assert_eq!(preset.ansi[0], (0x4e, 0x5c, 0x6a));
+    assert_eq!(preset.ansi[15], (0xd9, 0xe0, 0xe6));
 
     session.set_theme_mode(ThemeMode::Light);
     session.apply_remote_bytes(b"\x1b[40mA\x1b[0m\x1b[107mB\x1b[0mC");

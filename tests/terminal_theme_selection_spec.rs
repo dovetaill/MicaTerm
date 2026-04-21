@@ -1,5 +1,7 @@
-use mica_term::app::terminal_theme::{preset_for_theme_mode, selection_overlay_rgba};
-use mica_term::theme::ThemeMode;
+use mica_term::app::terminal_theme::{
+    preset_for_theme, preset_for_theme_mode, selection_overlay_rgba, selection_overlay_rgba_for_theme,
+};
+use mica_term::theme::{ThemeMode, ThemeVariant};
 use std::fs;
 
 #[test]
@@ -59,20 +61,34 @@ fn selection_overlay_colors_stay_translucent_and_theme_specific() {
 }
 
 #[test]
+fn legacy_hacker_green_variant_projects_distinct_terminal_palette() {
+    let preset = preset_for_theme(ThemeMode::Dark, ThemeVariant::LegacyHackerGreen);
+    let overlay = selection_overlay_rgba_for_theme(ThemeMode::Dark, ThemeVariant::LegacyHackerGreen);
+
+    assert_eq!(preset.name, "Legacy Hacker Green");
+    assert_eq!(preset.background, 0x05_0b08);
+    assert_eq!(preset.foreground, 0x9b_e6b3);
+    assert_eq!(preset.cursor_bg, 0xb4_f0c6);
+    assert_eq!(preset.cursor_fg, 0x05_0b08);
+    assert_eq!(preset.ansi[2], (0x73, 0xc0, 0x8c));
+    assert_eq!(overlay & 0x00ff_ffff, 0x3f7a57);
+}
+
+#[test]
 fn slint_terminal_tokens_match_shared_no_frame_defaults() {
     let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
 
     assert!(
-        tokens.contains("terminal-default-fg: dark-mode ? #d7e0e8 : #1f2933;"),
+        tokens.contains("terminal-default-fg: legacy-hacker-green"),
         "Slint no-frame terminal foreground tokens should match the shared Mica Graphite/Canvas defaults used by the Rust fallback preset projection"
     );
     assert!(
-        tokens.contains("terminal-default-bg: dark-mode ? #08131d : #f4f6f8;"),
+        tokens.contains("terminal-default-bg: legacy-hacker-green"),
         "Slint no-frame terminal background tokens should match the shared Mica Graphite/Canvas defaults used by the Rust fallback preset projection"
     );
     assert!(
-        tokens.contains("terminal-cursor-fg: dark-mode ? #08131d : #f4f6f8;")
-            && tokens.contains("terminal-cursor-bg: dark-mode ? #dce6ee : #24313c;"),
+        tokens.contains("terminal-cursor-fg: legacy-hacker-green")
+            && tokens.contains("terminal-cursor-bg: legacy-hacker-green"),
         "Slint cursor tokens should stay aligned with the terminal fallback preset so no-frame terminal states do not drift from the live terminal palette"
     );
     assert!(

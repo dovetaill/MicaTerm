@@ -188,13 +188,29 @@ export global ThemeTokens {
     out property <brush> danger-pressed-surface: dark-mode ? #8f2943 : #c53d5c;
     out property <brush> danger-fg: #ffffff;
 
-    out property <brush> terminal-canvas-surface: dark-mode ? #08131d : #f4f6f8;
-    out property <brush> terminal-default-fg: dark-mode ? #d7e0e8 : #1f2933;
-    out property <brush> terminal-default-bg: dark-mode ? #08131d : #f4f6f8;
-    out property <brush> terminal-cursor-fg: dark-mode ? #08131d : #f4f6f8;
-    out property <brush> terminal-cursor-bg: dark-mode ? #dce6ee : #24313c;
-    out property <brush> terminal-selection-surface: dark-mode ? #7a8fa94a : #7895b33a;
+    out property <brush> terminal-canvas-surface: legacy-hacker-green
+        ? (dark-mode ? #050b08 : #eff6f1)
+        : dark-mode ? #08131d : #f4f6f8;
+    out property <brush> terminal-default-fg: legacy-hacker-green
+        ? (dark-mode ? #9be6b3 : #213128)
+        : dark-mode ? #d7e0e8 : #1f2933;
+    out property <brush> terminal-default-bg: legacy-hacker-green
+        ? (dark-mode ? #050b08 : #eff6f1)
+        : dark-mode ? #08131d : #f4f6f8;
+    out property <brush> terminal-cursor-fg: legacy-hacker-green
+        ? (dark-mode ? #050b08 : #eff6f1)
+        : dark-mode ? #08131d : #f4f6f8;
+    out property <brush> terminal-cursor-bg: legacy-hacker-green
+        ? (dark-mode ? #b4f0c6 : #1e3026)
+        : dark-mode ? #dce6ee : #24313c;
+    out property <brush> terminal-selection-surface: legacy-hacker-green
+        ? (dark-mode ? #3f7a5740 : #9ab9a44a)
+        : dark-mode ? #7a8fa94a : #7895b33a;
     out property <brush> terminal-scrollbar-track-surface: dark-mode ? #ffffff0c : #1c273308;
-    out property <brush> terminal-scrollbar-thumb-surface: dark-mode ? #5a6a79 : #b6c0ca;
-    out property <brush> terminal-scrollbar-thumb-active-surface: dark-mode ? #728495 : #9facb8;
+    out property <brush> terminal-scrollbar-thumb-surface: legacy-hacker-green
+        ? (dark-mode ? #305841 : #b4cbbb)
+        : dark-mode ? #5a6a79 : #b6c0ca;
+    out property <brush> terminal-scrollbar-thumb-active-surface: legacy-hacker-green
+        ? (dark-mode ? #3f7256 : #98b4a2)
+        : dark-mode ? #728495 : #9facb8;
 }
