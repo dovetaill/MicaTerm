@@ -32,9 +32,9 @@ use crate::app::terminal_renderer::wgpu_renderer::{
 };
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
-use crate::app::terminal_semantic::{SemanticInputOverlay, SemanticOutputOverlay};
+use crate::app::terminal_semantic::SemanticSpan;
 #[cfg(feature = "terminal-native-renderer")]
-use crate::app::terminal_semantic::{detect_input_line_overlays, detect_output_block_overlays};
+use crate::app::terminal_semantic::{detect_input_line_spans, detect_output_block_spans};
 
 #[allow(dead_code)]
 type PresenterFrameSnapshot = TerminalFrameSnapshot;
@@ -176,8 +176,8 @@ pub struct PresentableNativeFrame {
     pub selection: NativeSelectionFrameState,
     pub selection_overlay: NativeSelectionOverlay,
     pub underline_overlay: NativeUnderlineOverlay,
-    pub semantic_overlays: Vec<SemanticOutputOverlay>,
-    pub semantic_input_overlays: Vec<SemanticInputOverlay>,
+    pub semantic_output_spans: Vec<SemanticSpan>,
+    pub semantic_input_spans: Vec<SemanticSpan>,
     pub ime_preview_overlay: NativeImePreviewOverlay,
     pub renderer_stats: NativeRendererFrameStats,
 }
@@ -681,8 +681,8 @@ fn prepare_native_terminal_frame_with_diagnostics(
         }
         None => NativeSelectionOverlay::default(),
     };
-    let semantic_overlays = detect_output_block_overlays(&frame_model);
-    let semantic_input_overlays = detect_input_line_overlays(&frame_model);
+    let semantic_output_spans = detect_output_block_spans(&frame_model);
+    let semantic_input_spans = detect_input_line_spans(&frame_model);
     let cursor = NativeCursorFrameState {
         row: frame_model.cursor.row,
         col: frame_model.cursor.col,
@@ -739,8 +739,8 @@ fn prepare_native_terminal_frame_with_diagnostics(
                 .map(NativeUnderlineRun::from)
                 .collect(),
         },
-        semantic_overlays,
-        semantic_input_overlays,
+        semantic_output_spans,
+        semantic_input_spans,
         ime_preview_overlay: options.ime_preview_overlay,
         renderer_stats: NativeRendererFrameStats {
             glyph_cache_entries: prepared.renderer_stats.glyph_cache_entries,

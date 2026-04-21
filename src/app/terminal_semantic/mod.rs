@@ -1,10 +1,9 @@
-//! Semantic overlay descriptors derived from terminal model frames.
+//! Semantic annotations derived from terminal model frames.
 
 mod input_line;
 mod output_blocks;
+mod types;
 
-pub use input_line::{SemanticInputOverlay, SemanticInputSpanKind, detect_input_line_overlays};
-pub use output_blocks::{
-    SemanticOutputBlockKind, SemanticOutputOverlay, SemanticOverlayRowRange,
-    detect_output_block_overlays,
-};
+pub use input_line::detect_input_line_spans;
+pub use output_blocks::detect_output_block_spans;
+pub use types::{SemanticPriority, SemanticSpan, SemanticStyleRole};

@@ -2,60 +2,44 @@
 
 use crate::app::terminal_model::{TerminalModelFrame, TerminalModelRow};
 
-const JSON_OVERLAY_RGBA: u32 = 0x3328_7dff;
-const XML_OVERLAY_RGBA: u32 = 0x3348_bf91;
-const LOG_OVERLAY_RGBA: u32 = 0x33f5_a524;
-const LOG_LEVEL_PREFIXES: &[&str] = &[
-    "[TRACE]", "[DEBUG]", "[INFO]", "[WARN]", "[ERROR]", "TRACE ", "DEBUG ", "INFO ", "WARN ",
-    "ERROR ",
+use super::types::{SemanticPriority, SemanticSpan, SemanticStyleRole};
+
+const LOG_LEVEL_PREFIXES: &[(&str, SemanticStyleRole)] = &[
+    ("[TRACE]", SemanticStyleRole::OutputLevelDebug),
+    ("[DEBUG]", SemanticStyleRole::OutputLevelDebug),
+    ("[INFO]", SemanticStyleRole::OutputLevelInfo),
+    ("[WARN]", SemanticStyleRole::OutputLevelWarn),
+    ("[ERROR]", SemanticStyleRole::OutputLevelError),
+    ("TRACE ", SemanticStyleRole::OutputLevelDebug),
+    ("DEBUG ", SemanticStyleRole::OutputLevelDebug),
+    ("INFO ", SemanticStyleRole::OutputLevelInfo),
+    ("WARN ", SemanticStyleRole::OutputLevelWarn),
+    ("ERROR ", SemanticStyleRole::OutputLevelError),
 ];
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SemanticOutputBlockKind {
-    Json,
-    Xml,
-    Log,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SemanticOverlayRowRange {
-    pub row: u32,
-    pub start_col: u32,
-    pub end_col: u32,
-    pub overlay_rgba: u32,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SemanticOutputOverlay {
-    pub kind: SemanticOutputBlockKind,
-    pub start_row: u32,
-    pub end_row: u32,
-    pub row_ranges: Vec<SemanticOverlayRowRange>,
-}
-
-pub fn detect_output_block_overlays(frame: &TerminalModelFrame) -> Vec<SemanticOutputOverlay> {
-    let mut overlays = Vec::new();
+pub fn detect_output_block_spans(frame: &TerminalModelFrame) -> Vec<SemanticSpan> {
+    let mut spans = Vec::new();
     let mut row_index = 0;
 
     while row_index < frame.rows.len() {
-        if let Some((overlay, next_row_index)) = detect_json_block(&frame.rows, row_index)
+        if let Some((block_spans, next_row_index)) = detect_json_block(&frame.rows, row_index)
             .or_else(|| detect_xml_block(&frame.rows, row_index))
             .or_else(|| detect_log_block(&frame.rows, row_index))
         {
-            overlays.push(overlay);
+            spans.extend(block_spans);
             row_index = next_row_index;
         } else {
             row_index += 1;
         }
     }
 
-    overlays
+    spans
 }
 
 fn detect_json_block(
     rows: &[TerminalModelRow],
     start_index: usize,
-) -> Option<(SemanticOutputOverlay, usize)> {
+) -> Option<(Vec<SemanticSpan>, usize)> {
     let first_line = rows.get(start_index)?.text.trim_start();
     if !(first_line.starts_with('{') || first_line.starts_with('[')) {
         return None;
@@ -74,7 +58,7 @@ fn detect_json_block(
         }
         if curly_depth == 0 && square_depth == 0 {
             return Some((
-                build_overlay(rows, start_index, offset, SemanticOutputBlockKind::Json),
+                build_block_spans(rows, start_index, offset, SemanticStyleRole::OutputJson),
                 offset + 1,
             ));
         }
@@ -86,7 +70,7 @@ fn detect_json_block(
 fn detect_xml_block(
     rows: &[TerminalModelRow],
     start_index: usize,
-) -> Option<(SemanticOutputOverlay, usize)> {
+) -> Option<(Vec<SemanticSpan>, usize)> {
     let first_line = rows.get(start_index)?.text.trim_start();
     if !first_line.starts_with('<') || first_line.starts_with("<?") || first_line.starts_with("<!")
     {
@@ -107,7 +91,7 @@ fn detect_xml_block(
         balance += open_tags as i32 - close_tags as i32;
         if balance <= 0 {
             return Some((
-                build_overlay(rows, start_index, offset, SemanticOutputBlockKind::Xml),
+                build_block_spans(rows, start_index, offset, SemanticStyleRole::OutputXml),
                 offset + 1,
             ));
         }
@@ -119,7 +103,7 @@ fn detect_xml_block(
 fn detect_log_block(
     rows: &[TerminalModelRow],
     start_index: usize,
-) -> Option<(SemanticOutputOverlay, usize)> {
+) -> Option<(Vec<SemanticSpan>, usize)> {
     if !is_log_line(rows.get(start_index)?.text.as_str()) {
         return None;
     }
@@ -136,45 +120,41 @@ fn detect_log_block(
         return None;
     }
 
-    Some((
-        build_overlay(
-            rows,
-            start_index,
-            end_index - 1,
-            SemanticOutputBlockKind::Log,
-        ),
-        end_index,
-    ))
+    let spans = rows[start_index..end_index]
+        .iter()
+        .filter_map(|row| {
+            let role = log_line_role(row.text.as_str())?;
+            Some(SemanticSpan::new(
+                row.row_index,
+                0,
+                row.text.chars().count().saturating_sub(1) as u32,
+                role,
+                SemanticPriority::High,
+            ))
+        })
+        .collect();
+
+    Some((spans, end_index))
 }
 
-fn build_overlay(
+fn build_block_spans(
     rows: &[TerminalModelRow],
     start_index: usize,
     end_index: usize,
-    kind: SemanticOutputBlockKind,
-) -> SemanticOutputOverlay {
-    SemanticOutputOverlay {
-        kind,
-        start_row: rows[start_index].row_index,
-        end_row: rows[end_index].row_index,
-        row_ranges: rows[start_index..=end_index]
-            .iter()
-            .map(|row| SemanticOverlayRowRange {
-                row: row.row_index,
-                start_col: 0,
-                end_col: row.text.chars().count().saturating_sub(1) as u32,
-                overlay_rgba: overlay_rgba(kind),
-            })
-            .collect(),
-    }
-}
-
-fn overlay_rgba(kind: SemanticOutputBlockKind) -> u32 {
-    match kind {
-        SemanticOutputBlockKind::Json => JSON_OVERLAY_RGBA,
-        SemanticOutputBlockKind::Xml => XML_OVERLAY_RGBA,
-        SemanticOutputBlockKind::Log => LOG_OVERLAY_RGBA,
-    }
+    role: SemanticStyleRole,
+) -> Vec<SemanticSpan> {
+    rows[start_index..=end_index]
+        .iter()
+        .map(|row| {
+            SemanticSpan::new(
+                row.row_index,
+                0,
+                row.text.chars().count().saturating_sub(1) as u32,
+                role,
+                SemanticPriority::Normal,
+            )
+        })
+        .collect()
 }
 
 fn update_json_depths(line: &str, curly_depth: &mut i32, square_depth: &mut i32) {
@@ -225,8 +205,12 @@ fn count_xml_tags(line: &str) -> (usize, usize) {
 }
 
 fn is_log_line(line: &str) -> bool {
+    log_line_role(line).is_some()
+}
+
+fn log_line_role(line: &str) -> Option<SemanticStyleRole> {
     let trimmed = line.trim_start();
     LOG_LEVEL_PREFIXES
         .iter()
-        .any(|prefix| trimmed.starts_with(prefix))
+        .find_map(|(prefix, role)| trimmed.starts_with(prefix).then_some(*role))
 }
