@@ -44,7 +44,7 @@ export component AppWindow inherits Window {
     in-out property <bool> dark-mode <=> ThemeTokens.dark-mode;
     in-out property <bool> sync-modal-open: false;
     in-out property <bool> settings-modal-open: false;
-    in-out property <string> settings-modal-theme-variant: "premium-default";
+    in-out property <string> settings-modal-theme-variant <=> ThemeTokens.theme-variant;
     in-out property <int> settings-modal-terminal-scrollback-limit: 1500;
     in-out property <bool> settings-modal-terminal-active-idle-shrink-enabled: true;
     in-out property <bool> settings-modal-terminal-input-highlighting-enabled: true;

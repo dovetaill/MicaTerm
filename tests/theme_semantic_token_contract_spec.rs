@@ -5,6 +5,7 @@ fn semantic_theme_tokens_cover_shell_hierarchy_and_states() {
     let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
 
     for token in [
+        "in property <string> theme-variant:",
         "out property <brush> titlebar-background:",
         "out property <brush> tabbar-background:",
         "out property <brush> sidebar-background:",
@@ -14,6 +15,11 @@ fn semantic_theme_tokens_cover_shell_hierarchy_and_states() {
         "out property <brush> sidebar-item-hover-background:",
         "out property <brush> sidebar-item-selected-background:",
         "out property <brush> sidebar-item-selected-border:",
+        "out property <brush> sidebar-item-selected-indicator:",
+        "out property <brush> sidebar-text:",
+        "out property <brush> sidebar-text-active:",
+        "out property <brush> tab-active-text:",
+        "out property <brush> tab-inactive-text:",
         "out property <brush> tab-active-line:",
         "out property <brush> input-surface:",
         "out property <brush> input-border:",
@@ -44,6 +50,10 @@ fn light_mode_text_tokens_raise_shell_contrast_for_small_misans_copy() {
         tokens.contains("out property <brush> text-muted: dark-mode ? #8b98a9 : #677789;"),
         "light-mode muted text should keep enough density for small shell captions instead of collapsing into low-contrast gray"
     );
+    assert!(
+        tokens.contains("out property <brush> sidebar-text-active:"),
+        "the selected sidebar copy should have its own higher-contrast token so active destinations stop reading like lightly outlined rows"
+    );
 }
 
 #[test]
@@ -68,19 +78,23 @@ fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
     assert!(
         active_tab.contains("ThemeTokens.tab-active-background")
             && active_tab.contains("ThemeTokens.tab-inactive-background")
+            && active_tab.contains("ThemeTokens.tab-active-text")
+            && active_tab.contains("ThemeTokens.tab-inactive-text")
             && active_tab.contains("ThemeTokens.tab-active-line")
             && active_tab.contains("ThemeTokens.text-secondary"),
         "active tabs should use semantic tab tokens for active/inactive hierarchy and secondary copy"
     );
     assert!(
         sidebar_button.contains("ThemeTokens.sidebar-item-hover-background")
-            && sidebar_button.contains("ThemeTokens.sidebar-item-selected-background"),
+            && sidebar_button.contains("ThemeTokens.sidebar-item-selected-background")
+            && sidebar_button.contains("ThemeTokens.sidebar-item-selected-indicator"),
         "activity buttons should use semantic sidebar hover/selected tokens"
     );
     assert!(
         asset_row.contains("ThemeTokens.sidebar-item-hover-background")
             && asset_row.contains("ThemeTokens.sidebar-item-selected-background")
-            && asset_row.contains("ThemeTokens.sidebar-item-selected-border"),
+            && asset_row.contains("ThemeTokens.sidebar-item-selected-border")
+            && asset_row.contains("ThemeTokens.sidebar-text-active"),
         "asset tree rows should share the same sidebar hover/selected token family"
     );
     assert!(

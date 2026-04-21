@@ -19,10 +19,11 @@ export component ActiveTab inherits Rectangle {
     private property <bool> close-visible: root.active || root.has-hover;
 
     min-width: 0px;
-    height: 34px;
+    height: 36px;
     preferred-width: min(root.max-chip-width, max(root.min-chip-width, title-metric.preferred-width + 62px));
-    border-radius: 10px;
-    border-width: 0px;
+    border-radius: 12px;
+    border-width: root.active || root.has-hover ? 1px : 0px;
+    border-color: root.active ? ThemeTokens.divider-strong : ThemeTokens.divider-subtle;
     background: root.active
         ? ThemeTokens.tab-active-background
         : (content-hit-target.pressed || close-hit-target.pressed)
@@ -48,9 +49,9 @@ export component ActiveTab inherits Rectangle {
     state-dot := Rectangle {
         x: 8px;
         y: (parent.height - self.height) / 2;
-        width: 2px;
-        height: 14px;
-        border-radius: 1px;
+        width: root.active ? 3px : 2px;
+        height: root.active ? 16px : 14px;
+        border-radius: 2px;
         background: root.state == "error" || root.state == "disconnected"
             ? ThemeTokens.status-error-accent
             : root.state == "connecting"
@@ -116,9 +117,9 @@ export component ActiveTab inherits Rectangle {
         height: parent.height;
         text: root.title;
         font-family: AppTypography.ui-font-family;
-        color: root.active ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
+        color: root.active ? ThemeTokens.tab-active-text : ThemeTokens.tab-inactive-text;
         font-size: AppTypography.ui-font-size-body;
-        font-weight: AppTypography.ui-font-weight-regular;
+        font-weight: root.active ? AppTypography.ui-font-weight-semibold : AppTypography.ui-font-weight-regular;
         letter-spacing: 0px;
         vertical-alignment: center;
         overflow: elide;

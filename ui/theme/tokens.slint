@@ -2,30 +2,83 @@
 
 export global ThemeTokens {
     in property <bool> dark-mode: true;
+    in property <string> theme-variant: "premium-default";
+    private property <bool> legacy-hacker-green: theme-variant == "legacy-hacker-green";
 
-    out property <brush> accent: dark-mode ? #6f8fb7 : #587daa;
-    out property <brush> link-accent: dark-mode ? #7a97bc : #6388b4;
-    out property <brush> focus-ring: dark-mode ? #7c9bc3 : #7e9ec5;
+    out property <brush> accent: legacy-hacker-green
+        ? (dark-mode ? #69b37f : #4e8a63)
+        : dark-mode ? #7d97b8 : #6b87ab;
+    out property <brush> link-accent: legacy-hacker-green
+        ? (dark-mode ? #7cc691 : #67967a)
+        : dark-mode ? #8ba3c0 : #7a92b4;
+    out property <brush> focus-ring: legacy-hacker-green
+        ? (dark-mode ? #8ed7a5 : #6f9d7d)
+        : dark-mode ? #90a7c1 : #8ca2bb;
 
-    out property <brush> text-primary: dark-mode ? #e6ecf3 : #24303d;
+    out property <brush> text-primary: legacy-hacker-green
+        ? (dark-mode ? #e6f6ec : #1c3127)
+        : dark-mode ? #edf3f8 : #1c2731;
     out property <brush> text-secondary: dark-mode ? #b8c2cf : #49586a;
     out property <brush> text-muted: dark-mode ? #8b98a9 : #677789;
     out property <brush> text-inactive: dark-mode ? #738095 : #7b8a9c;
+    out property <brush> sidebar-text: legacy-hacker-green
+        ? (dark-mode ? #91b29d : #50665a)
+        : dark-mode ? #9aabba : #516173;
+    out property <brush> sidebar-text-active: legacy-hacker-green
+        ? (dark-mode ? #e6f6ec : #183127)
+        : dark-mode ? #ecf3f9 : #12202c;
 
-    out property <brush> window-surface: dark-mode ? #141b23 : #f2f5f8;
-    out property <brush> titlebar-background: dark-mode ? #181f27 : #f7f9fc;
-    out property <brush> tabbar-background: dark-mode ? #1a222c : #eef2f7;
-    out property <brush> sidebar-background: dark-mode ? #18212b : #ebf0f5;
-    out property <brush> sidebar-panel-background: dark-mode ? #1b2430 : #f1f5f9;
-    out property <brush> terminal-frame-background: dark-mode ? #101924 : #fbfcfd;
-    out property <brush> terminal-surface-background: dark-mode ? #0c141c : #f8fafc;
-    out property <brush> tab-active-background: dark-mode ? #223040 : #ffffff;
-    out property <brush> tab-inactive-background: dark-mode ? #1a222c : #eef2f7;
-    out property <brush> tab-hover-background: dark-mode ? #202b38 : #e8edf4;
-    out property <brush> tab-active-line: dark-mode ? #7a97bc : #6388b4;
-    out property <brush> sidebar-item-hover-background: dark-mode ? #22303d : #e4ebf3;
-    out property <brush> sidebar-item-selected-background: dark-mode ? #2a3949 : #dce6f2;
-    out property <brush> sidebar-item-selected-border: dark-mode ? #6c88ae66 : #6e8cb333;
+    out property <brush> window-surface: legacy-hacker-green
+        ? (dark-mode ? #0b120f : #eef5f0)
+        : dark-mode ? #0f161d : #e8edf1;
+    out property <brush> titlebar-background: legacy-hacker-green
+        ? (dark-mode ? #121b17 : #f6fbf7)
+        : dark-mode ? #18212b : #f7f9fb;
+    out property <brush> tabbar-background: legacy-hacker-green
+        ? (dark-mode ? #0e1713 : #e7f0ea)
+        : dark-mode ? #111923 : #edf2f6;
+    out property <brush> sidebar-background: legacy-hacker-green
+        ? (dark-mode ? #101913 : #e1ece5)
+        : dark-mode ? #15202a : #e3eaf0;
+    out property <brush> sidebar-panel-background: legacy-hacker-green
+        ? (dark-mode ? #132018 : #edf4ef)
+        : dark-mode ? #101a24 : #eef3f7;
+    out property <brush> terminal-frame-background: legacy-hacker-green
+        ? (dark-mode ? #0a120e : #f2f7f3)
+        : dark-mode ? #0b141d : #eef3f7;
+    out property <brush> terminal-surface-background: legacy-hacker-green
+        ? (dark-mode ? #050b08 : #eff6f1)
+        : dark-mode ? #08131d : #f4f6f8;
+    out property <brush> tab-active-background: legacy-hacker-green
+        ? (dark-mode ? #173223 : #fdfefd)
+        : dark-mode ? #1c2937 : #ffffff;
+    out property <brush> tab-inactive-background: legacy-hacker-green
+        ? (dark-mode ? #0f1b14 : #e7f0ea)
+        : dark-mode ? #121b24 : #e8eef4;
+    out property <brush> tab-hover-background: legacy-hacker-green
+        ? (dark-mode ? #143021 : #dde9e1)
+        : dark-mode ? #182430 : #e0e8f0;
+    out property <brush> tab-active-text: legacy-hacker-green
+        ? (dark-mode ? #eaf8ef : #1b3228)
+        : dark-mode ? #eef4f9 : #15222e;
+    out property <brush> tab-inactive-text: legacy-hacker-green
+        ? (dark-mode ? #86a392 : #5b7065)
+        : dark-mode ? #93a4b4 : #5a6a79;
+    out property <brush> tab-active-line: legacy-hacker-green
+        ? (dark-mode ? #8ed7a5 : #5e946f)
+        : dark-mode ? #96afca : #6f89ab;
+    out property <brush> sidebar-item-hover-background: legacy-hacker-green
+        ? (dark-mode ? #163022 : #d7e6db)
+        : dark-mode ? #1c2a36 : #dde6ee;
+    out property <brush> sidebar-item-selected-background: legacy-hacker-green
+        ? (dark-mode ? #1b3c2a : #cfe1d5)
+        : dark-mode ? #223444 : #d2dfea;
+    out property <brush> sidebar-item-selected-border: legacy-hacker-green
+        ? (dark-mode ? #34684baa : #96b39faa)
+        : dark-mode ? #35506acc : #aec0d1b3;
+    out property <brush> sidebar-item-selected-indicator: legacy-hacker-green
+        ? (dark-mode ? #8ed7a5 : #5e946f)
+        : dark-mode ? #96afca : #6f89ab;
 
     // Compatibility aliases for unchanged shell/modal surfaces outside the redesign slice.
     out property <brush> titlebar-surface: titlebar-background;
@@ -101,12 +154,20 @@ export global ThemeTokens {
     out property <brush> explorer-row-hover-surface: sidebar-item-hover-background;
     out property <brush> explorer-row-selected-surface: sidebar-item-selected-background;
 
-    out property <brush> input-surface: dark-mode ? #161d27 : #ffffff;
-    out property <brush> input-border: dark-mode ? #2b3646 : #d7e0ec;
+    out property <brush> input-surface: legacy-hacker-green
+        ? (dark-mode ? #101a14 : #ffffff)
+        : dark-mode ? #101924 : #ffffff;
+    out property <brush> input-border: legacy-hacker-green
+        ? (dark-mode ? #2a4a39 : #cad8d0)
+        : dark-mode ? #324150 : #d7e0ec;
     out property <brush> input-focus-ring: focus-ring;
 
-    out property <brush> divider-subtle: dark-mode ? #ffffff14 : #1c27330f;
-    out property <brush> divider-strong: dark-mode ? #ffffff24 : #1c273324;
+    out property <brush> divider-subtle: legacy-hacker-green
+        ? (dark-mode ? #9be6b318 : #24412d12)
+        : dark-mode ? #ffffff14 : #10203012;
+    out property <brush> divider-strong: legacy-hacker-green
+        ? (dark-mode ? #9be6b328 : #24412d22)
+        : dark-mode ? #ffffff24 : #10203022;
 
     out property <brush> control-hover-surface: dark-mode ? #242d3a : #eef3fa;
     out property <brush> control-active-surface: dark-mode ? #1d2632 : #f4f7fb;

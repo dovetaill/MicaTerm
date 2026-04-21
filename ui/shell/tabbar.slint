@@ -23,7 +23,7 @@ export component TabBar inherits Rectangle {
 
     width: 100%;
     min-width: 0px;
-    height: 36px;
+    height: 40px;
     background: ThemeTokens.tabbar-background;
     border-width: 0px;
 
@@ -37,11 +37,11 @@ export component TabBar inherits Rectangle {
     HorizontalLayout {
         width: parent.width;
         height: parent.height;
-        padding-left: 12px;
+        padding-left: 10px;
         padding-right: 0px;
-        padding-top: 0px;
-        padding-bottom: 0px;
-        spacing: 0px;
+        padding-top: 2px;
+        padding-bottom: 2px;
+        spacing: 4px;
 
         for item in root.items : ActiveTab {
             horizontal-stretch: 0;
@@ -61,10 +61,10 @@ export component TabBar inherits Rectangle {
         }
 
         new-tab-button := Rectangle {
-            width: 34px;
-            height: 30px;
-            y: 3px;
-            border-radius: 8px;
+            width: 36px;
+            height: 32px;
+            y: 4px;
+            border-radius: 10px;
             border-width: new-tab-touch.has-hover ? 1px : 0px;
             border-color: ThemeTokens.divider-subtle;
             background: new-tab-touch.pressed
