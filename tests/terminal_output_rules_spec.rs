@@ -85,3 +85,29 @@ fn output_rules_only_recompute_dirty_rows_plus_bounded_lookbehind() {
         vec![1, 2, 3]
     );
 }
+
+#[test]
+fn output_rules_cover_paths_urls_ip_ports_levels_permissions_and_json_structure() {
+    let frame = output_rule_frame(
+        Uuid::new_v4(),
+        1,
+        &[
+            "ssh://host.example.com ~/.ssh/config 141.98.197.55:38010",
+            "WARN timeout connected disconnected",
+            "-rw-r--r-- 1 root root 42 Apr 21 10:30 archive.tar.gz",
+            "{ \"ok\": true, \"count\": 3 }",
+        ],
+        None,
+    );
+
+    let analysis = analyze_output_rules(&frame, &frame.dirty_rows);
+
+    assert!(has_role(&analysis.spans, SemanticStyleRole::OutputUrl));
+    assert!(has_role(&analysis.spans, SemanticStyleRole::OutputFilePath));
+    assert!(has_role(&analysis.spans, SemanticStyleRole::OutputIpPort));
+    assert!(has_role(&analysis.spans, SemanticStyleRole::OutputLevelWarn));
+    assert!(has_role(
+        &analysis.spans,
+        SemanticStyleRole::OutputJsonKey
+    ));
+}

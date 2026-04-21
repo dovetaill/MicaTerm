@@ -175,6 +175,32 @@ fn analyze_row_rules(row: &TerminalModelRow, spans: &mut Vec<SemanticSpan>) {
         }
     }
 
+    if let Some((start, end)) = find_ip_port_range(&row.text) {
+        push_unique_span(
+            spans,
+            SemanticSpan::new(
+                row.row_index,
+                start,
+                end,
+                SemanticStyleRole::OutputIpPort,
+                SemanticPriority::High,
+            ),
+        );
+    }
+
+    if let Some((start, end)) = find_timestamp_range(&row.text) {
+        push_unique_span(
+            spans,
+            SemanticSpan::new(
+                row.row_index,
+                start,
+                end,
+                SemanticStyleRole::OutputTimestamp,
+                SemanticPriority::Normal,
+            ),
+        );
+    }
+
     let trimmed = row.text.trim_start();
     if trimmed.starts_with("@@") {
         push_full_line_span(
@@ -481,7 +507,7 @@ fn count_xml_tags(line: &str) -> (usize, usize) {
 }
 
 fn find_url_range(line: &str) -> Option<(u32, u32)> {
-    for needle in ["https://", "http://"] {
+    for needle in ["https://", "http://", "ssh://", "sftp://", "relay+tls://"] {
         if let Some(start_byte) = line.find(needle) {
             let end_byte = line[start_byte..]
                 .find(char::is_whitespace)
@@ -499,23 +525,61 @@ fn find_url_range(line: &str) -> Option<(u32, u32)> {
 
 fn find_path_reference(line: &str) -> Option<(u32, u32, Option<u32>)> {
     for token in line.split_whitespace() {
-        if token.starts_with('<') || token.contains('>') || !looks_like_path(token) {
+        let trimmed = trim_punctuation(token);
+        if trimmed.starts_with('<')
+            || trimmed.contains('>')
+            || trimmed.contains("://")
+            || !looks_like_path(trimmed)
+        {
             continue;
         }
-        let start_byte = line.find(token)?;
-        if let Some((path_end, line_col_end)) = split_path_line_column(token) {
+        let start_byte = line.find(trimmed)?;
+        if let Some((path_end, line_col_end)) = split_path_line_column(trimmed) {
             return Some((
                 char_col(line, start_byte),
                 char_col(line, start_byte + path_end).saturating_sub(1),
                 Some(char_col(line, start_byte + line_col_end).saturating_sub(1)),
             ));
         }
-        let end_byte = start_byte + token.len();
+        let end_byte = start_byte + trimmed.len();
         return Some((
             char_col(line, start_byte),
             char_col(line, end_byte).saturating_sub(1),
             None,
         ));
+    }
+
+    None
+}
+
+fn find_ip_port_range(line: &str) -> Option<(u32, u32)> {
+    for token in line.split_whitespace() {
+        let trimmed = trim_punctuation(token);
+        if !looks_like_ipv4_port(trimmed) {
+            continue;
+        }
+        let start_byte = line.find(trimmed)?;
+        let end_byte = start_byte + trimmed.len();
+        return Some((
+            char_col(line, start_byte),
+            char_col(line, end_byte).saturating_sub(1),
+        ));
+    }
+
+    None
+}
+
+fn find_timestamp_range(line: &str) -> Option<(u32, u32)> {
+    for token in line.split_whitespace() {
+        let trimmed = trim_punctuation(token);
+        if looks_like_iso_date(trimmed) || looks_like_clock_time(trimmed) {
+            let start_byte = line.find(trimmed)?;
+            let end_byte = start_byte + trimmed.len();
+            return Some((
+                char_col(line, start_byte),
+                char_col(line, end_byte).saturating_sub(1),
+            ));
+        }
     }
 
     None
@@ -556,6 +620,47 @@ fn looks_like_path(token: &str) -> bool {
         || token.ends_with(".rs")
         || token.ends_with(".toml")
         || token.ends_with(".json")
+}
+
+fn looks_like_ipv4_port(token: &str) -> bool {
+    let Some((host, port)) = token.rsplit_once(':') else {
+        return false;
+    };
+    if port.is_empty() || port.len() > 5 || !port.chars().all(|ch| ch.is_ascii_digit()) {
+        return false;
+    }
+
+    let octets = host.split('.').collect::<Vec<_>>();
+    if octets.len() != 4 {
+        return false;
+    }
+    octets.iter().all(|octet| {
+        !octet.is_empty()
+            && octet.len() <= 3
+            && octet.chars().all(|ch| ch.is_ascii_digit())
+            && octet.parse::<u8>().is_ok()
+    })
+}
+
+fn looks_like_iso_date(token: &str) -> bool {
+    let parts = token.split('-').collect::<Vec<_>>();
+    parts.len() == 3
+        && parts[0].len() == 4
+        && parts[1].len() == 2
+        && parts[2].len() == 2
+        && parts.iter().all(|part| part.chars().all(|ch| ch.is_ascii_digit()))
+}
+
+fn looks_like_clock_time(token: &str) -> bool {
+    let parts = token.split(':').collect::<Vec<_>>();
+    (parts.len() == 2 || parts.len() == 3)
+        && parts
+            .iter()
+            .all(|part| !part.is_empty() && part.len() <= 2 && part.chars().all(|ch| ch.is_ascii_digit()))
+}
+
+fn trim_punctuation(token: &str) -> &str {
+    token.trim_matches(|ch: char| matches!(ch, ',' | ';' | ')' | '(' | '[' | ']'))
 }
 
 fn find_literal_range(line: &str, literal: &str) -> Option<(u32, u32)> {
