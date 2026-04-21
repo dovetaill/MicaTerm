@@ -195,20 +195,22 @@ Add width properties that let Rust drive panel size instead of hard-coded litera
 - `assets-sidebar-expanded-width`
 - `right-panel-expanded-width`
 
+The left width ended up threading through both `ui/shell/sidebar.slint` and `ui/shell/assets-sidebar.slint` so the outer shell column and the inner assets content stay aligned on the same remembered value.
+
 Keep the existing effective visibility booleans and use them to decide whether the live width is the expanded width or `0px`.
 
 ### Slint callbacks
 
 Add edge-handle callbacks for both sides, with separate start/move/end lifecycle events so Rust owns the interaction state:
 
-- left edge toggle request,
-- left edge drag start,
-- left edge drag move,
-- left edge drag end,
-- right edge toggle request,
-- right edge drag start,
-- right edge drag move,
-- right edge drag end.
+- `assets-sidebar-edge-toggle-requested()`
+- `assets-sidebar-edge-drag-start-requested(length)`
+- `assets-sidebar-edge-drag-move-requested(length)`
+- `assets-sidebar-edge-drag-end-requested(length)`
+- `right-panel-edge-toggle-requested()`
+- `right-panel-edge-drag-start-requested(length)`
+- `right-panel-edge-drag-move-requested(length)`
+- `right-panel-edge-drag-end-requested(length)`
 
 Exact callback naming can follow existing conventions, but the contract should stay symmetrical across both sides.
 

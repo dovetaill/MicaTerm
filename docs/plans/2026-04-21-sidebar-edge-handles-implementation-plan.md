@@ -60,6 +60,7 @@ git commit -m "test: lock sidebar edge handle behavior"
 - Modify: `src/shell/view_model/projection.rs`
 - Modify: `src/shell/layout.rs`
 - Modify: `src/shell/metrics.rs`
+- Modify: `src/app/bootstrap.rs`
 - Reference: `tests/sidebar_navigation_spec.rs`
 - Reference: `tests/shell_layout_policy.rs`
 
@@ -87,7 +88,7 @@ Expected: PASS for the pure state and layout coverage, while UI-contract tests s
 
 **Step 6: Commit the domain work**
 ```bash
-git add src/shell/view_model.rs src/shell/view_model/assets.rs src/shell/view_model/projection.rs src/shell/layout.rs src/shell/metrics.rs tests/sidebar_navigation_spec.rs tests/shell_layout_policy.rs
+git add src/shell/view_model.rs src/shell/view_model/assets.rs src/shell/view_model/projection.rs src/shell/layout.rs src/shell/metrics.rs src/app/bootstrap.rs tests/sidebar_navigation_spec.rs tests/shell_layout_policy.rs
 git commit -m "feat: remember shell panel widths"
 ```
 
@@ -95,6 +96,7 @@ git commit -m "feat: remember shell panel widths"
 
 **Files:**
 - Modify: `ui/app-window.slint`
+- Modify: `ui/shell/assets-sidebar.slint`
 - Modify: `ui/shell/sidebar.slint`
 - Modify: `ui/shell/right-panel.slint`
 - Reference: `tests/shell_layout_ui_contract_smoke.sh`
@@ -102,7 +104,7 @@ git commit -m "feat: remember shell panel widths"
 
 **Step 1: Replace hard-coded expanded widths with properties**
 - Add left and right expanded-width properties to `AppWindow`.
-- Thread those properties into `Sidebar` and `RightPanel`.
+- Thread those properties into `Sidebar`, `AssetsSidebar`, and `RightPanel`.
 - Replace fixed `320px` and `392px` expanded width expressions with the injected property values.
 
 **Step 2: Add edge-handle hit targets**
@@ -126,7 +128,7 @@ Expected: PASS
 
 **Step 6: Commit the Slint contract**
 ```bash
-git add ui/app-window.slint ui/shell/sidebar.slint ui/shell/right-panel.slint tests/shell_layout_ui_contract_smoke.sh tests/assets_sidebar_toolbar_ui_contract_smoke.sh
+git add ui/app-window.slint ui/shell/assets-sidebar.slint ui/shell/sidebar.slint ui/shell/right-panel.slint tests/shell_layout_ui_contract_smoke.sh tests/assets_sidebar_toolbar_ui_contract_smoke.sh
 git commit -m "feat: add shell edge handle UI contract"
 ```
 
@@ -192,6 +194,6 @@ Expected: PASS
 
 **Step 4: Commit the completed feature**
 ```bash
-git add docs/plans/2026-04-21-sidebar-edge-handles-design.md docs/plans/2026-04-21-sidebar-edge-handles-implementation-plan.md ui/app-window.slint ui/shell/sidebar.slint ui/shell/right-panel.slint src/shell/view_model.rs src/shell/view_model/assets.rs src/shell/view_model/projection.rs src/shell/layout.rs src/shell/metrics.rs src/app/bootstrap.rs src/app/bootstrap/shell_chrome.rs src/app/bootstrap/assets_keychain.rs src/app/bootstrap/sftp.rs tests/sidebar_navigation_spec.rs tests/sidebar_navigation_smoke.rs tests/shell_layout_policy.rs tests/shell_layout_ui_contract_smoke.sh tests/assets_sidebar_toolbar_ui_contract_smoke.sh
+git add docs/plans/2026-04-21-sidebar-edge-handles-design.md docs/plans/2026-04-21-sidebar-edge-handles-implementation-plan.md ui/app-window.slint ui/shell/assets-sidebar.slint ui/shell/sidebar.slint ui/shell/right-panel.slint src/shell/view_model.rs src/shell/view_model/assets.rs src/shell/view_model/projection.rs src/shell/layout.rs src/shell/metrics.rs src/app/bootstrap.rs src/app/bootstrap/shell_chrome.rs src/app/bootstrap/assets_keychain.rs src/app/bootstrap/sftp.rs tests/sidebar_navigation_spec.rs tests/sidebar_navigation_smoke.rs tests/shell_layout_policy.rs tests/shell_layout_ui_contract_smoke.sh tests/assets_sidebar_toolbar_ui_contract_smoke.sh
 git commit -m "feat: add workspace edge handles for shell panels"
 ```
