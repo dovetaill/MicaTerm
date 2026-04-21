@@ -79,6 +79,7 @@ export component AppWindow inherits Window {
     in-out property <int> transfer-center-feedback-sequence: 0;
     in-out property <bool> show-right-panel: false;
     in-out property <length> right-panel-expanded-width: 392px;
+    in-out property <bool> workspace-focus-mode: false;
     in-out property <bool> transfer-center-open: false;
     in-out property <bool> transfer-center-pinned: false;
     in-out property <bool> transfer-center-collapsed: false;
@@ -112,6 +113,10 @@ export component AppWindow inherits Window {
         ),
     );
     private property <length> transfer-center-closed-width: max(280px, root.transfer-center-target-width - 18px);
+    private property <bool> right-panel-revive-tooltip-visible: false;
+    private property <length> right-panel-revive-tooltip-anchor-x: 0px;
+    private property <length> right-panel-revive-tooltip-anchor-y: 0px;
+    private property <length> right-panel-revive-tooltip-anchor-width: 0px;
     in-out property <string> right-panel-view: "sftp";
     in-out property <string> sftp-panel-mode: "empty";
     in-out property <string> sftp-panel-host-label: "";
@@ -384,6 +389,7 @@ export component AppWindow inherits Window {
     callback maximize-toggle-requested();
     callback close-requested();
     callback toggle-right-panel-requested();
+    callback toggle-workspace-focus-mode-requested();
     callback right-panel-edge-toggle-requested();
     callback right-panel-edge-drag-start-requested(length);
     callback right-panel-edge-drag-move-requested(length);
@@ -683,6 +689,7 @@ export component AppWindow inherits Window {
                 transfer-queue-failed: root.transfer-queue-failed;
                 transfer-queue-current-session: root.transfer-queue-current-session;
                 show-global-menu: root.show-global-menu;
+                workspace-focus-mode: root.workspace-focus-mode;
                 is-window-maximized: root.is-window-maximized;
                 is-window-active: root.is-window-active;
                 is-window-always-on-top: root.is-window-always-on-top;
@@ -709,6 +716,10 @@ export component AppWindow inherits Window {
 
                 toggle-right-panel-requested => {
                     root.toggle-right-panel-requested();
+                }
+
+                toggle-workspace-focus-mode-requested => {
+                    root.toggle-workspace-focus-mode-requested();
                 }
 
                 sync-now-requested => {
@@ -1167,11 +1178,21 @@ export component AppWindow inherits Window {
                             : transparent;
 
                         revive-touch := TouchArea {
+                            changed has-hover => {
+                                root.right-panel-revive-tooltip-visible = self.has-hover;
+                                if self.has-hover {
+                                    root.right-panel-revive-tooltip-anchor-x = parent.absolute-position.x + parent.width / 2;
+                                    root.right-panel-revive-tooltip-anchor-y = parent.absolute-position.y + parent.height / 2;
+                                    root.right-panel-revive-tooltip-anchor-width = parent.width;
+                                }
+                            }
+
                             width: parent.width;
                             height: parent.height;
                             mouse-cursor: MouseCursor.w-resize;
 
                             clicked => {
+                                root.right-panel-revive-tooltip-visible = false;
                                 root.right-panel-edge-toggle-requested();
                             }
                         }
@@ -1320,6 +1341,17 @@ export component AppWindow inherits Window {
         anchor-y: right-panel.tooltip-anchor-y;
         anchor-width: right-panel.tooltip-anchor-width;
         tooltip-visible: right-panel.tooltip-visible;
+        host-width: root.width;
+        host-height: root.height;
+        place-right: false;
+    }
+
+    right-panel-revive-tooltip-overlay := TitlebarTooltip {
+        text: "Click to expand";
+        anchor-x: root.right-panel-revive-tooltip-anchor-x;
+        anchor-y: root.right-panel-revive-tooltip-anchor-y;
+        anchor-width: root.right-panel-revive-tooltip-anchor-width;
+        tooltip-visible: root.right-panel-revive-tooltip-visible;
         host-width: root.width;
         host-height: root.height;
         place-right: false;

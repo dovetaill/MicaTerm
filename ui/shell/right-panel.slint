@@ -64,6 +64,7 @@ export component RightPanel inherits Rectangle {
     private property <length> tooltip-anchor-y-value: 0px;
     private property <length> tooltip-anchor-width-value: 0px;
     private property <length> edge-handle-width: 8px;
+    private property <string> edge-handle-tooltip: "Click to collapse, drag to resize";
     out property <string> tooltip-text <=> root.tooltip-text-value;
     out property <bool> tooltip-visible <=> root.tooltip-visible-value;
     out property <length> tooltip-anchor-x <=> root.tooltip-anchor-x-value;
@@ -236,11 +237,26 @@ export component RightPanel inherits Rectangle {
             : transparent;
 
         handle-touch := TouchArea {
+            changed has-hover => {
+                if self.has-hover {
+                    root.schedule-tooltip(
+                        "right-panel-edge-handle",
+                        root.edge-handle-tooltip,
+                        parent.absolute-position.x + parent.width / 2,
+                        parent.absolute-position.y + parent.height / 2,
+                        parent.width,
+                    );
+                } else {
+                    root.queue-tooltip-close("right-panel-edge-handle");
+                }
+            }
+
             width: parent.width;
             height: parent.height;
             mouse-cursor: MouseCursor.w-resize;
 
             clicked => {
+                root.queue-tooltip-close("right-panel-edge-handle");
                 root.right-panel-edge-toggle-requested();
             }
 
