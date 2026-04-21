@@ -5,7 +5,9 @@ use crate::app::terminal_model::{TerminalModelFrame, TerminalModelRow};
 use super::types::{SemanticPriority, SemanticSpan, SemanticStyleRole};
 
 const PROMPT_MARKERS: &[&str] = &["$ ", "# ", "% ", "> "];
-const SHELL_OPERATORS: &[&str] = &["|", "||", "&&", ";", ">", ">>", "<", "2>", "2>>"];
+const SHELL_OPERATORS: &[&str] = &[
+    "|", "||", "&&", ";", ">", ">>", "<", "2>", "2>>", "2>&1", "&",
+];
 
 pub fn detect_input_line_spans(frame: &TerminalModelFrame) -> Vec<SemanticSpan> {
     if !input_highlighting_is_safe(frame) {
@@ -69,12 +71,9 @@ fn prompt_input_start(row: &TerminalModelRow) -> Option<u32> {
     let (marker_start, marker) = PROMPT_MARKERS
         .iter()
         .filter_map(|marker| {
-            row.text
-                .rmatch_indices(marker)
-                .next()
-                .map(|(index, _)| (index, *marker))
+            row.text.match_indices(marker).next().map(|(index, _)| (index, *marker))
         })
-        .max_by_key(|(index, _)| *index)?;
+        .min_by_key(|(index, _)| *index)?;
     let input_start = marker_start + marker.len();
     if row.text[input_start..].trim().is_empty() {
         return None;

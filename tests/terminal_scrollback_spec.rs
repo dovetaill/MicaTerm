@@ -265,6 +265,51 @@ fn semantic_input_roles_cover_command_path_variable_and_operator() {
 }
 
 #[test]
+fn input_highlighting_covers_command_option_argument_path_variable_string_and_redirects() {
+    let frame = semantic_model_frame(&[
+        "$ cargo run --bin mica --profile dev ./fixtures > out.log 2>&1 && echo \"done\" $HOME &",
+    ]);
+
+    let spans = detect_input_line_spans(&frame);
+
+    assert!(
+        spans
+            .iter()
+            .any(|span| span.role == SemanticStyleRole::InputCommand)
+    );
+    assert!(
+        spans
+            .iter()
+            .any(|span| span.role == SemanticStyleRole::InputOption)
+    );
+    assert!(
+        spans
+            .iter()
+            .any(|span| span.role == SemanticStyleRole::InputArgument)
+    );
+    assert!(
+        spans
+            .iter()
+            .any(|span| span.role == SemanticStyleRole::InputPath)
+    );
+    assert!(
+        spans
+            .iter()
+            .any(|span| span.role == SemanticStyleRole::InputVariable)
+    );
+    assert!(
+        spans
+            .iter()
+            .any(|span| span.role == SemanticStyleRole::InputString)
+    );
+    let operator_count = spans
+        .iter()
+        .filter(|span| span.role == SemanticStyleRole::InputOperator)
+        .count();
+    assert!(operator_count >= 4);
+}
+
+#[test]
 fn semantic_roles_project_visible_highlight_primitives_for_dirty_rows() {
     let frame = semantic_model_frame_with_cells(&[
         "$ cargo run --release ./fixtures",
