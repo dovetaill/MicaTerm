@@ -210,6 +210,11 @@ export component TerminalSessionHost inherits Rectangle {
     private property <length> terminal-padding-top: 8px;
     private property <length> terminal-padding-right: 10px;
     private property <length> terminal-padding-bottom: 8px;
+    private property <length> command-decoration-gutter-width: 8px;
+    private property <length> command-decoration-inset-x: 3px;
+    private property <length> command-decoration-inset-y: 3px;
+    private property <length> overview-marker-width: 3px;
+    private property <length> overview-marker-height: 11px;
     private property <length> scrollbar-reserved-width: 12px;
     private property <length> scrollbar-track-width: 7px;
     private property <length> scrollbar-thumb-min-height: 28px;
@@ -348,6 +353,43 @@ export component TerminalSessionHost inherits Rectangle {
                 1.0 - ((pointer-y - root.scrollbar-track-y())
                     / max(1px, root.scrollbar-track-height() - root.scrollbar-thumb-height())),
             ),
+        );
+    }
+
+    function command-decoration-gutter-x() -> length {
+        return root.snap-length-to-device-pixel(
+            max(0px, root.terminal-surface-origin-x() - root.command-decoration-gutter-width),
+        );
+    }
+
+    function command-decoration-y(row: int) -> length {
+        return root.snap-length-to-device-pixel(
+            root.terminal-cell-y(max(0, row)) + root.command-decoration-inset-y,
+        );
+    }
+
+    function command-decoration-height(start-row: int, end-row: int) -> length {
+        let clamped-end = max(start-row, end-row);
+        return max(
+            10px,
+            root.snap-length-to-device-pixel(
+                root.terminal-cell-y(clamped-end + 1) - root.terminal-cell-y(start-row)
+                    - (root.command-decoration-inset-y * 2),
+            ),
+        );
+    }
+
+    function overview-marker-x() -> length {
+        return root.snap-length-to-device-pixel(
+            root.scrollbar-visible()
+                ? root.scrollbar-track-x() - 6px
+                : root.width - root.terminal-padding-right - root.overview-marker-width,
+        );
+    }
+
+    function overview-marker-y(row: int) -> length {
+        return root.snap-length-to-device-pixel(
+            root.terminal-cell-y(max(0, row)) + ((root.terminal-cell-height - root.overview-marker-height) / 2),
         );
     }
 
@@ -986,6 +1028,54 @@ export component TerminalSessionHost inherits Rectangle {
             border-color: ThemeTokens.divider-subtle;
             background: ThemeTokens.terminal-frame-background;
 
+            for decoration in root.session-command-blocks : Rectangle {
+                x: root.command-decoration-gutter-x();
+                y: root.command-decoration-y(decoration.prompt_row);
+                width: root.command-decoration-gutter-width;
+                height: root.command-decoration-height(decoration.prompt_row, decoration.output_end_row);
+                border-radius: 5px;
+                border-width: 1px;
+                border-color: decoration.status == "failure"
+                    ? ThemeTokens.terminal-command-decoration-failure
+                    : decoration.status == "success"
+                        ? ThemeTokens.terminal-command-decoration-success
+                        : ThemeTokens.terminal-command-decoration-running;
+                background: decoration.status == "failure"
+                    ? ThemeTokens.terminal-command-decoration-failure-surface
+                    : decoration.status == "success"
+                        ? ThemeTokens.terminal-command-decoration-success-surface
+                        : ThemeTokens.terminal-command-decoration-running-surface;
+                visible: root.mode == "terminal";
+
+                Rectangle {
+                    x: root.command-decoration-inset-x;
+                    y: root.command-decoration-inset-y;
+                    width: 2px;
+                    height: max(6px, parent.height - (root.command-decoration-inset-y * 2));
+                    border-radius: self.width / 2;
+                    background: parent.border-color;
+                }
+
+                Rectangle {
+                    x: root.command-decoration-inset-x + 3px;
+                    y: root.command-decoration-inset-y;
+                    width: max(1px, parent.width - (root.command-decoration-inset-x * 2) - 1px);
+                    height: 1px;
+                    background: ThemeTokens.terminal-decoration-hairline;
+                    opacity: 0.9;
+                }
+
+                command-block-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+                    mouse-cursor: MouseCursor.pointer;
+
+                    clicked => {
+                        root.command-decoration-selected(decoration.id);
+                    }
+                }
+            }
+
             blank-surface := Rectangle {
                 x: root.terminal-surface-origin-x();
                 y: root.terminal-surface-origin-y();
@@ -1174,6 +1264,35 @@ export component TerminalSessionHost inherits Rectangle {
                                 event.modifiers.alt,
                             );
                         }
+                    }
+                }
+            }
+
+            for marker in root.session-overview-markers : Rectangle {
+                x: root.overview-marker-x();
+                y: root.overview-marker-y(marker.row);
+                width: root.overview-marker-width;
+                height: root.overview-marker-height;
+                border-radius: self.width / 2;
+                background: marker.kind == "command-failure" || marker.kind == "error"
+                    ? ThemeTokens.terminal-overview-marker-failure
+                    : marker.kind == "command-success"
+                        ? ThemeTokens.terminal-overview-marker-success
+                        : marker.kind == "search-match" || marker.kind == "warning"
+                            ? ThemeTokens.terminal-overview-marker-search
+                            : ThemeTokens.terminal-overview-marker-running;
+                opacity: 0.92;
+                visible: root.mode == "terminal";
+
+                overview-marker-touch := TouchArea {
+                    width: max(8px, parent.width + 6px);
+                    height: max(12px, parent.height + 4px);
+                    x: -3px;
+                    y: -2px;
+                    mouse-cursor: MouseCursor.pointer;
+
+                    clicked => {
+                        root.overview-marker-selected(marker.row);
                     }
                 }
             }

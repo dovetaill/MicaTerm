@@ -35,6 +35,8 @@ use crate::QuickLaunchCardRow;
 use crate::QuickLaunchDetailRow;
 use crate::QuickLaunchGroupRow;
 use crate::SftpPanelItem;
+use crate::TerminalCommandBlockDecoration;
+use crate::TerminalOverviewMarkerDecoration;
 use crate::TransferCenterItem;
 use crate::WorkspaceTabItem;
 use crate::app::app_paths::app_root_paths_for_app;
@@ -84,6 +86,7 @@ use crate::app::ssh::session_manager::{
     SessionRuntimeLauncher, SessionState,
 };
 use crate::app::terminal_atlas::TerminalAtlasSelection;
+use crate::app::terminal_semantic::command_blocks_from_surface;
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_presenter::WindowsNativePresenter;
 use crate::app::terminal_presenter::{
@@ -2098,6 +2101,50 @@ where
     }
 }
 
+fn terminal_command_block_decorations_for_state(
+    state: &ShellViewModel,
+) -> Vec<TerminalCommandBlockDecoration> {
+    if !state.settings_modal_terminal_command_decorations_enabled() {
+        return Vec::new();
+    }
+
+    let Some(surface) = state.active_workspace_terminal_surface() else {
+        return Vec::new();
+    };
+    let ledger = command_blocks_from_surface(surface);
+    ledger
+        .blocks
+        .into_iter()
+        .map(|block| TerminalCommandBlockDecoration {
+            id: i32::try_from(block.id).unwrap_or(i32::MAX),
+            prompt_row: i32::try_from(block.prompt_row).unwrap_or(i32::MAX),
+            output_end_row: i32::try_from(block.output_end_row).unwrap_or(i32::MAX),
+            status: SharedString::from(block.status.as_str()),
+        })
+        .collect()
+}
+
+fn terminal_overview_marker_decorations_for_state(
+    state: &ShellViewModel,
+) -> Vec<TerminalOverviewMarkerDecoration> {
+    if !state.settings_modal_terminal_overview_markers_enabled() {
+        return Vec::new();
+    }
+
+    let Some(surface) = state.active_workspace_terminal_surface() else {
+        return Vec::new();
+    };
+    let ledger = command_blocks_from_surface(surface);
+    ledger
+        .overview_markers
+        .into_iter()
+        .map(|marker| TerminalOverviewMarkerDecoration {
+            row: i32::try_from(marker.row).unwrap_or(i32::MAX),
+            kind: SharedString::from(marker.kind.as_str()),
+        })
+        .collect()
+}
+
 fn reconcile_vec_model_rows<T>(model: &VecModel<T>, next_rows: &[T])
 where
     T: Clone + PartialEq + 'static,
@@ -2972,6 +3019,16 @@ fn sync_workspace_session_state_with_manager(
         window.get_workspace_session_visible_lines(),
         visible_lines,
         |model| window.set_workspace_session_visible_lines(model),
+    );
+    sync_vec_model(
+        window.get_workspace_session_command_blocks(),
+        terminal_command_block_decorations_for_state(state),
+        |model| window.set_workspace_session_command_blocks(model),
+    );
+    sync_vec_model(
+        window.get_workspace_session_overview_markers(),
+        terminal_overview_marker_decorations_for_state(state),
+        |model| window.set_workspace_session_overview_markers(model),
     );
     sync_workspace_terminal_shell_chrome(
         window,

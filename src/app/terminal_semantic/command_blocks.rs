@@ -1,5 +1,6 @@
 //! Command block ledgering for prompt-oriented terminal sessions.
 
+use crate::app::ssh::runtime::{TerminalRowState, TerminalSurfaceState};
 use crate::app::terminal_model::TerminalModelFrame;
 
 const PROMPT_MARKERS: &[&str] = &["$ ", "# ", "% ", "> "];
@@ -10,6 +11,17 @@ pub enum CommandBlockStatus {
     Success,
     Failure,
     Unknown,
+}
+
+impl CommandBlockStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Success => "success",
+            Self::Failure => "failure",
+            Self::Unknown => "unknown",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,6 +46,19 @@ pub enum OverviewMarkerKind {
     SearchMatch,
     Error,
     Warning,
+}
+
+impl OverviewMarkerKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CommandRunning => "command-running",
+            Self::CommandFailure => "command-failure",
+            Self::CommandSuccess => "command-success",
+            Self::SearchMatch => "search-match",
+            Self::Error => "error",
+            Self::Warning => "warning",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,11 +103,32 @@ pub fn command_blocks_from_frame(frame: &TerminalModelFrame) -> CommandLedger {
     command_blocks_from_indexed_lines(&indexed)
 }
 
+pub fn command_blocks_from_surface(surface: &TerminalSurfaceState) -> CommandLedger {
+    if surface.alternate_screen_active || surface.mouse_grabbed {
+        return CommandLedger::default();
+    }
+
+    let indexed = surface
+        .visible_rows
+        .iter()
+        .map(indexed_line_from_visible_row)
+        .collect::<Vec<_>>();
+    command_blocks_from_indexed_lines(&indexed)
+}
+
 #[derive(Clone, Copy)]
 struct IndexedLine<'a> {
     row: u32,
     text: &'a str,
     wrapped: bool,
+}
+
+fn indexed_line_from_visible_row(row: &TerminalRowState) -> IndexedLine<'_> {
+    IndexedLine {
+        row: row.index,
+        text: row.text.as_str(),
+        wrapped: row.wrapped,
+    }
 }
 
 fn command_blocks_from_indexed_lines(lines: &[IndexedLine<'_>]) -> CommandLedger {

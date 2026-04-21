@@ -188,6 +188,36 @@ export global ThemeTokens {
     out property <brush> danger-pressed-surface: dark-mode ? #8f2943 : #c53d5c;
     out property <brush> danger-fg: #ffffff;
 
+    out property <brush> terminal-command-decoration-running: legacy-hacker-green
+        ? (dark-mode ? #7cc691 : #5f8d71)
+        : dark-mode ? #7d97b8 : #6b87ab;
+    out property <brush> terminal-command-decoration-running-surface: legacy-hacker-green
+        ? (dark-mode ? #7cc69118 : #5f8d7114)
+        : dark-mode ? #7d97b81c : #6b87ab16;
+    out property <brush> terminal-command-decoration-success: legacy-hacker-green
+        ? (dark-mode ? #8ed7a5 : #5c916c)
+        : dark-mode ? #7fb08d : #5f8f72;
+    out property <brush> terminal-command-decoration-success-surface: legacy-hacker-green
+        ? (dark-mode ? #8ed7a51c : #5c916c14)
+        : dark-mode ? #7fb08d1c : #5f8f7214;
+    out property <brush> terminal-command-decoration-failure: legacy-hacker-green
+        ? (dark-mode ? #d89aa6 : #ab6d78)
+        : dark-mode ? #c97d88 : #b16c79;
+    out property <brush> terminal-command-decoration-failure-surface: legacy-hacker-green
+        ? (dark-mode ? #d89aa61d : #ab6d7814)
+        : dark-mode ? #c97d881d : #b16c7914;
+    out property <brush> terminal-decoration-hairline: legacy-hacker-green
+        ? (dark-mode ? #9be6b316 : #33574412)
+        : dark-mode ? #d7e0e814 : #1f293310;
+    out property <brush> terminal-overview-marker-running: terminal-command-decoration-running;
+    out property <brush> terminal-overview-marker-success: terminal-command-decoration-success;
+    out property <brush> terminal-overview-marker-failure: terminal-command-decoration-failure;
+    out property <brush> terminal-overview-marker-search: legacy-hacker-green
+        ? (dark-mode ? #b8dd87 : #7a9463)
+        : dark-mode ? #c6a066 : #aa8152;
+    out property <brush> terminal-overview-marker-warning: terminal-overview-marker-search;
+    out property <brush> terminal-overview-marker-error: terminal-command-decoration-failure;
+
     out property <brush> terminal-canvas-surface: legacy-hacker-green
         ? (dark-mode ? #050b08 : #eff6f1)
         : dark-mode ? #08131d : #f4f6f8;
