@@ -83,9 +83,33 @@ pub struct DecorationTheme {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SemanticInkTheme {
+    pub fg: Option<u32>,
+    pub tint: Option<u32>,
+    pub underline: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SemanticHighlightTheme {
-    pub input_command: u32,
-    pub output_accent: u32,
+    pub input_prompt: SemanticInkTheme,
+    pub input_command: SemanticInkTheme,
+    pub input_path: SemanticInkTheme,
+    pub input_option: SemanticInkTheme,
+    pub input_operator: SemanticInkTheme,
+    pub input_variable: SemanticInkTheme,
+    pub input_string: SemanticInkTheme,
+    pub input_invalid: SemanticInkTheme,
+    pub output_accent: SemanticInkTheme,
+    pub output_muted: SemanticInkTheme,
+    pub output_info: SemanticInkTheme,
+    pub output_warn: SemanticInkTheme,
+    pub output_error: SemanticInkTheme,
+    pub output_success: SemanticInkTheme,
+    pub output_failure: SemanticInkTheme,
+    pub output_added: SemanticInkTheme,
+    pub output_removed: SemanticInkTheme,
+    pub output_json_key: SemanticInkTheme,
+    pub output_json_value: SemanticInkTheme,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -131,6 +155,28 @@ pub fn app_theme_spec(mode: ThemeMode, variant: ThemeVariant) -> AppThemeSpec {
         ThemeVariant::PremiumDefault => premium_default_spec(mode),
         ThemeVariant::LegacyHackerGreen => legacy_hacker_green_spec(mode),
     }
+}
+
+pub fn app_theme_spec_from_terminal_background(default_bg_rgba: u32) -> AppThemeSpec {
+    match default_bg_rgba & 0x00ff_ffff {
+        0x08_13_1d => app_theme_spec(ThemeMode::Dark, ThemeVariant::PremiumDefault),
+        0xf4_f6_f8 => app_theme_spec(ThemeMode::Light, ThemeVariant::PremiumDefault),
+        0x05_0b_08 => app_theme_spec(ThemeMode::Dark, ThemeVariant::LegacyHackerGreen),
+        0xef_f6_f1 => app_theme_spec(ThemeMode::Light, ThemeVariant::LegacyHackerGreen),
+        _ => app_theme_spec(ThemeMode::Dark, ThemeVariant::PremiumDefault),
+    }
+}
+
+fn semantic_ink(fg: Option<u32>, tint: Option<u32>, underline: bool) -> SemanticInkTheme {
+    SemanticInkTheme {
+        fg,
+        tint,
+        underline,
+    }
+}
+
+fn semantic_tint(rgb: u32, alpha: u8) -> u32 {
+    (u32::from(alpha) << 24) | (rgb & 0x00ff_ffff)
 }
 
 pub fn terminal_palette_spec(theme_mode: ThemeMode) -> ThemeTerminalPaletteSpec {
@@ -206,8 +252,69 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
                 failure: 0xc9_7d_88,
             },
             semantic: SemanticHighlightTheme {
-                input_command: 0x7d_97_b8,
-                output_accent: 0x7f_9e_c4,
+                input_prompt: semantic_ink(Some(0x8f_a0_ae), None, false),
+                input_command: semantic_ink(
+                    Some(0x7d_97_b8),
+                    Some(semantic_tint(0x7d_97_b8, 0x18)),
+                    true,
+                ),
+                input_path: semantic_ink(Some(0x7f_9e_c4), None, true),
+                input_option: semantic_ink(Some(0xc0_ca_d4), None, false),
+                input_operator: semantic_ink(Some(0x8f_a0_ae), None, false),
+                input_variable: semantic_ink(
+                    Some(0x96_af_ca),
+                    Some(semantic_tint(0x96_af_ca, 0x14)),
+                    false,
+                ),
+                input_string: semantic_ink(Some(0xc0_ca_d4), None, false),
+                input_invalid: semantic_ink(
+                    Some(0xc9_7d_88),
+                    Some(semantic_tint(0xc9_7d_88, 0x18)),
+                    true,
+                ),
+                output_accent: semantic_ink(
+                    Some(0x7f_9e_c4),
+                    Some(semantic_tint(0x7f_9e_c4, 0x14)),
+                    true,
+                ),
+                output_muted: semantic_ink(Some(0xc0_ca_d4), None, false),
+                output_info: semantic_ink(
+                    Some(0xc0_ca_d4),
+                    Some(semantic_tint(0x7f_9e_c4, 0x10)),
+                    false,
+                ),
+                output_warn: semantic_ink(
+                    Some(0xc6_a0_66),
+                    Some(semantic_tint(0xc6_a0_66, 0x12)),
+                    false,
+                ),
+                output_error: semantic_ink(
+                    Some(0xc9_7d_88),
+                    Some(semantic_tint(0xc9_7d_88, 0x16)),
+                    true,
+                ),
+                output_success: semantic_ink(
+                    Some(0x7f_b0_8d),
+                    Some(semantic_tint(0x7f_b0_8d, 0x12)),
+                    false,
+                ),
+                output_failure: semantic_ink(
+                    Some(0xc9_7d_88),
+                    Some(semantic_tint(0xc9_7d_88, 0x14)),
+                    true,
+                ),
+                output_added: semantic_ink(
+                    Some(0x97_c3_a1),
+                    Some(semantic_tint(0x97_c3_a1, 0x10)),
+                    false,
+                ),
+                output_removed: semantic_ink(
+                    Some(0xd9_93_9d),
+                    Some(semantic_tint(0xd9_93_9d, 0x10)),
+                    false,
+                ),
+                output_json_key: semantic_ink(Some(0x96_af_ca), None, false),
+                output_json_value: semantic_ink(Some(0xc0_ca_d4), None, false),
             },
         },
         ThemeMode::Light => AppThemeSpec {
@@ -255,8 +362,69 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
                 failure: 0xb7_64_70,
             },
             semantic: SemanticHighlightTheme {
-                input_command: 0x6b_87_ab,
-                output_accent: 0x56_7c_a8,
+                input_prompt: semantic_ink(Some(0x6c_7a_86), None, false),
+                input_command: semantic_ink(
+                    Some(0x6b_87_ab),
+                    Some(semantic_tint(0x6b_87_ab, 0x14)),
+                    true,
+                ),
+                input_path: semantic_ink(Some(0x56_7c_a8), None, true),
+                input_option: semantic_ink(Some(0x47_56_63), None, false),
+                input_operator: semantic_ink(Some(0x6c_7a_86), None, false),
+                input_variable: semantic_ink(
+                    Some(0x6b_87_ab),
+                    Some(semantic_tint(0x6b_87_ab, 0x10)),
+                    false,
+                ),
+                input_string: semantic_ink(Some(0x47_56_63), None, false),
+                input_invalid: semantic_ink(
+                    Some(0xb7_64_70),
+                    Some(semantic_tint(0xb7_64_70, 0x14)),
+                    true,
+                ),
+                output_accent: semantic_ink(
+                    Some(0x56_7c_a8),
+                    Some(semantic_tint(0x56_7c_a8, 0x10)),
+                    true,
+                ),
+                output_muted: semantic_ink(Some(0x47_56_63), None, false),
+                output_info: semantic_ink(
+                    Some(0x47_56_63),
+                    Some(semantic_tint(0x56_7c_a8, 0x0e)),
+                    false,
+                ),
+                output_warn: semantic_ink(
+                    Some(0x9b_7a_40),
+                    Some(semantic_tint(0x9b_7a_40, 0x10)),
+                    false,
+                ),
+                output_error: semantic_ink(
+                    Some(0xb7_64_70),
+                    Some(semantic_tint(0xb7_64_70, 0x14)),
+                    true,
+                ),
+                output_success: semantic_ink(
+                    Some(0x5f_89_69),
+                    Some(semantic_tint(0x5f_89_69, 0x10)),
+                    false,
+                ),
+                output_failure: semantic_ink(
+                    Some(0xb7_64_70),
+                    Some(semantic_tint(0xb7_64_70, 0x12)),
+                    true,
+                ),
+                output_added: semantic_ink(
+                    Some(0x76_9d_7d),
+                    Some(semantic_tint(0x76_9d_7d, 0x0e)),
+                    false,
+                ),
+                output_removed: semantic_ink(
+                    Some(0xc8_79_84),
+                    Some(semantic_tint(0xc8_79_84, 0x0e)),
+                    false,
+                ),
+                output_json_key: semantic_ink(Some(0x6b_87_ab), None, false),
+                output_json_value: semantic_ink(Some(0x47_56_63), None, false),
             },
         },
     }
@@ -309,8 +477,69 @@ fn legacy_hacker_green_spec(mode: ThemeMode) -> AppThemeSpec {
                 failure: 0xc0_7a_7a,
             },
             semantic: SemanticHighlightTheme {
-                input_command: 0x69_b3_7f,
-                output_accent: 0x63_bd_b5,
+                input_prompt: semantic_ink(Some(0x5e_8a_6d), None, false),
+                input_command: semantic_ink(
+                    Some(0x69_b3_7f),
+                    Some(semantic_tint(0x69_b3_7f, 0x18)),
+                    true,
+                ),
+                input_path: semantic_ink(Some(0x63_bd_b5), None, true),
+                input_option: semantic_ink(Some(0x7d_bf_92), None, false),
+                input_operator: semantic_ink(Some(0x5e_8a_6d), None, false),
+                input_variable: semantic_ink(
+                    Some(0x8e_db_a5),
+                    Some(semantic_tint(0x8e_db_a5, 0x14)),
+                    false,
+                ),
+                input_string: semantic_ink(Some(0x7d_bf_92), None, false),
+                input_invalid: semantic_ink(
+                    Some(0xc0_7a_7a),
+                    Some(semantic_tint(0xc0_7a_7a, 0x18)),
+                    true,
+                ),
+                output_accent: semantic_ink(
+                    Some(0x63_bd_b5),
+                    Some(semantic_tint(0x63_bd_b5, 0x14)),
+                    true,
+                ),
+                output_muted: semantic_ink(Some(0x7d_bf_92), None, false),
+                output_info: semantic_ink(
+                    Some(0x7d_bf_92),
+                    Some(semantic_tint(0x63_bd_b5, 0x10)),
+                    false,
+                ),
+                output_warn: semantic_ink(
+                    Some(0xb8_b9_6a),
+                    Some(semantic_tint(0xb8_b9_6a, 0x12)),
+                    false,
+                ),
+                output_error: semantic_ink(
+                    Some(0xc0_7a_7a),
+                    Some(semantic_tint(0xc0_7a_7a, 0x16)),
+                    true,
+                ),
+                output_success: semantic_ink(
+                    Some(0x73_c0_8c),
+                    Some(semantic_tint(0x73_c0_8c, 0x12)),
+                    false,
+                ),
+                output_failure: semantic_ink(
+                    Some(0xc0_7a_7a),
+                    Some(semantic_tint(0xc0_7a_7a, 0x14)),
+                    true,
+                ),
+                output_added: semantic_ink(
+                    Some(0x8e_db_a5),
+                    Some(semantic_tint(0x8e_db_a5, 0x10)),
+                    false,
+                ),
+                output_removed: semantic_ink(
+                    Some(0xd2_8f_8f),
+                    Some(semantic_tint(0xd2_8f_8f, 0x10)),
+                    false,
+                ),
+                output_json_key: semantic_ink(Some(0x8e_db_a5), None, false),
+                output_json_value: semantic_ink(Some(0x7d_bf_92), None, false),
             },
         },
         ThemeMode::Light => AppThemeSpec {
@@ -358,8 +587,69 @@ fn legacy_hacker_green_spec(mode: ThemeMode) -> AppThemeSpec {
                 failure: 0xb8_67_67,
             },
             semantic: SemanticHighlightTheme {
-                input_command: 0x4e_8a_63,
-                output_accent: 0x5f_88_b4,
+                input_prompt: semantic_ink(Some(0x6b_7e_74), None, false),
+                input_command: semantic_ink(
+                    Some(0x4e_8a_63),
+                    Some(semantic_tint(0x4e_8a_63, 0x14)),
+                    true,
+                ),
+                input_path: semantic_ink(Some(0x5f_88_b4), None, true),
+                input_option: semantic_ink(Some(0x45_5d_52), None, false),
+                input_operator: semantic_ink(Some(0x6b_7e_74), None, false),
+                input_variable: semantic_ink(
+                    Some(0x75_a8_84),
+                    Some(semantic_tint(0x75_a8_84, 0x10)),
+                    false,
+                ),
+                input_string: semantic_ink(Some(0x45_5d_52), None, false),
+                input_invalid: semantic_ink(
+                    Some(0xb8_67_67),
+                    Some(semantic_tint(0xb8_67_67, 0x14)),
+                    true,
+                ),
+                output_accent: semantic_ink(
+                    Some(0x5f_88_b4),
+                    Some(semantic_tint(0x5f_88_b4, 0x10)),
+                    true,
+                ),
+                output_muted: semantic_ink(Some(0x45_5d_52), None, false),
+                output_info: semantic_ink(
+                    Some(0x45_5d_52),
+                    Some(semantic_tint(0x5f_88_b4, 0x0e)),
+                    false,
+                ),
+                output_warn: semantic_ink(
+                    Some(0x9c_94_45),
+                    Some(semantic_tint(0x9c_94_45, 0x10)),
+                    false,
+                ),
+                output_error: semantic_ink(
+                    Some(0xb8_67_67),
+                    Some(semantic_tint(0xb8_67_67, 0x12)),
+                    true,
+                ),
+                output_success: semantic_ink(
+                    Some(0x5e_95_6d),
+                    Some(semantic_tint(0x5e_95_6d, 0x10)),
+                    false,
+                ),
+                output_failure: semantic_ink(
+                    Some(0xb8_67_67),
+                    Some(semantic_tint(0xb8_67_67, 0x12)),
+                    true,
+                ),
+                output_added: semantic_ink(
+                    Some(0x75_a8_84),
+                    Some(semantic_tint(0x75_a8_84, 0x0e)),
+                    false,
+                ),
+                output_removed: semantic_ink(
+                    Some(0xca_7c_7c),
+                    Some(semantic_tint(0xca_7c_7c, 0x0e)),
+                    false,
+                ),
+                output_json_key: semantic_ink(Some(0x4e_8a_63), None, false),
+                output_json_value: semantic_ink(Some(0x45_5d_52), None, false),
             },
         },
     }

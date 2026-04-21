@@ -1,9 +1,11 @@
 use mica_term::app::ssh::runtime::{
-    TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput, TerminalSession,
+    TerminalCellState, TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput,
+    TerminalSession,
     TerminalSurfaceState,
 };
 use mica_term::app::terminal_core::TerminalCoreKind;
 use mica_term::app::terminal_model::TerminalModelFrame;
+use mica_term::app::terminal_presenter::semantic_highlight_summary_for_test;
 use mica_term::app::terminal_semantic::{
     SemanticStyleRole, detect_input_line_spans, detect_output_block_spans,
 };
@@ -24,6 +26,36 @@ fn semantic_surface(lines: &[&str]) -> TerminalSurfaceState {
 
 fn semantic_model_frame(lines: &[&str]) -> TerminalModelFrame {
     let surface = semantic_surface(lines);
+    TerminalModelFrame::from_surface(&surface, None)
+}
+
+fn semantic_surface_with_cells(lines: &[&str]) -> TerminalSurfaceState {
+    let mut surface = semantic_surface(lines);
+    surface.default_fg_rgba = 0xffd7_e0e8;
+    surface.default_bg_rgba = 0xff08_131d;
+    surface.row_bg_even_rgba = surface.default_bg_rgba;
+    surface.row_bg_odd_rgba = surface.default_bg_rgba;
+    surface.cells = lines
+        .iter()
+        .enumerate()
+        .flat_map(|(row, line)| {
+            line.chars().enumerate().map(move |(col, ch)| TerminalCellState {
+                row: row as u32,
+                col: col as u32,
+                width: 1,
+                text: ch.to_string(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffd7_e0e8,
+                bg_rgba: 0xff08_131d,
+            })
+        })
+        .collect();
+    surface
+}
+
+fn semantic_model_frame_with_cells(lines: &[&str]) -> TerminalModelFrame {
+    let surface = semantic_surface_with_cells(lines);
     TerminalModelFrame::from_surface(&surface, None)
 }
 
@@ -229,6 +261,25 @@ fn semantic_input_roles_cover_command_path_variable_and_operator() {
         spans
             .iter()
             .any(|span| span.role == SemanticStyleRole::InputOperator)
+    );
+}
+
+#[test]
+fn semantic_roles_project_visible_highlight_primitives_for_dirty_rows() {
+    let frame = semantic_model_frame_with_cells(&[
+        "$ cargo run --release ./fixtures",
+        "https://example.com failed",
+    ]);
+
+    let summary = semantic_highlight_summary_for_test(frame);
+
+    assert!(
+        summary.input_fg_overrides > 0 || summary.input_underlines > 0 || summary.input_tints > 0
+    );
+    assert!(
+        summary.output_fg_overrides > 0
+            || summary.output_underlines > 0
+            || summary.output_tints > 0
     );
 }
 
