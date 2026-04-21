@@ -13,6 +13,7 @@ export struct SidebarNavItem {
 export component Sidebar inherits Rectangle {
     in property <[SidebarNavItem]> items;
     in property <bool> show-assets-sidebar: true;
+    in property <length> assets-sidebar-expanded-width: 320px;
     in property <string> active-sidebar-destination: "console";
     in property <string> assets-search-query: "";
     in property <bool> asset-search-expanded: false;
@@ -37,6 +38,7 @@ export component Sidebar inherits Rectangle {
     private property <length> tooltip-anchor-x-value: 0px;
     private property <length> tooltip-anchor-y-value: 0px;
     private property <length> tooltip-anchor-width-value: 0px;
+    private property <length> edge-handle-width: root.show-assets-sidebar ? 8px : 12px;
     out property <string> tooltip-text <=> root.tooltip-text-value;
     out property <bool> tooltip-visible <=> root.tooltip-visible-value;
     out property <length> tooltip-anchor-x <=> root.tooltip-anchor-x-value;
@@ -50,6 +52,10 @@ export component Sidebar inherits Rectangle {
     out property <length> activity-bar-width: activity-bar.width;
     out property <length> assets-sidebar-width: assets-sidebar.width;
     callback toggle-assets-sidebar-requested();
+    callback assets-sidebar-edge-toggle-requested();
+    callback assets-sidebar-edge-drag-start-requested(length);
+    callback assets-sidebar-edge-drag-move-requested(length);
+    callback assets-sidebar-edge-drag-end-requested(length);
     callback destination-selected(string);
     callback toggle-assets-search-requested();
     callback assets-search-query-changed(string);
@@ -66,7 +72,7 @@ export component Sidebar inherits Rectangle {
     callback asset-context-menu-requested(string, string, length, length);
     callback shell-interaction-requested();
 
-    width: 44px + (root.show-assets-sidebar ? 320px : 0px);
+    width: 44px + (root.show-assets-sidebar ? root.assets-sidebar-expanded-width : 0px);
     background: transparent;
 
     function schedule-tooltip(source-id: string, text: string, anchor-x: length, anchor-y: length, anchor-width: length) {
@@ -103,6 +109,10 @@ export component Sidebar inherits Rectangle {
             root.tooltip-source-id-value = "";
             tooltip-delay.stop();
         }
+    }
+
+    function edge-width-proposal(pointer-x: length) -> length {
+        return max(0px, pointer-x - root.absolute-position.x - activity-bar.width);
     }
 
     HorizontalLayout {
@@ -177,6 +187,7 @@ export component Sidebar inherits Rectangle {
 
         assets-sidebar := AssetsSidebar {
             expanded: root.show-assets-sidebar;
+            expanded-width: root.assets-sidebar-expanded-width;
             active-panel: root.active-sidebar-destination;
             assets-search-query: root.assets-search-query;
             asset-search-expanded: root.asset-search-expanded;
@@ -257,6 +268,44 @@ export component Sidebar inherits Rectangle {
 
             tooltip-close-requested(source-id) => {
                 root.queue-tooltip-close(source-id);
+            }
+        }
+    }
+
+    edge-handle := Rectangle {
+        x: parent.width - root.edge-handle-width;
+        y: 0px;
+        width: root.edge-handle-width;
+        height: parent.height;
+        background: handle-touch.has-hover || handle-touch.pressed
+            ? ThemeTokens.control-hover-surface
+            : transparent;
+
+        handle-touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: MouseCursor.e-resize;
+
+            clicked => {
+                root.assets-sidebar-edge-toggle-requested();
+            }
+
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down
+                    && event.button == PointerEventButton.left
+                {
+                    root.assets-sidebar-edge-drag-start-requested(
+                        root.edge-width-proposal(self.absolute-position.x + self.mouse-x),
+                    );
+                } else if event.kind == PointerEventKind.move && self.pressed {
+                    root.assets-sidebar-edge-drag-move-requested(
+                        root.edge-width-proposal(self.absolute-position.x + self.mouse-x),
+                    );
+                } else if event.kind == PointerEventKind.up {
+                    root.assets-sidebar-edge-drag-end-requested(
+                        root.edge-width-proposal(self.absolute-position.x + self.mouse-x),
+                    );
+                }
             }
         }
     }

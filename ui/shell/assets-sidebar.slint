@@ -23,6 +23,7 @@ export struct ConsoleAssetItem {
 
 export component AssetsSidebar inherits Rectangle {
     in property <bool> expanded: true;
+    in property <length> expanded-width: 320px;
     in property <string> active-panel: "console";
     in property <string> assets-search-query: "";
     in property <bool> asset-search-expanded: false;
@@ -68,7 +69,7 @@ export component AssetsSidebar inherits Rectangle {
     private property <image> list-view-icon: @image-url("../../assets/icons/fluent/list-20-regular.svg");
     private property <image> create-add-icon: @image-url("../../assets/icons/fluent/add-20-regular.svg");
 
-    width: expanded ? 320px : 0px;
+    width: expanded ? root.expanded-width : 0px;
     visible: expanded;
     clip: true;
     background: ThemeTokens.assets-surface;

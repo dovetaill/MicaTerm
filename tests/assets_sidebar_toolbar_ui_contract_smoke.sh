@@ -78,7 +78,7 @@ grep -F 'out property <length> create-menu-anchor-x: assets-sidebar.create-menu-
 grep -F 'out property <length> create-menu-anchor-y: assets-sidebar.create-menu-anchor-y;' "$SIDEBAR" >/dev/null
 grep -F 'out property <length> create-menu-anchor-width: assets-sidebar.create-menu-anchor-width;' "$SIDEBAR" >/dev/null
 grep -F 'out property <length> create-menu-anchor-height: assets-sidebar.create-menu-anchor-height;' "$SIDEBAR" >/dev/null
-grep -F 'assets-sidebar-expanded-width: root.assets-sidebar-expanded-width;' "$SIDEBAR" >/dev/null
+grep -F 'expanded-width: root.assets-sidebar-expanded-width;' "$SIDEBAR" >/dev/null
 grep -F 'width: 44px + (root.show-assets-sidebar ? root.assets-sidebar-expanded-width : 0px);' "$SIDEBAR" >/dev/null
 grep -F 'toggle-assets-create-menu-requested => {' "$SIDEBAR" >/dev/null
 grep -F 'close-assets-create-menu-requested => {' "$SIDEBAR" >/dev/null

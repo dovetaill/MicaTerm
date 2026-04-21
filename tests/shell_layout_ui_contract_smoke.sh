@@ -46,7 +46,7 @@ grep -F 'border-radius: 0px;' "$RIGHT_PANEL" >/dev/null
 grep -F 'border-width: 0px;' "$RIGHT_PANEL" >/dev/null
 ! grep -F 'width: root.expanded ? 392px : 0px;' "$RIGHT_PANEL" >/dev/null
 grep -F 'VerticalLayout {' "$WELCOME" >/dev/null
-grep -F 'QuickLaunchDetailPane' "$WELCOME" >/dev/null
+grep -F 'QuickLaunchSection' "$WELCOME" >/dev/null
 grep -F 'activity-bar := Rectangle' "$SIDEBAR" >/dev/null
 grep -F 'in property <length> assets-sidebar-expanded-width: 320px;' "$SIDEBAR" >/dev/null
 grep -F 'callback assets-sidebar-edge-toggle-requested();' "$SIDEBAR" >/dev/null

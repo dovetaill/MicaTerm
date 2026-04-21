@@ -78,6 +78,7 @@ export component AppWindow inherits Window {
     in-out property <string> transfer-center-feedback-tone: "neutral";
     in-out property <int> transfer-center-feedback-sequence: 0;
     in-out property <bool> show-right-panel: false;
+    in-out property <length> right-panel-expanded-width: 392px;
     in-out property <bool> transfer-center-open: false;
     in-out property <bool> transfer-center-pinned: false;
     in-out property <bool> transfer-center-collapsed: false;
@@ -97,16 +98,16 @@ export component AppWindow inherits Window {
             min(
                 520px,
                 root.width
-                    - (44px + (root.effective-show-assets-sidebar ? 320px : 0px))
-                    - (root.effective-show-right-panel ? 392px : 0px)
+                    - (44px + (root.effective-show-assets-sidebar ? root.assets-sidebar-expanded-width : 0px))
+                    - (root.effective-show-right-panel ? root.right-panel-expanded-width : 0px)
                     - 36px,
             ),
         ),
         max(
             280px,
             root.width
-                - (44px + (root.effective-show-assets-sidebar ? 320px : 0px))
-                - (root.effective-show-right-panel ? 392px : 0px)
+                - (44px + (root.effective-show-assets-sidebar ? root.assets-sidebar-expanded-width : 0px))
+                - (root.effective-show-right-panel ? root.right-panel-expanded-width : 0px)
                 - 20px,
         ),
     );
@@ -146,6 +147,7 @@ export component AppWindow inherits Window {
     in-out property <bool> is-window-active: true;
     in-out property <bool> is-window-always-on-top: false;
     in-out property <bool> show-assets-sidebar: true;
+    in-out property <length> assets-sidebar-expanded-width: 320px;
     in-out property <bool> effective-show-assets-sidebar: true;
     in-out property <bool> effective-show-right-panel: false;
     in-out property <string> active-sidebar-destination: "console";
@@ -382,6 +384,10 @@ export component AppWindow inherits Window {
     callback maximize-toggle-requested();
     callback close-requested();
     callback toggle-right-panel-requested();
+    callback right-panel-edge-toggle-requested();
+    callback right-panel-edge-drag-start-requested(length);
+    callback right-panel-edge-drag-move-requested(length);
+    callback right-panel-edge-drag-end-requested(length);
     callback sync-now-requested();
     callback open-transfer-center-requested();
     callback close-transfer-center-requested();
@@ -442,6 +448,10 @@ export component AppWindow inherits Window {
     callback toggle-theme-mode-requested();
     callback toggle-window-always-on-top-requested();
     callback toggle-assets-sidebar-requested();
+    callback assets-sidebar-edge-toggle-requested();
+    callback assets-sidebar-edge-drag-start-requested(length);
+    callback assets-sidebar-edge-drag-move-requested(length);
+    callback assets-sidebar-edge-drag-end-requested(length);
     callback sidebar-destination-selected(string);
     callback toggle-assets-search-requested();
     callback assets-search-query-changed(string);
@@ -756,6 +766,7 @@ export component AppWindow inherits Window {
                         height: parent.height;
                         items: root.sidebar-items;
                         show-assets-sidebar: root.effective-show-assets-sidebar;
+                        assets-sidebar-expanded-width: root.assets-sidebar-expanded-width;
                         active-sidebar-destination: root.active-sidebar-destination;
                         assets-search-query: root.assets-search-query;
                         asset-search-expanded: root.asset-search-expanded;
@@ -776,6 +787,22 @@ export component AppWindow inherits Window {
 
                         toggle-assets-sidebar-requested => {
                             root.toggle-assets-sidebar-requested();
+                        }
+
+                        assets-sidebar-edge-toggle-requested => {
+                            root.assets-sidebar-edge-toggle-requested();
+                        }
+
+                        assets-sidebar-edge-drag-start-requested(width) => {
+                            root.assets-sidebar-edge-drag-start-requested(width);
+                        }
+
+                        assets-sidebar-edge-drag-move-requested(width) => {
+                            root.assets-sidebar-edge-drag-move-requested(width);
+                        }
+
+                        assets-sidebar-edge-drag-end-requested(width) => {
+                            root.assets-sidebar-edge-drag-end-requested(width);
                         }
 
                         destination-selected(id) => {
@@ -1000,6 +1027,7 @@ export component AppWindow inherits Window {
                         y: 0px;
                         height: parent.height;
                         expanded: root.effective-show-right-panel;
+                        expanded-width: root.right-panel-expanded-width;
                         view: root.right-panel-view;
                         sftp-panel-mode: root.sftp-panel-mode;
                         sftp-panel-host-label: root.sftp-panel-host-label;
@@ -1108,8 +1136,44 @@ export component AppWindow inherits Window {
                             root.sftp-panel-reenable-follow-requested();
                         }
 
+                        right-panel-edge-toggle-requested => {
+                            root.right-panel-edge-toggle-requested();
+                        }
+
+                        right-panel-edge-drag-start-requested(width) => {
+                            root.right-panel-edge-drag-start-requested(width);
+                        }
+
+                        right-panel-edge-drag-move-requested(width) => {
+                            root.right-panel-edge-drag-move-requested(width);
+                        }
+
+                        right-panel-edge-drag-end-requested(width) => {
+                            root.right-panel-edge-drag-end-requested(width);
+                        }
+
                         transfer-center-close-requested => {
                             root.close-transfer-center-requested();
+                        }
+                    }
+
+                    if !root.effective-show-right-panel : right-panel-revive-strip := Rectangle {
+                        x: parent.width - 12px;
+                        y: 0px;
+                        width: 12px;
+                        height: parent.height;
+                        background: revive-touch.has-hover || revive-touch.pressed
+                            ? ThemeTokens.control-hover-surface
+                            : transparent;
+
+                        revive-touch := TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+                            mouse-cursor: MouseCursor.w-resize;
+
+                            clicked => {
+                                root.right-panel-edge-toggle-requested();
+                            }
                         }
                     }
 

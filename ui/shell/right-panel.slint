@@ -18,6 +18,7 @@ export struct SftpPanelItem {
 
 export component RightPanel inherits Rectangle {
     in property <bool> expanded: false;
+    in property <length> expanded-width: 392px;
     in property <string> view: "sftp";
     in property <string> sftp-panel-mode: "empty";
     in property <string> sftp-panel-host-label: "";
@@ -62,6 +63,7 @@ export component RightPanel inherits Rectangle {
     private property <length> tooltip-anchor-x-value: 0px;
     private property <length> tooltip-anchor-y-value: 0px;
     private property <length> tooltip-anchor-width-value: 0px;
+    private property <length> edge-handle-width: 8px;
     out property <string> tooltip-text <=> root.tooltip-text-value;
     out property <bool> tooltip-visible <=> root.tooltip-visible-value;
     out property <length> tooltip-anchor-x <=> root.tooltip-anchor-x-value;
@@ -99,6 +101,10 @@ export component RightPanel inherits Rectangle {
     callback sftp-panel-open-queue-requested();
     callback sftp-panel-retry-requested();
     callback sftp-panel-reenable-follow-requested();
+    callback right-panel-edge-toggle-requested();
+    callback right-panel-edge-drag-start-requested(length);
+    callback right-panel-edge-drag-move-requested(length);
+    callback right-panel-edge-drag-end-requested(length);
     callback transfer-center-close-requested();
     private property <length> sftp-status-row-height:
         root.sftp-panel-mode == "connecting"
@@ -158,6 +164,10 @@ export component RightPanel inherits Rectangle {
         }
     }
 
+    function edge-width-proposal(pointer-x: length) -> length {
+        return max(0px, root.absolute-position.x + root.width - pointer-x);
+    }
+
     function sftp-empty-headline() -> string {
         return "Open an SSH session";
     }
@@ -200,7 +210,7 @@ export component RightPanel inherits Rectangle {
         return "";
     }
 
-    width: root.expanded ? 392px : 0px;
+    width: root.expanded ? root.expanded-width : 0px;
     visible: root.expanded;
     clip: true;
     background: ThemeTokens.inspector-surface;
@@ -214,6 +224,44 @@ export component RightPanel inherits Rectangle {
         width: 1px;
         height: parent.height;
         background: ThemeTokens.divider-strong;
+    }
+
+    edge-handle := Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.edge-handle-width;
+        height: parent.height;
+        background: handle-touch.has-hover || handle-touch.pressed
+            ? ThemeTokens.control-hover-surface
+            : transparent;
+
+        handle-touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: MouseCursor.w-resize;
+
+            clicked => {
+                root.right-panel-edge-toggle-requested();
+            }
+
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down
+                    && event.button == PointerEventButton.left
+                {
+                    root.right-panel-edge-drag-start-requested(
+                        root.edge-width-proposal(self.absolute-position.x + self.mouse-x),
+                    );
+                } else if event.kind == PointerEventKind.move && self.pressed {
+                    root.right-panel-edge-drag-move-requested(
+                        root.edge-width-proposal(self.absolute-position.x + self.mouse-x),
+                    );
+                } else if event.kind == PointerEventKind.up {
+                    root.right-panel-edge-drag-end-requested(
+                        root.edge-width-proposal(self.absolute-position.x + self.mouse-x),
+                    );
+                }
+            }
+        }
     }
 
     sftp-panel := Rectangle {
