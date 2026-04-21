@@ -1836,13 +1836,13 @@ pub(super) fn bind_sftp_callbacks(
     let store_ref = store.clone();
     let effects_ref = Rc::clone(effects);
     let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
     let sftp_browser_controller_ref = Rc::clone(sftp_browser_controller);
     let open_runtime_handle = async_runtime_handle.clone();
     let open_result_tx = sftp_result_tx.clone();
     window.on_open_sftp_panel_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        let (width, height) = current_window_size(&window);
         state.open_sftp_panel();
         if let Some(session_bridge) = session_bridge_ref.as_ref() {
             let mut controller = sftp_browser_controller_ref.borrow_mut();
@@ -1854,9 +1854,13 @@ pub(super) fn bind_sftp_callbacks(
                 &open_result_tx,
             );
         }
-        super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        sync_right_panel_state(&window, &mut state);
-        sync_shell_layout(&window, &mut state, width, height);
+        super::shell_chrome::sync_shell_side_regions(
+            &window,
+            &mut state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
         save_ui_preferences(&store_ref, &state);
     });
 

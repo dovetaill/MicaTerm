@@ -91,6 +91,16 @@ impl ShellViewModel {
     }
 
     pub fn apply_assets_sidebar_resize(&mut self, width_px: f32) -> bool {
+        if self.workspace_focus_mode
+            && !self.show_assets_sidebar
+            && width_px >= ShellMetrics::ASSETS_SIDEBAR_COLLAPSE_THRESHOLD as f32
+        {
+            self.exit_workspace_focus_mode();
+            let _ = self.set_assets_sidebar_expanded_width(width_px);
+            self.show_assets_sidebar = true;
+            return true;
+        }
+
         if width_px < ShellMetrics::ASSETS_SIDEBAR_COLLAPSE_THRESHOLD as f32 {
             if !self.show_assets_sidebar {
                 return false;

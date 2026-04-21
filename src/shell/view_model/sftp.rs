@@ -94,6 +94,9 @@ fn recompute_sftp_panel_virtual_window(render_cache: &mut SftpPanelRenderCache) 
 
 impl ShellViewModel {
     pub fn open_sftp_panel(&mut self) {
+        if self.workspace_focus_mode && !self.show_right_panel {
+            self.exit_workspace_focus_mode();
+        }
         self.right_panel_view = RightPanelView::Sftp;
         self.show_right_panel = true;
         self.show_global_menu = false;

@@ -4,10 +4,30 @@ use super::*;
 
 const EDGE_DRAG_THRESHOLD_PX: f32 = 4.0;
 
-fn sync_assets_sidebar_layout(window: &AppWindow, state: &mut ShellViewModel) {
+pub(super) fn sync_shell_side_regions(
+    window: &AppWindow,
+    state: &mut ShellViewModel,
+    effects: &dyn PlatformWindowEffects,
+    follow_tracker: &mut WorkspaceFollowTracker,
+    manager: Option<&SessionManager>,
+) {
+    sync_top_status_bar_state(window, state, effects);
+    sftp::sync_right_panel_state(window, state);
     assets_keychain::sync_sidebar_state(window, state);
     let (width, height) = current_window_size(window);
     sync_shell_layout(window, state, width, height);
+    sync_workspace_session_state_with_manager(window, state, follow_tracker, manager);
+}
+
+pub(super) fn toggle_workspace_focus_mode_and_sync(
+    window: &AppWindow,
+    state: &mut ShellViewModel,
+    effects: &dyn PlatformWindowEffects,
+    follow_tracker: &mut WorkspaceFollowTracker,
+    manager: Option<&SessionManager>,
+) {
+    state.toggle_workspace_focus_mode();
+    sync_shell_side_regions(window, state, effects, follow_tracker, manager);
 }
 
 fn transfer_was_skipped(task: &crate::app::sftp::TransferTask) -> bool {
@@ -372,6 +392,7 @@ pub(super) fn sync_top_status_bar_state(
 ) {
     sync_theme_and_window_effects(window, state, effects);
     window.set_show_right_panel(state.show_right_panel);
+    window.set_workspace_focus_mode(state.workspace_focus_mode());
     window.set_transfer_center_open(state.transfer_center_open());
     window.set_transfer_center_pinned(state.transfer_center_pinned());
     window.set_transfer_center_collapsed(state.transfer_center_collapsed());
@@ -513,14 +534,19 @@ pub(super) fn bind_shell_chrome_callbacks(
     let handle = window.as_weak();
     let store_ref = store.clone();
     let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
     window.on_open_appearance_panel_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        let (width, height) = current_window_size(&window);
         state.open_appearance_panel();
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        sftp::sync_right_panel_state(&window, &mut state);
-        sync_shell_layout(&window, &mut state, width, height);
+        sync_shell_side_regions(
+            &window,
+            &mut state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
         save_ui_preferences(&store_ref, &state);
     });
 
@@ -617,21 +643,39 @@ pub(super) fn bind_shell_chrome_callbacks(
 
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
+    let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
     window.on_toggle_assets_sidebar_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.toggle_assets_sidebar();
-        sync_assets_sidebar_layout(&window, &mut state);
+        sync_shell_side_regions(
+            &window,
+            &mut state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
     });
 
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
+    let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
     let assets_edge_drag_state_ref = Rc::clone(&assets_edge_drag_state);
     window.on_assets_sidebar_edge_toggle_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.toggle_assets_sidebar();
-        sync_assets_sidebar_layout(&window, &mut state);
+        sync_shell_side_regions(
+            &window,
+            &mut state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
         *assets_edge_drag_state_ref.borrow_mut() = None;
     });
 
@@ -642,6 +686,9 @@ pub(super) fn bind_shell_chrome_callbacks(
 
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
+    let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
     let assets_edge_drag_state_ref = Rc::clone(&assets_edge_drag_state);
     window.on_assets_sidebar_edge_drag_move_requested(move |width| {
         let should_apply = {
@@ -663,12 +710,21 @@ pub(super) fn bind_shell_chrome_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         if state.apply_assets_sidebar_resize(width) {
-            sync_assets_sidebar_layout(&window, &mut state);
+            sync_shell_side_regions(
+                &window,
+                &mut state,
+                effects_ref.as_ref(),
+                &mut workspace_follow_tracker_ref.borrow_mut(),
+                session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+            );
         }
     });
 
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
+    let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
     let assets_edge_drag_state_ref = Rc::clone(&assets_edge_drag_state);
     window.on_assets_sidebar_edge_drag_end_requested(move |width| {
         let should_apply = {
@@ -686,12 +742,21 @@ pub(super) fn bind_shell_chrome_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         if state.apply_assets_sidebar_resize(width) {
-            sync_assets_sidebar_layout(&window, &mut state);
+            sync_shell_side_regions(
+                &window,
+                &mut state,
+                effects_ref.as_ref(),
+                &mut workspace_follow_tracker_ref.borrow_mut(),
+                session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+            );
         }
     });
 
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
+    let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
     window.on_sidebar_destination_selected(move |destination_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -699,6 +764,29 @@ pub(super) fn bind_shell_chrome_callbacks(
         let destination = SidebarDestination::from_id(destination_id.as_str())
             .unwrap_or(SidebarDestination::Console);
         state.select_sidebar_destination(destination);
-        sync_assets_sidebar_layout(&window, &mut state);
+        sync_shell_side_regions(
+            &window,
+            &mut state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
+    window.on_toggle_workspace_focus_mode_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        toggle_workspace_focus_mode_and_sync(
+            &window,
+            &mut state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
     });
 }
