@@ -2,6 +2,14 @@
 
 use super::*;
 
+const EDGE_DRAG_THRESHOLD_PX: f32 = 4.0;
+
+fn sync_assets_sidebar_layout(window: &AppWindow, state: &mut ShellViewModel) {
+    assets_keychain::sync_sidebar_state(window, state);
+    let (width, height) = current_window_size(window);
+    sync_shell_layout(window, state, width, height);
+}
+
 fn transfer_was_skipped(task: &crate::app::sftp::TransferTask) -> bool {
     task.state == crate::app::sftp::TransferTaskState::Cancelled
         && task
@@ -605,15 +613,81 @@ pub(super) fn bind_shell_chrome_callbacks(
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
     });
 
+    let assets_edge_drag_state = Rc::new(RefCell::new(None::<(f32, bool)>));
+
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
     window.on_toggle_assets_sidebar_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.toggle_assets_sidebar();
-        assets_keychain::sync_sidebar_state(&window, &state);
-        let (width, height) = current_window_size(&window);
-        sync_shell_layout(&window, &mut state, width, height);
+        sync_assets_sidebar_layout(&window, &mut state);
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let assets_edge_drag_state_ref = Rc::clone(&assets_edge_drag_state);
+    window.on_assets_sidebar_edge_toggle_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.toggle_assets_sidebar();
+        sync_assets_sidebar_layout(&window, &mut state);
+        *assets_edge_drag_state_ref.borrow_mut() = None;
+    });
+
+    let assets_edge_drag_state_ref = Rc::clone(&assets_edge_drag_state);
+    window.on_assets_sidebar_edge_drag_start_requested(move |width| {
+        *assets_edge_drag_state_ref.borrow_mut() = Some((width, false));
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let assets_edge_drag_state_ref = Rc::clone(&assets_edge_drag_state);
+    window.on_assets_sidebar_edge_drag_move_requested(move |width| {
+        let should_apply = {
+            let mut drag_state = assets_edge_drag_state_ref.borrow_mut();
+            let Some((start_width, drag_active)) = drag_state.as_mut() else {
+                return;
+            };
+            if !*drag_active && (width - *start_width).abs() < EDGE_DRAG_THRESHOLD_PX {
+                return;
+            }
+            *drag_active = true;
+            true
+        };
+
+        if !should_apply {
+            return;
+        }
+
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.apply_assets_sidebar_resize(width) {
+            sync_assets_sidebar_layout(&window, &mut state);
+        }
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let assets_edge_drag_state_ref = Rc::clone(&assets_edge_drag_state);
+    window.on_assets_sidebar_edge_drag_end_requested(move |width| {
+        let should_apply = {
+            let mut drag_state = assets_edge_drag_state_ref.borrow_mut();
+            let Some((start_width, drag_active)) = drag_state.take() else {
+                return;
+            };
+            drag_active || (width - start_width).abs() >= EDGE_DRAG_THRESHOLD_PX
+        };
+
+        if !should_apply {
+            return;
+        }
+
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.apply_assets_sidebar_resize(width) {
+            sync_assets_sidebar_layout(&window, &mut state);
+        }
     });
 
     let state = Rc::clone(view_model);
@@ -625,8 +699,6 @@ pub(super) fn bind_shell_chrome_callbacks(
         let destination = SidebarDestination::from_id(destination_id.as_str())
             .unwrap_or(SidebarDestination::Console);
         state.select_sidebar_destination(destination);
-        assets_keychain::sync_sidebar_state(&window, &state);
-        let (width, height) = current_window_size(&window);
-        sync_shell_layout(&window, &mut state, width, height);
+        sync_assets_sidebar_layout(&window, &mut state);
     });
 }

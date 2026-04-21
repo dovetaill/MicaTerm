@@ -167,6 +167,7 @@ pub(super) fn sync_sftp_panel_state(window: &AppWindow, state: &mut ShellViewMod
 
 pub(super) fn sync_right_panel_state(window: &AppWindow, state: &mut ShellViewModel) {
     window.set_right_panel_view(state.right_panel_view_id().into());
+    window.set_right_panel_expanded_width(state.right_panel_expanded_width_px());
     sync_sftp_panel_state(window, state);
 }
 

@@ -197,6 +197,7 @@ const WORKSPACE_SCROLL_VIEWPORT_PROJECTION_DEBOUNCE_MS: u64 = 4;
 const WORKSPACE_SCROLL_THUMB_DRAG_PROJECTION_DEBOUNCE_MS: u64 = 8;
 const WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS: u64 = 1_000;
 const WORKSPACE_TERMINAL_CURSOR_BLINK_INTERVAL_MS: u64 = 520;
+const EDGE_DRAG_THRESHOLD_PX: f32 = 4.0;
 
 #[cfg(test)]
 type WorkspaceTerminalPresenterFactory =
@@ -5257,6 +5258,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         );
     }
 
+    let right_panel_edge_drag_state = Rc::new(RefCell::new(None::<(f32, bool)>));
+
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let session_projection_timer_ref = Rc::clone(&session_projection_timer);
@@ -5272,6 +5275,107 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         sftp::sync_right_panel_state(&window, &mut state);
         sync_shell_layout(&window, &mut state, width, height);
+        sync_workspace_session_state_with_manager(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let effects_ref = Rc::clone(&effects);
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let right_panel_edge_drag_state_ref = Rc::clone(&right_panel_edge_drag_state);
+    window.on_right_panel_edge_toggle_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let (width, height) = current_window_size(&window);
+        state.toggle_right_panel();
+        shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        sftp::sync_right_panel_state(&window, &mut state);
+        sync_shell_layout(&window, &mut state, width, height);
+        sync_workspace_session_state_with_manager(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
+        *right_panel_edge_drag_state_ref.borrow_mut() = None;
+    });
+
+    let right_panel_edge_drag_state_ref = Rc::clone(&right_panel_edge_drag_state);
+    window.on_right_panel_edge_drag_start_requested(move |width| {
+        *right_panel_edge_drag_state_ref.borrow_mut() = Some((width, false));
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let effects_ref = Rc::clone(&effects);
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let right_panel_edge_drag_state_ref = Rc::clone(&right_panel_edge_drag_state);
+    window.on_right_panel_edge_drag_move_requested(move |width| {
+        {
+            let mut drag_state = right_panel_edge_drag_state_ref.borrow_mut();
+            let Some((start_width, drag_active)) = drag_state.as_mut() else {
+                return;
+            };
+            if !*drag_active && (width - *start_width).abs() < EDGE_DRAG_THRESHOLD_PX {
+                return;
+            }
+            *drag_active = true;
+        }
+
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if !state.apply_right_panel_resize(width) {
+            return;
+        }
+
+        let (logical_width, logical_height) = current_window_size(&window);
+        shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        sftp::sync_right_panel_state(&window, &mut state);
+        sync_shell_layout(&window, &mut state, logical_width, logical_height);
+        sync_workspace_session_state_with_manager(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let effects_ref = Rc::clone(&effects);
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let right_panel_edge_drag_state_ref = Rc::clone(&right_panel_edge_drag_state);
+    window.on_right_panel_edge_drag_end_requested(move |width| {
+        let should_apply = {
+            let mut drag_state = right_panel_edge_drag_state_ref.borrow_mut();
+            let Some((start_width, drag_active)) = drag_state.take() else {
+                return;
+            };
+            drag_active || (width - start_width).abs() >= EDGE_DRAG_THRESHOLD_PX
+        };
+
+        if !should_apply {
+            return;
+        }
+
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if !state.apply_right_panel_resize(width) {
+            return;
+        }
+
+        let (logical_width, logical_height) = current_window_size(&window);
+        shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        sftp::sync_right_panel_state(&window, &mut state);
+        sync_shell_layout(&window, &mut state, logical_width, logical_height);
         sync_workspace_session_state_with_manager(
             &window,
             &state,

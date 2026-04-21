@@ -4,6 +4,7 @@ use super::*;
 
 pub(super) fn sync_sidebar_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_show_assets_sidebar(state.show_assets_sidebar);
+    window.set_assets_sidebar_expanded_width(state.assets_sidebar_expanded_width_px());
     window.set_active_sidebar_destination(state.active_sidebar_destination.id().into());
     window.set_sidebar_items(ModelRc::new(VecModel::from(sidebar_items_for(state))));
     sync_assets_toolbar_state(window, state);
