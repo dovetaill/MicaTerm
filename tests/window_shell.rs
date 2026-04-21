@@ -11,7 +11,7 @@ use mica_term::theme::ThemeMode;
 fn balanced_desktop_metrics_match_the_design_doc() {
     assert_eq!(ShellMetrics::TITLEBAR_HEIGHT, 48);
     assert_eq!(ShellMetrics::ACTIVITY_BAR_WIDTH, 48);
-    assert_eq!(ShellMetrics::ASSETS_SIDEBAR_WIDTH, 288);
+    assert_eq!(ShellMetrics::ASSETS_SIDEBAR_WIDTH, 320);
     assert_eq!(ShellMetrics::TAB_BAR_HEIGHT, 38);
     assert_eq!(ShellMetrics::RIGHT_PANEL_WIDTH, 392);
 }
@@ -19,7 +19,7 @@ fn balanced_desktop_metrics_match_the_design_doc() {
 #[test]
 fn sidebar_metrics_match_the_navigation_design() {
     assert_eq!(ShellMetrics::ACTIVITY_BAR_WIDTH, 48);
-    assert_eq!(ShellMetrics::ASSETS_SIDEBAR_WIDTH, 288);
+    assert_eq!(ShellMetrics::ASSETS_SIDEBAR_WIDTH, 320);
     assert_eq!(ShellMetrics::ACTIVITY_BAR_BUTTON_SIZE, 36);
     assert_eq!(ShellMetrics::ACTIVITY_BAR_ICON_SIZE, 20);
 }
@@ -36,7 +36,7 @@ fn shell_layout_metrics_match_the_layout_bugfix_budget() {
     assert_eq!(ShellMetrics::WINDOW_DEFAULT_WIDTH, 1440);
     assert_eq!(ShellMetrics::WINDOW_DEFAULT_HEIGHT, 900);
     assert_eq!(ShellMetrics::ACTIVITY_BAR_WIDTH, 48);
-    assert_eq!(ShellMetrics::ASSETS_SIDEBAR_WIDTH, 288);
+    assert_eq!(ShellMetrics::ASSETS_SIDEBAR_WIDTH, 320);
     assert_eq!(ShellMetrics::RIGHT_PANEL_WIDTH, 392);
     assert_eq!(ShellMetrics::MAIN_WORKSPACE_MIN_WIDTH, 640);
 }

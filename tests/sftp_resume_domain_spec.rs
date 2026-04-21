@@ -10,6 +10,7 @@ fn sample_app_root_paths() -> AppRootPaths {
     AppRootPaths {
         root_source: AppRootSource::StandardLocalData,
         root_dir: PathBuf::from("/tmp/mica-term"),
+        config_dir: PathBuf::from("/tmp/mica-term/config"),
         data_dir: PathBuf::from("/tmp/mica-term/data"),
         logs_dir: PathBuf::from("/tmp/mica-term/logs"),
         crash_dir: PathBuf::from("/tmp/mica-term/crash"),
