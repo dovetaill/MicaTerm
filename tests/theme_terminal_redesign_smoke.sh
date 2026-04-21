@@ -10,6 +10,8 @@ APP_WINDOW=ui/app-window.slint
 WORKSPACE_PANE=ui/shell/workspace-pane.slint
 TERMINAL_HOST=ui/shell/terminal-session-host.slint
 BOOTSTRAP=src/app/bootstrap.rs
+SHELL_CHROME=src/app/bootstrap/shell_chrome.rs
+PRESENTER=src/app/terminal_presenter.rs
 
 grep -F 'in property <string> theme-variant: "premium-default";' "$TOKENS"
 grep -F 'out property <brush> titlebar-background:' "$TOKENS"
@@ -33,6 +35,17 @@ grep -F 'ThemeTokens.terminal-command-decoration-running' "$TERMINAL_HOST"
 grep -F 'ThemeTokens.terminal-overview-marker-failure' "$TERMINAL_HOST"
 grep -F 'set_workspace_session_command_blocks' "$BOOTSTRAP"
 grep -F 'set_workspace_session_overview_markers' "$BOOTSTRAP"
+grep -F 'input_highlighting_enabled: state' "$BOOTSTRAP"
+grep -F 'output_rule_highlighting_enabled: state' "$BOOTSTRAP"
+grep -F 'output_rule_profile: state.settings_modal_terminal_output_rule_profile()' "$BOOTSTRAP"
+grep -F 'window.on_settings_modal_terminal_input_highlighting_enabled_changed' "$SHELL_CHROME"
+grep -F 'window.on_settings_modal_terminal_output_rule_highlighting_enabled_changed' "$SHELL_CHROME"
+grep -F 'window.on_settings_modal_terminal_command_decorations_enabled_changed' "$SHELL_CHROME"
+grep -F 'window.on_settings_modal_terminal_overview_markers_enabled_changed' "$SHELL_CHROME"
+grep -F 'window.on_settings_modal_terminal_search_match_highlight_changed' "$SHELL_CHROME"
+grep -F 'sync_shell_side_regions(' "$SHELL_CHROME"
+grep -F 'pub input_highlighting_enabled: bool,' "$PRESENTER"
+grep -F 'pub output_rule_highlighting_enabled: bool,' "$PRESENTER"
 grep -F 'theme-variant' "$SETTINGS"
 grep -F 'terminal-input-highlighting-enabled' "$SETTINGS"
 grep -F 'terminal-output-rule-profile' "$SETTINGS"

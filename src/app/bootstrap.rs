@@ -3099,6 +3099,11 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
                 TerminalRendererHostOptions {
                     selection,
                     selection_overlay_rgba,
+                    input_highlighting_enabled: state
+                        .settings_modal_terminal_input_highlighting_enabled(),
+                    output_rule_highlighting_enabled: state
+                        .settings_modal_terminal_output_rule_highlighting_enabled(),
+                    output_rule_profile: state.settings_modal_terminal_output_rule_profile(),
                 },
                 scale_factor,
             ) {

@@ -565,11 +565,19 @@ pub(super) fn bind_shell_chrome_callbacks(
     let handle = window.as_weak();
     let store_ref = store.clone();
     let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
     window.on_settings_modal_terminal_input_highlighting_enabled_changed(move |value| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.set_settings_modal_terminal_input_highlighting_enabled(value);
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        sync_shell_side_regions(
+            &window,
+            &mut state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
         save_ui_preferences(&store_ref, &state);
     });
 
@@ -577,11 +585,19 @@ pub(super) fn bind_shell_chrome_callbacks(
     let handle = window.as_weak();
     let store_ref = store.clone();
     let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
     window.on_settings_modal_terminal_output_rule_highlighting_enabled_changed(move |value| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.set_settings_modal_terminal_output_rule_highlighting_enabled(value);
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        sync_shell_side_regions(
+            &window,
+            &mut state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
         save_ui_preferences(&store_ref, &state);
     });
 
@@ -589,11 +605,19 @@ pub(super) fn bind_shell_chrome_callbacks(
     let handle = window.as_weak();
     let store_ref = store.clone();
     let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
     window.on_settings_modal_terminal_output_rule_profile_changed(move |value| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.set_settings_modal_terminal_output_rule_profile(value.as_str());
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        sync_shell_side_regions(
+            &window,
+            &mut state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
         save_ui_preferences(&store_ref, &state);
     });
 
@@ -601,11 +625,19 @@ pub(super) fn bind_shell_chrome_callbacks(
     let handle = window.as_weak();
     let store_ref = store.clone();
     let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
     window.on_settings_modal_terminal_command_decorations_enabled_changed(move |value| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.set_settings_modal_terminal_command_decorations_enabled(value);
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        sync_shell_side_regions(
+            &window,
+            &mut state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
         save_ui_preferences(&store_ref, &state);
     });
 
@@ -613,11 +645,19 @@ pub(super) fn bind_shell_chrome_callbacks(
     let handle = window.as_weak();
     let store_ref = store.clone();
     let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
     window.on_settings_modal_terminal_overview_markers_enabled_changed(move |value| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.set_settings_modal_terminal_overview_markers_enabled(value);
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        sync_shell_side_regions(
+            &window,
+            &mut state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
         save_ui_preferences(&store_ref, &state);
     });
 
@@ -625,11 +665,19 @@ pub(super) fn bind_shell_chrome_callbacks(
     let handle = window.as_weak();
     let store_ref = store.clone();
     let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
     window.on_settings_modal_terminal_search_match_highlight_changed(move |value| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.set_settings_modal_terminal_search_match_highlight(value.as_str());
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        sync_shell_side_regions(
+            &window,
+            &mut state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
         save_ui_preferences(&store_ref, &state);
     });
 

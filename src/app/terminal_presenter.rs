@@ -33,11 +33,12 @@ use crate::app::terminal_renderer::wgpu_renderer::{
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 use crate::app::terminal_semantic::{
-    CommandBlock, OutputRuleAnalysis, OverviewMarker, SemanticSpan,
+    CommandBlock, OutputRuleAnalysis, OutputRuleProfile, OverviewMarker, SemanticSpan,
 };
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_semantic::{
-    SemanticStyleRole, analyze_output_rules, command_blocks_from_frame, detect_input_line_spans,
+    OutputRuleConfig, SemanticStyleRole, analyze_output_rules_with_config,
+    command_blocks_from_frame, detect_input_line_spans,
 };
 #[cfg(feature = "terminal-native-renderer")]
 use crate::theme::{AppThemeSpec, SemanticInkTheme, app_theme_spec_from_terminal_background};
@@ -199,11 +200,27 @@ pub struct NativeTerminalFrame {
     pub presentable_frame: PresentableNativeFrame,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerminalPresentationOptions {
     pub selection: Option<TerminalAtlasSelection>,
     pub selection_overlay_rgba: u32,
     pub ime_preview_overlay: NativeImePreviewOverlay,
+    pub input_highlighting_enabled: bool,
+    pub output_rule_highlighting_enabled: bool,
+    pub output_rule_profile: OutputRuleProfile,
+}
+
+impl Default for TerminalPresentationOptions {
+    fn default() -> Self {
+        Self {
+            selection: None,
+            selection_overlay_rgba: 0,
+            ime_preview_overlay: NativeImePreviewOverlay::default(),
+            input_highlighting_enabled: true,
+            output_rule_highlighting_enabled: true,
+            output_rule_profile: OutputRuleProfile::Default,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -656,14 +673,26 @@ fn prepare_native_terminal_frame_with_diagnostics(
     let model_started = Instant::now();
     let mut frame_model = TerminalModelFrame::from_surface(surface, context.previous_frame.as_ref());
     let model_frame_us = model_started.elapsed().as_micros() as u64;
-    let semantic_output_analysis = analyze_output_rules(&frame_model, &frame_model.dirty_rows);
+    let semantic_output_analysis = analyze_output_rules_with_config(
+        &frame_model,
+        &frame_model.dirty_rows,
+        &OutputRuleConfig {
+            enabled: options.output_rule_highlighting_enabled,
+            profile: options.output_rule_profile,
+            ..OutputRuleConfig::default()
+        },
+    );
     let semantic_output_spans = merge_semantic_output_spans(
         context.previous_output_rule_spans.as_deref(),
         &semantic_output_analysis,
         &frame_model,
     );
     let cached_semantic_output_spans = semantic_output_spans.clone();
-    let semantic_input_spans = detect_input_line_spans(&frame_model);
+    let semantic_input_spans = if options.input_highlighting_enabled {
+        detect_input_line_spans(&frame_model)
+    } else {
+        Vec::new()
+    };
     let theme_spec =
         app_theme_spec_from_terminal_background(frame_model.palette.default_bg_rgba);
     apply_semantic_highlights(
@@ -855,11 +884,31 @@ fn merge_semantic_output_spans(
 
 #[cfg(feature = "terminal-native-renderer")]
 pub fn semantic_highlight_summary_for_test(
-    mut frame: TerminalModelFrame,
+    frame: TerminalModelFrame,
 ) -> SemanticHighlightDebugSummary {
-    let output_analysis = analyze_output_rules(&frame, &frame.dirty_rows);
+    semantic_highlight_summary_with_options_for_test(frame, TerminalPresentationOptions::default())
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+pub fn semantic_highlight_summary_with_options_for_test(
+    mut frame: TerminalModelFrame,
+    options: TerminalPresentationOptions,
+) -> SemanticHighlightDebugSummary {
+    let output_analysis = analyze_output_rules_with_config(
+        &frame,
+        &frame.dirty_rows,
+        &OutputRuleConfig {
+            enabled: options.output_rule_highlighting_enabled,
+            profile: options.output_rule_profile,
+            ..OutputRuleConfig::default()
+        },
+    );
     let output_spans = merge_semantic_output_spans(None, &output_analysis, &frame);
-    let input_spans = detect_input_line_spans(&frame);
+    let input_spans = if options.input_highlighting_enabled {
+        detect_input_line_spans(&frame)
+    } else {
+        Vec::new()
+    };
     let theme_spec = app_theme_spec_from_terminal_background(frame.palette.default_bg_rgba);
     apply_semantic_highlights(&mut frame, &theme_spec, &output_spans, &input_spans)
 }

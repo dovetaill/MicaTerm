@@ -5,7 +5,10 @@ use mica_term::app::ssh::runtime::{
 };
 use mica_term::app::terminal_core::TerminalCoreKind;
 use mica_term::app::terminal_model::TerminalModelFrame;
-use mica_term::app::terminal_presenter::semantic_highlight_summary_for_test;
+use mica_term::app::terminal_presenter::{
+    TerminalPresentationOptions, semantic_highlight_summary_for_test,
+    semantic_highlight_summary_with_options_for_test,
+};
 use mica_term::app::terminal_semantic::{
     SemanticStyleRole, detect_input_line_spans, detect_output_block_spans,
 };
@@ -326,6 +329,40 @@ fn semantic_roles_project_visible_highlight_primitives_for_dirty_rows() {
             || summary.output_underlines > 0
             || summary.output_tints > 0
     );
+}
+
+#[test]
+fn presentation_options_can_disable_input_highlighting() {
+    let frame = semantic_model_frame_with_cells(&["$ cargo run --release ./fixtures"]);
+
+    let summary = semantic_highlight_summary_with_options_for_test(
+        frame,
+        TerminalPresentationOptions {
+            input_highlighting_enabled: false,
+            ..TerminalPresentationOptions::default()
+        },
+    );
+
+    assert_eq!(summary.input_fg_overrides, 0);
+    assert_eq!(summary.input_underlines, 0);
+    assert_eq!(summary.input_tints, 0);
+}
+
+#[test]
+fn presentation_options_can_disable_output_rule_highlighting() {
+    let frame = semantic_model_frame_with_cells(&["https://example.com failed"]);
+
+    let summary = semantic_highlight_summary_with_options_for_test(
+        frame,
+        TerminalPresentationOptions {
+            output_rule_highlighting_enabled: false,
+            ..TerminalPresentationOptions::default()
+        },
+    );
+
+    assert_eq!(summary.output_fg_overrides, 0);
+    assert_eq!(summary.output_underlines, 0);
+    assert_eq!(summary.output_tints, 0);
 }
 
 #[test]
