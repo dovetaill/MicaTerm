@@ -9,7 +9,7 @@ fn top_status_bar_layout_matches_sync_first_class_action_budget() {
     assert_eq!(ShellMetrics::TITLEBAR_BRAND_WIDTH, 188);
     assert_eq!(ShellMetrics::TITLEBAR_TOOL_BUTTON_SIZE, 36);
     assert_eq!(ShellMetrics::TITLEBAR_TOOL_ICON_SIZE, 20);
-    assert_eq!(ShellMetrics::TITLEBAR_UTILITY_WIDTH, 220);
+    assert_eq!(ShellMetrics::TITLEBAR_UTILITY_WIDTH, 260);
     assert_eq!(ShellMetrics::TITLEBAR_WINDOW_CONTROL_WIDTH, 138);
 }
 
