@@ -34,14 +34,14 @@ export component SidebarNavButton inherits Rectangle {
     height: 36px;
     border-radius: 10px;
     border-width: root.active || touch.has-hover ? 1px : 0px;
-    border-color: root.active ? ThemeTokens.divider-strong : ThemeTokens.divider-subtle;
+    border-color: root.active ? ThemeTokens.sidebar-item-selected-border : ThemeTokens.divider-subtle;
     background: touch.pressed
         ? ThemeTokens.control-pressed-surface
         : root.active
-            ? ThemeTokens.sidebar-selected-surface
+            ? ThemeTokens.sidebar-item-selected-background
             : touch.has-hover
-                ? ThemeTokens.sidebar-hover-surface
-            : transparent;
+                ? ThemeTokens.sidebar-item-hover-background
+                : transparent;
 
     if (root.displayed-icon.width > 0 && root.displayed-icon.height > 0) : Image {
         x: (parent.width - self.width) / 2;

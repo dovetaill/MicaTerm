@@ -968,9 +968,7 @@ export component TerminalSessionHost inherits Rectangle {
             clip: true;
             border-width: 1px;
             border-color: ThemeTokens.divider-subtle;
-            background: root.session-render-mode == "native"
-                ? root.session-default-bg
-                : ThemeTokens.panel-surface;
+            background: ThemeTokens.terminal-frame-background;
 
             blank-surface := Rectangle {
                 x: root.terminal-surface-origin-x();
@@ -978,7 +976,9 @@ export component TerminalSessionHost inherits Rectangle {
                 width: root.snapped-terminal-content-width();
                 height: root.snapped-terminal-content-height();
                 clip: true;
-                background: root.session-default-bg;
+                background: root.session-render-mode == "native"
+                    ? root.session-default-bg
+                    : ThemeTokens.terminal-surface-background;
 
                 Image {
                     x: 0px;
@@ -1261,7 +1261,7 @@ export component TerminalSessionHost inherits Rectangle {
                 border-radius: 8px;
                 border-width: 1px;
                 border-color: ThemeTokens.divider-strong;
-                background: ThemeTokens.panel-surface;
+                background: ThemeTokens.sidebar-panel-background;
 
                 VerticalLayout {
                     x: 8px;
@@ -1335,7 +1335,7 @@ export component TerminalSessionHost inherits Rectangle {
                 border-radius: 12px;
                 border-width: 1px;
                 border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.panel-surface;
+                background: ThemeTokens.terminal-frame-background;
 
                 VerticalLayout {
                     width: parent.width;
@@ -1375,7 +1375,7 @@ export component TerminalSessionHost inherits Rectangle {
                 border-radius: 12px;
                 border-width: 1px;
                 border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.panel-surface;
+                background: ThemeTokens.terminal-frame-background;
                 clip: true;
 
                 VerticalLayout {
@@ -1396,7 +1396,7 @@ export component TerminalSessionHost inherits Rectangle {
                             ? ThemeTokens.focus-ring
                             : ThemeTokens.divider-subtle;
                         background: step.state == "running"
-                            ? ThemeTokens.sidebar-selected-surface
+                            ? ThemeTokens.sidebar-item-selected-background
                             : step.state == "failed"
                                 ? ThemeTokens.status-error-surface
                                 : step.state == "done"

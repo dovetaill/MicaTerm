@@ -24,12 +24,12 @@ export component ActiveTab inherits Rectangle {
     border-radius: 10px;
     border-width: 0px;
     background: root.active
-        ? ThemeTokens.tab-active-surface
+        ? ThemeTokens.tab-active-background
         : (content-hit-target.pressed || close-hit-target.pressed)
             ? ThemeTokens.control-pressed-surface
             : root.has-hover
-                ? ThemeTokens.tab-inactive-surface
-                : transparent;
+                ? ThemeTokens.tab-hover-background
+                : ThemeTokens.tab-inactive-background;
     clip: true;
 
     title-metric := Text {
@@ -65,7 +65,7 @@ export component ActiveTab inherits Rectangle {
         width: parent.width - 20px;
         height: 2px;
         border-radius: 1px;
-        background: ThemeTokens.tab-active-indicator;
+        background: ThemeTokens.tab-active-line;
         visible: root.active;
     }
 

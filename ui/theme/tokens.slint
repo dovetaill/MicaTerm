@@ -3,25 +3,41 @@
 export global ThemeTokens {
     in property <bool> dark-mode: true;
 
-    out property <brush> accent: dark-mode ? #6f9bd4 : #4d80c8;
-    out property <brush> link-accent: dark-mode ? #86b5ea : #2d6fc7;
-    out property <brush> focus-ring: dark-mode ? #7099cc : #83aadf;
+    out property <brush> accent: dark-mode ? #6f8fb7 : #587daa;
+    out property <brush> link-accent: dark-mode ? #7a97bc : #6388b4;
+    out property <brush> focus-ring: dark-mode ? #7c9bc3 : #7e9ec5;
 
-    out property <brush> text-primary: dark-mode ? #eef3f8 : #0f1722;
-    out property <brush> text-secondary: dark-mode ? #b9c3d0 : #3f4d5d;
-    out property <brush> text-muted: dark-mode ? #8794a6 : #5f7084;
+    out property <brush> text-primary: dark-mode ? #e6ecf3 : #24303d;
+    out property <brush> text-secondary: dark-mode ? #b8c2cf : #49586a;
+    out property <brush> text-muted: dark-mode ? #8b98a9 : #677789;
+    out property <brush> text-inactive: dark-mode ? #738095 : #7b8a9c;
 
-    out property <brush> window-surface: dark-mode ? #171c24 : #f6f8fb;
-    out property <brush> titlebar-surface: dark-mode ? #1b212be8 : #fbfcfeee;
-    out property <brush> activity-surface: dark-mode ? #151b24 : #f2f5f9;
-    out property <brush> assets-surface: dark-mode ? #181f29 : #f7f9fc;
-    out property <brush> tabbar-surface: dark-mode ? #181f28 : #f9fbfe;
-    out property <brush> tab-active-surface: dark-mode ? #1f2732 : #ffffff;
-    out property <brush> tab-inactive-surface: dark-mode ? #17202a : #f4f7fb;
-    out property <brush> tab-active-indicator: dark-mode ? #78a6d9 : #3d77bf;
-    out property <brush> workspace-surface: dark-mode ? #10151d : #ffffff;
-    out property <brush> panel-surface: dark-mode ? #181f29 : #f5f8fc;
-    out property <brush> inspector-surface: panel-surface;
+    out property <brush> window-surface: dark-mode ? #141b23 : #f2f5f8;
+    out property <brush> titlebar-background: dark-mode ? #181f27 : #f7f9fc;
+    out property <brush> tabbar-background: dark-mode ? #1a222c : #eef2f7;
+    out property <brush> sidebar-background: dark-mode ? #18212b : #ebf0f5;
+    out property <brush> sidebar-panel-background: dark-mode ? #1b2430 : #f1f5f9;
+    out property <brush> terminal-frame-background: dark-mode ? #101924 : #fbfcfd;
+    out property <brush> terminal-surface-background: dark-mode ? #0c141c : #f8fafc;
+    out property <brush> tab-active-background: dark-mode ? #223040 : #ffffff;
+    out property <brush> tab-inactive-background: dark-mode ? #1a222c : #eef2f7;
+    out property <brush> tab-hover-background: dark-mode ? #202b38 : #e8edf4;
+    out property <brush> tab-active-line: dark-mode ? #7a97bc : #6388b4;
+    out property <brush> sidebar-item-hover-background: dark-mode ? #22303d : #e4ebf3;
+    out property <brush> sidebar-item-selected-background: dark-mode ? #2a3949 : #dce6f2;
+    out property <brush> sidebar-item-selected-border: dark-mode ? #6c88ae66 : #6e8cb333;
+
+    // Compatibility aliases for unchanged shell/modal surfaces outside the redesign slice.
+    out property <brush> titlebar-surface: titlebar-background;
+    out property <brush> activity-surface: sidebar-background;
+    out property <brush> assets-surface: sidebar-panel-background;
+    out property <brush> tabbar-surface: tabbar-background;
+    out property <brush> tab-active-surface: tab-active-background;
+    out property <brush> tab-inactive-surface: tab-inactive-background;
+    out property <brush> tab-active-indicator: tab-active-line;
+    out property <brush> workspace-surface: terminal-frame-background;
+    out property <brush> panel-surface: sidebar-panel-background;
+    out property <brush> inspector-surface: sidebar-panel-background;
     out property <brush> utility-panel-surface: dark-mode ? #1c2431 : #f3f6fb;
     out property <brush> utility-panel-header-surface: dark-mode ? #222c39 : #fafcff;
     out property <brush> utility-panel-section-surface: dark-mode ? #141c26 : #f8fbff;
@@ -80,17 +96,17 @@ export global ThemeTokens {
     out property <length> modal-header-height: 58px;
     out property <length> modal-footer-min-height: 72px;
 
-    out property <brush> sidebar-hover-surface: dark-mode ? #232d39 : #edf3fb;
-    out property <brush> sidebar-selected-surface: dark-mode ? #293442 : #e4edf9;
-    out property <brush> explorer-row-hover-surface: sidebar-hover-surface;
-    out property <brush> explorer-row-selected-surface: sidebar-selected-surface;
+    out property <brush> sidebar-hover-surface: sidebar-item-hover-background;
+    out property <brush> sidebar-selected-surface: sidebar-item-selected-background;
+    out property <brush> explorer-row-hover-surface: sidebar-item-hover-background;
+    out property <brush> explorer-row-selected-surface: sidebar-item-selected-background;
 
     out property <brush> input-surface: dark-mode ? #161d27 : #ffffff;
     out property <brush> input-border: dark-mode ? #2b3646 : #d7e0ec;
     out property <brush> input-focus-ring: focus-ring;
 
-    out property <brush> divider-subtle: dark-mode ? #ffffff12 : #0f172a14;
-    out property <brush> divider-strong: dark-mode ? #ffffff24 : #0f172a26;
+    out property <brush> divider-subtle: dark-mode ? #ffffff14 : #1c27330f;
+    out property <brush> divider-strong: dark-mode ? #ffffff24 : #1c273324;
 
     out property <brush> control-hover-surface: dark-mode ? #242d3a : #eef3fa;
     out property <brush> control-active-surface: dark-mode ? #1d2632 : #f4f7fb;

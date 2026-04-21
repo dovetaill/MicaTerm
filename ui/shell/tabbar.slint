@@ -24,14 +24,14 @@ export component TabBar inherits Rectangle {
     width: 100%;
     min-width: 0px;
     height: 36px;
-    background: ThemeTokens.tabbar-surface;
+    background: ThemeTokens.tabbar-background;
     border-width: 0px;
 
     chrome-reference := Rectangle {
         width: 0px;
         height: 0px;
         visible: false;
-        background: ThemeTokens.titlebar-surface;
+        background: ThemeTokens.titlebar-background;
     }
 
     HorizontalLayout {
@@ -70,7 +70,7 @@ export component TabBar inherits Rectangle {
             background: new-tab-touch.pressed
                 ? ThemeTokens.control-pressed-surface
                 : new-tab-touch.has-hover
-                    ? ThemeTokens.tab-inactive-surface
+                    ? ThemeTokens.tab-hover-background
                     : transparent;
 
             Image {

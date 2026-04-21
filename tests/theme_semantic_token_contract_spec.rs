@@ -5,13 +5,16 @@ fn semantic_theme_tokens_cover_shell_hierarchy_and_states() {
     let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
 
     for token in [
-        "out property <brush> tabbar-surface:",
-        "out property <brush> tab-active-surface:",
-        "out property <brush> tab-inactive-surface:",
-        "out property <brush> tab-active-indicator:",
-        "out property <brush> sidebar-hover-surface:",
-        "out property <brush> sidebar-selected-surface:",
-        "out property <brush> panel-surface:",
+        "out property <brush> titlebar-background:",
+        "out property <brush> tabbar-background:",
+        "out property <brush> sidebar-background:",
+        "out property <brush> sidebar-panel-background:",
+        "out property <brush> terminal-frame-background:",
+        "out property <brush> terminal-surface-background:",
+        "out property <brush> sidebar-item-hover-background:",
+        "out property <brush> sidebar-item-selected-background:",
+        "out property <brush> sidebar-item-selected-border:",
+        "out property <brush> tab-active-line:",
         "out property <brush> input-surface:",
         "out property <brush> input-border:",
         "out property <brush> input-focus-ring:",
@@ -34,11 +37,11 @@ fn light_mode_text_tokens_raise_shell_contrast_for_small_misans_copy() {
     let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
 
     assert!(
-        tokens.contains("out property <brush> text-secondary: dark-mode ? #b9c3d0 : #3f4d5d;"),
+        tokens.contains("out property <brush> text-secondary: dark-mode ? #b8c2cf : #49586a;"),
         "light-mode secondary text should move to a darker shell contrast so 14px shell body copy stops reading as gray haze on Windows"
     );
     assert!(
-        tokens.contains("out property <brush> text-muted: dark-mode ? #8794a6 : #5f7084;"),
+        tokens.contains("out property <brush> text-muted: dark-mode ? #8b98a9 : #677789;"),
         "light-mode muted text should keep enough density for small shell captions instead of collapsing into low-contrast gray"
     );
 }
@@ -57,27 +60,27 @@ fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
         fs::read_to_string("ui/components/status-pill.slint").expect("read status pill");
     let terminal_host =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
-    let theme_spec = fs::read_to_string("src/theme/spec.rs").expect("read theme spec");
 
     assert!(
-        tabbar.contains("ThemeTokens.tabbar-surface"),
-        "tab strip should use a dedicated tabbar surface instead of reusing the titlebar surface"
+        tabbar.contains("ThemeTokens.tabbar-background"),
+        "tab strip should use the premium default tabbar background token instead of the older shared surface token"
     );
     assert!(
-        active_tab.contains("ThemeTokens.tab-active-surface")
-            && active_tab.contains("ThemeTokens.tab-inactive-surface")
-            && active_tab.contains("ThemeTokens.tab-active-indicator")
+        active_tab.contains("ThemeTokens.tab-active-background")
+            && active_tab.contains("ThemeTokens.tab-inactive-background")
+            && active_tab.contains("ThemeTokens.tab-active-line")
             && active_tab.contains("ThemeTokens.text-secondary"),
         "active tabs should use semantic tab tokens for active/inactive hierarchy and secondary copy"
     );
     assert!(
-        sidebar_button.contains("ThemeTokens.sidebar-hover-surface")
-            && sidebar_button.contains("ThemeTokens.sidebar-selected-surface"),
+        sidebar_button.contains("ThemeTokens.sidebar-item-hover-background")
+            && sidebar_button.contains("ThemeTokens.sidebar-item-selected-background"),
         "activity buttons should use semantic sidebar hover/selected tokens"
     );
     assert!(
-        asset_row.contains("ThemeTokens.sidebar-hover-surface")
-            && asset_row.contains("ThemeTokens.sidebar-selected-surface"),
+        asset_row.contains("ThemeTokens.sidebar-item-hover-background")
+            && asset_row.contains("ThemeTokens.sidebar-item-selected-background")
+            && asset_row.contains("ThemeTokens.sidebar-item-selected-border"),
         "asset tree rows should share the same sidebar hover/selected token family"
     );
     assert!(
@@ -94,20 +97,29 @@ fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
         "status pill should use its own semantic pill tokens instead of a generic panel background"
     );
     assert!(
-        terminal_host.contains("ThemeTokens.panel-surface"),
-        "terminal host chrome should use the shared panel surface token rather than a generic control fill"
+        terminal_host.contains("ThemeTokens.terminal-frame-background")
+            && terminal_host.contains("ThemeTokens.terminal-surface-background"),
+        "terminal host chrome should use the dedicated terminal frame/surface background tokens"
     );
     assert!(
-        theme_spec.contains("pub const TERMINAL_ROW_BANDING_ENABLED: bool = false;")
-            && theme_spec.contains("pub const TERMINAL_ROW_BANDING_ALPHA: f32 = 0.0;")
-            && theme_spec.contains("pub const TERMINAL_BG_GRAIN_ALPHA: f32 = 0.0;")
-            && theme_spec.contains("pub const TERMINAL_BG_BASE_DARK: u32 = 0x08_131d;")
-            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_TOP_DARK: u32 = 0x0b_1824;")
-            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_BOTTOM_DARK: u32 = 0x08_131d;")
-            && theme_spec.contains("pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xf2_f4f7;")
-            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xf6_f7f9;")
-            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xf2_f4f7;"),
-        "terminal palette spec should expose the shared calm viewport background constants, disable legacy row banding/grain, and keep soft dark/light gradient endpoints explicit"
+        !active_tab.contains("ThemeTokens.tab-active-surface")
+            && !active_tab.contains("ThemeTokens.tab-inactive-surface")
+            && !active_tab.contains("ThemeTokens.tab-active-indicator"),
+        "active-tab should stop reading the retired tab surface token family once the premium default ladder is in place"
+    );
+    assert!(
+        !sidebar_button.contains("ThemeTokens.sidebar-hover-surface")
+            && !sidebar_button.contains("ThemeTokens.sidebar-selected-surface"),
+        "sidebar buttons should stop reading the retired sidebar hover/selected token names"
+    );
+    assert!(
+        !asset_row.contains("ThemeTokens.sidebar-hover-surface")
+            && !asset_row.contains("ThemeTokens.sidebar-selected-surface"),
+        "asset rows should stop reading the retired sidebar hover/selected token names"
+    );
+    assert!(
+        !terminal_host.contains("ThemeTokens.panel-surface"),
+        "terminal host should stop reading the generic panel surface token once the dedicated terminal frame ladder exists"
     );
     assert!(
         !fs::read_to_string("ui/theme/tokens.slint")
