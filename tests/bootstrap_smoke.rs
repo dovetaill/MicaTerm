@@ -9155,6 +9155,49 @@ fn workspace_terminal_ctrl_shift_f_expands_asset_search_locally() {
 }
 
 #[test]
+fn workspace_terminal_ctrl_shift_m_toggles_focus_mode_locally() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let state = KeyboardMatrixState::default();
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(KeyboardMatrixLauncher::new(state.clone())),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    app.invoke_toggle_right_panel_requested();
+    assert!(app.get_show_assets_sidebar());
+    assert!(app.get_show_right_panel());
+
+    dispatch_text_key_chord(&app, "M", true, true, false);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_focus_mode(),
+        "Ctrl+Shift+M should enter the local workspace focus mode"
+    );
+    assert!(
+        !app.get_show_assets_sidebar() && !app.get_show_right_panel(),
+        "Ctrl+Shift+M should hide both side regions together"
+    );
+    assert!(
+        state.take_key_inputs().is_empty(),
+        "Ctrl+Shift+M should stay local and must not forward a remote key chord"
+    );
+    assert!(
+        state.take_paste_inputs().is_empty(),
+        "Ctrl+Shift+M should not hit the terminal paste channel"
+    );
+}
+
+#[test]
 fn workspace_terminal_ctrl_shift_p_opens_global_menu_locally() {
     i_slint_backend_testing::init_no_event_loop();
 

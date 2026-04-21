@@ -12,6 +12,7 @@ export component Titlebar inherits Rectangle {
     in property <int> sync-feedback-sequence: 0;
     in property <bool> sync-feedback-running: false;
     in property <bool> show-right-panel: false;
+    in property <bool> workspace-focus-mode: false;
     in property <bool> transfer-center-open: false;
     in property <int> transfer-queue-total: 0;
     in property <int> transfer-queue-active: 0;
@@ -29,6 +30,8 @@ export component Titlebar inherits Rectangle {
     private property <image> sync-icon: @image-url("../../assets/icons/fluent/arrow-clockwise-20-regular.svg");
     private property <image> panel-right-icon-regular: @image-url("../../assets/icons/fluent/panel-right-20-regular.svg");
     private property <image> panel-right-icon-filled: @image-url("../../assets/icons/fluent/panel-right-20-filled.svg");
+    private property <image> focus-mode-icon-regular: @image-url("../../assets/icons/fluent/arrow-collapse-all-20-regular.svg");
+    private property <image> focus-mode-icon-active: @image-url("../../assets/icons/fluent/arrow-expand-all-20-regular.svg");
     private property <image> transfer-icon: @image-url("../../assets/icons/fluent/arrow-upload-20-regular.svg");
     private property <image> pin-icon: @image-url("../../assets/icons/fluent/pin-20-regular.svg");
     private property <image> pin-off-icon: @image-url("../../assets/icons/fluent/pin-off-20-regular.svg");
@@ -96,6 +99,7 @@ export component Titlebar inherits Rectangle {
     callback sync-now-requested;
     callback open-sync-modal-requested;
     callback toggle-right-panel-requested;
+    callback toggle-workspace-focus-mode-requested;
     callback open-transfer-center-requested;
     callback open-settings-panel-requested;
     callback open-appearance-panel-requested;
@@ -325,7 +329,7 @@ export component Titlebar inherits Rectangle {
         }
 
         utility-zone := Rectangle {
-            width: 220px;
+            width: 260px;
             height: parent.height;
             background: transparent;
             opacity: root.is-window-active ? 1 : 0.72;
@@ -394,7 +398,7 @@ export component Titlebar inherits Rectangle {
             }
 
             transfer-button := TitlebarIconButton {
-                x: 120px;
+                x: 160px;
                 y: 0px;
                 icon-source: root.transfer-icon;
                 active: root.transfer-center-open;
@@ -414,9 +418,30 @@ export component Titlebar inherits Rectangle {
                 }
             }
 
+            focus-mode-button := TitlebarIconButton {
+                x: 120px;
+                y: 0px;
+                icon-source: root.focus-mode-icon-regular;
+                active-icon-source: root.focus-mode-icon-active;
+                active: root.workspace-focus-mode;
+                tooltip-text: root.workspace-focus-mode ? "Exit focus mode" : "Enter focus mode";
+                tooltip-source-id: "focus-mode-button";
+
+                clicked => {
+                    root.toggle-workspace-focus-mode-requested();
+                }
+
+                tooltip-open-requested(source-id, text, anchor-x, anchor-y) => {
+                    root.schedule-tooltip(source-id, text, anchor-x, anchor-y);
+                }
+
+                tooltip-close-requested(source-id) => {
+                    root.queue-tooltip-close(source-id);
+                }
+            }
 
             divider-line := Rectangle {
-                x: 164px;
+                x: 204px;
                 y: 8px;
                 width: 1px;
                 height: 20px;
@@ -425,7 +450,7 @@ export component Titlebar inherits Rectangle {
             }
 
             pin-button := TitlebarIconButton {
-                x: 180px;
+                x: 220px;
                 y: 0px;
                 icon-source: root.is-window-always-on-top ? root.pin-icon : root.pin-off-icon;
                 active: root.is-window-always-on-top;

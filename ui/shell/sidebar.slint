@@ -39,6 +39,9 @@ export component Sidebar inherits Rectangle {
     private property <length> tooltip-anchor-y-value: 0px;
     private property <length> tooltip-anchor-width-value: 0px;
     private property <length> edge-handle-width: root.show-assets-sidebar ? 8px : 12px;
+    private property <string> edge-handle-tooltip: root.show-assets-sidebar
+        ? "Click to collapse, drag to resize"
+        : "Click to expand";
     out property <string> tooltip-text <=> root.tooltip-text-value;
     out property <bool> tooltip-visible <=> root.tooltip-visible-value;
     out property <length> tooltip-anchor-x <=> root.tooltip-anchor-x-value;
@@ -282,11 +285,26 @@ export component Sidebar inherits Rectangle {
             : transparent;
 
         handle-touch := TouchArea {
+            changed has-hover => {
+                if self.has-hover {
+                    root.schedule-tooltip(
+                        "assets-sidebar-edge-handle",
+                        root.edge-handle-tooltip,
+                        parent.absolute-position.x + parent.width / 2,
+                        parent.absolute-position.y + parent.height / 2,
+                        parent.width,
+                    );
+                } else {
+                    root.queue-tooltip-close("assets-sidebar-edge-handle");
+                }
+            }
+
             width: parent.width;
             height: parent.height;
             mouse-cursor: MouseCursor.e-resize;
 
             clicked => {
+                root.queue-tooltip-close("assets-sidebar-edge-handle");
                 root.assets-sidebar-edge-toggle-requested();
             }
 

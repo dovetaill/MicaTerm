@@ -450,6 +450,9 @@ export component TerminalSessionHost inherits Rectangle {
         if text == "f" || text == "F" {
             return "toggle-asset-search";
         }
+        if text == "m" || text == "M" {
+            return "toggle-workspace-focus-mode";
+        }
         return "";
     }
 

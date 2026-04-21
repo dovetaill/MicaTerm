@@ -16,6 +16,40 @@ impl ShellViewModel {
         self.asset_create_menu_open = false;
     }
 
+    pub(super) fn enter_workspace_focus_mode(&mut self) {
+        if self.workspace_focus_mode {
+            return;
+        }
+
+        self.saved_workspace_focus_assets_sidebar = self.show_assets_sidebar;
+        self.saved_workspace_focus_right_panel = self.show_right_panel;
+        self.workspace_focus_mode = true;
+        self.collapse_assets_sidebar();
+        self.show_right_panel = false;
+    }
+
+    pub(super) fn exit_workspace_focus_mode(&mut self) {
+        if !self.workspace_focus_mode {
+            return;
+        }
+
+        self.workspace_focus_mode = false;
+        if self.saved_workspace_focus_assets_sidebar {
+            self.show_assets_sidebar = true;
+        } else {
+            self.collapse_assets_sidebar();
+        }
+        self.show_right_panel = self.saved_workspace_focus_right_panel;
+    }
+
+    pub fn toggle_workspace_focus_mode(&mut self) {
+        if self.workspace_focus_mode {
+            self.exit_workspace_focus_mode();
+        } else {
+            self.enter_workspace_focus_mode();
+        }
+    }
+
     pub fn toggle_global_menu(&mut self) {
         self.show_global_menu = !self.show_global_menu;
     }
@@ -25,6 +59,16 @@ impl ShellViewModel {
     }
 
     pub fn toggle_assets_sidebar(&mut self) {
+        if self.workspace_focus_mode && !self.show_assets_sidebar {
+            self.exit_workspace_focus_mode();
+            if self.show_assets_sidebar {
+                return;
+            }
+
+            self.show_assets_sidebar = true;
+            return;
+        }
+
         if self.show_assets_sidebar {
             self.collapse_assets_sidebar();
         } else {
@@ -47,6 +91,16 @@ impl ShellViewModel {
     }
 
     pub fn apply_assets_sidebar_resize(&mut self, width_px: f32) -> bool {
+        if self.workspace_focus_mode
+            && !self.show_assets_sidebar
+            && width_px >= ShellMetrics::ASSETS_SIDEBAR_COLLAPSE_THRESHOLD as f32
+        {
+            self.exit_workspace_focus_mode();
+            let _ = self.set_assets_sidebar_expanded_width(width_px);
+            self.show_assets_sidebar = true;
+            return true;
+        }
+
         if width_px < ShellMetrics::ASSETS_SIDEBAR_COLLAPSE_THRESHOLD as f32 {
             if !self.show_assets_sidebar {
                 return false;
@@ -63,6 +117,13 @@ impl ShellViewModel {
     }
 
     pub fn select_sidebar_destination(&mut self, destination: SidebarDestination) {
+        if self.workspace_focus_mode && !self.show_assets_sidebar {
+            self.exit_workspace_focus_mode();
+            if self.show_assets_sidebar && self.active_sidebar_destination == destination {
+                return;
+            }
+        }
+
         if self.active_sidebar_destination == destination && self.show_assets_sidebar {
             self.collapse_assets_sidebar();
             return;

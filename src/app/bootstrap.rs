@@ -5270,14 +5270,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let _keep_session_projection_timer_alive = &session_projection_timer_ref;
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        let (width, height) = current_window_size(&window);
         state.toggle_right_panel();
-        shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        sftp::sync_right_panel_state(&window, &mut state);
-        sync_shell_layout(&window, &mut state, width, height);
-        sync_workspace_session_state_with_manager(
+        shell_chrome::sync_shell_side_regions(
             &window,
-            &state,
+            &mut state,
+            effects_ref.as_ref(),
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -5292,14 +5289,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window.on_right_panel_edge_toggle_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        let (width, height) = current_window_size(&window);
         state.toggle_right_panel();
-        shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        sftp::sync_right_panel_state(&window, &mut state);
-        sync_shell_layout(&window, &mut state, width, height);
-        sync_workspace_session_state_with_manager(
+        shell_chrome::sync_shell_side_regions(
             &window,
-            &state,
+            &mut state,
+            effects_ref.as_ref(),
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -5335,13 +5329,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             return;
         }
 
-        let (logical_width, logical_height) = current_window_size(&window);
-        shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        sftp::sync_right_panel_state(&window, &mut state);
-        sync_shell_layout(&window, &mut state, logical_width, logical_height);
-        sync_workspace_session_state_with_manager(
+        shell_chrome::sync_shell_side_regions(
             &window,
-            &state,
+            &mut state,
+            effects_ref.as_ref(),
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -5372,13 +5363,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             return;
         }
 
-        let (logical_width, logical_height) = current_window_size(&window);
-        shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        sftp::sync_right_panel_state(&window, &mut state);
-        sync_shell_layout(&window, &mut state, logical_width, logical_height);
-        sync_workspace_session_state_with_manager(
+        shell_chrome::sync_shell_side_regions(
             &window,
-            &state,
+            &mut state,
+            effects_ref.as_ref(),
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -6180,6 +6168,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let workspace_terminal_no_surface_since_ref = Rc::clone(&workspace_terminal_no_surface_since);
     let workspace_terminal_idle_cache_shrunk_ref = Rc::clone(&workspace_terminal_idle_cache_shrunk);
+    let effects_ref = Rc::clone(&effects);
     window.on_workspace_session_local_action_requested(move |action_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -6260,6 +6249,15 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             "toggle-global-menu" => {
                 state.toggle_global_menu();
                 window.set_show_global_menu(state.show_global_menu);
+            }
+            "toggle-workspace-focus-mode" => {
+                shell_chrome::toggle_workspace_focus_mode_and_sync(
+                    &window,
+                    &mut state,
+                    effects_ref.as_ref(),
+                    &mut workspace_follow_tracker_ref.borrow_mut(),
+                    session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+                );
             }
             "cancel-connection-attempt" => {
                 let Some(session_bridge) = session_bridge_ref.as_ref() else {
