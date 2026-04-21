@@ -11,6 +11,8 @@ fn layout_policy_keeps_full_shell_when_width_budget_is_sufficient() {
         window_width: ShellMetrics::WINDOW_DEFAULT_WIDTH,
         request_assets_sidebar: true,
         request_right_panel: true,
+        requested_assets_sidebar_width: ShellMetrics::ASSETS_SIDEBAR_DEFAULT_WIDTH,
+        requested_right_panel_width: ShellMetrics::RIGHT_PANEL_DEFAULT_WIDTH,
     });
 
     assert!(layout.show_assets_sidebar);
@@ -21,17 +23,28 @@ fn layout_policy_keeps_full_shell_when_width_budget_is_sufficient() {
 #[test]
 fn layout_policy_collapses_assets_sidebar_before_right_panel() {
     let collapse_assets = resolve_shell_layout(ShellLayoutInput {
-        window_width: ShellMetrics::FULL_LAYOUT_MIN_WIDTH - 1,
+        window_width: ShellMetrics::ACTIVITY_BAR_WIDTH
+            + ShellMetrics::MAIN_WORKSPACE_MIN_WIDTH
+            + ShellMetrics::RIGHT_PANEL_MAX_WIDTH
+            + ShellMetrics::ASSETS_SIDEBAR_MAX_WIDTH
+            - 1,
         request_assets_sidebar: true,
         request_right_panel: true,
+        requested_assets_sidebar_width: ShellMetrics::ASSETS_SIDEBAR_MAX_WIDTH,
+        requested_right_panel_width: ShellMetrics::RIGHT_PANEL_MAX_WIDTH,
     });
     assert!(!collapse_assets.show_assets_sidebar);
     assert!(collapse_assets.show_right_panel);
 
     let collapse_right = resolve_shell_layout(ShellLayoutInput {
-        window_width: ShellMetrics::RIGHT_PANEL_ONLY_MIN_WIDTH - 1,
+        window_width: ShellMetrics::ACTIVITY_BAR_WIDTH
+            + ShellMetrics::MAIN_WORKSPACE_MIN_WIDTH
+            + ShellMetrics::RIGHT_PANEL_MAX_WIDTH
+            - 1,
         request_assets_sidebar: true,
         request_right_panel: true,
+        requested_assets_sidebar_width: ShellMetrics::ASSETS_SIDEBAR_MAX_WIDTH,
+        requested_right_panel_width: ShellMetrics::RIGHT_PANEL_MAX_WIDTH,
     });
     assert!(!collapse_right.show_assets_sidebar);
     assert!(!collapse_right.show_right_panel);
@@ -43,10 +56,30 @@ fn layout_policy_preserves_requested_state_when_regions_are_not_requested() {
         window_width: ShellMetrics::WINDOW_DEFAULT_WIDTH,
         request_assets_sidebar: false,
         request_right_panel: false,
+        requested_assets_sidebar_width: ShellMetrics::ASSETS_SIDEBAR_DEFAULT_WIDTH,
+        requested_right_panel_width: ShellMetrics::RIGHT_PANEL_DEFAULT_WIDTH,
     });
 
     assert!(!layout.show_assets_sidebar);
     assert!(!layout.show_right_panel);
+}
+
+#[test]
+fn layout_policy_uses_requested_panel_widths_when_budget_exactly_fits() {
+    let layout = resolve_shell_layout(ShellLayoutInput {
+        window_width: ShellMetrics::ACTIVITY_BAR_WIDTH
+            + ShellMetrics::ASSETS_SIDEBAR_MAX_WIDTH
+            + ShellMetrics::MAIN_WORKSPACE_MIN_WIDTH
+            + ShellMetrics::RIGHT_PANEL_MAX_WIDTH,
+        request_assets_sidebar: true,
+        request_right_panel: true,
+        requested_assets_sidebar_width: ShellMetrics::ASSETS_SIDEBAR_MAX_WIDTH,
+        requested_right_panel_width: ShellMetrics::RIGHT_PANEL_MAX_WIDTH,
+    });
+
+    assert!(layout.show_assets_sidebar);
+    assert!(layout.show_right_panel);
+    assert_eq!(layout.main_workspace_width, ShellMetrics::MAIN_WORKSPACE_MIN_WIDTH);
 }
 
 #[test]

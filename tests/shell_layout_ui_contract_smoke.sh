@@ -18,18 +18,42 @@ grep -F 'clip: true;' "$APP_WINDOW" >/dev/null
 grep -F 'vertical-stretch: 1;' "$APP_WINDOW" >/dev/null
 grep -F 'shell-body := Rectangle' "$APP_WINDOW" >/dev/null
 grep -F 'WorkspacePane' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <length> assets-sidebar-expanded-width: 320px;' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <length> right-panel-expanded-width: 392px;' "$APP_WINDOW" >/dev/null
+grep -F 'callback assets-sidebar-edge-toggle-requested();' "$APP_WINDOW" >/dev/null
+grep -F 'callback assets-sidebar-edge-drag-start-requested(length);' "$APP_WINDOW" >/dev/null
+grep -F 'callback assets-sidebar-edge-drag-move-requested(length);' "$APP_WINDOW" >/dev/null
+grep -F 'callback assets-sidebar-edge-drag-end-requested(length);' "$APP_WINDOW" >/dev/null
+grep -F 'callback right-panel-edge-toggle-requested();' "$APP_WINDOW" >/dev/null
+grep -F 'callback right-panel-edge-drag-start-requested(length);' "$APP_WINDOW" >/dev/null
+grep -F 'callback right-panel-edge-drag-move-requested(length);' "$APP_WINDOW" >/dev/null
+grep -F 'callback right-panel-edge-drag-end-requested(length);' "$APP_WINDOW" >/dev/null
 grep -F 'show-assets-sidebar: root.effective-show-assets-sidebar;' "$APP_WINDOW" >/dev/null
+grep -F 'assets-sidebar-expanded-width: root.assets-sidebar-expanded-width;' "$APP_WINDOW" >/dev/null
 grep -F 'expanded: root.effective-show-right-panel;' "$APP_WINDOW" >/dev/null
+grep -F 'expanded-width: root.right-panel-expanded-width;' "$APP_WINDOW" >/dev/null
 grep -F 'horizontal-stretch: 1;' "$WORKSPACE_PANE" >/dev/null
 grep -F 'min-width: 0px;' "$WORKSPACE_PANE" >/dev/null
 grep -F 'width: 100%;' "$WORKSPACE_PANE" >/dev/null
+grep -F 'in property <length> expanded-width: 392px;' "$RIGHT_PANEL" >/dev/null
+grep -F 'callback right-panel-edge-toggle-requested();' "$RIGHT_PANEL" >/dev/null
+grep -F 'callback right-panel-edge-drag-start-requested(length);' "$RIGHT_PANEL" >/dev/null
+grep -F 'callback right-panel-edge-drag-move-requested(length);' "$RIGHT_PANEL" >/dev/null
+grep -F 'callback right-panel-edge-drag-end-requested(length);' "$RIGHT_PANEL" >/dev/null
 grep -F 'left-divider := Rectangle {' "$RIGHT_PANEL" >/dev/null
 grep -F 'visible: root.expanded;' "$RIGHT_PANEL" >/dev/null
 grep -F 'border-radius: 0px;' "$RIGHT_PANEL" >/dev/null
 grep -F 'border-width: 0px;' "$RIGHT_PANEL" >/dev/null
+! grep -F 'width: root.expanded ? 392px : 0px;' "$RIGHT_PANEL" >/dev/null
 grep -F 'VerticalLayout {' "$WELCOME" >/dev/null
 grep -F 'QuickLaunchDetailPane' "$WELCOME" >/dev/null
 grep -F 'activity-bar := Rectangle' "$SIDEBAR" >/dev/null
+grep -F 'in property <length> assets-sidebar-expanded-width: 320px;' "$SIDEBAR" >/dev/null
+grep -F 'callback assets-sidebar-edge-toggle-requested();' "$SIDEBAR" >/dev/null
+grep -F 'callback assets-sidebar-edge-drag-start-requested(length);' "$SIDEBAR" >/dev/null
+grep -F 'callback assets-sidebar-edge-drag-move-requested(length);' "$SIDEBAR" >/dev/null
+grep -F 'callback assets-sidebar-edge-drag-end-requested(length);' "$SIDEBAR" >/dev/null
+! grep -F 'width: 44px + (root.show-assets-sidebar ? 320px : 0px);' "$SIDEBAR" >/dev/null
 
 ! grep -F 'border-radius: 14px;' "$RIGHT_PANEL" >/dev/null
 

@@ -5,6 +5,7 @@ use std::fs;
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::bind_top_status_bar_with_store;
 use mica_term::app::ui_preferences::UiPreferencesStore;
+use mica_term::shell::metrics::ShellMetrics;
 use slint::{ComponentHandle, PhysicalSize};
 
 #[test]
@@ -138,4 +139,67 @@ fn narrow_width_preserves_requested_right_panel_but_hides_it_effectively() {
     assert!(app.get_show_right_panel());
     assert!(!app.get_effective_show_assets_sidebar());
     assert!(!app.get_effective_show_right_panel());
+}
+
+#[test]
+fn bootstrap_syncs_shell_panel_width_memory_into_window_contract() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    assert_eq!(
+        app.get_assets_sidebar_expanded_width() as u32,
+        ShellMetrics::ASSETS_SIDEBAR_DEFAULT_WIDTH
+    );
+    assert_eq!(
+        app.get_right_panel_expanded_width() as u32,
+        ShellMetrics::RIGHT_PANEL_DEFAULT_WIDTH
+    );
+}
+
+#[test]
+fn edge_handle_callbacks_resize_restore_and_collapse_shell_panels() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_assets_sidebar_edge_drag_start_requested(
+        ShellMetrics::ASSETS_SIDEBAR_DEFAULT_WIDTH as f32,
+    );
+    app.invoke_assets_sidebar_edge_drag_move_requested(368.0);
+    app.invoke_assets_sidebar_edge_drag_end_requested(368.0);
+    assert_eq!(app.get_assets_sidebar_expanded_width() as u32, 368);
+
+    app.invoke_assets_sidebar_edge_toggle_requested();
+    assert!(!app.get_show_assets_sidebar());
+
+    app.invoke_assets_sidebar_edge_toggle_requested();
+    assert!(app.get_show_assets_sidebar());
+    assert_eq!(app.get_assets_sidebar_expanded_width() as u32, 368);
+
+    app.invoke_right_panel_edge_toggle_requested();
+    assert!(app.get_show_right_panel());
+
+    app.invoke_right_panel_edge_drag_start_requested(
+        ShellMetrics::RIGHT_PANEL_DEFAULT_WIDTH as f32,
+    );
+    app.invoke_right_panel_edge_drag_move_requested(452.0);
+    app.invoke_right_panel_edge_drag_end_requested(452.0);
+    assert_eq!(app.get_right_panel_expanded_width() as u32, 452);
+
+    app.invoke_right_panel_edge_drag_start_requested(452.0);
+    app.invoke_right_panel_edge_drag_move_requested(
+        (ShellMetrics::RIGHT_PANEL_COLLAPSE_THRESHOLD - 1) as f32,
+    );
+    app.invoke_right_panel_edge_drag_end_requested(
+        (ShellMetrics::RIGHT_PANEL_COLLAPSE_THRESHOLD - 1) as f32,
+    );
+    assert!(!app.get_show_right_panel());
+    assert_eq!(app.get_right_panel_expanded_width() as u32, 452);
+
+    app.invoke_right_panel_edge_toggle_requested();
+    assert!(app.get_show_right_panel());
+    assert_eq!(app.get_right_panel_expanded_width() as u32, 452);
 }

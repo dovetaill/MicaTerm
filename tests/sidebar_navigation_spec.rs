@@ -3,6 +3,7 @@
 use mica_term::shell::sidebar::{
     SidebarDestination, create_popover_actions_for, sidebar_destinations, toolbar_descriptor_for,
 };
+use mica_term::shell::metrics::ShellMetrics;
 use mica_term::shell::view_model::ShellViewModel;
 
 #[test]
@@ -99,6 +100,57 @@ fn selecting_active_destination_collapse_hides_sidebar_search() {
     assert!(!view_model.show_assets_sidebar);
     assert!(!view_model.asset_search_expanded);
     assert_eq!(view_model.asset_search_query, "prod");
+}
+
+#[test]
+fn reopening_assets_sidebar_restores_last_resized_width() {
+    let mut view_model = ShellViewModel::default();
+
+    assert!(view_model.set_assets_sidebar_expanded_width(360.0));
+
+    view_model.toggle_assets_sidebar();
+    assert!(!view_model.show_assets_sidebar);
+
+    view_model.toggle_assets_sidebar();
+
+    assert!(view_model.show_assets_sidebar);
+    assert_eq!(view_model.assets_sidebar_expanded_width_px() as u32, 360);
+}
+
+#[test]
+fn reopening_right_panel_restores_last_resized_width() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.toggle_right_panel();
+    assert!(view_model.set_right_panel_expanded_width(448.0));
+
+    view_model.toggle_right_panel();
+    assert!(!view_model.show_right_panel);
+
+    view_model.toggle_right_panel();
+
+    assert!(view_model.show_right_panel);
+    assert_eq!(view_model.right_panel_expanded_width_px() as u32, 448);
+}
+
+#[test]
+fn dragging_below_collapse_threshold_hides_panels_without_forgetting_widths() {
+    let mut view_model = ShellViewModel::default();
+
+    assert!(view_model.set_assets_sidebar_expanded_width(364.0));
+    assert!(view_model.apply_assets_sidebar_resize(
+        (ShellMetrics::ASSETS_SIDEBAR_COLLAPSE_THRESHOLD - 1) as f32,
+    ));
+    assert!(!view_model.show_assets_sidebar);
+    assert_eq!(view_model.assets_sidebar_expanded_width_px() as u32, 364);
+
+    view_model.toggle_right_panel();
+    assert!(view_model.set_right_panel_expanded_width(456.0));
+    assert!(view_model.apply_right_panel_resize(
+        (ShellMetrics::RIGHT_PANEL_COLLAPSE_THRESHOLD - 1) as f32,
+    ));
+    assert!(!view_model.show_right_panel);
+    assert_eq!(view_model.right_panel_expanded_width_px() as u32, 456);
 }
 
 #[test]

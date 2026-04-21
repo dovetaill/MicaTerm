@@ -64,19 +64,22 @@ grep -F 'enabled: root.asset-show-tree-controls && root.asset-tree-controls-enab
 grep -F 'if root.asset-uses-create-popover {' "$ASSETS" >/dev/null
 grep -F 'root.toggle-assets-create-menu-requested();' "$ASSETS" >/dev/null
 grep -F 'root.assets-create-action-selected(root.asset-primary-create-action-id);' "$ASSETS" >/dev/null
-grep -F 'width: expanded ? 320px : 0px;' "$ASSETS" >/dev/null
+grep -F 'in property <length> expanded-width: 320px;' "$ASSETS" >/dev/null
+grep -F 'width: expanded ? root.expanded-width : 0px;' "$ASSETS" >/dev/null
 grep -F 'height: root.asset-search-expanded ? 44px : 0px;' "$ASSETS" >/dev/null
 ! grep -F 'create-menu := AssetsCreateMenu {' "$ASSETS" >/dev/null
 
 grep -F 'in property <bool> asset-create-menu-open: false;' "$SIDEBAR" >/dev/null
 grep -F 'in property <bool> asset-tree-controls-enabled: true;' "$SIDEBAR" >/dev/null
+grep -F 'in property <length> assets-sidebar-expanded-width: 320px;' "$SIDEBAR" >/dev/null
 grep -F 'callback toggle-assets-create-menu-requested();' "$SIDEBAR" >/dev/null
 grep -F 'callback close-assets-create-menu-requested();' "$SIDEBAR" >/dev/null
 grep -F 'out property <length> create-menu-anchor-x: assets-sidebar.create-menu-anchor-x;' "$SIDEBAR" >/dev/null
 grep -F 'out property <length> create-menu-anchor-y: assets-sidebar.create-menu-anchor-y;' "$SIDEBAR" >/dev/null
 grep -F 'out property <length> create-menu-anchor-width: assets-sidebar.create-menu-anchor-width;' "$SIDEBAR" >/dev/null
 grep -F 'out property <length> create-menu-anchor-height: assets-sidebar.create-menu-anchor-height;' "$SIDEBAR" >/dev/null
-grep -F 'width: 44px + (root.show-assets-sidebar ? 320px : 0px);' "$SIDEBAR" >/dev/null
+grep -F 'assets-sidebar-expanded-width: root.assets-sidebar-expanded-width;' "$SIDEBAR" >/dev/null
+grep -F 'width: 44px + (root.show-assets-sidebar ? root.assets-sidebar-expanded-width : 0px);' "$SIDEBAR" >/dev/null
 grep -F 'toggle-assets-create-menu-requested => {' "$SIDEBAR" >/dev/null
 grep -F 'close-assets-create-menu-requested => {' "$SIDEBAR" >/dev/null
 grep -F 'root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);' "$SIDEBAR" >/dev/null
@@ -84,6 +87,7 @@ grep -F 'root.queue-tooltip-close(source-id);' "$SIDEBAR" >/dev/null
 
 grep -F 'import { AssetsCreateMenu } from "components/assets-create-menu.slint";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <bool> asset-create-menu-open: false;' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <length> assets-sidebar-expanded-width: 320px;' "$APP_WINDOW" >/dev/null
 grep -F 'callback toggle-assets-create-menu-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback close-assets-create-menu-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'out property <length> layout-assets-create-menu-anchor-x: sidebar.create-menu-anchor-x;' "$APP_WINDOW" >/dev/null
@@ -96,6 +100,7 @@ grep -F 'assets-create-menu-dismiss-layer := TouchArea {' "$APP_WINDOW" >/dev/nu
 grep -F 'enabled: root.asset-create-menu-open;' "$APP_WINDOW" >/dev/null
 grep -F 'assets-create-menu-overlay := AssetsCreateMenu {' "$APP_WINDOW" >/dev/null
 grep -F 'visible: root.asset-create-menu-open;' "$APP_WINDOW" >/dev/null
+grep -F 'assets-sidebar-expanded-width: root.assets-sidebar-expanded-width;' "$APP_WINDOW" >/dev/null
 grep -F 'x: sidebar.create-menu-anchor-x + sidebar.create-menu-anchor-width - self.width;' "$APP_WINDOW" >/dev/null
 grep -F 'y: sidebar.create-menu-anchor-y + sidebar.create-menu-anchor-height + 6px;' "$APP_WINDOW" >/dev/null
 ! grep -F 'assets-create-menu-overlay.show();' "$APP_WINDOW" >/dev/null
