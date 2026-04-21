@@ -115,6 +115,10 @@ impl ShellViewModel {
         self.show_right_panel
     }
 
+    pub fn workspace_focus_mode(&self) -> bool {
+        self.workspace_focus_mode
+    }
+
     pub fn requested_right_panel_width(&self) -> u32 {
         self.right_panel_expanded_width.round().max(0.0) as u32
     }
@@ -264,6 +268,17 @@ impl ShellViewModel {
     }
 
     pub fn toggle_right_panel(&mut self) {
+        if self.workspace_focus_mode && !self.show_right_panel {
+            self.exit_workspace_focus_mode();
+            if self.show_right_panel {
+                return;
+            }
+
+            self.show_right_panel = true;
+            self.right_panel_view = RightPanelView::Sftp;
+            return;
+        }
+
         self.show_right_panel = !self.show_right_panel;
         self.right_panel_view = RightPanelView::Sftp;
     }
@@ -286,6 +301,17 @@ impl ShellViewModel {
     }
 
     pub fn apply_right_panel_resize(&mut self, width_px: f32) -> bool {
+        if self.workspace_focus_mode
+            && !self.show_right_panel
+            && width_px >= ShellMetrics::RIGHT_PANEL_COLLAPSE_THRESHOLD as f32
+        {
+            self.exit_workspace_focus_mode();
+            let _ = self.set_right_panel_expanded_width(width_px);
+            self.show_right_panel = true;
+            self.right_panel_view = RightPanelView::Sftp;
+            return true;
+        }
+
         if width_px < ShellMetrics::RIGHT_PANEL_COLLAPSE_THRESHOLD as f32 {
             if !self.show_right_panel {
                 return false;

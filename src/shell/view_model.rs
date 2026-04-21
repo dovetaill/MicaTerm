@@ -625,6 +625,7 @@ pub struct SftpPanelRenderCache {
 pub struct ShellViewModel {
     pub show_welcome: bool,
     pub show_right_panel: bool,
+    pub workspace_focus_mode: bool,
     pub transfer_center_open: bool,
     pub transfer_center_pinned: bool,
     pub transfer_center_collapsed: bool,
@@ -633,6 +634,8 @@ pub struct ShellViewModel {
     pub right_panel_expanded_width: f32,
     pub show_global_menu: bool,
     pub show_assets_sidebar: bool,
+    saved_workspace_focus_assets_sidebar: bool,
+    saved_workspace_focus_right_panel: bool,
     pub assets_sidebar_expanded_width: f32,
     pub active_sidebar_destination: SidebarDestination,
     pub is_window_active: bool,
@@ -707,6 +710,7 @@ impl Default for ShellViewModel {
         Self {
             show_welcome: true,
             show_right_panel: false,
+            workspace_focus_mode: false,
             transfer_center_open: false,
             transfer_center_pinned: false,
             transfer_center_collapsed: false,
@@ -715,6 +719,8 @@ impl Default for ShellViewModel {
             right_panel_expanded_width: ShellMetrics::RIGHT_PANEL_DEFAULT_WIDTH as f32,
             show_global_menu: false,
             show_assets_sidebar: true,
+            saved_workspace_focus_assets_sidebar: true,
+            saved_workspace_focus_right_panel: false,
             assets_sidebar_expanded_width: ShellMetrics::ASSETS_SIDEBAR_DEFAULT_WIDTH as f32,
             active_sidebar_destination: SidebarDestination::Console,
             is_window_active: true,
