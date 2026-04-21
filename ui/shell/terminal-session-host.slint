@@ -53,6 +53,18 @@ export struct ConnectionProgressDiagnosticRow {
     text: string,
 }
 
+export struct TerminalCommandBlockDecoration {
+    id: int,
+    prompt_row: int,
+    output_end_row: int,
+    status: string,
+}
+
+export struct TerminalOverviewMarkerDecoration {
+    row: int,
+    kind: string,
+}
+
 component ConnectionProgressActionButton inherits Rectangle {
     in property <string> label;
     in property <bool> enabled: true;
@@ -143,6 +155,8 @@ export component TerminalSessionHost inherits Rectangle {
     in property <color> session-scrollbar-thumb: ThemeTokens.terminal-scrollbar-thumb-surface;
     in property <color> session-scrollbar-thumb-active: ThemeTokens.terminal-scrollbar-thumb-active-surface;
     in property <bool> session-mouse-grabbed: false;
+    in property <[TerminalCommandBlockDecoration]> session-command-blocks: [];
+    in property <[TerminalOverviewMarkerDecoration]> session-overview-markers: [];
     in property <[string]> session-visible-lines: [];
     in property <int> session-surface-seqno: 0;
     in property <int> session-viewport-offset-lines: 0;
@@ -167,6 +181,8 @@ export component TerminalSessionHost inherits Rectangle {
     callback selection-changed();
     callback paste-requested();
     callback local-action-requested(string);
+    callback command-decoration-selected(int);
+    callback overview-marker-selected(int);
     callback scroll-requested(int, int, int, bool, bool, bool);
     callback scroll-thumb-drag-requested(float);
     callback scroll-jump-requested(float);

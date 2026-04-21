@@ -32,9 +32,11 @@ use crate::app::terminal_renderer::wgpu_renderer::{
 };
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
-use crate::app::terminal_semantic::SemanticSpan;
+use crate::app::terminal_semantic::{CommandBlock, OverviewMarker, SemanticSpan};
 #[cfg(feature = "terminal-native-renderer")]
-use crate::app::terminal_semantic::{detect_input_line_spans, detect_output_block_spans};
+use crate::app::terminal_semantic::{
+    command_blocks_from_frame, detect_input_line_spans, detect_output_block_spans,
+};
 
 #[allow(dead_code)]
 type PresenterFrameSnapshot = TerminalFrameSnapshot;
@@ -176,6 +178,8 @@ pub struct PresentableNativeFrame {
     pub selection: NativeSelectionFrameState,
     pub selection_overlay: NativeSelectionOverlay,
     pub underline_overlay: NativeUnderlineOverlay,
+    pub command_blocks: Vec<CommandBlock>,
+    pub overview_markers: Vec<OverviewMarker>,
     pub semantic_output_spans: Vec<SemanticSpan>,
     pub semantic_input_spans: Vec<SemanticSpan>,
     pub ime_preview_overlay: NativeImePreviewOverlay,
@@ -683,6 +687,7 @@ fn prepare_native_terminal_frame_with_diagnostics(
     };
     let semantic_output_spans = detect_output_block_spans(&frame_model);
     let semantic_input_spans = detect_input_line_spans(&frame_model);
+    let command_ledger = command_blocks_from_frame(&frame_model);
     let cursor = NativeCursorFrameState {
         row: frame_model.cursor.row,
         col: frame_model.cursor.col,
@@ -739,6 +744,8 @@ fn prepare_native_terminal_frame_with_diagnostics(
                 .map(NativeUnderlineRun::from)
                 .collect(),
         },
+        command_blocks: command_ledger.blocks,
+        overview_markers: command_ledger.overview_markers,
         semantic_output_spans,
         semantic_input_spans,
         ime_preview_overlay: options.ime_preview_overlay,

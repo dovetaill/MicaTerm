@@ -2471,6 +2471,8 @@ fn present_workspace_native_terminal_frame(window: &AppWindow, frame: NativeTerm
         color_draws = presentable_frame.color_glyph_draws.len(),
         glyph_cache_entries = presentable_frame.renderer_stats.glyph_cache_entries,
         selection_overlay_rects = presentable_frame.selection_overlay.rect_count,
+        command_block_count = presentable_frame.command_blocks.len(),
+        overview_marker_count = presentable_frame.overview_markers.len(),
         semantic_output_span_count = presentable_frame.semantic_output_spans.len(),
         semantic_input_span_count = presentable_frame.semantic_input_spans.len(),
         underline_overlay_runs = presentable_frame.underline_overlay.run_count,
