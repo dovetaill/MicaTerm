@@ -3,6 +3,13 @@
 use super::*;
 
 impl ShellViewModel {
+    fn clamp_assets_sidebar_expanded_width(width_px: f32) -> f32 {
+        width_px.clamp(
+            ShellMetrics::ASSETS_SIDEBAR_MIN_WIDTH as f32,
+            ShellMetrics::ASSETS_SIDEBAR_MAX_WIDTH as f32,
+        )
+    }
+
     fn collapse_assets_sidebar(&mut self) {
         self.show_assets_sidebar = false;
         self.asset_search_expanded = false;
@@ -23,6 +30,36 @@ impl ShellViewModel {
         } else {
             self.show_assets_sidebar = true;
         }
+    }
+
+    pub fn assets_sidebar_expanded_width_px(&self) -> f32 {
+        self.assets_sidebar_expanded_width
+    }
+
+    pub fn set_assets_sidebar_expanded_width(&mut self, width_px: f32) -> bool {
+        let width_px = Self::clamp_assets_sidebar_expanded_width(width_px);
+        if (self.assets_sidebar_expanded_width - width_px).abs() <= f32::EPSILON {
+            return false;
+        }
+
+        self.assets_sidebar_expanded_width = width_px;
+        true
+    }
+
+    pub fn apply_assets_sidebar_resize(&mut self, width_px: f32) -> bool {
+        if width_px < ShellMetrics::ASSETS_SIDEBAR_COLLAPSE_THRESHOLD as f32 {
+            if !self.show_assets_sidebar {
+                return false;
+            }
+
+            self.collapse_assets_sidebar();
+            return true;
+        }
+
+        let width_changed = self.set_assets_sidebar_expanded_width(width_px);
+        let reopened = !self.show_assets_sidebar;
+        self.show_assets_sidebar = true;
+        width_changed || reopened
     }
 
     pub fn select_sidebar_destination(&mut self, destination: SidebarDestination) {

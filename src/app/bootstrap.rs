@@ -3214,6 +3214,8 @@ fn sync_shell_layout(
         window_width: logical_width.max(ShellMetrics::WINDOW_MIN_WIDTH),
         request_assets_sidebar: state.requested_assets_sidebar(),
         request_right_panel: state.requested_right_panel(),
+        requested_assets_sidebar_width: state.requested_assets_sidebar_width(),
+        requested_right_panel_width: state.requested_right_panel_width(),
     });
 
     window.set_effective_show_assets_sidebar(layout.show_assets_sidebar);

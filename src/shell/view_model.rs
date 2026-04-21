@@ -53,6 +53,7 @@ use crate::shell::quick_launch::{
     QuickLaunchGroupItem, collect_quick_launch_records, group_id_for_asset,
     matches_quick_launch_query, project_card_item, project_detail_item,
 };
+use crate::shell::metrics::ShellMetrics;
 use crate::shell::sidebar::SidebarDestination;
 use crate::shell::tabs::WorkspaceTab;
 use crate::theme::ThemeMode;
@@ -629,8 +630,10 @@ pub struct ShellViewModel {
     pub transfer_center_collapsed: bool,
     pub transfer_center_filter: TransferCenterFilter,
     pub right_panel_view: RightPanelView,
+    pub right_panel_expanded_width: f32,
     pub show_global_menu: bool,
     pub show_assets_sidebar: bool,
+    pub assets_sidebar_expanded_width: f32,
     pub active_sidebar_destination: SidebarDestination,
     pub is_window_active: bool,
     pub theme_mode: ThemeMode,
@@ -709,8 +712,10 @@ impl Default for ShellViewModel {
             transfer_center_collapsed: false,
             transfer_center_filter: TransferCenterFilter::All,
             right_panel_view: RightPanelView::Sftp,
+            right_panel_expanded_width: ShellMetrics::RIGHT_PANEL_DEFAULT_WIDTH as f32,
             show_global_menu: false,
             show_assets_sidebar: true,
+            assets_sidebar_expanded_width: ShellMetrics::ASSETS_SIDEBAR_DEFAULT_WIDTH as f32,
             active_sidebar_destination: SidebarDestination::Console,
             is_window_active: true,
             theme_mode: ThemeMode::Dark,

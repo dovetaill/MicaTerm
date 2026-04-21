@@ -107,8 +107,16 @@ impl ShellViewModel {
         self.show_assets_sidebar
     }
 
+    pub fn requested_assets_sidebar_width(&self) -> u32 {
+        self.assets_sidebar_expanded_width.round().max(0.0) as u32
+    }
+
     pub fn requested_right_panel(&self) -> bool {
         self.show_right_panel
+    }
+
+    pub fn requested_right_panel_width(&self) -> u32 {
+        self.right_panel_expanded_width.round().max(0.0) as u32
     }
 
     pub fn sync_modal_open(&self) -> bool {
@@ -258,6 +266,41 @@ impl ShellViewModel {
     pub fn toggle_right_panel(&mut self) {
         self.show_right_panel = !self.show_right_panel;
         self.right_panel_view = RightPanelView::Sftp;
+    }
+
+    pub fn right_panel_expanded_width_px(&self) -> f32 {
+        self.right_panel_expanded_width
+    }
+
+    pub fn set_right_panel_expanded_width(&mut self, width_px: f32) -> bool {
+        let width_px = width_px.clamp(
+            ShellMetrics::RIGHT_PANEL_MIN_WIDTH as f32,
+            ShellMetrics::RIGHT_PANEL_MAX_WIDTH as f32,
+        );
+        if (self.right_panel_expanded_width - width_px).abs() <= f32::EPSILON {
+            return false;
+        }
+
+        self.right_panel_expanded_width = width_px;
+        true
+    }
+
+    pub fn apply_right_panel_resize(&mut self, width_px: f32) -> bool {
+        if width_px < ShellMetrics::RIGHT_PANEL_COLLAPSE_THRESHOLD as f32 {
+            if !self.show_right_panel {
+                return false;
+            }
+
+            self.show_right_panel = false;
+            self.right_panel_view = RightPanelView::Sftp;
+            return true;
+        }
+
+        let width_changed = self.set_right_panel_expanded_width(width_px);
+        let reopened = !self.show_right_panel;
+        self.show_right_panel = true;
+        self.right_panel_view = RightPanelView::Sftp;
+        width_changed || reopened
     }
 
     pub fn transfer_center_open(&self) -> bool {
