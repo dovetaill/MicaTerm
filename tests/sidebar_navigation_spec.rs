@@ -1,9 +1,9 @@
 //! Sidebar destination ordering and activation contracts.
 
+use mica_term::shell::metrics::ShellMetrics;
 use mica_term::shell::sidebar::{
     SidebarDestination, create_popover_actions_for, sidebar_destinations, toolbar_descriptor_for,
 };
-use mica_term::shell::metrics::ShellMetrics;
 use mica_term::shell::view_model::ShellViewModel;
 
 #[test]
@@ -199,17 +199,20 @@ fn dragging_below_collapse_threshold_hides_panels_without_forgetting_widths() {
     let mut view_model = ShellViewModel::default();
 
     assert!(view_model.set_assets_sidebar_expanded_width(364.0));
-    assert!(view_model.apply_assets_sidebar_resize(
-        (ShellMetrics::ASSETS_SIDEBAR_COLLAPSE_THRESHOLD - 1) as f32,
-    ));
+    assert!(
+        view_model.apply_assets_sidebar_resize(
+            (ShellMetrics::ASSETS_SIDEBAR_COLLAPSE_THRESHOLD - 1) as f32,
+        )
+    );
     assert!(!view_model.show_assets_sidebar);
     assert_eq!(view_model.assets_sidebar_expanded_width_px() as u32, 364);
 
     view_model.toggle_right_panel();
     assert!(view_model.set_right_panel_expanded_width(456.0));
-    assert!(view_model.apply_right_panel_resize(
-        (ShellMetrics::RIGHT_PANEL_COLLAPSE_THRESHOLD - 1) as f32,
-    ));
+    assert!(
+        view_model
+            .apply_right_panel_resize((ShellMetrics::RIGHT_PANEL_COLLAPSE_THRESHOLD - 1) as f32,)
+    );
     assert!(!view_model.show_right_panel);
     assert_eq!(view_model.right_panel_expanded_width_px() as u32, 456);
 }

@@ -46,7 +46,11 @@ pub fn resolve_shell_layout(input: ShellLayoutInput) -> ShellLayoutDecision {
             } else {
                 0
             }
-            + if show_right_panel { right_panel_width } else { 0 };
+            + if show_right_panel {
+                right_panel_width
+            } else {
+                0
+            };
         input.window_width >= occupied + ShellMetrics::MAIN_WORKSPACE_MIN_WIDTH
     };
 
