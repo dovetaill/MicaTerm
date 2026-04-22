@@ -19,18 +19,17 @@ export component ActiveTab inherits Rectangle {
     private property <bool> close-visible: root.active || root.has-hover;
 
     min-width: 0px;
-    height: 36px;
+    height: 34px;
     preferred-width: min(root.max-chip-width, max(root.min-chip-width, title-metric.preferred-width + 62px));
-    border-radius: 12px;
-    border-width: root.active || root.has-hover ? 1px : 0px;
-    border-color: root.active ? ThemeTokens.divider-strong : ThemeTokens.divider-subtle;
+    border-radius: 10px;
+    border-width: 0px;
     background: root.active
-        ? ThemeTokens.tab-active-background
+        ? ThemeTokens.tab-active-surface
         : (content-hit-target.pressed || close-hit-target.pressed)
             ? ThemeTokens.control-pressed-surface
             : root.has-hover
-                ? ThemeTokens.tab-hover-background
-                : ThemeTokens.tab-inactive-background;
+                ? ThemeTokens.tab-inactive-surface
+                : transparent;
     clip: true;
 
     title-metric := Text {
@@ -49,9 +48,9 @@ export component ActiveTab inherits Rectangle {
     state-dot := Rectangle {
         x: 8px;
         y: (parent.height - self.height) / 2;
-        width: root.active ? 3px : 2px;
-        height: root.active ? 16px : 14px;
-        border-radius: 2px;
+        width: 2px;
+        height: 14px;
+        border-radius: 1px;
         background: root.state == "error" || root.state == "disconnected"
             ? ThemeTokens.status-error-accent
             : root.state == "connecting"
@@ -66,7 +65,7 @@ export component ActiveTab inherits Rectangle {
         width: parent.width - 20px;
         height: 2px;
         border-radius: 1px;
-        background: ThemeTokens.tab-active-line;
+        background: ThemeTokens.tab-active-indicator;
         visible: root.active;
     }
 
@@ -117,9 +116,9 @@ export component ActiveTab inherits Rectangle {
         height: parent.height;
         text: root.title;
         font-family: AppTypography.ui-font-family;
-        color: root.active ? ThemeTokens.tab-active-text : ThemeTokens.tab-inactive-text;
+        color: root.active ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
         font-size: AppTypography.ui-font-size-body;
-        font-weight: root.active ? AppTypography.ui-font-weight-semibold : AppTypography.ui-font-weight-regular;
+        font-weight: AppTypography.ui-font-weight-regular;
         letter-spacing: 0px;
         vertical-alignment: center;
         overflow: elide;

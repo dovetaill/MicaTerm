@@ -1,317 +1,456 @@
 # Terminal Visual and Highlight Redesign Design
 
 **Date:** 2026-04-21
-**Status:** Approved for implementation
-**Scope:** Rust + Slint desktop shell chrome, terminal palette, ANSI mapping, semantic highlighting, user preferences
+**Status:** Approved for planning
+**Scope:** Rust + Slint desktop terminal shell chrome, terminal palette, semantic highlighting, command decorations
 
 ## Goal
 
-Deliver a visually obvious terminal redesign that feels like a premium desktop product instead of a lightly polished default terminal. The terminal must become the primary visual surface in both dark and light mode, the shell chrome must establish a clear four-layer hierarchy, and semantic highlighting must become visibly useful without turning the output into a noisy rainbow.
+Upgrade the terminal experience from "already usable" to a calmer, more product-grade default that feels closer to mature tools like VS Code, Windows Terminal, Termius, and iTerm2 without copying any single product's look. The redesign must keep the terminal as the visual and functional focal point, improve long-session readability, unify dark and light modes, and introduce maintainable semantic highlighting and command-state decorations.
 
 ## Product Constraints
 
 - Keep the current font family. Do not replace the terminal font stack.
-- Restrict terminal metric changes to small padding / radius / hairline adjustments.
-- Preserve native ANSI output as the ground truth; semantic highlighting must layer on top of it.
-- Keep semantic detection and semantic styling decoupled.
-- Do not run regex analysis in the renderer.
-- Do not rescan the full scrollback every frame; only process dirty rows plus a bounded lookbehind.
-- Do not introduce WebView or heavy dependencies.
-- Reuse the existing terminal presenter / model / Slint shell structure.
-- Stay restrained: no neon blue, no neon green outside the legacy theme, no cyberpunk purple, no thick shadows, no glossy game-skin look.
+- Only make small terminal metric adjustments; preserve the current user-tuned feel.
+- Avoid cyberpunk styling, neon accents, heavy shadows, fake glass, or game-like chrome.
+- Favor low-saturation blue-black / graphite dark surfaces and misty cool off-white light surfaces.
+- Keep the implementation incremental and maintainable; avoid WebView or heavy new dependencies.
+- Do not compromise terminal performance, especially under large scrollback and high-output sessions.
 
 ## Current State Audit
 
-### Why the previous redesign still looked almost unchanged
+### What already works
 
-1. `src/theme/spec.rs` and `ui/theme/tokens.slint` keep the shell surfaces too close together in value. Dark mode stays in a narrow graphite band and light mode stays in a narrow fog-white band, so the app still reads as one large surface.
-2. Terminal foreground is still too close to conventional white / black defaults. It is technically tuned, but not enough to create a visible before/after difference.
-3. `ui/components/sidebar-nav-button.slint` and `ui/components/asset-node-row.slint` still express selection mostly through a 1px border and a mild fill, which reads like a highlighted control instead of a mature active destination.
-4. `ui/components/active-tab.slint` still relies on a bottom indicator and a small background delta, so active and inactive tabs remain too similar.
-5. The Premium Default ANSI palette is improved but still feels like a cautious recolor of a traditional 16-color set rather than a product-level palette with a clear taste.
-6. `src/app/terminal_semantic/rules.rs` and `src/app/terminal_semantic/input_line.rs` already emit semantic spans, but those spans are not yet transformed into visible terminal styling, so the rules exist more on paper than on screen.
-7. Light theme is still too close to a flat white-gray app shell. Terminal, tab strip, sidebar, and titlebar do not step apart enough.
-8. Dark theme is still too close to dark slab + bright text. The terminal does not yet feel like a calm blue-black working surface.
+- The terminal already owns most of the window's attention.
+- The shell chrome and terminal projection already have semantic structure via `ui/theme/tokens.slint`, `src/theme/spec.rs`, and `src/app/terminal_theme.rs`.
+- The app already has a `terminal_semantic` module with early input and output detectors.
+- The renderer pipeline already carries retained overlays and dirty-row information, which is a good base for incremental semantic work.
 
-### Strong parts worth preserving
+### Problems observed in the current UI
 
-- The terminal already owns the central workspace layout and does not need structural repositioning.
-- The app already has a stable theme root split across Rust and Slint, which we can consolidate rather than replace.
-- The semantic analyzer already supports incremental dirty-row analysis. The architecture is suitable for visible highlighting without a performance regression.
-- Command blocks, overview markers, and settings wiring already exist and should be expanded instead of rewritten.
+#### Light theme
 
-## Visual Direction
+- `titlebar`, `tabbar`, `sidebar`, and terminal shell frame sit too close together in value, so the app reads like one large white-gray surface.
+- The active tab is recognizable but still reads like a selected control rather than the current working context.
+- The asset tree selected row still feels border-driven instead of content-driven.
 
-## Recommended direction: Premium Default v2
+#### Dark theme
 
-A calm, product-grade terminal aesthetic with explicit chrome hierarchy and a visibly richer terminal palette.
+- The terminal background is close to pure black, which makes the shell chrome and content feel slightly disconnected.
+- The shell surfaces sit too close together, so the tab strip and side panel do not step back cleanly behind the terminal.
+- ANSI accents work functionally but still lean closer to theme-pack colors than to a premium product palette.
 
-- **Dark mode:** blue-black terminal surface, cool gray-white body text, restrained blue-gray accenting.
-- **Light mode:** mist-gray terminal surface, charcoal body text, soft blue-gray accenting.
-- **Chrome behavior:** titlebar, tab strip, sidebar, and terminal surface each occupy their own tonal layer, with the terminal clearly in focus.
-- **Highlight behavior:** semantic highlighting improves scanning through selective emphasis, subtle tints, and light underlines, not through broad saturated blocks.
+#### Structural problems in code
 
-## Rejected alternatives
+- Shell chrome tokens live in `ui/theme/tokens.slint`, while terminal palette values live separately in `src/theme/spec.rs` and `src/app/terminal_theme.rs`.
+- Semantic detectors in `src/app/terminal_semantic/input_line.rs` and `src/app/terminal_semantic/output_blocks.rs` currently hard-code overlay colors instead of outputting semantic roles.
+- Command decorations and overview markers do not yet exist as first-class themeable structures.
+- Terminal-specific text attributes are not fully modeled beyond the current bold/underline/fg/bg set.
 
-- **Warp-like heavy block UI:** too likely to overpower ANSI truth and make the shell chrome louder than the terminal.
-- **Minimal palette-only tweak:** too likely to repeat the same “changed, but barely noticeable” outcome.
-- **Aggressive Fluent glass treatment:** too decorative, too shell-focused, and too risky for long-session readability.
+## Design Direction
+
+### Recommended approach: Premium Default / Product-grade Calm
+
+Keep the existing layout and typography direction, but rebuild the shell ladder, terminal palette, and semantic decoration stack so the product feels calmer, more deliberate, and more maintainable.
+
+### Rejected alternatives
+
+- **Fluent-heavy shell:** too much risk of making the desktop chrome louder than the terminal.
+- **Terminal-first minimal shell:** too much risk of weakening the integrated assets / SSH / SFTP product identity.
 
 ## Visual Hierarchy
 
-The shell must read as four layers in both modes:
+The app should read as four layers in both dark and light modes:
 
-1. **Titlebar** — least assertive, utility-only layer.
-2. **Tab strip** — navigation layer, clearly distinct from titlebar.
-3. **Sidebar** — tool/navigation plane, slightly behind active workspace.
-4. **Terminal surface** — focal working plane, visually strongest without using loud effects.
+1. `titlebar`: lightest, least assertive, carries window controls and global actions.
+2. `tab strip`: one step stronger than the titlebar, but still clearly navigation chrome.
+3. `sidebar`: slightly deeper than the tab strip, giving the tool area its own plane.
+4. `terminal surface`: the visual anchor of the window, calm and readable, always more important than surrounding chrome.
 
-### Dark mode behavior
-
-- Application shell moves to a slightly cooler and deeper blue-black family.
-- Terminal surface becomes deeper than chrome but avoids pure black.
-- Foreground text softens from near-white to cool gray-white.
-- Selected controls gain presence through structured fills and slim indicators, not bright outlines.
-
-### Light mode behavior
-
-- Titlebar, tab strip, sidebar, and terminal surface all separate by clear but restrained value shifts.
-- Terminal surface becomes a cleaner working plane rather than more white shell.
-- Text moves to charcoal rather than pure black.
-- Hover and selected states become more content-driven and less border-driven.
-
-## Premium Default v2 Tokens
-
-### Global tokens
+### Desired behavior by mode
 
 #### Dark
 
-- `APP_BG_DARK = #0F161D`
-- `TITLEBAR_BG_DARK = #18212B`
-- `TAB_STRIP_BG_DARK = #111923`
-- `SIDEBAR_BG_DARK = #15202A`
-- `BORDER_DARK = #2D3A48`
-- `HAIRLINE_DARK = #FFFFFF14`
-- `ACCENT_DARK = #7D97B8`
+- Use low-saturation blue-black / graphite surfaces.
+- Let the terminal be the deepest surface, but stop short of pure black.
+- Keep body text off-white and cool, not bright white.
+- Let non-active chrome fall back by half a step.
 
 #### Light
 
-- `APP_BG_LIGHT = #E8EDF1`
-- `TITLEBAR_BG_LIGHT = #F7F9FB`
-- `TAB_STRIP_BG_LIGHT = #EDF2F6`
-- `SIDEBAR_BG_LIGHT = #E3EAF0`
-- `BORDER_LIGHT = #C9D3DD`
-- `HAIRLINE_LIGHT = #10203012`
-- `ACCENT_LIGHT = #6B87AB`
+- Use cool mist-gray shell surfaces with small but clear value separation.
+- Let the terminal read as a cleaner working surface rather than another part of the shell.
+- Use charcoal body text, not pure black.
+- Avoid the washed-out "single white sheet" look.
 
-### Sidebar tokens
+## Premium Default Tokens
+
+### Core shell tokens
 
 #### Dark
 
-- `SIDEBAR_ITEM_HOVER_DARK = #1C2A36`
-- `SIDEBAR_ITEM_SELECTED_BG_DARK = #223444`
-- `SIDEBAR_ITEM_SELECTED_BORDER_DARK = #35506A`
-- `SIDEBAR_ITEM_SELECTED_INDICATOR_DARK = #96AFCA`
-- `SIDEBAR_TEXT_DARK = #9AABBA`
-- `SIDEBAR_TEXT_ACTIVE_DARK = #ECF3F9`
+- `APP_BG_DARK = #141B23`
+- `TITLEBAR_BG_DARK = #181F27`
+- `TABBAR_BG_DARK = #1A222C`
+- `SIDEBAR_BG_DARK = #18212B`
+- `SIDEBAR_PANEL_BG_DARK = #1B2430`
+- `TERMINAL_BG_DARK = #0C141C`
+- `TERMINAL_BG_TOP_DARK = #101924`
+- `TERMINAL_BG_BOTTOM_DARK = #0C141C`
+- `TEXT_PRIMARY_DARK = #E6ECF3`
+- `TEXT_SECONDARY_DARK = #B8C2CF`
+- `TEXT_MUTED_DARK = #8B98A9`
+- `TEXT_INACTIVE_DARK = #738095`
+- `ACCENT_DARK = #6F8FB7`
+- `ACCENT_SOFT_DARK = #5E7EA8`
+- `FOCUS_RING_DARK = #7C9BC3`
+- `TAB_ACTIVE_BG_DARK = #223040`
+- `TAB_INACTIVE_BG_DARK = #1A222C`
+- `TAB_HOVER_BG_DARK = #202B38`
+- `TAB_ACTIVE_LINE_DARK = #7A97BC`
+- `SIDEBAR_ITEM_HOVER_DARK = #22303D`
+- `SIDEBAR_ITEM_SELECTED_DARK = #2A3949`
+- `SIDEBAR_ITEM_BORDER_DARK = #6C88AE66`
+- `SEPARATOR_DARK = #FFFFFF14`
+- `BORDER_DARK = #FFFFFF1E`
+- `HAIRLINE_STRONG_DARK = #FFFFFF24`
 
 #### Light
 
-- `SIDEBAR_ITEM_HOVER_LIGHT = #DDE6EE`
-- `SIDEBAR_ITEM_SELECTED_BG_LIGHT = #D2DFEA`
-- `SIDEBAR_ITEM_SELECTED_BORDER_LIGHT = #AEC0D1`
-- `SIDEBAR_ITEM_SELECTED_INDICATOR_LIGHT = #6F89AB`
-- `SIDEBAR_TEXT_LIGHT = #516173`
-- `SIDEBAR_TEXT_ACTIVE_LIGHT = #12202C`
-
-### Tab tokens
-
-#### Dark
-
-- `TAB_ACTIVE_BG_DARK = #1C2937`
-- `TAB_INACTIVE_BG_DARK = #121B24`
-- `TAB_HOVER_BG_DARK = #182430`
-- `TAB_ACTIVE_TEXT_DARK = #EEF4F9`
-- `TAB_INACTIVE_TEXT_DARK = #93A4B4`
-
-#### Light
-
+- `APP_BG_LIGHT = #F2F5F8`
+- `TITLEBAR_BG_LIGHT = #F7F9FC`
+- `TABBAR_BG_LIGHT = #EEF2F7`
+- `SIDEBAR_BG_LIGHT = #EBF0F5`
+- `SIDEBAR_PANEL_BG_LIGHT = #F1F5F9`
+- `TERMINAL_BG_LIGHT = #F8FAFC`
+- `TERMINAL_BG_TOP_LIGHT = #FBFCFD`
+- `TERMINAL_BG_BOTTOM_LIGHT = #F6F8FB`
+- `TEXT_PRIMARY_LIGHT = #24303D`
+- `TEXT_SECONDARY_LIGHT = #49586A`
+- `TEXT_MUTED_LIGHT = #677789`
+- `TEXT_INACTIVE_LIGHT = #7B8A9C`
+- `ACCENT_LIGHT = #587DAA`
+- `ACCENT_SOFT_LIGHT = #6E90B8`
+- `FOCUS_RING_LIGHT = #7E9EC5`
 - `TAB_ACTIVE_BG_LIGHT = #FFFFFF`
-- `TAB_INACTIVE_BG_LIGHT = #E8EEF4`
-- `TAB_HOVER_BG_LIGHT = #E0E8F0`
-- `TAB_ACTIVE_TEXT_LIGHT = #15222E`
-- `TAB_INACTIVE_TEXT_LIGHT = #5A6A79`
+- `TAB_INACTIVE_BG_LIGHT = #EEF2F7`
+- `TAB_HOVER_BG_LIGHT = #E8EDF4`
+- `TAB_ACTIVE_LINE_LIGHT = #6388B4`
+- `SIDEBAR_ITEM_HOVER_LIGHT = #E4EBF3`
+- `SIDEBAR_ITEM_SELECTED_LIGHT = #DCE6F2`
+- `SIDEBAR_ITEM_BORDER_LIGHT = #6E8CB333`
+- `SEPARATOR_LIGHT = #1C27330F`
+- `BORDER_LIGHT = #1C273319`
+- `HAIRLINE_STRONG_LIGHT = #1C273324`
 
-### Terminal tokens
+### Terminal reading tokens
 
 #### Dark
 
-- `TERMINAL_BG_DARK = #08131D`
-- `TERMINAL_FG_DARK = #D7E0E8`
-- `TERMINAL_FG_DIM_DARK = #8FA0AE`
-- `TERMINAL_CURSOR_DARK = #DCE6EE`
-- `TERMINAL_SELECTION_BG_DARK = #7A8FA94A`
-- `TERMINAL_SEARCH_MATCH_DARK = #A17A2430`
+- `TERMINAL_FG_DARK = #E3EAF2`
+- `TERMINAL_FG_DIM_DARK = #93A0B2`
+- `TERMINAL_FG_SOFT_DARK = #C8D1DC`
+- `TERMINAL_CURSOR_BG_DARK = #DCE6F3`
+- `TERMINAL_CURSOR_FG_DARK = #0C141C`
+- `TERMINAL_SELECTION_DARK = #6C88AE42`
+- `TERMINAL_SEARCH_MATCH_DARK = #7B68402E`
+- `TERMINAL_SEARCH_CURRENT_DARK = #8E79B845`
+- `SCROLLBAR_TRACK_DARK = #FFFFFF0C`
+- `SCROLLBAR_THUMB_DARK = #536274`
+- `SCROLLBAR_THUMB_ACTIVE_DARK = #66788E`
 
 #### Light
 
-- `TERMINAL_BG_LIGHT = #F4F6F8`
-- `TERMINAL_FG_LIGHT = #1F2933`
-- `TERMINAL_FG_DIM_LIGHT = #6C7A86`
-- `TERMINAL_CURSOR_LIGHT = #24313C`
-- `TERMINAL_SELECTION_BG_LIGHT = #7895B33A`
-- `TERMINAL_SEARCH_MATCH_LIGHT = #C49B3952`
+- `TERMINAL_FG_LIGHT = #263240`
+- `TERMINAL_FG_DIM_LIGHT = #758395`
+- `TERMINAL_FG_SOFT_LIGHT = #4B596A`
+- `TERMINAL_CURSOR_BG_LIGHT = #2C3948`
+- `TERMINAL_CURSOR_FG_LIGHT = #F8FAFC`
+- `TERMINAL_SELECTION_LIGHT = #7F9BC233`
+- `TERMINAL_SEARCH_MATCH_LIGHT = #D8C79A52`
+- `TERMINAL_SEARCH_CURRENT_LIGHT = #A98DDA52`
+- `SCROLLBAR_TRACK_LIGHT = #1C273308`
+- `SCROLLBAR_THUMB_LIGHT = #B7C3D0`
+- `SCROLLBAR_THUMB_ACTIVE_LIGHT = #9FAFBE`
 
-### ANSI palettes
+### Status tokens
 
-#### Premium Default dark
+#### Dark
 
-- `ANSI_BLACK_DARK = #3E4A57`
-- `ANSI_RED_DARK = #C97D88`
-- `ANSI_GREEN_DARK = #7FB08D`
-- `ANSI_YELLOW_DARK = #C6A066`
-- `ANSI_BLUE_DARK = #7F9EC4`
-- `ANSI_MAGENTA_DARK = #A88DBF`
-- `ANSI_CYAN_DARK = #74B1B7`
-- `ANSI_WHITE_DARK = #CBD5DF`
-- `ANSI_BRIGHT_BLACK_DARK = #5F6D7C`
-- `ANSI_BRIGHT_RED_DARK = #D9939D`
-- `ANSI_BRIGHT_GREEN_DARK = #97C3A1`
-- `ANSI_BRIGHT_YELLOW_DARK = #D8B780`
-- `ANSI_BRIGHT_BLUE_DARK = #9AB5D6`
-- `ANSI_BRIGHT_MAGENTA_DARK = #BEA2D1`
-- `ANSI_BRIGHT_CYAN_DARK = #90C8CC`
-- `ANSI_BRIGHT_WHITE_DARK = #ECF2F7`
+- `STATUS_SUCCESS_DARK = #7FB08D`
+- `STATUS_WARNING_DARK = #C9A86A`
+- `STATUS_ERROR_DARK = #C98A94`
+- `STATUS_INFO_DARK = #7D9BC2`
+- `STATUS_RUNNING_DARK = #7B96B8`
 
-#### Premium Default light
+#### Light
 
-- `ANSI_BLACK_LIGHT = #4E5C6A`
-- `ANSI_RED_LIGHT = #B76470`
-- `ANSI_GREEN_LIGHT = #5F8969`
-- `ANSI_YELLOW_LIGHT = #9B7A40`
-- `ANSI_BLUE_LIGHT = #567CA8`
-- `ANSI_MAGENTA_LIGHT = #866EA2`
-- `ANSI_CYAN_LIGHT = #4C8D8F`
-- `ANSI_WHITE_LIGHT = #A7B4BF`
-- `ANSI_BRIGHT_BLACK_LIGHT = #6C7B89`
-- `ANSI_BRIGHT_RED_LIGHT = #C87984`
-- `ANSI_BRIGHT_GREEN_LIGHT = #769D7D`
-- `ANSI_BRIGHT_YELLOW_LIGHT = #AD8B54`
-- `ANSI_BRIGHT_BLUE_LIGHT = #7095BF`
-- `ANSI_BRIGHT_MAGENTA_LIGHT = #9C83B6`
-- `ANSI_BRIGHT_CYAN_LIGHT = #66A4A7`
-- `ANSI_BRIGHT_WHITE_LIGHT = #D9E0E6`
+- `STATUS_SUCCESS_LIGHT = #5E8A68`
+- `STATUS_WARNING_LIGHT = #9B7A3C`
+- `STATUS_ERROR_LIGHT = #A55C67`
+- `STATUS_INFO_LIGHT = #5E81AE`
+- `STATUS_RUNNING_LIGHT = #6B85A9`
 
-## Legacy Hacker Green Variant
+### ANSI 16-color palettes
 
-Keep a clearly optional green-skewed variant for nostalgic users while preserving the same structural hierarchy and style system.
+#### Dark
 
-### Legacy Hacker Green tokens
+- black `#4A5260`
+- red `#C37A86`
+- green `#86B48F`
+- yellow `#C6A56A`
+- blue `#7D9BC2`
+- magenta `#A78CBF`
+- cyan `#78AFAE`
+- white `#C8D1DC`
+- bright black `#667180`
+- bright red `#D6949F`
+- bright green `#9BC6A4`
+- bright yellow `#D8BA83`
+- bright blue `#94AED0`
+- bright magenta `#B79CCB`
+- bright cyan `#8EC0C0`
+- bright white `#E7EDF4`
 
-- Use dark shell values in the `#0B120F` to `#173223` range.
-- Use light shell values in the `#E1ECE5` to `#FDFEFD` range.
-- Use terminal foreground in dark mode near `#9BE6B3` and light mode near `#213128`.
-- Keep ANSI green-led but still restrained: green remains visible, but side chrome and tab chrome still follow the same four-layer hierarchy.
+#### Light
 
-This variant must reuse the same semantic roles, settings flow, and renderer behavior as Premium Default.
+- black `#5A6573`
+- red `#B86470`
+- green `#5F8D69`
+- yellow `#9D7C41`
+- blue `#5B80AE`
+- magenta `#8F73AA`
+- cyan `#4E9090`
+- white `#AAB5C1`
+- bright black `#738090`
+- bright red `#C77A85`
+- bright green `#769E7E`
+- bright yellow `#B08D53`
+- bright blue `#7295BF`
+- bright magenta `#A286BB`
+- bright cyan `#68A4A3`
+- bright white `#D5DCE4`
 
-## Shell Chrome Adjustments
+## Typography and Reading
 
-### Titlebar
+- Keep the current font family.
+- Preserve the current default font size unless a very small alignment tweak is needed during verification.
+- Restrict line-height changes to subtle preset-level refinement rather than open-ended retuning.
+- Keep dim text readable; do not let it collapse into muddy gray.
+- If supported by the native renderer, preserve stable weight and edge clarity instead of chasing a softer but blurrier look.
+- Allow an optional tiny inactive-terminal contrast drop, but keep it under approximately five percent.
 
-- Reduce the sense of a heavy top slab.
-- Use a quieter surface with only a weak bottom hairline.
-- Keep controls legible, but avoid making the titlebar more eye-catching than the terminal.
+## Theme Architecture
 
-### Tab strip
+Introduce a single Rust-side theme root and let both Slint shell chrome and terminal renderer projection flow from it.
 
-- Treat the strip as a navigation plane distinct from the titlebar.
-- Make the active tab a visible container instead of a slightly lighter chip with a thin bottom line.
-- Reduce inactive tab contrast so the active tab becomes obvious even at a glance.
-- Keep hover readable but calm.
+```text
+AppThemeSpec
+|- id / name / variant / mode
+|- shell: ShellChromeTheme
+|- terminal: TerminalTheme
+|- decoration: DecorationTheme
+`- semantic: SemanticHighlightTheme
+```
 
-### Sidebar
+### Shell theme responsibilities
 
-- Replace the current “outlined selected control” look with a proper active destination treatment.
-- Selected rows and icon buttons use: low-saturation fill, soft border, brighter active text/icon, and a slim left indicator.
-- Hover remains one level lighter than idle but does not compete with selected.
+- App chrome surfaces
+- Tab strip states
+- Sidebar row states
+- Shell text hierarchy
+- Hairlines and focus rings
+- Status semantic colors
 
-### Terminal frame and surface
+### Terminal theme responsibilities
 
-- Move from a generic framed rectangle to a focused workspace plane.
-- Keep borders thin and quiet.
-- Let the terminal surface visually separate from surrounding chrome by a whole level rather than a subtle tint shift.
+- Default background/foreground
+- Cursor colors and emphasis
+- Selection overlay
+- Search match colors
+- Scrollbar chrome
+- ANSI 16-color palette
 
-## Semantic Highlighting System
+### Decoration theme responsibilities
 
-## Architecture
+- Command gutter markers
+- Overview ruler markers
+- Running block emphasis
+- Status-pill color families
 
-1. `terminal_semantic` modules remain responsible for detection only.
-2. Semantic analyzers emit `SemanticStyleRole` spans, not colors.
-3. The theme layer maps roles to a small set of visual primitives.
-4. The presenter merges those primitives into the frame for dirty rows only.
-5. The renderer consumes precomputed runs; it does not do regex or parsing.
+### Semantic highlight theme responsibilities
 
-## Supported first-wave rules
+- Input command roles
+- Output rule roles
+- Light-weight style payloads (foreground, underline, bold, optional background)
 
-### Output rules
+## Highlighter Architecture
 
-- Paths: `/root/gost`, `./foo/bar`, `~/.ssh/config`
-- URLs / schemes / domains: `http://`, `https://`, `ssh://`, `sftp://`, `relay+tls://`
-- IP + port: `185.241.40.72:38005`
-- Shell composition in visible input / prompt lines: command, option, argument, operator, variable, string, path
-- Semantic words: `ERROR`, `WARN`, `INFO`, `DEBUG`, `success`, `failed`, `denied`, `timeout`, `connected`, `disconnected`
-- Structural patterns: timestamps, permissions, `ls -l` style file kinds, `grep`/`rg` hits, obvious JSON key/string/number/boolean spans
+Adopt four explicit layers:
 
-### Visual treatment rules
+1. **ANSI Native Layer** - render ANSI truth first.
+2. **Input Command Highlight Layer** - analyze only the editable command line near the bottom of the terminal.
+3. **Command Block / Status Decoration Layer** - derive command lifecycle blocks and project gutter/overview status.
+4. **Output Rule Highlight Layer** - apply configurable high-value regex/structured rules incrementally.
 
-- Primary tool: foreground emphasis
-- Secondary tool: subtle underline
-- Optional supporting tool: extremely light background tint
-- No broad, fully opaque color blocks
-- If the original ANSI foreground is already meaningful, prefer underline or tint rather than overwriting that foreground
+### Key rules
 
-## Input highlighting
+- Do not rewrite ANSI output.
+- Do not run regex at renderer draw time.
+- Use dirty-row and append-window analysis by default.
+- Limit multi-line re-analysis to a bounded lookbehind window.
 
-- Reuse the current prompt-line tokenizer and expand it to reliably distinguish command, option, argument, path, variable, string, and operator.
-- Keep invalid-command styling dormant unless the shell integration can provide trusted validity information. The role may exist, but this redesign should not guess remote command validity.
+## Semantic Roles and Decorations
 
-## User Settings
+### Input roles
 
-Expose and persist:
+- Prompt
+- Command
+- Subcommand
+- Option
+- Argument
+- String
+- Path
+- Variable
+- InvalidCommand
+- Operator
 
-- Theme variant: `Premium Default` / `Legacy Hacker Green`
-- `Enable output rule highlighting`
-- `Enable shell input highlighting`
+### Output roles
 
-These options already have partial plumbing in `UiPreferences` and `ShellViewModel`; the redesign should finish the UX and keep persistence stable.
+- Url
+- FilePath
+- LineColumn
+- IpPort
+- Timestamp
+- LevelError / Warn / Info / Debug
+- SuccessKeyword / FailureKeyword
+- GrepMatch
+- GitAdded / GitRemoved / GitHunk
+- JsonKey / JsonString / JsonNumber / JsonBoolean
 
-## Testing Strategy
+### Command block status
 
-- Extend theme-token contract tests so the new token families are explicit and stable.
-- Extend terminal palette tests to assert the new Premium Default and Legacy Hacker Green values.
-- Extend scrollback / semantic tests to cover rule roles and incremental dirty-row behavior.
-- Add or update smoke checks for shell chrome token adoption.
-- Keep final verification as a real command run, not a claim based on expected behavior.
+- Running
+- Success
+- Failure
+- Unknown
+
+## Default Rule Set
+
+Enable these by default:
+
+- URL detection
+- Unix/Windows/home-relative paths
+- Path + line/column references
+- IPv4 + port
+- ISO/syslog-like timestamps
+- ERROR / WARN / INFO / DEBUG tokens
+- Success/failure keywords
+- `grep` / `rg` match lines
+- Git diff added/removed/hunk markers
+- JSON block roles when output clearly forms a JSON block
+- SSH / SFTP / rsync / kubectl / docker high-value patterns, starting with errors, host/path references, and transfer summaries
+
+Keep XML and richer structured modes conservative in the first pass.
+
+## Code Landing Plan
+
+### Files to refactor or extend
+
+- `src/theme/spec.rs`
+- `src/theme/mod.rs`
+- `src/app/terminal_theme.rs`
+- `src/app/bootstrap.rs`
+- `ui/theme/tokens.slint`
+- `ui/components/active-tab.slint`
+- `ui/components/sidebar-nav-button.slint`
+- `ui/components/asset-node-row.slint`
+- `ui/shell/titlebar.slint`
+- `ui/shell/tabbar.slint`
+- `ui/shell/sidebar.slint`
+- `ui/shell/assets-sidebar.slint`
+- `ui/shell/terminal-session-host.slint`
+- `src/app/terminal_model.rs`
+- `src/app/terminal_semantic/mod.rs`
+- `src/app/terminal_semantic/input_line.rs`
+- `src/app/terminal_semantic/output_blocks.rs`
+
+### Suggested new files
+
+- `src/app/terminal_semantic/types.rs`
+- `src/app/terminal_semantic/rules.rs`
+- `src/app/terminal_semantic/command_blocks.rs`
+
+## User-facing Settings
+
+First-pass exposed settings should stay limited to:
+
+- Theme mode
+- Theme variant
+- Terminal font size
+- Cursor shape
+- Input command highlighting enabled
+- Output rule highlighting enabled
+- Output rule profile
+- Command decorations enabled
+- Overview markers enabled
+- Search match highlight strength
+
+Avoid first-pass color pickers, arbitrary regex editors, or per-role manual theming.
 
 ## Acceptance Criteria
 
-The redesign is accepted only if all of the following are visibly true:
+### Visual
 
-- Before / after screenshots are obviously different.
-- Dark mode is no longer dead black with bright white text.
-- Light mode is no longer a mostly flat pale sheet.
-- Terminal surface is clearly the visual focus.
-- Active and inactive tabs are immediately distinguishable.
-- Sidebar selected state no longer reads like a boxed outline.
-- ANSI colors feel more mature and cohesive.
-- Output history shows visible information hierarchy from semantic highlighting.
-- The code path remains incremental and maintainable.
+- Dark and light each show clear four-layer hierarchy.
+- The terminal remains the visual center.
+- Light mode no longer reads as one white-gray plane.
+- Dark mode no longer reads as pure black behind bright white text.
+- Active tabs and selected asset rows are clear without loud borders.
 
-## References
+### Reading
 
-These references informed the direction without being copied literally:
+- Default text is calm and readable in long sessions.
+- Dim/secondary/inactive text form a usable hierarchy.
+- Small metric adjustments do not disrupt the existing user-tuned feel.
 
-- Warp theme design notes for extending terminal themes into full-UI surfaces.
-- Ghostty documentation for terminal-first, native, restrained UI priorities.
-- Windows Terminal color scheme guidance for explicit background / foreground / selection / cursor / ANSI token completeness.
+### Highlighting and state
+
+- ANSI output stays correct.
+- Input command highlighting improves readability without becoming editor-like.
+- Running / success / failure decorations are visible at a glance.
+- Overview markers help with long outputs.
+- Rule highlighting is useful but restrained.
+
+### Performance and stability
+
+- Large scrollback remains smooth.
+- Alternate-screen and mouse-grabbed TUIs are not polluted by shell-line overlays.
+- Theme switches update shell chrome, terminal chrome, and semantic styles together.
+
+### Maintainability
+
+- Theme tokens are no longer scattered through ad hoc constants.
+- Semantic detectors output roles, not hard-coded colors.
+- Theme variants can reuse the same semantic pipeline.
+
+## External Method References
+
+The redesign borrows method, not direct styling, from mature products and documentation:
+
+- VS Code shell integration command decorations and overview ruler ideas: <https://code.visualstudio.com/docs/terminal/shell-integration>
+- Windows Terminal paired dark/light profile and scheme design: <https://learn.microsoft.com/en-us/windows/terminal/customize-settings/profile-appearance>
+- Windows Terminal color scheme structure: <https://learn.microsoft.com/en-us/windows/terminal/customize-settings/color-schemes>
+- iTerm2 trigger-based output enhancement model: <https://iterm2.com/documentation-triggers.html>
+
+## Recommended Next Step
+
+Create an implementation plan that keeps the work incremental in this order:
+
+1. Theme root structures and preferences
+2. Shell chrome token replacement
+3. Terminal palette and ANSI projection
+4. Semantic type refactor
+5. Input highlighter enhancement
+6. Command block decorations and overview markers
+7. Output rule highlighting and settings polish

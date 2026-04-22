@@ -4,7 +4,7 @@ use anyhow::Result;
 use slint::Image;
 
 #[cfg(feature = "terminal-native-renderer")]
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 #[cfg(feature = "terminal-native-renderer")]
 use std::time::Instant;
 
@@ -32,16 +32,9 @@ use crate::app::terminal_renderer::wgpu_renderer::{
 };
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
-use crate::app::terminal_semantic::{
-    CommandBlock, OutputRuleAnalysis, OutputRuleProfile, OverviewMarker, SemanticSpan,
-};
+use crate::app::terminal_semantic::{SemanticInputOverlay, SemanticOutputOverlay};
 #[cfg(feature = "terminal-native-renderer")]
-use crate::app::terminal_semantic::{
-    OutputRuleConfig, SemanticStyleRole, analyze_output_rules_with_config,
-    command_blocks_from_frame, detect_input_line_spans,
-};
-#[cfg(feature = "terminal-native-renderer")]
-use crate::theme::{AppThemeSpec, SemanticInkTheme, app_theme_spec_from_terminal_background};
+use crate::app::terminal_semantic::{detect_input_line_overlays, detect_output_block_overlays};
 
 #[allow(dead_code)]
 type PresenterFrameSnapshot = TerminalFrameSnapshot;
@@ -183,10 +176,8 @@ pub struct PresentableNativeFrame {
     pub selection: NativeSelectionFrameState,
     pub selection_overlay: NativeSelectionOverlay,
     pub underline_overlay: NativeUnderlineOverlay,
-    pub command_blocks: Vec<CommandBlock>,
-    pub overview_markers: Vec<OverviewMarker>,
-    pub semantic_output_spans: Vec<SemanticSpan>,
-    pub semantic_input_spans: Vec<SemanticSpan>,
+    pub semantic_overlays: Vec<SemanticOutputOverlay>,
+    pub semantic_input_overlays: Vec<SemanticInputOverlay>,
     pub ime_preview_overlay: NativeImePreviewOverlay,
     pub renderer_stats: NativeRendererFrameStats,
 }
@@ -200,27 +191,11 @@ pub struct NativeTerminalFrame {
     pub presentable_frame: PresentableNativeFrame,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TerminalPresentationOptions {
     pub selection: Option<TerminalAtlasSelection>,
     pub selection_overlay_rgba: u32,
     pub ime_preview_overlay: NativeImePreviewOverlay,
-    pub input_highlighting_enabled: bool,
-    pub output_rule_highlighting_enabled: bool,
-    pub output_rule_profile: OutputRuleProfile,
-}
-
-impl Default for TerminalPresentationOptions {
-    fn default() -> Self {
-        Self {
-            selection: None,
-            selection_overlay_rgba: 0,
-            ime_preview_overlay: NativeImePreviewOverlay::default(),
-            input_highlighting_enabled: true,
-            output_rule_highlighting_enabled: true,
-            output_rule_profile: OutputRuleProfile::Default,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -233,17 +208,6 @@ pub struct TerminalPresenterCacheStats {
     pub color_glyph_cache_entries: usize,
     pub glyph_raster_cache_entries: usize,
     pub prepared_row_cache_entries: usize,
-}
-
-#[cfg(feature = "terminal-native-renderer")]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SemanticHighlightDebugSummary {
-    pub input_fg_overrides: usize,
-    pub input_underlines: usize,
-    pub input_tints: usize,
-    pub output_fg_overrides: usize,
-    pub output_underlines: usize,
-    pub output_tints: usize,
 }
 
 #[cfg(feature = "terminal-native-renderer")]
@@ -486,7 +450,6 @@ pub struct WindowsNativePresenter {
     raster_scale: f32,
     previous_frame: Option<TerminalModelFrame>,
     previous_shaped_rows: Option<Vec<crate::app::terminal_layout::ShapedRow>>,
-    previous_output_rule_spans: Option<Vec<SemanticSpan>>,
     shaped_row_cache: PresenterShapedRowCache,
 }
 
@@ -508,7 +471,6 @@ impl WindowsNativePresenter {
             raster_scale: 1.0,
             previous_frame: None,
             previous_shaped_rows: None,
-            previous_output_rule_spans: None,
             shaped_row_cache: PresenterShapedRowCache::default(),
         })
     }
@@ -520,7 +482,6 @@ impl WindowsNativePresenter {
         log_terminal_font_diagnostics("directwrite-d2d", request.px_size, &snapshot);
         self.previous_frame = None;
         self.previous_shaped_rows = None;
-        self.previous_output_rule_spans = None;
         self.shaped_row_cache.clear();
         Ok(())
     }
@@ -530,7 +491,6 @@ impl WindowsNativePresenter {
         self.font_system.set_emoji_renderer_for_tests(renderer);
         self.previous_frame = None;
         self.previous_shaped_rows = None;
-        self.previous_output_rule_spans = None;
         self.shaped_row_cache.clear();
     }
 }
@@ -568,7 +528,6 @@ impl TerminalPresenter for WindowsNativePresenter {
             &self.loaded_font,
             &mut self.previous_frame,
             &mut self.previous_shaped_rows,
-            &mut self.previous_output_rule_spans,
             &mut self.shaped_row_cache,
         );
         let (frame, diagnostics) =
@@ -606,7 +565,6 @@ impl TerminalPresenter for WindowsNativePresenter {
     fn clear_transient_caches(&mut self) {
         self.previous_frame = None;
         self.previous_shaped_rows = None;
-        self.previous_output_rule_spans = None;
         self.shaped_row_cache.clear();
         self.renderer.clear_transient_caches();
     }
@@ -624,7 +582,6 @@ struct NativeFramePreparationContext<'a> {
     loaded_font: &'a LoadedFont,
     previous_frame: &'a mut Option<TerminalModelFrame>,
     previous_shaped_rows: &'a mut Option<Vec<crate::app::terminal_layout::ShapedRow>>,
-    previous_output_rule_spans: &'a mut Option<Vec<SemanticSpan>>,
     shaped_row_cache: &'a mut PresenterShapedRowCache,
 }
 
@@ -637,7 +594,6 @@ impl<'a> NativeFramePreparationContext<'a> {
         loaded_font: &'a LoadedFont,
         previous_frame: &'a mut Option<TerminalModelFrame>,
         previous_shaped_rows: &'a mut Option<Vec<crate::app::terminal_layout::ShapedRow>>,
-        previous_output_rule_spans: &'a mut Option<Vec<SemanticSpan>>,
         shaped_row_cache: &'a mut PresenterShapedRowCache,
     ) -> Self {
         Self {
@@ -647,7 +603,6 @@ impl<'a> NativeFramePreparationContext<'a> {
             loaded_font,
             previous_frame,
             previous_shaped_rows,
-            previous_output_rule_spans,
             shaped_row_cache,
         }
     }
@@ -671,36 +626,8 @@ fn prepare_native_terminal_frame_with_diagnostics(
 ) -> Result<(NativeTerminalFrame, TerminalPrepareDiagnostics)> {
     let prepare_started = Instant::now();
     let model_started = Instant::now();
-    let mut frame_model = TerminalModelFrame::from_surface(surface, context.previous_frame.as_ref());
+    let frame_model = TerminalModelFrame::from_surface(surface, context.previous_frame.as_ref());
     let model_frame_us = model_started.elapsed().as_micros() as u64;
-    let semantic_output_analysis = analyze_output_rules_with_config(
-        &frame_model,
-        &frame_model.dirty_rows,
-        &OutputRuleConfig {
-            enabled: options.output_rule_highlighting_enabled,
-            profile: options.output_rule_profile,
-            ..OutputRuleConfig::default()
-        },
-    );
-    let semantic_output_spans = merge_semantic_output_spans(
-        context.previous_output_rule_spans.as_deref(),
-        &semantic_output_analysis,
-        &frame_model,
-    );
-    let cached_semantic_output_spans = semantic_output_spans.clone();
-    let semantic_input_spans = if options.input_highlighting_enabled {
-        detect_input_line_spans(&frame_model)
-    } else {
-        Vec::new()
-    };
-    let theme_spec =
-        app_theme_spec_from_terminal_background(frame_model.palette.default_bg_rgba);
-    apply_semantic_highlights(
-        &mut frame_model,
-        &theme_spec,
-        &semantic_output_spans,
-        &semantic_input_spans,
-    );
     let shape_started = Instant::now();
     let (rows, reused_shaped_row_count) = shape_rows_with_previous_cache(
         &frame_model,
@@ -754,7 +681,8 @@ fn prepare_native_terminal_frame_with_diagnostics(
         }
         None => NativeSelectionOverlay::default(),
     };
-    let command_ledger = command_blocks_from_frame(&frame_model);
+    let semantic_overlays = detect_output_block_overlays(&frame_model);
+    let semantic_input_overlays = detect_input_line_overlays(&frame_model);
     let cursor = NativeCursorFrameState {
         row: frame_model.cursor.row,
         col: frame_model.cursor.col,
@@ -811,10 +739,8 @@ fn prepare_native_terminal_frame_with_diagnostics(
                 .map(NativeUnderlineRun::from)
                 .collect(),
         },
-        command_blocks: command_ledger.blocks,
-        overview_markers: command_ledger.overview_markers,
-        semantic_output_spans,
-        semantic_input_spans,
+        semantic_overlays,
+        semantic_input_overlays,
         ime_preview_overlay: options.ime_preview_overlay,
         renderer_stats: NativeRendererFrameStats {
             glyph_cache_entries: prepared.renderer_stats.glyph_cache_entries,
@@ -825,7 +751,6 @@ fn prepare_native_terminal_frame_with_diagnostics(
         },
     };
     *context.previous_shaped_rows = Some(rows);
-    *context.previous_output_rule_spans = Some(cached_semantic_output_spans);
     *context.previous_frame = Some(frame_model);
 
     let shaped_row_count = presentable_frame.shaped_row_count;
@@ -853,205 +778,6 @@ fn prepare_native_terminal_frame_with_diagnostics(
         },
         diagnostics,
     ))
-}
-
-#[cfg(feature = "terminal-native-renderer")]
-fn merge_semantic_output_spans(
-    previous: Option<&[SemanticSpan]>,
-    analysis: &OutputRuleAnalysis,
-    frame: &TerminalModelFrame,
-) -> Vec<SemanticSpan> {
-    let valid_rows = frame
-        .rows
-        .iter()
-        .map(|row| row.row_index)
-        .collect::<HashSet<_>>();
-    let analyzed_rows = analysis
-        .analyzed_rows
-        .iter()
-        .copied()
-        .collect::<HashSet<_>>();
-    let mut spans = previous
-        .unwrap_or(&[])
-        .iter()
-        .copied()
-        .filter(|span| valid_rows.contains(&span.row) && !analyzed_rows.contains(&span.row))
-        .collect::<Vec<_>>();
-    spans.extend(analysis.spans.iter().copied());
-    spans.sort_by_key(|span| (span.row, span.start_col, span.end_col));
-    spans
-}
-
-#[cfg(feature = "terminal-native-renderer")]
-pub fn semantic_highlight_summary_for_test(
-    frame: TerminalModelFrame,
-) -> SemanticHighlightDebugSummary {
-    semantic_highlight_summary_with_options_for_test(frame, TerminalPresentationOptions::default())
-}
-
-#[cfg(feature = "terminal-native-renderer")]
-pub fn semantic_highlight_summary_with_options_for_test(
-    mut frame: TerminalModelFrame,
-    options: TerminalPresentationOptions,
-) -> SemanticHighlightDebugSummary {
-    let output_analysis = analyze_output_rules_with_config(
-        &frame,
-        &frame.dirty_rows,
-        &OutputRuleConfig {
-            enabled: options.output_rule_highlighting_enabled,
-            profile: options.output_rule_profile,
-            ..OutputRuleConfig::default()
-        },
-    );
-    let output_spans = merge_semantic_output_spans(None, &output_analysis, &frame);
-    let input_spans = if options.input_highlighting_enabled {
-        detect_input_line_spans(&frame)
-    } else {
-        Vec::new()
-    };
-    let theme_spec = app_theme_spec_from_terminal_background(frame.palette.default_bg_rgba);
-    apply_semantic_highlights(&mut frame, &theme_spec, &output_spans, &input_spans)
-}
-
-#[cfg(feature = "terminal-native-renderer")]
-fn apply_semantic_highlights(
-    frame: &mut TerminalModelFrame,
-    theme_spec: &AppThemeSpec,
-    output_spans: &[SemanticSpan],
-    input_spans: &[SemanticSpan],
-) -> SemanticHighlightDebugSummary {
-    let mut summary = SemanticHighlightDebugSummary::default();
-    apply_semantic_span_collection(
-        frame,
-        output_spans,
-        theme_spec,
-        false,
-        &mut summary,
-    );
-    apply_semantic_span_collection(frame, input_spans, theme_spec, true, &mut summary);
-    frame.refresh_row_hashes();
-    summary
-}
-
-#[cfg(feature = "terminal-native-renderer")]
-fn apply_semantic_span_collection(
-    frame: &mut TerminalModelFrame,
-    spans: &[SemanticSpan],
-    theme_spec: &AppThemeSpec,
-    is_input: bool,
-    summary: &mut SemanticHighlightDebugSummary,
-) {
-    for span in spans {
-        let Some(row) = frame.rows.get_mut(span.row as usize) else {
-            continue;
-        };
-        let ink = semantic_ink_for_role(theme_spec, span.role);
-        if ink.fg.is_none() && ink.tint.is_none() && !ink.underline {
-            continue;
-        }
-        for cell in row.cells.iter_mut().filter(|cell| cell_overlaps_span(cell, span)) {
-            if let Some(fg) = ink.fg {
-                if cell.fg_rgba == frame.palette.default_fg_rgba && cell.fg_rgba != fg {
-                    cell.fg_rgba = fg;
-                    if is_input {
-                        summary.input_fg_overrides = summary.input_fg_overrides.saturating_add(1);
-                    } else {
-                        summary.output_fg_overrides =
-                            summary.output_fg_overrides.saturating_add(1);
-                    }
-                }
-            }
-            if let Some(tint) = ink.tint {
-                if cell.bg_rgba == frame.palette.default_bg_rgba {
-                    let blended = blend_tint_rgba(cell.bg_rgba, tint);
-                    if blended != cell.bg_rgba {
-                        cell.bg_rgba = blended;
-                        if is_input {
-                            summary.input_tints = summary.input_tints.saturating_add(1);
-                        } else {
-                            summary.output_tints = summary.output_tints.saturating_add(1);
-                        }
-                    }
-                }
-            }
-            if ink.underline && !cell.underline {
-                cell.underline = true;
-                if is_input {
-                    summary.input_underlines = summary.input_underlines.saturating_add(1);
-                } else {
-                    summary.output_underlines = summary.output_underlines.saturating_add(1);
-                }
-            }
-        }
-    }
-}
-
-#[cfg(feature = "terminal-native-renderer")]
-fn semantic_ink_for_role(theme_spec: &AppThemeSpec, role: SemanticStyleRole) -> SemanticInkTheme {
-    match role {
-        SemanticStyleRole::InputPrompt => theme_spec.semantic.input_prompt,
-        SemanticStyleRole::InputCommand | SemanticStyleRole::InputSubcommand => {
-            theme_spec.semantic.input_command
-        }
-        SemanticStyleRole::InputOption => theme_spec.semantic.input_option,
-        SemanticStyleRole::InputArgument => theme_spec.semantic.output_muted,
-        SemanticStyleRole::InputString => theme_spec.semantic.input_string,
-        SemanticStyleRole::InputPath => theme_spec.semantic.input_path,
-        SemanticStyleRole::InputVariable => theme_spec.semantic.input_variable,
-        SemanticStyleRole::InputInvalidCommand => theme_spec.semantic.input_invalid,
-        SemanticStyleRole::InputOperator => theme_spec.semantic.input_operator,
-        SemanticStyleRole::OutputJson | SemanticStyleRole::OutputXml => theme_spec.semantic.output_info,
-        SemanticStyleRole::OutputUrl | SemanticStyleRole::OutputFilePath => {
-            theme_spec.semantic.output_accent
-        }
-        SemanticStyleRole::OutputLineColumn
-        | SemanticStyleRole::OutputIpPort
-        | SemanticStyleRole::OutputTimestamp => theme_spec.semantic.output_muted,
-        SemanticStyleRole::OutputLevelError => theme_spec.semantic.output_error,
-        SemanticStyleRole::OutputLevelWarn => theme_spec.semantic.output_warn,
-        SemanticStyleRole::OutputLevelInfo | SemanticStyleRole::OutputLevelDebug => {
-            theme_spec.semantic.output_info
-        }
-        SemanticStyleRole::OutputSuccessKeyword => theme_spec.semantic.output_success,
-        SemanticStyleRole::OutputFailureKeyword => theme_spec.semantic.output_failure,
-        SemanticStyleRole::OutputGrepMatch => theme_spec.semantic.output_accent,
-        SemanticStyleRole::OutputGitAdded => theme_spec.semantic.output_added,
-        SemanticStyleRole::OutputGitRemoved => theme_spec.semantic.output_removed,
-        SemanticStyleRole::OutputGitHunk => theme_spec.semantic.output_accent,
-        SemanticStyleRole::OutputJsonKey => theme_spec.semantic.output_json_key,
-        SemanticStyleRole::OutputJsonString
-        | SemanticStyleRole::OutputJsonNumber
-        | SemanticStyleRole::OutputJsonBoolean => theme_spec.semantic.output_json_value,
-    }
-}
-
-#[cfg(feature = "terminal-native-renderer")]
-fn cell_overlaps_span(
-    cell: &crate::app::terminal_model::TerminalModelCell,
-    span: &SemanticSpan,
-) -> bool {
-    let cell_end = cell.col.saturating_add(cell.width).saturating_sub(1);
-    cell.row == span.row && cell.col <= span.end_col && cell_end >= span.start_col
-}
-
-#[cfg(feature = "terminal-native-renderer")]
-fn blend_tint_rgba(base_rgba: u32, tint_rgba: u32) -> u32 {
-    let alpha = ((tint_rgba >> 24) & 0xff) as u32;
-    if alpha == 0 {
-        return base_rgba;
-    }
-
-    let base_r = (base_rgba >> 16) & 0xff;
-    let base_g = (base_rgba >> 8) & 0xff;
-    let base_b = base_rgba & 0xff;
-    let tint_r = (tint_rgba >> 16) & 0xff;
-    let tint_g = (tint_rgba >> 8) & 0xff;
-    let tint_b = tint_rgba & 0xff;
-    let inv = 255_u32.saturating_sub(alpha);
-
-    let mix = |base: u32, tint: u32| ((base * inv) + (tint * alpha) + 127) / 255;
-
-    0xff00_0000 | (mix(base_r, tint_r) << 16) | (mix(base_g, tint_g) << 8) | mix(base_b, tint_b)
 }
 
 #[cfg(feature = "terminal-native-renderer")]

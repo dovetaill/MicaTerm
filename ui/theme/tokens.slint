@@ -2,95 +2,26 @@
 
 export global ThemeTokens {
     in property <bool> dark-mode: true;
-    in property <string> theme-variant: "premium-default";
-    private property <bool> legacy-hacker-green: theme-variant == "legacy-hacker-green";
 
-    out property <brush> accent: legacy-hacker-green
-        ? (dark-mode ? #69b37f : #4e8a63)
-        : dark-mode ? #7d97b8 : #6b87ab;
-    out property <brush> link-accent: legacy-hacker-green
-        ? (dark-mode ? #7cc691 : #67967a)
-        : dark-mode ? #8ba3c0 : #7a92b4;
-    out property <brush> focus-ring: legacy-hacker-green
-        ? (dark-mode ? #8ed7a5 : #6f9d7d)
-        : dark-mode ? #90a7c1 : #8ca2bb;
+    out property <brush> accent: dark-mode ? #6f9bd4 : #4d80c8;
+    out property <brush> link-accent: dark-mode ? #86b5ea : #2d6fc7;
+    out property <brush> focus-ring: dark-mode ? #7099cc : #83aadf;
 
-    out property <brush> text-primary: legacy-hacker-green
-        ? (dark-mode ? #e6f6ec : #1c3127)
-        : dark-mode ? #edf3f8 : #1c2731;
-    out property <brush> text-secondary: dark-mode ? #b8c2cf : #49586a;
-    out property <brush> text-muted: dark-mode ? #8b98a9 : #677789;
-    out property <brush> text-inactive: dark-mode ? #738095 : #7b8a9c;
-    out property <brush> sidebar-text: legacy-hacker-green
-        ? (dark-mode ? #91b29d : #50665a)
-        : dark-mode ? #9aabba : #516173;
-    out property <brush> sidebar-text-active: legacy-hacker-green
-        ? (dark-mode ? #e6f6ec : #183127)
-        : dark-mode ? #ecf3f9 : #12202c;
+    out property <brush> text-primary: dark-mode ? #eef3f8 : #0f1722;
+    out property <brush> text-secondary: dark-mode ? #b9c3d0 : #3f4d5d;
+    out property <brush> text-muted: dark-mode ? #8794a6 : #5f7084;
 
-    out property <brush> window-surface: legacy-hacker-green
-        ? (dark-mode ? #0b120f : #eef5f0)
-        : dark-mode ? #0f161d : #e8edf1;
-    out property <brush> titlebar-background: legacy-hacker-green
-        ? (dark-mode ? #121b17 : #f6fbf7)
-        : dark-mode ? #18212b : #f7f9fb;
-    out property <brush> tabbar-background: legacy-hacker-green
-        ? (dark-mode ? #0e1713 : #e7f0ea)
-        : dark-mode ? #111923 : #edf2f6;
-    out property <brush> sidebar-background: legacy-hacker-green
-        ? (dark-mode ? #101913 : #e1ece5)
-        : dark-mode ? #15202a : #e3eaf0;
-    out property <brush> sidebar-panel-background: legacy-hacker-green
-        ? (dark-mode ? #132018 : #edf4ef)
-        : dark-mode ? #101a24 : #eef3f7;
-    out property <brush> terminal-frame-background: legacy-hacker-green
-        ? (dark-mode ? #0a120e : #f2f7f3)
-        : dark-mode ? #0b141d : #eef3f7;
-    out property <brush> terminal-surface-background: legacy-hacker-green
-        ? (dark-mode ? #050b08 : #eff6f1)
-        : dark-mode ? #08131d : #f4f6f8;
-    out property <brush> tab-active-background: legacy-hacker-green
-        ? (dark-mode ? #173223 : #fdfefd)
-        : dark-mode ? #1c2937 : #ffffff;
-    out property <brush> tab-inactive-background: legacy-hacker-green
-        ? (dark-mode ? #0f1b14 : #e7f0ea)
-        : dark-mode ? #121b24 : #e8eef4;
-    out property <brush> tab-hover-background: legacy-hacker-green
-        ? (dark-mode ? #143021 : #dde9e1)
-        : dark-mode ? #182430 : #e0e8f0;
-    out property <brush> tab-active-text: legacy-hacker-green
-        ? (dark-mode ? #eaf8ef : #1b3228)
-        : dark-mode ? #eef4f9 : #15222e;
-    out property <brush> tab-inactive-text: legacy-hacker-green
-        ? (dark-mode ? #86a392 : #5b7065)
-        : dark-mode ? #93a4b4 : #5a6a79;
-    out property <brush> tab-active-line: legacy-hacker-green
-        ? (dark-mode ? #8ed7a5 : #5e946f)
-        : dark-mode ? #96afca : #6f89ab;
-    out property <brush> sidebar-item-hover-background: legacy-hacker-green
-        ? (dark-mode ? #163022 : #d7e6db)
-        : dark-mode ? #1c2a36 : #dde6ee;
-    out property <brush> sidebar-item-selected-background: legacy-hacker-green
-        ? (dark-mode ? #1b3c2a : #cfe1d5)
-        : dark-mode ? #223444 : #d2dfea;
-    out property <brush> sidebar-item-selected-border: legacy-hacker-green
-        ? (dark-mode ? #34684baa : #96b39faa)
-        : dark-mode ? #35506acc : #aec0d1b3;
-    out property <brush> sidebar-item-selected-indicator: legacy-hacker-green
-        ? (dark-mode ? #8ed7a5 : #5e946f)
-        : dark-mode ? #96afca : #6f89ab;
-
-    // Compatibility aliases for unchanged shell/modal surfaces outside the redesign slice.
-    out property <brush> titlebar-surface: titlebar-background;
-    out property <brush> activity-surface: sidebar-background;
-    out property <brush> assets-surface: sidebar-panel-background;
-    out property <brush> tabbar-surface: tabbar-background;
-    out property <brush> tab-active-surface: tab-active-background;
-    out property <brush> tab-inactive-surface: tab-inactive-background;
-    out property <brush> tab-active-indicator: tab-active-line;
-    out property <brush> workspace-surface: terminal-frame-background;
-    out property <brush> panel-surface: sidebar-panel-background;
-    out property <brush> inspector-surface: sidebar-panel-background;
+    out property <brush> window-surface: dark-mode ? #171c24 : #f6f8fb;
+    out property <brush> titlebar-surface: dark-mode ? #1b212be8 : #fbfcfeee;
+    out property <brush> activity-surface: dark-mode ? #151b24 : #f2f5f9;
+    out property <brush> assets-surface: dark-mode ? #181f29 : #f7f9fc;
+    out property <brush> tabbar-surface: dark-mode ? #181f28 : #f9fbfe;
+    out property <brush> tab-active-surface: dark-mode ? #1f2732 : #ffffff;
+    out property <brush> tab-inactive-surface: dark-mode ? #17202a : #f4f7fb;
+    out property <brush> tab-active-indicator: dark-mode ? #78a6d9 : #3d77bf;
+    out property <brush> workspace-surface: dark-mode ? #10151d : #ffffff;
+    out property <brush> panel-surface: dark-mode ? #181f29 : #f5f8fc;
+    out property <brush> inspector-surface: panel-surface;
     out property <brush> utility-panel-surface: dark-mode ? #1c2431 : #f3f6fb;
     out property <brush> utility-panel-header-surface: dark-mode ? #222c39 : #fafcff;
     out property <brush> utility-panel-section-surface: dark-mode ? #141c26 : #f8fbff;
@@ -149,25 +80,17 @@ export global ThemeTokens {
     out property <length> modal-header-height: 58px;
     out property <length> modal-footer-min-height: 72px;
 
-    out property <brush> sidebar-hover-surface: sidebar-item-hover-background;
-    out property <brush> sidebar-selected-surface: sidebar-item-selected-background;
-    out property <brush> explorer-row-hover-surface: sidebar-item-hover-background;
-    out property <brush> explorer-row-selected-surface: sidebar-item-selected-background;
+    out property <brush> sidebar-hover-surface: dark-mode ? #232d39 : #edf3fb;
+    out property <brush> sidebar-selected-surface: dark-mode ? #293442 : #e4edf9;
+    out property <brush> explorer-row-hover-surface: sidebar-hover-surface;
+    out property <brush> explorer-row-selected-surface: sidebar-selected-surface;
 
-    out property <brush> input-surface: legacy-hacker-green
-        ? (dark-mode ? #101a14 : #ffffff)
-        : dark-mode ? #101924 : #ffffff;
-    out property <brush> input-border: legacy-hacker-green
-        ? (dark-mode ? #2a4a39 : #cad8d0)
-        : dark-mode ? #324150 : #d7e0ec;
+    out property <brush> input-surface: dark-mode ? #161d27 : #ffffff;
+    out property <brush> input-border: dark-mode ? #2b3646 : #d7e0ec;
     out property <brush> input-focus-ring: focus-ring;
 
-    out property <brush> divider-subtle: legacy-hacker-green
-        ? (dark-mode ? #9be6b318 : #24412d12)
-        : dark-mode ? #ffffff14 : #10203012;
-    out property <brush> divider-strong: legacy-hacker-green
-        ? (dark-mode ? #9be6b328 : #24412d22)
-        : dark-mode ? #ffffff24 : #10203022;
+    out property <brush> divider-subtle: dark-mode ? #ffffff12 : #0f172a14;
+    out property <brush> divider-strong: dark-mode ? #ffffff24 : #0f172a26;
 
     out property <brush> control-hover-surface: dark-mode ? #242d3a : #eef3fa;
     out property <brush> control-active-surface: dark-mode ? #1d2632 : #f4f7fb;
@@ -188,59 +111,13 @@ export global ThemeTokens {
     out property <brush> danger-pressed-surface: dark-mode ? #8f2943 : #c53d5c;
     out property <brush> danger-fg: #ffffff;
 
-    out property <brush> terminal-command-decoration-running: legacy-hacker-green
-        ? (dark-mode ? #7cc691 : #5f8d71)
-        : dark-mode ? #7d97b8 : #6b87ab;
-    out property <brush> terminal-command-decoration-running-surface: legacy-hacker-green
-        ? (dark-mode ? #7cc69118 : #5f8d7114)
-        : dark-mode ? #7d97b81c : #6b87ab16;
-    out property <brush> terminal-command-decoration-success: legacy-hacker-green
-        ? (dark-mode ? #8ed7a5 : #5c916c)
-        : dark-mode ? #7fb08d : #5f8f72;
-    out property <brush> terminal-command-decoration-success-surface: legacy-hacker-green
-        ? (dark-mode ? #8ed7a51c : #5c916c14)
-        : dark-mode ? #7fb08d1c : #5f8f7214;
-    out property <brush> terminal-command-decoration-failure: legacy-hacker-green
-        ? (dark-mode ? #d89aa6 : #ab6d78)
-        : dark-mode ? #c97d88 : #b16c79;
-    out property <brush> terminal-command-decoration-failure-surface: legacy-hacker-green
-        ? (dark-mode ? #d89aa61d : #ab6d7814)
-        : dark-mode ? #c97d881d : #b16c7914;
-    out property <brush> terminal-decoration-hairline: legacy-hacker-green
-        ? (dark-mode ? #9be6b316 : #33574412)
-        : dark-mode ? #d7e0e814 : #1f293310;
-    out property <brush> terminal-overview-marker-running: terminal-command-decoration-running;
-    out property <brush> terminal-overview-marker-success: terminal-command-decoration-success;
-    out property <brush> terminal-overview-marker-failure: terminal-command-decoration-failure;
-    out property <brush> terminal-overview-marker-search: legacy-hacker-green
-        ? (dark-mode ? #b8dd87 : #7a9463)
-        : dark-mode ? #c6a066 : #aa8152;
-    out property <brush> terminal-overview-marker-warning: terminal-overview-marker-search;
-    out property <brush> terminal-overview-marker-error: terminal-command-decoration-failure;
-
-    out property <brush> terminal-canvas-surface: legacy-hacker-green
-        ? (dark-mode ? #050b08 : #eff6f1)
-        : dark-mode ? #08131d : #f4f6f8;
-    out property <brush> terminal-default-fg: legacy-hacker-green
-        ? (dark-mode ? #9be6b3 : #213128)
-        : dark-mode ? #d7e0e8 : #1f2933;
-    out property <brush> terminal-default-bg: legacy-hacker-green
-        ? (dark-mode ? #050b08 : #eff6f1)
-        : dark-mode ? #08131d : #f4f6f8;
-    out property <brush> terminal-cursor-fg: legacy-hacker-green
-        ? (dark-mode ? #050b08 : #eff6f1)
-        : dark-mode ? #08131d : #f4f6f8;
-    out property <brush> terminal-cursor-bg: legacy-hacker-green
-        ? (dark-mode ? #b4f0c6 : #1e3026)
-        : dark-mode ? #dce6ee : #24313c;
-    out property <brush> terminal-selection-surface: legacy-hacker-green
-        ? (dark-mode ? #3f7a5740 : #9ab9a44a)
-        : dark-mode ? #7a8fa94a : #7895b33a;
-    out property <brush> terminal-scrollbar-track-surface: dark-mode ? #ffffff0c : #1c273308;
-    out property <brush> terminal-scrollbar-thumb-surface: legacy-hacker-green
-        ? (dark-mode ? #305841 : #b4cbbb)
-        : dark-mode ? #5a6a79 : #b6c0ca;
-    out property <brush> terminal-scrollbar-thumb-active-surface: legacy-hacker-green
-        ? (dark-mode ? #3f7256 : #98b4a2)
-        : dark-mode ? #728495 : #9facb8;
+    out property <brush> terminal-canvas-surface: dark-mode ? #08131d : #f2f4f7;
+    out property <brush> terminal-default-fg: dark-mode ? #e5ebf5 : #243142;
+    out property <brush> terminal-default-bg: dark-mode ? #08131d : #f2f4f7;
+    out property <brush> terminal-cursor-fg: dark-mode ? #08131d : #f2f4f7;
+    out property <brush> terminal-cursor-bg: dark-mode ? #e5ebf5 : #243142;
+    out property <brush> terminal-selection-surface: dark-mode ? #7c92af40 : #95add34d;
+    out property <brush> terminal-scrollbar-track-surface: dark-mode ? #ffffff0d : #0f172a0d;
+    out property <brush> terminal-scrollbar-thumb-surface: dark-mode ? #4a586a : #bcc8da;
+    out property <brush> terminal-scrollbar-thumb-active-surface: dark-mode ? #5c6d82 : #a8b8ce;
 }

@@ -214,7 +214,7 @@ export component RightPanel inherits Rectangle {
     width: root.expanded ? root.expanded-width : 0px;
     visible: root.expanded;
     clip: true;
-    background: ThemeTokens.sidebar-panel-background;
+    background: ThemeTokens.inspector-surface;
     border-radius: 0px;
     border-width: 0px;
     border-color: transparent;
@@ -295,7 +295,7 @@ export component RightPanel inherits Rectangle {
             border-radius: 12px;
             border-width: 1px;
             border-color: ThemeTokens.divider-subtle;
-            background: ThemeTokens.sidebar-panel-background;
+            background: ThemeTokens.workspace-surface;
 
             Rectangle {
                 x: 12px;
@@ -504,7 +504,7 @@ export component RightPanel inherits Rectangle {
             border-radius: 0px;
             border-width: 0px;
             border-color: transparent;
-            background: ThemeTokens.sidebar-panel-background;
+            background: ThemeTokens.workspace-surface;
             clip: true;
 
             if root.sftp-panel-drop-target-active : drop-overlay := Rectangle {

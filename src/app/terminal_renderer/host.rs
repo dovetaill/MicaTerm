@@ -5,31 +5,15 @@ use anyhow::Result;
 use crate::app::runtime_profile::TerminalRenderMode;
 use crate::app::ssh::runtime::TerminalSurfaceState;
 use crate::app::terminal_atlas::TerminalAtlasSelection;
-use crate::app::terminal_semantic::OutputRuleProfile;
 use crate::app::terminal_presenter::{
     PresentedTerminalFrame, TerminalPresentationOptions, TerminalPresenter,
     TerminalPresenterCacheStats,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TerminalRendererHostOptions {
     pub selection: Option<TerminalAtlasSelection>,
     pub selection_overlay_rgba: u32,
-    pub input_highlighting_enabled: bool,
-    pub output_rule_highlighting_enabled: bool,
-    pub output_rule_profile: OutputRuleProfile,
-}
-
-impl Default for TerminalRendererHostOptions {
-    fn default() -> Self {
-        Self {
-            selection: None,
-            selection_overlay_rgba: 0,
-            input_highlighting_enabled: true,
-            output_rule_highlighting_enabled: true,
-            output_rule_profile: OutputRuleProfile::Default,
-        }
-    }
 }
 
 pub struct TerminalRendererHost {
@@ -91,9 +75,6 @@ impl TerminalRendererHost {
             TerminalPresentationOptions {
                 selection: options.selection,
                 selection_overlay_rgba: options.selection_overlay_rgba,
-                input_highlighting_enabled: options.input_highlighting_enabled,
-                output_rule_highlighting_enabled: options.output_rule_highlighting_enabled,
-                output_rule_profile: options.output_rule_profile,
                 ..TerminalPresentationOptions::default()
             },
         )

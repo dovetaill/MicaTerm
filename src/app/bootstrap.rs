@@ -35,8 +35,6 @@ use crate::QuickLaunchCardRow;
 use crate::QuickLaunchDetailRow;
 use crate::QuickLaunchGroupRow;
 use crate::SftpPanelItem;
-use crate::TerminalCommandBlockDecoration;
-use crate::TerminalOverviewMarkerDecoration;
 use crate::TransferCenterItem;
 use crate::WorkspaceTabItem;
 use crate::app::app_paths::app_root_paths_for_app;
@@ -86,7 +84,6 @@ use crate::app::ssh::session_manager::{
     SessionRuntimeLauncher, SessionState,
 };
 use crate::app::terminal_atlas::TerminalAtlasSelection;
-use crate::app::terminal_semantic::command_blocks_from_surface;
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_presenter::WindowsNativePresenter;
 use crate::app::terminal_presenter::{
@@ -97,7 +94,7 @@ use crate::app::terminal_renderer::{
     TerminalRendererHostOptions,
 };
 use crate::app::terminal_theme::{
-    TerminalThemePreset, preset_for_theme, selection_overlay_rgba_for_theme,
+    TerminalThemePreset, preset_for_theme_mode, selection_overlay_rgba,
 };
 #[cfg(any(target_os = "windows", test))]
 use crate::app::ui_preferences::PersistedWindowBounds;
@@ -2058,11 +2055,8 @@ fn sync_workspace_terminal_shell_chrome(window: &AppWindow, preset: TerminalThem
     ));
 }
 
-fn terminal_selection_overlay_rgba(
-    theme_mode: ThemeMode,
-    theme_variant: crate::theme::ThemeVariant,
-) -> u32 {
-    selection_overlay_rgba_for_theme(theme_mode, theme_variant)
+fn terminal_selection_overlay_rgba(theme_mode: ThemeMode) -> u32 {
+    selection_overlay_rgba(theme_mode)
 }
 
 fn workspace_session_uses_host_selection_overlay(window: &AppWindow) -> bool {
@@ -2099,50 +2093,6 @@ where
     } else {
         replace(ModelRc::from(Rc::new(VecModel::from(next_rows))));
     }
-}
-
-fn terminal_command_block_decorations_for_state(
-    state: &ShellViewModel,
-) -> Vec<TerminalCommandBlockDecoration> {
-    if !state.settings_modal_terminal_command_decorations_enabled() {
-        return Vec::new();
-    }
-
-    let Some(surface) = state.active_workspace_terminal_surface() else {
-        return Vec::new();
-    };
-    let ledger = command_blocks_from_surface(surface);
-    ledger
-        .blocks
-        .into_iter()
-        .map(|block| TerminalCommandBlockDecoration {
-            id: i32::try_from(block.id).unwrap_or(i32::MAX),
-            prompt_row: i32::try_from(block.prompt_row).unwrap_or(i32::MAX),
-            output_end_row: i32::try_from(block.output_end_row).unwrap_or(i32::MAX),
-            status: SharedString::from(block.status.as_str()),
-        })
-        .collect()
-}
-
-fn terminal_overview_marker_decorations_for_state(
-    state: &ShellViewModel,
-) -> Vec<TerminalOverviewMarkerDecoration> {
-    if !state.settings_modal_terminal_overview_markers_enabled() {
-        return Vec::new();
-    }
-
-    let Some(surface) = state.active_workspace_terminal_surface() else {
-        return Vec::new();
-    };
-    let ledger = command_blocks_from_surface(surface);
-    ledger
-        .overview_markers
-        .into_iter()
-        .map(|marker| TerminalOverviewMarkerDecoration {
-            row: i32::try_from(marker.row).unwrap_or(i32::MAX),
-            kind: SharedString::from(marker.kind.as_str()),
-        })
-        .collect()
 }
 
 fn reconcile_vec_model_rows<T>(model: &VecModel<T>, next_rows: &[T])
@@ -2518,10 +2468,8 @@ fn present_workspace_native_terminal_frame(window: &AppWindow, frame: NativeTerm
         color_draws = presentable_frame.color_glyph_draws.len(),
         glyph_cache_entries = presentable_frame.renderer_stats.glyph_cache_entries,
         selection_overlay_rects = presentable_frame.selection_overlay.rect_count,
-        command_block_count = presentable_frame.command_blocks.len(),
-        overview_marker_count = presentable_frame.overview_markers.len(),
-        semantic_output_span_count = presentable_frame.semantic_output_spans.len(),
-        semantic_input_span_count = presentable_frame.semantic_input_spans.len(),
+        semantic_overlay_count = presentable_frame.semantic_overlays.len(),
+        semantic_input_overlay_count = presentable_frame.semantic_input_overlays.len(),
         underline_overlay_runs = presentable_frame.underline_overlay.run_count,
         ime_preview_active = presentable_frame.ime_preview_overlay.active,
         cursor_visible = presentable_frame.cursor.visible,
@@ -3020,20 +2968,7 @@ fn sync_workspace_session_state_with_manager(
         visible_lines,
         |model| window.set_workspace_session_visible_lines(model),
     );
-    sync_vec_model(
-        window.get_workspace_session_command_blocks(),
-        terminal_command_block_decorations_for_state(state),
-        |model| window.set_workspace_session_command_blocks(model),
-    );
-    sync_vec_model(
-        window.get_workspace_session_overview_markers(),
-        terminal_overview_marker_decorations_for_state(state),
-        |model| window.set_workspace_session_overview_markers(model),
-    );
-    sync_workspace_terminal_shell_chrome(
-        window,
-        preset_for_theme(state.theme_mode, state.theme_variant),
-    );
+    sync_workspace_terminal_shell_chrome(window, preset_for_theme_mode(state.theme_mode));
     sync_workspace_terminal_surface_projection_only(window, state);
     sync_workspace_connection_progress_state(window, state, manager);
 
@@ -3071,7 +3006,7 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
     window.set_workspace_session_cell_width(default_cell_width_px as f32 / scale_factor);
     window.set_workspace_session_cell_height(default_cell_height_px as f32 / scale_factor);
     sync_workspace_native_terminal_surface_geometry(window);
-    let terminal_theme_preset = preset_for_theme(state.theme_mode, state.theme_variant);
+    let terminal_theme_preset = preset_for_theme_mode(state.theme_mode);
 
     if let Some(surface) = state.active_workspace_terminal_surface() {
         let selection = if workspace_session_uses_host_selection_overlay(window) {
@@ -3079,8 +3014,7 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
         } else {
             active_workspace_terminal_selection(window)
         };
-        let selection_overlay_rgba =
-            terminal_selection_overlay_rgba(state.theme_mode, state.theme_variant);
+        let selection_overlay_rgba = terminal_selection_overlay_rgba(state.theme_mode);
         let mut native_frame_presented = false;
         let mut next_render_mode = None;
         let mut next_surface_seqno = None;
@@ -3099,11 +3033,6 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
                 TerminalRendererHostOptions {
                     selection,
                     selection_overlay_rgba,
-                    input_highlighting_enabled: state
-                        .settings_modal_terminal_input_highlighting_enabled(),
-                    output_rule_highlighting_enabled: state
-                        .settings_modal_terminal_output_rule_highlighting_enabled(),
-                    output_rule_profile: state.settings_modal_terminal_output_rule_profile(),
                 },
                 scale_factor,
             ) {
@@ -4512,24 +4441,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         .set_settings_modal_terminal_scrollback_limit(prefs.terminal_scrollback_limit as i32);
     initial_view_model.set_settings_modal_terminal_active_idle_shrink_enabled(
         prefs.terminal_active_idle_shrink_enabled,
-    );
-    initial_view_model.set_settings_modal_terminal_input_highlighting_enabled(
-        prefs.terminal_input_highlighting_enabled,
-    );
-    initial_view_model.set_settings_modal_terminal_output_rule_highlighting_enabled(
-        prefs.terminal_output_rule_highlighting_enabled,
-    );
-    initial_view_model.set_settings_modal_terminal_output_rule_profile(
-        prefs.terminal_output_rule_profile.as_str(),
-    );
-    initial_view_model.set_settings_modal_terminal_command_decorations_enabled(
-        prefs.terminal_command_decorations_enabled,
-    );
-    initial_view_model.set_settings_modal_terminal_overview_markers_enabled(
-        prefs.terminal_overview_markers_enabled,
-    );
-    initial_view_model.set_settings_modal_terminal_search_match_highlight(
-        prefs.terminal_search_match_highlight.as_str(),
     );
     initial_view_model
         .set_settings_modal_download_conflict_default(prefs.download_conflict_default.as_str());

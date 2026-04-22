@@ -2,10 +2,9 @@
 
 use std::fs;
 
-use mica_term::app::terminal_semantic::OutputRuleProfile;
 use mica_term::app::ui_preferences::{DownloadConflictDefault, UiPreferences, UiPreferencesStore};
 use mica_term::shell::view_model::RightPanelView;
-use mica_term::theme::{ThemeMode, ThemeVariant};
+use mica_term::theme::ThemeMode;
 
 #[test]
 fn ui_preferences_default_to_dark_and_not_pinned() {
@@ -95,79 +94,6 @@ fn ui_preferences_roundtrip_download_conflict_default() {
 
     assert_eq!(loaded, prefs);
     let _ = std::fs::remove_file(temp_path);
-}
-
-#[test]
-fn ui_preferences_round_trip_terminal_redesign_settings() {
-    let prefs = UiPreferences {
-        theme_variant: ThemeVariant::PremiumDefault,
-        terminal_input_highlighting_enabled: true,
-        terminal_output_rule_highlighting_enabled: true,
-        terminal_output_rule_profile: OutputRuleProfile::Default,
-        terminal_command_decorations_enabled: true,
-        terminal_overview_markers_enabled: true,
-        ..UiPreferences::default()
-    };
-
-    let json = serde_json::to_string(&prefs).unwrap();
-    let decoded: UiPreferences = serde_json::from_str(&json).unwrap();
-
-    assert!(decoded.terminal_input_highlighting_enabled);
-    assert!(decoded.terminal_overview_markers_enabled);
-}
-
-#[test]
-fn ui_preferences_persist_theme_variant_and_highlight_toggles() {
-    let prefs = UiPreferences {
-        theme_variant: ThemeVariant::LegacyHackerGreen,
-        terminal_input_highlighting_enabled: false,
-        terminal_output_rule_highlighting_enabled: true,
-        terminal_output_rule_profile: OutputRuleProfile::Default,
-        terminal_command_decorations_enabled: false,
-        terminal_overview_markers_enabled: true,
-        terminal_search_match_highlight: "subtle".into(),
-        ..UiPreferences::default()
-    };
-
-    let json = serde_json::to_string(&prefs).unwrap();
-    let decoded: UiPreferences = serde_json::from_str(&json).unwrap();
-
-    assert_eq!(decoded.theme_variant, ThemeVariant::LegacyHackerGreen);
-    assert!(!decoded.terminal_input_highlighting_enabled);
-    assert!(decoded.terminal_output_rule_highlighting_enabled);
-    assert!(!decoded.terminal_command_decorations_enabled);
-    assert!(decoded.terminal_overview_markers_enabled);
-    assert_eq!(decoded.terminal_search_match_highlight, "subtle");
-}
-
-fn callback_slice<'a>(source: &'a str, marker: &str) -> &'a str {
-    let start = source.find(marker).expect("callback marker");
-    let rest = &source[start..];
-    let next = rest
-        .find("\n\n    let state = Rc::clone(view_model);")
-        .unwrap_or(rest.len());
-    &rest[..next]
-}
-
-#[test]
-fn terminal_projection_setting_callbacks_force_workspace_refresh() {
-    let shell_chrome =
-        fs::read_to_string("src/app/bootstrap/shell_chrome.rs").expect("read shell chrome");
-
-    for marker in [
-        "window.on_settings_modal_terminal_input_highlighting_enabled_changed(move |value| {",
-        "window.on_settings_modal_terminal_output_rule_highlighting_enabled_changed(move |value| {",
-        "window.on_settings_modal_terminal_output_rule_profile_changed(move |value| {",
-        "window.on_settings_modal_terminal_command_decorations_enabled_changed(move |value| {",
-        "window.on_settings_modal_terminal_overview_markers_enabled_changed(move |value| {",
-        "window.on_settings_modal_terminal_search_match_highlight_changed(move |value| {",
-    ] {
-        let callback = callback_slice(&shell_chrome, marker);
-        assert!(
-            callback.contains("sync_shell_side_regions("),
-            "{marker} should refresh the workspace projection immediately so terminal theme and highlight toggles do not wait for a later incidental redraw",
-        );
-    }
 }
 
 #[test]

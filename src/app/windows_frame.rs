@@ -1,10 +1,10 @@
 //! Windows-specific non-client frame interop for hit-testing, snap layouts, and placement queries.
 
 use crate::AppWindow;
-use crate::app::terminal_renderer::NativeTerminalSurfaceDiagnostics;
-use crate::app::terminal_renderer::diagnostics::NativeTerminalSurfaceGlyphBoundsTrace;
 #[cfg(target_os = "windows")]
 use crate::app::window_geometry::MonitorWorkArea;
+use crate::app::terminal_renderer::NativeTerminalSurfaceDiagnostics;
+use crate::app::terminal_renderer::diagnostics::NativeTerminalSurfaceGlyphBoundsTrace;
 use crate::app::window_state::WindowPlacementKind;
 #[cfg(target_os = "windows")]
 use crate::app::window_state::{Rect, classify_window_placement};
@@ -282,7 +282,9 @@ fn rect_from_win32_rect(rect: windows_sys::Win32::Foundation::RECT) -> Option<Re
 }
 
 #[cfg(target_os = "windows")]
-pub fn work_area_from_hmonitor(hmonitor: isize) -> Option<MonitorWorkArea> {
+pub fn work_area_from_hmonitor(
+    hmonitor: isize,
+) -> Option<MonitorWorkArea> {
     use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITORINFO};
 
     unsafe {
@@ -301,12 +303,7 @@ pub fn work_area_from_hmonitor(hmonitor: isize) -> Option<MonitorWorkArea> {
         }
 
         let work = rect_from_win32_rect(monitor_info.rcWork)?;
-        Some(MonitorWorkArea::new(
-            work.x,
-            work.y,
-            work.width,
-            work.height,
-        ))
+        Some(MonitorWorkArea::new(work.x, work.y, work.width, work.height))
     }
 }
 

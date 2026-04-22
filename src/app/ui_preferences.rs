@@ -7,7 +7,6 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::app::app_paths::app_root_paths_for_app;
-use crate::app::terminal_semantic::OutputRuleProfile;
 use crate::app::vault::model::SnapshotUiPreferences;
 use crate::shell::view_model::{RightPanelView, ShellViewModel};
 use crate::theme::{ThemeMode, ThemeVariant};
@@ -59,18 +58,6 @@ pub struct UiPreferences {
     pub terminal_scrollback_limit: usize,
     #[serde(default = "default_terminal_active_idle_shrink_enabled")]
     pub terminal_active_idle_shrink_enabled: bool,
-    #[serde(default = "default_terminal_input_highlighting_enabled")]
-    pub terminal_input_highlighting_enabled: bool,
-    #[serde(default = "default_terminal_output_rule_highlighting_enabled")]
-    pub terminal_output_rule_highlighting_enabled: bool,
-    #[serde(default)]
-    pub terminal_output_rule_profile: OutputRuleProfile,
-    #[serde(default = "default_terminal_command_decorations_enabled")]
-    pub terminal_command_decorations_enabled: bool,
-    #[serde(default = "default_terminal_overview_markers_enabled")]
-    pub terminal_overview_markers_enabled: bool,
-    #[serde(default = "default_terminal_search_match_highlight")]
-    pub terminal_search_match_highlight: String,
     #[serde(default)]
     pub download_conflict_default: DownloadConflictDefault,
     #[serde(default)]
@@ -97,26 +84,6 @@ fn default_terminal_active_idle_shrink_enabled() -> bool {
     true
 }
 
-fn default_terminal_input_highlighting_enabled() -> bool {
-    true
-}
-
-fn default_terminal_output_rule_highlighting_enabled() -> bool {
-    true
-}
-
-fn default_terminal_command_decorations_enabled() -> bool {
-    true
-}
-
-fn default_terminal_overview_markers_enabled() -> bool {
-    true
-}
-
-fn default_terminal_search_match_highlight() -> String {
-    "default".into()
-}
-
 impl Default for UiPreferences {
     fn default() -> Self {
         Self {
@@ -126,13 +93,6 @@ impl Default for UiPreferences {
             right_panel_view: default_right_panel_view(),
             terminal_scrollback_limit: default_terminal_scrollback_limit(),
             terminal_active_idle_shrink_enabled: default_terminal_active_idle_shrink_enabled(),
-            terminal_input_highlighting_enabled: default_terminal_input_highlighting_enabled(),
-            terminal_output_rule_highlighting_enabled:
-                default_terminal_output_rule_highlighting_enabled(),
-            terminal_output_rule_profile: OutputRuleProfile::Default,
-            terminal_command_decorations_enabled: default_terminal_command_decorations_enabled(),
-            terminal_overview_markers_enabled: default_terminal_overview_markers_enabled(),
-            terminal_search_match_highlight: default_terminal_search_match_highlight(),
             download_conflict_default: DownloadConflictDefault::Ask,
             window_bounds: None,
         }
@@ -183,18 +143,6 @@ impl From<&ShellViewModel> for UiPreferences {
             terminal_scrollback_limit: value.settings_modal_terminal_scrollback_limit(),
             terminal_active_idle_shrink_enabled: value
                 .settings_modal_terminal_active_idle_shrink_enabled(),
-            terminal_input_highlighting_enabled: value
-                .settings_modal_terminal_input_highlighting_enabled(),
-            terminal_output_rule_highlighting_enabled: value
-                .settings_modal_terminal_output_rule_highlighting_enabled(),
-            terminal_output_rule_profile: value.settings_modal_terminal_output_rule_profile(),
-            terminal_command_decorations_enabled: value
-                .settings_modal_terminal_command_decorations_enabled(),
-            terminal_overview_markers_enabled: value
-                .settings_modal_terminal_overview_markers_enabled(),
-            terminal_search_match_highlight: value
-                .settings_modal_terminal_search_match_highlight()
-                .into(),
             download_conflict_default: value.settings_modal_download_conflict_default(),
             window_bounds: None,
         }
@@ -226,13 +174,6 @@ pub fn ui_preferences_from_snapshot(snapshot: &SnapshotUiPreferences) -> UiPrefe
         right_panel_view: default_right_panel_view(),
         terminal_scrollback_limit: default_terminal_scrollback_limit(),
         terminal_active_idle_shrink_enabled: default_terminal_active_idle_shrink_enabled(),
-        terminal_input_highlighting_enabled: default_terminal_input_highlighting_enabled(),
-        terminal_output_rule_highlighting_enabled:
-            default_terminal_output_rule_highlighting_enabled(),
-        terminal_output_rule_profile: OutputRuleProfile::Default,
-        terminal_command_decorations_enabled: default_terminal_command_decorations_enabled(),
-        terminal_overview_markers_enabled: default_terminal_overview_markers_enabled(),
-        terminal_search_match_highlight: default_terminal_search_match_highlight(),
         download_conflict_default: DownloadConflictDefault::Ask,
         window_bounds: None,
     }

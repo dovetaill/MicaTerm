@@ -166,14 +166,6 @@ impl TerminalModelFrame {
             dirty_rows,
         }
     }
-
-    pub fn refresh_row_hashes(&mut self) {
-        let palette = self.palette;
-        for row in &mut self.rows {
-            row.content_hash = hash_row_content(&row.text, row.wrapped, &row.cells);
-            row.row_hash = hash_row(row.row_index, &row.text, row.wrapped, &row.cells, palette);
-        }
-    }
 }
 
 impl TerminalModelCell {

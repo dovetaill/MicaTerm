@@ -1,16 +1,12 @@
 use mica_term::app::ssh::runtime::{
-    TerminalCellState, TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput,
-    TerminalSession,
+    TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput, TerminalSession,
     TerminalSurfaceState,
 };
 use mica_term::app::terminal_core::TerminalCoreKind;
 use mica_term::app::terminal_model::TerminalModelFrame;
-use mica_term::app::terminal_presenter::{
-    TerminalPresentationOptions, semantic_highlight_summary_for_test,
-    semantic_highlight_summary_with_options_for_test,
-};
 use mica_term::app::terminal_semantic::{
-    SemanticStyleRole, detect_input_line_spans, detect_output_block_spans,
+    SemanticInputSpanKind, SemanticOutputBlockKind, detect_input_line_overlays,
+    detect_output_block_overlays,
 };
 use std::fs;
 #[path = "support/retired_windows_subsystem.rs"]
@@ -29,36 +25,6 @@ fn semantic_surface(lines: &[&str]) -> TerminalSurfaceState {
 
 fn semantic_model_frame(lines: &[&str]) -> TerminalModelFrame {
     let surface = semantic_surface(lines);
-    TerminalModelFrame::from_surface(&surface, None)
-}
-
-fn semantic_surface_with_cells(lines: &[&str]) -> TerminalSurfaceState {
-    let mut surface = semantic_surface(lines);
-    surface.default_fg_rgba = 0xffd7_e0e8;
-    surface.default_bg_rgba = 0xff08_131d;
-    surface.row_bg_even_rgba = surface.default_bg_rgba;
-    surface.row_bg_odd_rgba = surface.default_bg_rgba;
-    surface.cells = lines
-        .iter()
-        .enumerate()
-        .flat_map(|(row, line)| {
-            line.chars().enumerate().map(move |(col, ch)| TerminalCellState {
-                row: row as u32,
-                col: col as u32,
-                width: 1,
-                text: ch.to_string(),
-                bold: false,
-                underline: false,
-                fg_rgba: 0xffd7_e0e8,
-                bg_rgba: 0xff08_131d,
-            })
-        })
-        .collect();
-    surface
-}
-
-fn semantic_model_frame_with_cells(lines: &[&str]) -> TerminalModelFrame {
-    let surface = semantic_surface_with_cells(lines);
     TerminalModelFrame::from_surface(&surface, None)
 }
 
@@ -160,16 +126,13 @@ fn remote_output_keeps_following_when_viewport_is_at_bottom() {
 fn semantic_overlay_detects_json_blocks_over_normal_shell_output() {
     let frame = semantic_model_frame(&["{", "  \"name\": \"mica-term\"", "}"]);
 
-    let spans = detect_output_block_spans(&frame);
+    let overlays = detect_output_block_overlays(&frame);
 
-    assert_eq!(spans.len(), 3);
-    assert!(
-        spans
-            .iter()
-            .all(|span| span.role == SemanticStyleRole::OutputJson)
-    );
-    assert_eq!(spans[0].row, 0);
-    assert_eq!(spans[2].row, 2);
+    assert_eq!(overlays.len(), 1);
+    assert_eq!(overlays[0].kind, SemanticOutputBlockKind::Json);
+    assert_eq!(overlays[0].start_row, 0);
+    assert_eq!(overlays[0].end_row, 2);
+    assert_eq!(overlays[0].row_ranges.len(), 3);
     assert_eq!(frame.rows[1].text, "  \"name\": \"mica-term\"");
 }
 
@@ -177,16 +140,13 @@ fn semantic_overlay_detects_json_blocks_over_normal_shell_output() {
 fn semantic_overlay_detects_xml_blocks_over_normal_shell_output() {
     let frame = semantic_model_frame(&["<root>", "  <item>mica-term</item>", "</root>"]);
 
-    let spans = detect_output_block_spans(&frame);
+    let overlays = detect_output_block_overlays(&frame);
 
-    assert_eq!(spans.len(), 3);
-    assert!(
-        spans
-            .iter()
-            .all(|span| span.role == SemanticStyleRole::OutputXml)
-    );
-    assert_eq!(spans[0].row, 0);
-    assert_eq!(spans[2].row, 2);
+    assert_eq!(overlays.len(), 1);
+    assert_eq!(overlays[0].kind, SemanticOutputBlockKind::Xml);
+    assert_eq!(overlays[0].start_row, 0);
+    assert_eq!(overlays[0].end_row, 2);
+    assert_eq!(overlays[0].row_ranges.len(), 3);
 }
 
 #[test]
@@ -197,172 +157,30 @@ fn semantic_overlay_detects_log_blocks_over_normal_shell_output() {
         "[ERROR] native surface unavailable",
     ]);
 
-    let spans = detect_output_block_spans(&frame);
+    let overlays = detect_output_block_overlays(&frame);
 
-    assert_eq!(spans.len(), 3);
-    assert!(
-        spans
-            .iter()
-            .any(|span| span.role == SemanticStyleRole::OutputLevelInfo)
-    );
-    assert!(
-        spans
-            .iter()
-            .any(|span| span.role == SemanticStyleRole::OutputLevelWarn)
-    );
-    assert!(
-        spans
-            .iter()
-            .any(|span| span.role == SemanticStyleRole::OutputLevelError)
-    );
+    assert_eq!(overlays.len(), 1);
+    assert_eq!(overlays[0].kind, SemanticOutputBlockKind::Log);
+    assert_eq!(overlays[0].start_row, 0);
+    assert_eq!(overlays[0].end_row, 2);
+    assert_eq!(overlays[0].row_ranges.len(), 3);
 }
 
 #[test]
 fn semantic_input_overlay_highlights_shell_prompt_command_option_and_argument() {
     let frame = semantic_model_frame(&["[root@host ~]$ cargo test --workspace"]);
 
-    let spans = detect_input_line_spans(&frame);
+    let overlays = detect_input_line_overlays(&frame);
 
-    assert_eq!(spans.len(), 4);
-    assert_eq!(spans[0].role, SemanticStyleRole::InputPrompt);
-    assert_eq!(spans[1].role, SemanticStyleRole::InputCommand);
-    assert_eq!(spans[2].role, SemanticStyleRole::InputArgument);
-    assert_eq!(spans[3].role, SemanticStyleRole::InputOption);
-    assert_eq!(spans[1].start_col, 15);
-    assert_eq!(spans[1].end_col, 19);
-    assert_eq!(spans[3].start_col, 26);
-    assert_eq!(spans[3].end_col, 36);
-}
-
-#[test]
-fn semantic_input_roles_cover_command_path_variable_and_operator() {
-    let frame = semantic_model_frame(&["$ cargo run --bin app ./fixtures $HOME && echo done"]);
-
-    let spans = detect_input_line_spans(&frame);
-
-    assert!(
-        spans
-            .iter()
-            .any(|span| span.role == SemanticStyleRole::InputCommand)
-    );
-    assert!(
-        spans
-            .iter()
-            .any(|span| span.role == SemanticStyleRole::InputOption)
-    );
-    assert!(
-        spans
-            .iter()
-            .any(|span| span.role == SemanticStyleRole::InputPath)
-    );
-    assert!(
-        spans
-            .iter()
-            .any(|span| span.role == SemanticStyleRole::InputVariable)
-    );
-    assert!(
-        spans
-            .iter()
-            .any(|span| span.role == SemanticStyleRole::InputOperator)
-    );
-}
-
-#[test]
-fn input_highlighting_covers_command_option_argument_path_variable_string_and_redirects() {
-    let frame = semantic_model_frame(&[
-        "$ cargo run --bin mica --profile dev ./fixtures > out.log 2>&1 && echo \"done\" $HOME &",
-    ]);
-
-    let spans = detect_input_line_spans(&frame);
-
-    assert!(
-        spans
-            .iter()
-            .any(|span| span.role == SemanticStyleRole::InputCommand)
-    );
-    assert!(
-        spans
-            .iter()
-            .any(|span| span.role == SemanticStyleRole::InputOption)
-    );
-    assert!(
-        spans
-            .iter()
-            .any(|span| span.role == SemanticStyleRole::InputArgument)
-    );
-    assert!(
-        spans
-            .iter()
-            .any(|span| span.role == SemanticStyleRole::InputPath)
-    );
-    assert!(
-        spans
-            .iter()
-            .any(|span| span.role == SemanticStyleRole::InputVariable)
-    );
-    assert!(
-        spans
-            .iter()
-            .any(|span| span.role == SemanticStyleRole::InputString)
-    );
-    let operator_count = spans
-        .iter()
-        .filter(|span| span.role == SemanticStyleRole::InputOperator)
-        .count();
-    assert!(operator_count >= 4);
-}
-
-#[test]
-fn semantic_roles_project_visible_highlight_primitives_for_dirty_rows() {
-    let frame = semantic_model_frame_with_cells(&[
-        "$ cargo run --release ./fixtures",
-        "https://example.com failed",
-    ]);
-
-    let summary = semantic_highlight_summary_for_test(frame);
-
-    assert!(
-        summary.input_fg_overrides > 0 || summary.input_underlines > 0 || summary.input_tints > 0
-    );
-    assert!(
-        summary.output_fg_overrides > 0
-            || summary.output_underlines > 0
-            || summary.output_tints > 0
-    );
-}
-
-#[test]
-fn presentation_options_can_disable_input_highlighting() {
-    let frame = semantic_model_frame_with_cells(&["$ cargo run --release ./fixtures"]);
-
-    let summary = semantic_highlight_summary_with_options_for_test(
-        frame,
-        TerminalPresentationOptions {
-            input_highlighting_enabled: false,
-            ..TerminalPresentationOptions::default()
-        },
-    );
-
-    assert_eq!(summary.input_fg_overrides, 0);
-    assert_eq!(summary.input_underlines, 0);
-    assert_eq!(summary.input_tints, 0);
-}
-
-#[test]
-fn presentation_options_can_disable_output_rule_highlighting() {
-    let frame = semantic_model_frame_with_cells(&["https://example.com failed"]);
-
-    let summary = semantic_highlight_summary_with_options_for_test(
-        frame,
-        TerminalPresentationOptions {
-            output_rule_highlighting_enabled: false,
-            ..TerminalPresentationOptions::default()
-        },
-    );
-
-    assert_eq!(summary.output_fg_overrides, 0);
-    assert_eq!(summary.output_underlines, 0);
-    assert_eq!(summary.output_tints, 0);
+    assert_eq!(overlays.len(), 4);
+    assert_eq!(overlays[0].kind, SemanticInputSpanKind::Prompt);
+    assert_eq!(overlays[1].kind, SemanticInputSpanKind::Command);
+    assert_eq!(overlays[2].kind, SemanticInputSpanKind::Argument);
+    assert_eq!(overlays[3].kind, SemanticInputSpanKind::Option);
+    assert_eq!(overlays[1].start_col, 15);
+    assert_eq!(overlays[1].end_col, 19);
+    assert_eq!(overlays[3].start_col, 26);
+    assert_eq!(overlays[3].end_col, 36);
 }
 
 #[test]
@@ -371,9 +189,9 @@ fn semantic_input_overlay_is_disabled_in_alternate_screen_mode() {
     surface.alternate_screen_active = true;
     let frame = TerminalModelFrame::from_surface(&surface, None);
 
-    let spans = detect_input_line_spans(&frame);
+    let overlays = detect_input_line_overlays(&frame);
 
-    assert!(spans.is_empty());
+    assert!(overlays.is_empty());
 }
 
 #[test]
@@ -382,36 +200,9 @@ fn semantic_input_overlay_is_disabled_when_tui_mouse_grab_is_active() {
     surface.mouse_grabbed = true;
     let frame = TerminalModelFrame::from_surface(&surface, None);
 
-    let spans = detect_input_line_spans(&frame);
+    let overlays = detect_input_line_overlays(&frame);
 
-    assert!(spans.is_empty());
-}
-
-#[test]
-fn semantic_analyzers_emit_roles_without_overlay_rgba_fields() {
-    let input = fs::read_to_string("src/app/terminal_semantic/input_line.rs")
-        .expect("read semantic input analyzer");
-    let output = fs::read_to_string("src/app/terminal_semantic/output_blocks.rs")
-        .expect("read semantic output analyzer");
-    let shared = fs::read_to_string("src/app/terminal_semantic/types.rs")
-        .expect("read semantic shared types");
-
-    assert!(
-        !input.contains("overlay_rgba"),
-        "input analyzer should emit semantic roles instead of color overlays"
-    );
-    assert!(
-        !output.contains("overlay_rgba"),
-        "output analyzer should emit semantic roles instead of color overlays"
-    );
-    assert!(
-        shared.contains("pub enum SemanticStyleRole"),
-        "semantic shared types should expose semantic style roles"
-    );
-    assert!(
-        shared.contains("pub struct SemanticSpan"),
-        "semantic shared types should expose semantic spans"
-    );
+    assert!(overlays.is_empty());
 }
 
 #[test]

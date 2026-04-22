@@ -29,10 +29,7 @@ fn app_root_prefers_explicit_override() {
     assert_eq!(paths.root_source, AppRootSource::EnvOverride);
     assert_eq!(paths.root_dir, temp_root.join("override-root"));
     assert_eq!(paths.data_dir, temp_root.join("override-root").join("data"));
-    assert_eq!(
-        paths.config_dir,
-        temp_root.join("override-root").join("config")
-    );
+    assert_eq!(paths.config_dir, temp_root.join("override-root").join("config"));
     assert_eq!(paths.logs_dir, temp_root.join("override-root").join("logs"));
     assert_eq!(
         paths.crash_dir,
@@ -64,10 +61,7 @@ fn app_root_uses_executable_dir_when_portable_marker_exists() {
 
     assert_eq!(paths.root_source, AppRootSource::PortableMarker);
     assert_eq!(paths.root_dir, temp_root.join("portable-root"));
-    assert_eq!(
-        paths.config_dir,
-        temp_root.join("portable-root").join("config")
-    );
+    assert_eq!(paths.config_dir, temp_root.join("portable-root").join("config"));
     assert_eq!(paths.data_dir, temp_root.join("portable-root").join("data"));
 }
 
@@ -90,10 +84,7 @@ fn app_root_uses_platform_local_data_when_marker_is_absent() {
 
     assert_eq!(paths.root_source, AppRootSource::StandardLocalData);
     assert_eq!(paths.root_dir, temp_root.join("standard-root"));
-    assert_eq!(
-        paths.config_dir,
-        temp_root.join("standard-root").join("config")
-    );
+    assert_eq!(paths.config_dir, temp_root.join("standard-root").join("config"));
     assert_eq!(paths.data_dir, temp_root.join("standard-root").join("data"));
 }
 

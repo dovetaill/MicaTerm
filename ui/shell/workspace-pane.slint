@@ -4,7 +4,7 @@ import { ThemeTokens } from "../theme/tokens.slint";
 import { QuickLaunchCardRow, QuickLaunchDetailRow, QuickLaunchGroupRow } from "../welcome/quick-launch-types.slint";
 import { SftpWorkspaceHost } from "./sftp-workspace-host.slint";
 import { TabBar, WorkspaceTabItem } from "./tabbar.slint";
-import { ConnectionProgressDiagnosticRow, ConnectionProgressStepRow, TerminalCommandBlockDecoration, TerminalOverviewMarkerDecoration, TerminalSessionHost } from "./terminal-session-host.slint";
+import { ConnectionProgressDiagnosticRow, ConnectionProgressStepRow, TerminalSessionHost } from "./terminal-session-host.slint";
 
 export component WorkspacePane inherits Rectangle {
     in property <[WorkspaceTabItem]> workspace-tab-items: [];
@@ -57,8 +57,6 @@ export component WorkspacePane inherits Rectangle {
     in property <color> workspace-session-scrollbar-thumb: ThemeTokens.terminal-scrollbar-thumb-surface;
     in property <color> workspace-session-scrollbar-thumb-active: ThemeTokens.terminal-scrollbar-thumb-active-surface;
     in property <bool> workspace-session-mouse-grabbed: false;
-    in property <[TerminalCommandBlockDecoration]> workspace-session-command-blocks: [];
-    in property <[TerminalOverviewMarkerDecoration]> workspace-session-overview-markers: [];
     in property <[string]> workspace-session-visible-lines: [];
     in property <int> workspace-session-surface-seqno: 0;
     in property <int> workspace-session-viewport-offset-lines: 0;
@@ -109,7 +107,7 @@ export component WorkspacePane inherits Rectangle {
 
     horizontal-stretch: 1;
     min-width: 0px;
-    background: ThemeTokens.terminal-frame-background;
+    background: ThemeTokens.workspace-surface;
 
     VerticalLayout {
         width: 100%;
@@ -196,8 +194,6 @@ export component WorkspacePane inherits Rectangle {
                 session-scrollbar-thumb: root.workspace-session-scrollbar-thumb;
                 session-scrollbar-thumb-active: root.workspace-session-scrollbar-thumb-active;
                 session-mouse-grabbed: root.workspace-session-mouse-grabbed;
-                session-command-blocks: root.workspace-session-command-blocks;
-                session-overview-markers: root.workspace-session-overview-markers;
                 session-visible-lines: root.workspace-session-visible-lines;
                 session-surface-seqno: root.workspace-session-surface-seqno;
                 session-viewport-offset-lines: root.workspace-session-viewport-offset-lines;

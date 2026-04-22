@@ -427,8 +427,6 @@ fn terminal_presenter_threads_native_overlay_render_contracts() {
     let renderer_source = fs::read_to_string("src/app/terminal_renderer/wgpu_renderer.rs")
         .expect("read native renderer");
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
-    let host_source = fs::read_to_string("ui/shell/terminal-session-host.slint")
-        .expect("read terminal session host");
 
     assert!(
         presenter_source.contains("pub struct NativeCursorOverlay"),
@@ -479,14 +477,6 @@ fn terminal_presenter_threads_native_overlay_render_contracts() {
         "presentable native frames should carry IME preview overlay data"
     );
     assert!(
-        presenter_source.contains("pub command_blocks: Vec<CommandBlock>"),
-        "presentable native frames should carry command block decoration payloads"
-    );
-    assert!(
-        presenter_source.contains("pub overview_markers: Vec<OverviewMarker>"),
-        "presentable native frames should carry overview marker payloads"
-    );
-    assert!(
         renderer_source.contains("pub struct PreparedUnderlineOverlay"),
         "renderer preparation should expose an explicit underline overlay contract for native frame payload assembly"
     );
@@ -505,22 +495,6 @@ fn terminal_presenter_threads_native_overlay_render_contracts() {
     assert!(
         bootstrap_source.contains("presentable_frame.ime_preview_overlay"),
         "bootstrap should keep the native IME preview overlay payload alongside the retained frame state"
-    );
-    assert!(
-        bootstrap_source.contains("presentable_frame.command_blocks"),
-        "bootstrap should keep command block decoration payloads alongside the retained native frame state"
-    );
-    assert!(
-        bootstrap_source.contains("presentable_frame.overview_markers"),
-        "bootstrap should keep overview marker payloads alongside the retained native frame state"
-    );
-    assert!(
-        host_source.contains("session-command-blocks"),
-        "terminal session host should expose a command block decoration property contract"
-    );
-    assert!(
-        host_source.contains("session-overview-markers"),
-        "terminal session host should expose an overview marker property contract"
     );
 }
 

@@ -3,9 +3,8 @@
 mod spec;
 
 pub use spec::{
-    AppThemeSpec, DecorationTheme, SemanticHighlightTheme, SemanticInkTheme, ShellChromeTheme,
+    AppThemeSpec, DecorationTheme, SemanticHighlightTheme, ShellChromeTheme,
     TerminalBackgroundTheme, TerminalCursorTheme, TerminalForegroundTheme, TerminalOverlayTheme,
     TerminalScrollbarTheme, TerminalTheme, ThemeMode, ThemeTerminalPaletteSpec, ThemeVariant,
-    app_theme_spec, app_theme_spec_from_terminal_background, terminal_palette_spec,
-    terminal_palette_spec_for,
+    app_theme_spec, terminal_palette_spec, terminal_palette_spec_for,
 };

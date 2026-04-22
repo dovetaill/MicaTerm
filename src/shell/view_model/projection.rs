@@ -156,43 +156,6 @@ impl ShellViewModel {
             .terminal_active_idle_shrink_enabled
     }
 
-    pub fn settings_modal_terminal_input_highlighting_enabled(&self) -> bool {
-        self.settings_modal_state
-            .terminal_input_highlighting_enabled
-    }
-
-    pub fn settings_modal_terminal_output_rule_highlighting_enabled(&self) -> bool {
-        self.settings_modal_state
-            .terminal_output_rule_highlighting_enabled
-    }
-
-    pub fn settings_modal_terminal_output_rule_profile(
-        &self,
-    ) -> crate::app::terminal_semantic::OutputRuleProfile {
-        self.settings_modal_state.terminal_output_rule_profile
-    }
-
-    pub fn settings_modal_terminal_output_rule_profile_id(&self) -> &'static str {
-        self.settings_modal_state
-            .terminal_output_rule_profile
-            .as_str()
-    }
-
-    pub fn settings_modal_terminal_command_decorations_enabled(&self) -> bool {
-        self.settings_modal_state
-            .terminal_command_decorations_enabled
-    }
-
-    pub fn settings_modal_terminal_overview_markers_enabled(&self) -> bool {
-        self.settings_modal_state.terminal_overview_markers_enabled
-    }
-
-    pub fn settings_modal_terminal_search_match_highlight(&self) -> &str {
-        self.settings_modal_state
-            .terminal_search_match_highlight
-            .as_str()
-    }
-
     pub fn settings_modal_download_conflict_default(
         &self,
     ) -> crate::app::ui_preferences::DownloadConflictDefault {
@@ -201,13 +164,6 @@ impl ShellViewModel {
 
     pub fn settings_modal_download_conflict_default_id(&self) -> &'static str {
         self.settings_modal_state.download_conflict_default.as_str()
-    }
-
-    pub fn theme_variant_id(&self) -> &'static str {
-        match self.theme_variant {
-            ThemeVariant::PremiumDefault => "premium-default",
-            ThemeVariant::LegacyHackerGreen => "legacy-hacker-green",
-        }
     }
 
     pub fn start_sync_feedback(&mut self, text: impl Into<String>) {
@@ -267,44 +223,9 @@ impl ShellViewModel {
             .terminal_active_idle_shrink_enabled = value;
     }
 
-    pub fn set_settings_modal_terminal_input_highlighting_enabled(&mut self, value: bool) {
-        self.settings_modal_state
-            .terminal_input_highlighting_enabled = value;
-    }
-
-    pub fn set_settings_modal_terminal_output_rule_highlighting_enabled(&mut self, value: bool) {
-        self.settings_modal_state
-            .terminal_output_rule_highlighting_enabled = value;
-    }
-
-    pub fn set_settings_modal_terminal_output_rule_profile(&mut self, value: &str) {
-        self.settings_modal_state.terminal_output_rule_profile =
-            crate::app::terminal_semantic::OutputRuleProfile::from_str(value);
-    }
-
-    pub fn set_settings_modal_terminal_command_decorations_enabled(&mut self, value: bool) {
-        self.settings_modal_state
-            .terminal_command_decorations_enabled = value;
-    }
-
-    pub fn set_settings_modal_terminal_overview_markers_enabled(&mut self, value: bool) {
-        self.settings_modal_state.terminal_overview_markers_enabled = value;
-    }
-
-    pub fn set_settings_modal_terminal_search_match_highlight(&mut self, value: &str) {
-        self.settings_modal_state.terminal_search_match_highlight = value.into();
-    }
-
     pub fn set_settings_modal_download_conflict_default(&mut self, value: &str) {
         self.settings_modal_state.download_conflict_default =
             crate::app::ui_preferences::DownloadConflictDefault::from_str(value);
-    }
-
-    pub fn set_theme_variant_id(&mut self, value: &str) {
-        self.theme_variant = match value {
-            "legacy-hacker-green" => ThemeVariant::LegacyHackerGreen,
-            _ => ThemeVariant::PremiumDefault,
-        };
     }
 
     pub fn open_sync_modal(&mut self) {

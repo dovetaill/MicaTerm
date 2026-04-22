@@ -83,33 +83,9 @@ pub struct DecorationTheme {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SemanticInkTheme {
-    pub fg: Option<u32>,
-    pub tint: Option<u32>,
-    pub underline: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SemanticHighlightTheme {
-    pub input_prompt: SemanticInkTheme,
-    pub input_command: SemanticInkTheme,
-    pub input_path: SemanticInkTheme,
-    pub input_option: SemanticInkTheme,
-    pub input_operator: SemanticInkTheme,
-    pub input_variable: SemanticInkTheme,
-    pub input_string: SemanticInkTheme,
-    pub input_invalid: SemanticInkTheme,
-    pub output_accent: SemanticInkTheme,
-    pub output_muted: SemanticInkTheme,
-    pub output_info: SemanticInkTheme,
-    pub output_warn: SemanticInkTheme,
-    pub output_error: SemanticInkTheme,
-    pub output_success: SemanticInkTheme,
-    pub output_failure: SemanticInkTheme,
-    pub output_added: SemanticInkTheme,
-    pub output_removed: SemanticInkTheme,
-    pub output_json_key: SemanticInkTheme,
-    pub output_json_value: SemanticInkTheme,
+    pub input_command: u32,
+    pub output_accent: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -157,28 +133,6 @@ pub fn app_theme_spec(mode: ThemeMode, variant: ThemeVariant) -> AppThemeSpec {
     }
 }
 
-pub fn app_theme_spec_from_terminal_background(default_bg_rgba: u32) -> AppThemeSpec {
-    match default_bg_rgba & 0x00ff_ffff {
-        0x08_13_1d => app_theme_spec(ThemeMode::Dark, ThemeVariant::PremiumDefault),
-        0xf4_f6_f8 => app_theme_spec(ThemeMode::Light, ThemeVariant::PremiumDefault),
-        0x05_0b_08 => app_theme_spec(ThemeMode::Dark, ThemeVariant::LegacyHackerGreen),
-        0xef_f6_f1 => app_theme_spec(ThemeMode::Light, ThemeVariant::LegacyHackerGreen),
-        _ => app_theme_spec(ThemeMode::Dark, ThemeVariant::PremiumDefault),
-    }
-}
-
-fn semantic_ink(fg: Option<u32>, tint: Option<u32>, underline: bool) -> SemanticInkTheme {
-    SemanticInkTheme {
-        fg,
-        tint,
-        underline,
-    }
-}
-
-fn semantic_tint(rgb: u32, alpha: u8) -> u32 {
-    (u32::from(alpha) << 24) | (rgb & 0x00ff_ffff)
-}
-
 pub fn terminal_palette_spec(theme_mode: ThemeMode) -> ThemeTerminalPaletteSpec {
     terminal_palette_spec_for(theme_mode, ThemeVariant::PremiumDefault)
 }
@@ -213,108 +167,47 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
             variant: ThemeVariant::PremiumDefault,
             mode,
             shell: ShellChromeTheme {
-                app_background: 0x0f_16_1d,
-                border: 0x2d_3a_48,
+                app_background: 0x17_1c24,
+                border: 0x34_47_5c,
             },
             terminal: TerminalTheme {
                 name: "Mica Graphite",
                 background: TerminalBackgroundTheme {
                     base: 0x08_13_1d,
-                    gradient_top: 0x0d_18_22,
+                    gradient_top: 0x0b_18_24,
                     gradient_bottom: 0x08_13_1d,
                 },
                 foreground: TerminalForegroundTheme {
-                    default: 0xd7_e0_e8,
-                    dim: 0x8f_a0_ae,
-                    soft: 0xc0_cad4,
+                    default: 0xe5_eb_f5,
+                    dim: 0x92_9d_ab,
+                    soft: 0xc7_d0_db,
                 },
                 cursor: TerminalCursorTheme {
-                    background: 0xdc_e6_ee,
+                    background: 0xe5_eb_f5,
                     foreground: 0x08_13_1d,
                 },
                 selection: TerminalOverlayTheme {
-                    rgb: 0x7a_8f_a9,
-                    alpha: 74.0 / 255.0,
+                    rgb: 0x7c_92_af,
+                    alpha: 0.25,
                 },
                 scrollbar: TerminalScrollbarTheme {
-                    thumb: 0x5a_6a_79,
-                    thumb_active: 0x72_84_95,
+                    thumb: 0x4a_58_6a,
+                    thumb_active: 0x5c_6d_82,
                 },
                 ansi: [
-                    0x3e_4a_57, 0xc9_7d_88, 0x7f_b0_8d, 0xc6_a0_66, 0x7f_9e_c4, 0xa8_8d_bf,
-                    0x74_b1_b7, 0xcb_d5_df, 0x5f_6d_7c, 0xd9_93_9d, 0x97_c3_a1, 0xd8_b7_80,
-                    0x9a_b5_d6, 0xbe_a2_d1, 0x90_c8_cc, 0xec_f2_f7,
+                    0x45_47_5a, 0xf3_8b_a8, 0xa6_e3_a1, 0xf9_e2_af, 0x89_b4_fa, 0xf5_c2_e7,
+                    0x94_e2_d5, 0xba_c2_de, 0x58_5b_70, 0xf3_8b_a8, 0xa6_e3_a1, 0xf9_e2_af,
+                    0x89_b4_fa, 0xf5_c2_e7, 0x94_e2_d5, 0xa6_ad_c8,
                 ],
             },
             decoration: DecorationTheme {
-                running: 0x7d_97_b8,
-                success: 0x7f_b0_8d,
-                failure: 0xc9_7d_88,
+                running: 0x7d_a8_d9,
+                success: 0x7b_c5_93,
+                failure: 0xde_8b_95,
             },
             semantic: SemanticHighlightTheme {
-                input_prompt: semantic_ink(Some(0x8f_a0_ae), None, false),
-                input_command: semantic_ink(
-                    Some(0x7d_97_b8),
-                    Some(semantic_tint(0x7d_97_b8, 0x18)),
-                    true,
-                ),
-                input_path: semantic_ink(Some(0x7f_9e_c4), None, true),
-                input_option: semantic_ink(Some(0xc0_ca_d4), None, false),
-                input_operator: semantic_ink(Some(0x8f_a0_ae), None, false),
-                input_variable: semantic_ink(
-                    Some(0x96_af_ca),
-                    Some(semantic_tint(0x96_af_ca, 0x14)),
-                    false,
-                ),
-                input_string: semantic_ink(Some(0xc0_ca_d4), None, false),
-                input_invalid: semantic_ink(
-                    Some(0xc9_7d_88),
-                    Some(semantic_tint(0xc9_7d_88, 0x18)),
-                    true,
-                ),
-                output_accent: semantic_ink(
-                    Some(0x7f_9e_c4),
-                    Some(semantic_tint(0x7f_9e_c4, 0x14)),
-                    true,
-                ),
-                output_muted: semantic_ink(Some(0xc0_ca_d4), None, false),
-                output_info: semantic_ink(
-                    Some(0xc0_ca_d4),
-                    Some(semantic_tint(0x7f_9e_c4, 0x10)),
-                    false,
-                ),
-                output_warn: semantic_ink(
-                    Some(0xc6_a0_66),
-                    Some(semantic_tint(0xc6_a0_66, 0x12)),
-                    false,
-                ),
-                output_error: semantic_ink(
-                    Some(0xc9_7d_88),
-                    Some(semantic_tint(0xc9_7d_88, 0x16)),
-                    true,
-                ),
-                output_success: semantic_ink(
-                    Some(0x7f_b0_8d),
-                    Some(semantic_tint(0x7f_b0_8d, 0x12)),
-                    false,
-                ),
-                output_failure: semantic_ink(
-                    Some(0xc9_7d_88),
-                    Some(semantic_tint(0xc9_7d_88, 0x14)),
-                    true,
-                ),
-                output_added: semantic_ink(
-                    Some(0x97_c3_a1),
-                    Some(semantic_tint(0x97_c3_a1, 0x10)),
-                    false,
-                ),
-                output_removed: semantic_ink(
-                    Some(0xd9_93_9d),
-                    Some(semantic_tint(0xd9_93_9d, 0x10)),
-                    false,
-                ),
-                output_json_key: semantic_ink(Some(0x96_af_ca), None, false),
-                output_json_value: semantic_ink(Some(0xc0_ca_d4), None, false),
+                input_command: 0x4f_c3_f7,
+                output_accent: 0x28_7d_ff,
             },
         },
         ThemeMode::Light => AppThemeSpec {
@@ -323,108 +216,47 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
             variant: ThemeVariant::PremiumDefault,
             mode,
             shell: ShellChromeTheme {
-                app_background: 0xe8_ed_f1,
-                border: 0xc9_d3_dd,
+                app_background: 0xf6_f8_fb,
+                border: 0xc7_d4_e6,
             },
             terminal: TerminalTheme {
                 name: "Mica Canvas",
                 background: TerminalBackgroundTheme {
-                    base: 0xf4_f6_f8,
-                    gradient_top: 0xf8_f9_fb,
-                    gradient_bottom: 0xf1_f4_f7,
+                    base: 0xf2_f4_f7,
+                    gradient_top: 0xf6_f7_f9,
+                    gradient_bottom: 0xf2_f4_f7,
                 },
                 foreground: TerminalForegroundTheme {
-                    default: 0x1f_29_33,
-                    dim: 0x6c_7a_86,
-                    soft: 0x4756_63,
+                    default: 0x24_31_42,
+                    dim: 0x74_83_95,
+                    soft: 0x4c_59_6b,
                 },
                 cursor: TerminalCursorTheme {
-                    background: 0x24_31_3c,
-                    foreground: 0xf4_f6_f8,
+                    background: 0x24_31_42,
+                    foreground: 0xf2_f4_f7,
                 },
                 selection: TerminalOverlayTheme {
-                    rgb: 0x78_95_b3,
-                    alpha: 58.0 / 255.0,
+                    rgb: 0x95_ad_d3,
+                    alpha: 0.30,
                 },
                 scrollbar: TerminalScrollbarTheme {
-                    thumb: 0xb6_c0_ca,
-                    thumb_active: 0x9f_ac_b8,
+                    thumb: 0xbc_c8_da,
+                    thumb_active: 0xa8_b8_ce,
                 },
                 ansi: [
-                    0x4e_5c_6a, 0xb7_64_70, 0x5f_89_69, 0x9b_7a_40, 0x56_7c_a8, 0x86_6e_a2,
-                    0x4c_8d_8f, 0xa7_b4_bf, 0x6c_7b_89, 0xc8_79_84, 0x76_9d_7d, 0xad_8b_54,
-                    0x70_95_bf, 0x9c_83_b6, 0x66_a4_a7, 0xd9_e0_e6,
+                    0x5c_5f_77, 0xd2_0f_39, 0x40_a0_2b, 0xdf_8e_1d, 0x1e_66_f5, 0xea_76_cb,
+                    0x17_92_99, 0xac_b0_be, 0x6c_6f_85, 0xd2_0f_39, 0x40_a0_2b, 0xdf_8e_1d,
+                    0x1e_66_f5, 0xea_76_cb, 0x17_92_99, 0x7c_7f_93,
                 ],
             },
             decoration: DecorationTheme {
-                running: 0x6b_87_ab,
-                success: 0x5f_89_69,
-                failure: 0xb7_64_70,
+                running: 0x5f_87_c0,
+                success: 0x4d_8f_66,
+                failure: 0xc3_64_73,
             },
             semantic: SemanticHighlightTheme {
-                input_prompt: semantic_ink(Some(0x6c_7a_86), None, false),
-                input_command: semantic_ink(
-                    Some(0x6b_87_ab),
-                    Some(semantic_tint(0x6b_87_ab, 0x14)),
-                    true,
-                ),
-                input_path: semantic_ink(Some(0x56_7c_a8), None, true),
-                input_option: semantic_ink(Some(0x47_56_63), None, false),
-                input_operator: semantic_ink(Some(0x6c_7a_86), None, false),
-                input_variable: semantic_ink(
-                    Some(0x6b_87_ab),
-                    Some(semantic_tint(0x6b_87_ab, 0x10)),
-                    false,
-                ),
-                input_string: semantic_ink(Some(0x47_56_63), None, false),
-                input_invalid: semantic_ink(
-                    Some(0xb7_64_70),
-                    Some(semantic_tint(0xb7_64_70, 0x14)),
-                    true,
-                ),
-                output_accent: semantic_ink(
-                    Some(0x56_7c_a8),
-                    Some(semantic_tint(0x56_7c_a8, 0x10)),
-                    true,
-                ),
-                output_muted: semantic_ink(Some(0x47_56_63), None, false),
-                output_info: semantic_ink(
-                    Some(0x47_56_63),
-                    Some(semantic_tint(0x56_7c_a8, 0x0e)),
-                    false,
-                ),
-                output_warn: semantic_ink(
-                    Some(0x9b_7a_40),
-                    Some(semantic_tint(0x9b_7a_40, 0x10)),
-                    false,
-                ),
-                output_error: semantic_ink(
-                    Some(0xb7_64_70),
-                    Some(semantic_tint(0xb7_64_70, 0x14)),
-                    true,
-                ),
-                output_success: semantic_ink(
-                    Some(0x5f_89_69),
-                    Some(semantic_tint(0x5f_89_69, 0x10)),
-                    false,
-                ),
-                output_failure: semantic_ink(
-                    Some(0xb7_64_70),
-                    Some(semantic_tint(0xb7_64_70, 0x12)),
-                    true,
-                ),
-                output_added: semantic_ink(
-                    Some(0x76_9d_7d),
-                    Some(semantic_tint(0x76_9d_7d, 0x0e)),
-                    false,
-                ),
-                output_removed: semantic_ink(
-                    Some(0xc8_79_84),
-                    Some(semantic_tint(0xc8_79_84, 0x0e)),
-                    false,
-                ),
-                output_json_key: semantic_ink(Some(0x6b_87_ab), None, false),
-                output_json_value: semantic_ink(Some(0x47_56_63), None, false),
+                input_command: 0x3d_77_bf,
+                output_accent: 0x1e_66_f5,
             },
         },
     }
@@ -438,108 +270,47 @@ fn legacy_hacker_green_spec(mode: ThemeMode) -> AppThemeSpec {
             variant: ThemeVariant::LegacyHackerGreen,
             mode,
             shell: ShellChromeTheme {
-                app_background: 0x0b_12_0f,
-                border: 0x23_43_33,
+                app_background: 0x0c_12_0f,
+                border: 0x1f_57_36,
             },
             terminal: TerminalTheme {
                 name: "Legacy Hacker Green",
                 background: TerminalBackgroundTheme {
                     base: 0x05_0b_08,
-                    gradient_top: 0x08_10_0c,
+                    gradient_top: 0x08_12_0d,
                     gradient_bottom: 0x05_0b_08,
                 },
                 foreground: TerminalForegroundTheme {
-                    default: 0x9b_e6_b3,
-                    dim: 0x5e_8a_6d,
-                    soft: 0x7d_bf_92,
+                    default: 0x98_f5_b3,
+                    dim: 0x4b_8d_64,
+                    soft: 0x74_c0_8b,
                 },
                 cursor: TerminalCursorTheme {
-                    background: 0xb4_f0_c6,
+                    background: 0x98_f5_b3,
                     foreground: 0x05_0b_08,
                 },
                 selection: TerminalOverlayTheme {
-                    rgb: 0x3f_7a_57,
-                    alpha: 0.25,
+                    rgb: 0x2d_80_55,
+                    alpha: 0.32,
                 },
                 scrollbar: TerminalScrollbarTheme {
-                    thumb: 0x30_58_41,
-                    thumb_active: 0x3f_72_56,
+                    thumb: 0x25_53_3a,
+                    thumb_active: 0x31_68_48,
                 },
                 ansi: [
-                    0x24_31_29, 0xc0_7a_7a, 0x73_c0_8c, 0xb8_b9_6a, 0x6f_a6_d8, 0x9b_88_c8,
-                    0x63_bd_b5, 0xbe_e7_c9, 0x39_51_43, 0xd2_8f_8f, 0x8e_db_a5, 0xd2_d4_7f,
-                    0x8a_bc_f0, 0xb1_9b_e0, 0x7c_d4_cc, 0xe4_f8_ea,
+                    0x1b_26_20, 0xc8_74_74, 0x72_d7_91, 0xc9_c7_6d, 0x5e_b5_f5, 0xb1_8b_f2,
+                    0x57_d0_c8, 0xb9_f0_c8, 0x2e_4d_3b, 0xde_8b_95, 0x8e_e5_ab, 0xe0_d7_84,
+                    0x89_b4_fa, 0xc2_a8_f7, 0x7b_dc_d4, 0xda_f7_e2,
                 ],
             },
             decoration: DecorationTheme {
-                running: 0x69_b3_7f,
-                success: 0x73_c0_8c,
-                failure: 0xc0_7a_7a,
+                running: 0x72_d7_91,
+                success: 0x98_f5_b3,
+                failure: 0xc8_74_74,
             },
             semantic: SemanticHighlightTheme {
-                input_prompt: semantic_ink(Some(0x5e_8a_6d), None, false),
-                input_command: semantic_ink(
-                    Some(0x69_b3_7f),
-                    Some(semantic_tint(0x69_b3_7f, 0x18)),
-                    true,
-                ),
-                input_path: semantic_ink(Some(0x63_bd_b5), None, true),
-                input_option: semantic_ink(Some(0x7d_bf_92), None, false),
-                input_operator: semantic_ink(Some(0x5e_8a_6d), None, false),
-                input_variable: semantic_ink(
-                    Some(0x8e_db_a5),
-                    Some(semantic_tint(0x8e_db_a5, 0x14)),
-                    false,
-                ),
-                input_string: semantic_ink(Some(0x7d_bf_92), None, false),
-                input_invalid: semantic_ink(
-                    Some(0xc0_7a_7a),
-                    Some(semantic_tint(0xc0_7a_7a, 0x18)),
-                    true,
-                ),
-                output_accent: semantic_ink(
-                    Some(0x63_bd_b5),
-                    Some(semantic_tint(0x63_bd_b5, 0x14)),
-                    true,
-                ),
-                output_muted: semantic_ink(Some(0x7d_bf_92), None, false),
-                output_info: semantic_ink(
-                    Some(0x7d_bf_92),
-                    Some(semantic_tint(0x63_bd_b5, 0x10)),
-                    false,
-                ),
-                output_warn: semantic_ink(
-                    Some(0xb8_b9_6a),
-                    Some(semantic_tint(0xb8_b9_6a, 0x12)),
-                    false,
-                ),
-                output_error: semantic_ink(
-                    Some(0xc0_7a_7a),
-                    Some(semantic_tint(0xc0_7a_7a, 0x16)),
-                    true,
-                ),
-                output_success: semantic_ink(
-                    Some(0x73_c0_8c),
-                    Some(semantic_tint(0x73_c0_8c, 0x12)),
-                    false,
-                ),
-                output_failure: semantic_ink(
-                    Some(0xc0_7a_7a),
-                    Some(semantic_tint(0xc0_7a_7a, 0x14)),
-                    true,
-                ),
-                output_added: semantic_ink(
-                    Some(0x8e_db_a5),
-                    Some(semantic_tint(0x8e_db_a5, 0x10)),
-                    false,
-                ),
-                output_removed: semantic_ink(
-                    Some(0xd2_8f_8f),
-                    Some(semantic_tint(0xd2_8f_8f, 0x10)),
-                    false,
-                ),
-                output_json_key: semantic_ink(Some(0x8e_db_a5), None, false),
-                output_json_value: semantic_ink(Some(0x7d_bf_92), None, false),
+                input_command: 0x72_d7_91,
+                output_accent: 0x57_d0_c8,
             },
         },
         ThemeMode::Light => AppThemeSpec {
@@ -548,108 +319,47 @@ fn legacy_hacker_green_spec(mode: ThemeMode) -> AppThemeSpec {
             variant: ThemeVariant::LegacyHackerGreen,
             mode,
             shell: ShellChromeTheme {
-                app_background: 0xee_f5_f0,
-                border: 0xaf_c6_b5,
+                app_background: 0xf1_f7_f2,
+                border: 0x9d_c2_a6,
             },
             terminal: TerminalTheme {
                 name: "Legacy Hacker Green",
                 background: TerminalBackgroundTheme {
-                    base: 0xef_f6_f1,
-                    gradient_top: 0xf7_fb_f8,
-                    gradient_bottom: 0xec_f4_ee,
+                    base: 0xee_f6_ef,
+                    gradient_top: 0xf6_fb_f7,
+                    gradient_bottom: 0xee_f6_ef,
                 },
                 foreground: TerminalForegroundTheme {
-                    default: 0x21_31_28,
-                    dim: 0x6b_7e_74,
-                    soft: 0x45_5d_52,
+                    default: 0x1e_32_26,
+                    dim: 0x5b_73_67,
+                    soft: 0x3c_54_47,
                 },
                 cursor: TerminalCursorTheme {
-                    background: 0x1e_30_26,
-                    foreground: 0xef_f6_f1,
+                    background: 0x1e_32_26,
+                    foreground: 0xee_f6_ef,
                 },
                 selection: TerminalOverlayTheme {
-                    rgb: 0x9a_b9_a4,
-                    alpha: 0.29,
+                    rgb: 0x8d_b9_98,
+                    alpha: 0.28,
                 },
                 scrollbar: TerminalScrollbarTheme {
-                    thumb: 0xb4_cb_bb,
-                    thumb_active: 0x98_b4_a2,
+                    thumb: 0xaf_c8_b6,
+                    thumb_active: 0x92_b2_9d,
                 },
                 ansi: [
-                    0x56_67_5d, 0xb8_67_67, 0x5e_95_6d, 0x9c_94_45, 0x5f_88_b4, 0x85_6e_a8,
-                    0x4f_97_91, 0xaa_bc_b1, 0x74_86_7a, 0xca_7c_7c, 0x75_a8_84, 0xb0_a8_5d,
-                    0x75_9d_c6, 0x9a_84_ba, 0x68_ae_a7, 0xd9_e5_dd,
+                    0x5a_68_60, 0xb4_65_67, 0x53_8b_64, 0x96_8b_43, 0x4c_7b_b0, 0x8d_70_b0,
+                    0x4b_8e_88, 0xa9_b9_b0, 0x73_85_7b, 0xc5_78_7b, 0x69_9b_78, 0xac_a0_5c,
+                    0x66_92_c1, 0xa0_82_c1, 0x63_a2_9b, 0xd2_dd_d7,
                 ],
             },
             decoration: DecorationTheme {
-                running: 0x5e_94_6f,
-                success: 0x5e_95_6d,
-                failure: 0xb8_67_67,
+                running: 0x69_9b_78,
+                success: 0x53_8b_64,
+                failure: 0xb4_65_67,
             },
             semantic: SemanticHighlightTheme {
-                input_prompt: semantic_ink(Some(0x6b_7e_74), None, false),
-                input_command: semantic_ink(
-                    Some(0x4e_8a_63),
-                    Some(semantic_tint(0x4e_8a_63, 0x14)),
-                    true,
-                ),
-                input_path: semantic_ink(Some(0x5f_88_b4), None, true),
-                input_option: semantic_ink(Some(0x45_5d_52), None, false),
-                input_operator: semantic_ink(Some(0x6b_7e_74), None, false),
-                input_variable: semantic_ink(
-                    Some(0x75_a8_84),
-                    Some(semantic_tint(0x75_a8_84, 0x10)),
-                    false,
-                ),
-                input_string: semantic_ink(Some(0x45_5d_52), None, false),
-                input_invalid: semantic_ink(
-                    Some(0xb8_67_67),
-                    Some(semantic_tint(0xb8_67_67, 0x14)),
-                    true,
-                ),
-                output_accent: semantic_ink(
-                    Some(0x5f_88_b4),
-                    Some(semantic_tint(0x5f_88_b4, 0x10)),
-                    true,
-                ),
-                output_muted: semantic_ink(Some(0x45_5d_52), None, false),
-                output_info: semantic_ink(
-                    Some(0x45_5d_52),
-                    Some(semantic_tint(0x5f_88_b4, 0x0e)),
-                    false,
-                ),
-                output_warn: semantic_ink(
-                    Some(0x9c_94_45),
-                    Some(semantic_tint(0x9c_94_45, 0x10)),
-                    false,
-                ),
-                output_error: semantic_ink(
-                    Some(0xb8_67_67),
-                    Some(semantic_tint(0xb8_67_67, 0x12)),
-                    true,
-                ),
-                output_success: semantic_ink(
-                    Some(0x5e_95_6d),
-                    Some(semantic_tint(0x5e_95_6d, 0x10)),
-                    false,
-                ),
-                output_failure: semantic_ink(
-                    Some(0xb8_67_67),
-                    Some(semantic_tint(0xb8_67_67, 0x12)),
-                    true,
-                ),
-                output_added: semantic_ink(
-                    Some(0x75_a8_84),
-                    Some(semantic_tint(0x75_a8_84, 0x0e)),
-                    false,
-                ),
-                output_removed: semantic_ink(
-                    Some(0xca_7c_7c),
-                    Some(semantic_tint(0xca_7c_7c, 0x0e)),
-                    false,
-                ),
-                output_json_key: semantic_ink(Some(0x4e_8a_63), None, false),
-                output_json_value: semantic_ink(Some(0x45_5d_52), None, false),
+                input_command: 0x53_8b_64,
+                output_accent: 0x4c_7b_b0,
             },
         },
     }

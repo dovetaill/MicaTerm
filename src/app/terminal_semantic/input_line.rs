@@ -2,14 +2,33 @@
 
 use crate::app::terminal_model::{TerminalModelFrame, TerminalModelRow};
 
-use super::types::{SemanticPriority, SemanticSpan, SemanticStyleRole};
-
+const PROMPT_OVERLAY_RGBA: u32 = 0x336a_5acd;
+const COMMAND_OVERLAY_RGBA: u32 = 0x334f_c3f7;
+const ARGUMENT_OVERLAY_RGBA: u32 = 0x3334_d399;
+const OPTION_OVERLAY_RGBA: u32 = 0x33f5_a524;
+const OPERATOR_OVERLAY_RGBA: u32 = 0x33ef_6c00;
 const PROMPT_MARKERS: &[&str] = &["$ ", "# ", "% ", "> "];
-const SHELL_OPERATORS: &[&str] = &[
-    "|", "||", "&&", ";", ">", ">>", "<", "2>", "2>>", "2>&1", "&",
-];
+const SHELL_OPERATORS: &[&str] = &["|", "||", "&&", ";", ">", ">>", "<", "2>", "2>>"];
 
-pub fn detect_input_line_spans(frame: &TerminalModelFrame) -> Vec<SemanticSpan> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SemanticInputSpanKind {
+    Prompt,
+    Command,
+    Argument,
+    Option,
+    Operator,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SemanticInputOverlay {
+    pub kind: SemanticInputSpanKind,
+    pub row: u32,
+    pub start_col: u32,
+    pub end_col: u32,
+    pub overlay_rgba: u32,
+}
+
+pub fn detect_input_line_overlays(frame: &TerminalModelFrame) -> Vec<SemanticInputOverlay> {
     if !input_highlighting_is_safe(frame) {
         return Vec::new();
     }
@@ -34,28 +53,36 @@ pub fn detect_input_line_spans(frame: &TerminalModelFrame) -> Vec<SemanticSpan> 
         return Vec::new();
     }
 
-    let mut spans = vec![SemanticSpan::new(
-        row.row_index,
-        0,
-        input_start_col.saturating_sub(1),
-        SemanticStyleRole::InputPrompt,
-        SemanticPriority::Normal,
-    )];
-    let mut command_context = CommandContext::default();
+    let mut overlays = vec![SemanticInputOverlay {
+        kind: SemanticInputSpanKind::Prompt,
+        row: row.row_index,
+        start_col: 0,
+        end_col: input_start_col.saturating_sub(1),
+        overlay_rgba: overlay_rgba(SemanticInputSpanKind::Prompt),
+    }];
+    let mut saw_command = false;
 
     for token in tokens {
-        let role = classify_token(token.text.as_str(), &command_context);
-        spans.push(SemanticSpan::new(
-            row.row_index,
-            token.start_col,
-            token.end_col,
-            role,
-            priority_for(role),
-        ));
-        command_context.observe(token.text.as_str(), role);
+        let kind = if is_shell_operator(token.text.as_str()) {
+            SemanticInputSpanKind::Operator
+        } else if !saw_command {
+            saw_command = true;
+            SemanticInputSpanKind::Command
+        } else if token.text.starts_with('-') {
+            SemanticInputSpanKind::Option
+        } else {
+            SemanticInputSpanKind::Argument
+        };
+        overlays.push(SemanticInputOverlay {
+            kind,
+            row: row.row_index,
+            start_col: token.start_col,
+            end_col: token.end_col,
+            overlay_rgba: overlay_rgba(kind),
+        });
     }
 
-    spans
+    overlays
 }
 
 fn input_highlighting_is_safe(frame: &TerminalModelFrame) -> bool {
@@ -71,41 +98,18 @@ fn prompt_input_start(row: &TerminalModelRow) -> Option<u32> {
     let (marker_start, marker) = PROMPT_MARKERS
         .iter()
         .filter_map(|marker| {
-            row.text.match_indices(marker).next().map(|(index, _)| (index, *marker))
+            row.text
+                .rmatch_indices(marker)
+                .next()
+                .map(|(index, _)| (index, *marker))
         })
-        .min_by_key(|(index, _)| *index)?;
+        .max_by_key(|(index, _)| *index)?;
     let input_start = marker_start + marker.len();
     if row.text[input_start..].trim().is_empty() {
         return None;
     }
 
     Some(char_col(&row.text, input_start) as u32)
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-struct CommandContext {
-    expecting_command: bool,
-    saw_primary_command: bool,
-}
-
-impl CommandContext {
-    fn observe(&mut self, token: &str, role: SemanticStyleRole) {
-        if is_shell_operator(token) {
-            self.expecting_command = true;
-            return;
-        }
-
-        match role {
-            SemanticStyleRole::InputCommand => {
-                self.expecting_command = false;
-                self.saw_primary_command = true;
-            }
-            SemanticStyleRole::InputSubcommand => {
-                self.expecting_command = false;
-            }
-            _ => {}
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -144,57 +148,14 @@ fn shell_tokens(line: &str, input_start_col: u32) -> Vec<ShellToken> {
     tokens
 }
 
-fn classify_token(token: &str, context: &CommandContext) -> SemanticStyleRole {
-    if is_shell_operator(token) {
-        return SemanticStyleRole::InputOperator;
+fn overlay_rgba(kind: SemanticInputSpanKind) -> u32 {
+    match kind {
+        SemanticInputSpanKind::Prompt => PROMPT_OVERLAY_RGBA,
+        SemanticInputSpanKind::Command => COMMAND_OVERLAY_RGBA,
+        SemanticInputSpanKind::Argument => ARGUMENT_OVERLAY_RGBA,
+        SemanticInputSpanKind::Option => OPTION_OVERLAY_RGBA,
+        SemanticInputSpanKind::Operator => OPERATOR_OVERLAY_RGBA,
     }
-    if token.starts_with('$') {
-        return SemanticStyleRole::InputVariable;
-    }
-    if is_quoted(token) {
-        return SemanticStyleRole::InputString;
-    }
-    if token.starts_with('-') {
-        return SemanticStyleRole::InputOption;
-    }
-    if is_path_like(token) {
-        return SemanticStyleRole::InputPath;
-    }
-    if context.expecting_command || !context.saw_primary_command {
-        return SemanticStyleRole::InputCommand;
-    }
-
-    SemanticStyleRole::InputArgument
-}
-
-fn priority_for(role: SemanticStyleRole) -> SemanticPriority {
-    match role {
-        SemanticStyleRole::InputPrompt => SemanticPriority::Low,
-        SemanticStyleRole::InputCommand
-        | SemanticStyleRole::InputSubcommand
-        | SemanticStyleRole::InputInvalidCommand => SemanticPriority::High,
-        SemanticStyleRole::InputVariable | SemanticStyleRole::InputOperator => {
-            SemanticPriority::High
-        }
-        SemanticStyleRole::InputOption
-        | SemanticStyleRole::InputArgument
-        | SemanticStyleRole::InputString
-        | SemanticStyleRole::InputPath => SemanticPriority::Normal,
-        _ => SemanticPriority::Normal,
-    }
-}
-
-fn is_quoted(token: &str) -> bool {
-    (token.starts_with('"') && token.ends_with('"'))
-        || (token.starts_with('\'') && token.ends_with('\''))
-}
-
-fn is_path_like(token: &str) -> bool {
-    token.starts_with("./")
-        || token.starts_with("../")
-        || token.starts_with('/')
-        || token.starts_with("~/")
-        || token.contains('/')
 }
 
 fn is_shell_operator(token: &str) -> bool {

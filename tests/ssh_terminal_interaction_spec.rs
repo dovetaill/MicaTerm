@@ -282,11 +282,6 @@ fn light_theme_palette_preserves_active_ansi_black_bright_white_and_default_back
     let mut session = TerminalSession::new(24, 80);
     let preset = preset_for_theme_mode(ThemeMode::Light);
 
-    assert_eq!(preset.background, 0xf4_f6f8);
-    assert_eq!(preset.foreground, 0x1f_2933);
-    assert_eq!(preset.ansi[0], (0x4e, 0x5c, 0x6a));
-    assert_eq!(preset.ansi[15], (0xd9, 0xe0, 0xe6));
-
     session.set_theme_mode(ThemeMode::Light);
     session.apply_remote_bytes(b"\x1b[40mA\x1b[0m\x1b[107mB\x1b[0mC");
 
@@ -568,8 +563,7 @@ fn logging_runtime_source_omits_terminal_render_mode_metadata() {
         fs::read_to_string("src/app/logging/runtime.rs").expect("read logging runtime");
 
     assert!(
-        logging_runtime
-            .contains("pub fn emit_runtime_profile_metadata(_profile: AppRuntimeProfile)")
+        logging_runtime.contains("pub fn emit_runtime_profile_metadata(_profile: AppRuntimeProfile)")
             && !logging_runtime.contains("terminal_render_mode = ?profile.terminal_render_mode()"),
         "runtime logging should keep the runtime-profile helper as an intentional no-op instead of reintroducing terminal render mode startup noise"
     );

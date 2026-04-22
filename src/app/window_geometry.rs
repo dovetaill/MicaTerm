@@ -69,7 +69,13 @@ fn first_intersecting_monitor(
     monitors: &[MonitorWorkArea],
 ) -> Option<MonitorWorkArea> {
     monitors.iter().copied().find(|monitor| {
-        bounds_intersects_monitor(saved.x, saved.y, desired_size.0, desired_size.1, *monitor)
+        bounds_intersects_monitor(
+            saved.x,
+            saved.y,
+            desired_size.0,
+            desired_size.1,
+            *monitor,
+        )
     })
 }
 
@@ -85,7 +91,10 @@ fn bounds_intersects_monitor(
     let monitor_right = monitor.x + monitor.width as i32;
     let monitor_bottom = monitor.y + monitor.height as i32;
 
-    x < monitor_right && bounds_right > monitor.x && y < monitor_bottom && bounds_bottom > monitor.y
+    x < monitor_right
+        && bounds_right > monitor.x
+        && y < monitor_bottom
+        && bounds_bottom > monitor.y
 }
 
 fn bounds_fit_any_monitor(
@@ -170,8 +179,8 @@ mod tests {
         let monitors = [MonitorWorkArea::new(0, 0, 1920, 1040)];
         let saved = PersistedWindowBounds { x: 4000, y: 2800 };
 
-        let resolved =
-            resolve_startup_bounds(Some(saved), (1600, 960), &monitors).expect("resolved bounds");
+        let resolved = resolve_startup_bounds(Some(saved), (1600, 960), &monitors)
+            .expect("resolved bounds");
 
         assert_eq!(resolved.x, 160);
         assert_eq!(resolved.y, 40);
@@ -182,8 +191,8 @@ mod tests {
         let monitors = [MonitorWorkArea::new(0, 0, 1920, 1040)];
         let saved = PersistedWindowBounds { x: 120, y: 80 };
 
-        let resolved =
-            resolve_startup_bounds(Some(saved), (1600, 960), &monitors).expect("resolved bounds");
+        let resolved = resolve_startup_bounds(Some(saved), (1600, 960), &monitors)
+            .expect("resolved bounds");
 
         assert_eq!(resolved.x, 120);
         assert_eq!(resolved.y, 80);
@@ -196,8 +205,8 @@ mod tests {
         let monitors = [MonitorWorkArea::new(0, 0, 1920, 1040)];
         let saved = PersistedWindowBounds { x: 600, y: 400 };
 
-        let resolved =
-            resolve_startup_bounds(Some(saved), (1600, 960), &monitors).expect("resolved bounds");
+        let resolved = resolve_startup_bounds(Some(saved), (1600, 960), &monitors)
+            .expect("resolved bounds");
 
         assert_eq!(resolved.x, 320);
         assert_eq!(resolved.y, 80);
