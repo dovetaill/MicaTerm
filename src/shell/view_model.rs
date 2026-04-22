@@ -48,15 +48,15 @@ use crate::shell::keychain::{
     next_default_name_for_parent as next_default_keychain_name_for_parent, project_keychain_rows,
     rename_keychain_node,
 };
-use crate::shell::metrics::ShellMetrics;
 use crate::shell::quick_launch::{
     QUICK_LAUNCH_RECENT_LIMIT, QuickLaunchAssetRecord, QuickLaunchCardItem, QuickLaunchDetailItem,
     QuickLaunchGroupItem, collect_quick_launch_records, group_id_for_asset,
     matches_quick_launch_query, project_card_item, project_detail_item,
 };
+use crate::shell::metrics::ShellMetrics;
 use crate::shell::sidebar::SidebarDestination;
 use crate::shell::tabs::WorkspaceTab;
-use crate::theme::{ThemeMode, ThemeVariant};
+use crate::theme::ThemeMode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WelcomeAction {
@@ -640,7 +640,6 @@ pub struct ShellViewModel {
     pub active_sidebar_destination: SidebarDestination,
     pub is_window_active: bool,
     pub theme_mode: ThemeMode,
-    pub theme_variant: ThemeVariant,
     pub is_always_on_top: bool,
     pub asset_view_mode: AssetViewMode,
     pub asset_search_expanded: bool,
@@ -726,7 +725,6 @@ impl Default for ShellViewModel {
             active_sidebar_destination: SidebarDestination::Console,
             is_window_active: true,
             theme_mode: ThemeMode::Dark,
-            theme_variant: ThemeVariant::PremiumDefault,
             is_always_on_top: false,
             asset_view_mode: AssetViewMode::Tree,
             asset_search_expanded: false,

@@ -3682,7 +3682,7 @@ fn install_windows_frame_adapter(_window: &AppWindow) {}
 fn windows_monitor_work_areas() -> Vec<MonitorWorkArea> {
     use windows_sys::Win32::Foundation::{BOOL, LPARAM, POINT, RECT};
     use windows_sys::Win32::Graphics::Gdi::{
-        EnumDisplayMonitors, HDC, MONITOR_DEFAULTTONEAREST, MonitorFromPoint,
+        EnumDisplayMonitors, HDC, MonitorFromPoint, MONITOR_DEFAULTTONEAREST,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
@@ -3692,14 +3692,19 @@ fn windows_monitor_work_areas() -> Vec<MonitorWorkArea> {
     }
 
     impl MonitorCollection {
-        unsafe fn push_hmonitor(&mut self, hmonitor: windows_sys::Win32::Graphics::Gdi::HMONITOR) {
+        unsafe fn push_hmonitor(
+            &mut self,
+            hmonitor: windows_sys::Win32::Graphics::Gdi::HMONITOR,
+        ) {
             let Some(work_area) = work_area_from_hmonitor(hmonitor as isize) else {
                 return;
             };
-            if self
-                .seen
-                .insert((work_area.x, work_area.y, work_area.width, work_area.height))
-            {
+            if self.seen.insert((
+                work_area.x,
+                work_area.y,
+                work_area.width,
+                work_area.height,
+            )) {
                 self.monitors.push(work_area);
             }
         }
@@ -3750,11 +3755,9 @@ fn apply_startup_window_bounds(window: &AppWindow, prefs: &UiPreferences) -> (u3
     };
 
     apply_restored_window_size(window, (bounds.width, bounds.height));
-    window
-        .window()
-        .set_position(slint::WindowPosition::Physical(
-            slint::PhysicalPosition::new(bounds.x, bounds.y),
-        ));
+    window.window().set_position(slint::WindowPosition::Physical(
+        slint::PhysicalPosition::new(bounds.x, bounds.y),
+    ));
     (bounds.width, bounds.height)
 }
 
@@ -4429,7 +4432,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         }
     }
     initial_view_model.theme_mode = prefs.theme_mode;
-    initial_view_model.theme_variant = prefs.theme_variant;
     initial_view_model.is_always_on_top = prefs.always_on_top;
     initial_view_model.set_right_panel_view(RightPanelView::from_id(&prefs.right_panel_view));
     if let Some(session_bridge) = session_bridge.as_ref() {
