@@ -70,6 +70,9 @@ fn frame_with_cursor(frame_token: u64, cursor_col: Option<u32>) -> NativeTermina
             underline_overlay: NativeUnderlineOverlay::default(),
             semantic_overlays: vec![],
             semantic_input_overlays: vec![],
+            semantic_spans: vec![],
+            command_blocks: vec![],
+            overview_markers: vec![],
             ime_preview_overlay: NativeImePreviewOverlay::default(),
             renderer_stats: NativeRendererFrameStats {
                 glyph_cache_entries: 0,
@@ -148,6 +151,9 @@ fn frame_with_underline(
             },
             semantic_overlays: vec![],
             semantic_input_overlays: vec![],
+            semantic_spans: vec![],
+            command_blocks: vec![],
+            overview_markers: vec![],
             ime_preview_overlay: NativeImePreviewOverlay::default(),
             renderer_stats: NativeRendererFrameStats {
                 glyph_cache_entries: 0,
@@ -220,6 +226,9 @@ fn frame_with_selection(
             underline_overlay: NativeUnderlineOverlay::default(),
             semantic_overlays: vec![],
             semantic_input_overlays: vec![],
+            semantic_spans: vec![],
+            command_blocks: vec![],
+            overview_markers: vec![],
             ime_preview_overlay: NativeImePreviewOverlay::default(),
             renderer_stats: NativeRendererFrameStats {
                 glyph_cache_entries: 0,
@@ -282,6 +291,9 @@ fn frame_with_ime_preview(
             underline_overlay: NativeUnderlineOverlay::default(),
             semantic_overlays: vec![],
             semantic_input_overlays: vec![],
+            semantic_spans: vec![],
+            command_blocks: vec![],
+            overview_markers: vec![],
             ime_preview_overlay,
             renderer_stats: NativeRendererFrameStats {
                 glyph_cache_entries: 0,

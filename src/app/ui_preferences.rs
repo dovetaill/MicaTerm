@@ -7,9 +7,10 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::app::app_paths::app_root_paths_for_app;
+use crate::app::terminal_semantic::OutputRuleProfile;
 use crate::app::vault::model::SnapshotUiPreferences;
 use crate::shell::view_model::{RightPanelView, ShellViewModel};
-use crate::theme::ThemeMode;
+use crate::theme::{SearchMatchHighlightStrength, ThemeMode, ThemeVariant};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
@@ -48,6 +49,8 @@ pub struct PersistedWindowBounds {
 pub struct UiPreferences {
     #[serde(default = "default_theme_mode")]
     pub theme_mode: ThemeMode,
+    #[serde(default = "default_theme_variant")]
+    pub theme_variant: ThemeVariant,
     #[serde(default)]
     pub always_on_top: bool,
     #[serde(default = "default_right_panel_view")]
@@ -56,6 +59,18 @@ pub struct UiPreferences {
     pub terminal_scrollback_limit: usize,
     #[serde(default = "default_terminal_active_idle_shrink_enabled")]
     pub terminal_active_idle_shrink_enabled: bool,
+    #[serde(default = "default_terminal_input_highlighting_enabled")]
+    pub terminal_input_highlighting_enabled: bool,
+    #[serde(default = "default_terminal_output_rule_highlighting_enabled")]
+    pub terminal_output_rule_highlighting_enabled: bool,
+    #[serde(default = "default_terminal_command_decorations_enabled")]
+    pub terminal_command_decorations_enabled: bool,
+    #[serde(default = "default_terminal_overview_markers_enabled")]
+    pub terminal_overview_markers_enabled: bool,
+    #[serde(default = "default_terminal_output_rule_profile")]
+    pub terminal_output_rule_profile: OutputRuleProfile,
+    #[serde(default = "default_terminal_search_match_highlight")]
+    pub terminal_search_match_highlight: SearchMatchHighlightStrength,
     #[serde(default)]
     pub download_conflict_default: DownloadConflictDefault,
     #[serde(default)]
@@ -64,6 +79,10 @@ pub struct UiPreferences {
 
 fn default_theme_mode() -> ThemeMode {
     ThemeMode::Dark
+}
+
+fn default_theme_variant() -> ThemeVariant {
+    ThemeVariant::PremiumDefault
 }
 
 fn default_right_panel_view() -> String {
@@ -78,14 +97,46 @@ fn default_terminal_active_idle_shrink_enabled() -> bool {
     true
 }
 
+fn default_terminal_input_highlighting_enabled() -> bool {
+    true
+}
+
+fn default_terminal_output_rule_highlighting_enabled() -> bool {
+    true
+}
+
+fn default_terminal_command_decorations_enabled() -> bool {
+    true
+}
+
+fn default_terminal_overview_markers_enabled() -> bool {
+    true
+}
+
+fn default_terminal_output_rule_profile() -> OutputRuleProfile {
+    OutputRuleProfile::Default
+}
+
+fn default_terminal_search_match_highlight() -> SearchMatchHighlightStrength {
+    SearchMatchHighlightStrength::Balanced
+}
+
 impl Default for UiPreferences {
     fn default() -> Self {
         Self {
             theme_mode: ThemeMode::Dark,
+            theme_variant: ThemeVariant::PremiumDefault,
             always_on_top: false,
             right_panel_view: default_right_panel_view(),
             terminal_scrollback_limit: default_terminal_scrollback_limit(),
             terminal_active_idle_shrink_enabled: default_terminal_active_idle_shrink_enabled(),
+            terminal_input_highlighting_enabled: default_terminal_input_highlighting_enabled(),
+            terminal_output_rule_highlighting_enabled:
+                default_terminal_output_rule_highlighting_enabled(),
+            terminal_command_decorations_enabled: default_terminal_command_decorations_enabled(),
+            terminal_overview_markers_enabled: default_terminal_overview_markers_enabled(),
+            terminal_output_rule_profile: default_terminal_output_rule_profile(),
+            terminal_search_match_highlight: default_terminal_search_match_highlight(),
             download_conflict_default: DownloadConflictDefault::Ask,
             window_bounds: None,
         }
@@ -130,11 +181,22 @@ impl From<&ShellViewModel> for UiPreferences {
     fn from(value: &ShellViewModel) -> Self {
         Self {
             theme_mode: value.theme_mode,
+            theme_variant: value.theme_variant,
             always_on_top: value.is_always_on_top,
             right_panel_view: value.right_panel_view_id().into(),
             terminal_scrollback_limit: value.settings_modal_terminal_scrollback_limit(),
             terminal_active_idle_shrink_enabled: value
                 .settings_modal_terminal_active_idle_shrink_enabled(),
+            terminal_input_highlighting_enabled: value
+                .settings_modal_terminal_input_highlighting_enabled(),
+            terminal_output_rule_highlighting_enabled: value
+                .settings_modal_terminal_output_rule_highlighting_enabled(),
+            terminal_command_decorations_enabled: value
+                .settings_modal_terminal_command_decorations_enabled(),
+            terminal_overview_markers_enabled: value
+                .settings_modal_terminal_overview_markers_enabled(),
+            terminal_output_rule_profile: value.settings_modal_terminal_output_rule_profile(),
+            terminal_search_match_highlight: value.settings_modal_terminal_search_match_highlight(),
             download_conflict_default: value.settings_modal_download_conflict_default(),
             window_bounds: None,
         }
@@ -161,10 +223,18 @@ pub fn ui_preferences_from_snapshot(snapshot: &SnapshotUiPreferences) -> UiPrefe
 
     UiPreferences {
         theme_mode,
+        theme_variant: default_theme_variant(),
         always_on_top: snapshot.always_on_top.unwrap_or(false),
         right_panel_view: default_right_panel_view(),
         terminal_scrollback_limit: default_terminal_scrollback_limit(),
         terminal_active_idle_shrink_enabled: default_terminal_active_idle_shrink_enabled(),
+        terminal_input_highlighting_enabled: default_terminal_input_highlighting_enabled(),
+        terminal_output_rule_highlighting_enabled:
+            default_terminal_output_rule_highlighting_enabled(),
+        terminal_command_decorations_enabled: default_terminal_command_decorations_enabled(),
+        terminal_overview_markers_enabled: default_terminal_overview_markers_enabled(),
+        terminal_output_rule_profile: default_terminal_output_rule_profile(),
+        terminal_search_match_highlight: default_terminal_search_match_highlight(),
         download_conflict_default: DownloadConflictDefault::Ask,
         window_bounds: None,
     }
@@ -182,6 +252,12 @@ mod tests {
             "right_panel_view": "sftp",
             "terminal_scrollback_limit": 1500,
             "terminal_active_idle_shrink_enabled": true,
+            "terminal_input_highlighting_enabled": true,
+            "terminal_output_rule_highlighting_enabled": true,
+            "terminal_command_decorations_enabled": true,
+            "terminal_overview_markers_enabled": true,
+            "terminal_output_rule_profile": "default",
+            "terminal_search_match_highlight": "balanced",
             "download_conflict_default": "ask",
             "window_bounds": {
                 "x": 160,
@@ -195,7 +271,10 @@ mod tests {
         let decoded: UiPreferences = serde_json::from_str(&json).expect("deserialize preferences");
         let reencoded = serde_json::to_value(&decoded).expect("serialize preferences");
 
-        assert_eq!(reencoded["window_bounds"], serde_json::json!({ "x": 160, "y": 120 }));
+        assert_eq!(
+            reencoded["window_bounds"],
+            serde_json::json!({ "x": 160, "y": 120 })
+        );
     }
 
     #[test]

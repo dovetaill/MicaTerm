@@ -5,10 +5,23 @@ fn semantic_theme_tokens_cover_shell_hierarchy_and_states() {
     let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
 
     for token in [
+        "out property <brush> titlebar-background:",
+        "out property <brush> tabbar-background:",
+        "out property <brush> sidebar-background:",
+        "out property <brush> sidebar-panel-background:",
+        "out property <brush> right-panel-background:",
+        "out property <brush> terminal-frame-background:",
+        "out property <brush> separator:",
+        "out property <brush> hairline:",
         "out property <brush> tabbar-surface:",
         "out property <brush> tab-active-surface:",
         "out property <brush> tab-inactive-surface:",
+        "out property <brush> tab-hover-surface:",
+        "out property <brush> tab-active-line:",
         "out property <brush> tab-active-indicator:",
+        "out property <brush> sidebar-item-hover-background:",
+        "out property <brush> sidebar-item-selected-background:",
+        "out property <brush> sidebar-item-selected-border:",
         "out property <brush> sidebar-hover-surface:",
         "out property <brush> sidebar-selected-surface:",
         "out property <brush> panel-surface:",
@@ -21,6 +34,8 @@ fn semantic_theme_tokens_cover_shell_hierarchy_and_states() {
         "out property <brush> text-muted:",
         "out property <brush> link-accent:",
         "out property <brush> focus-ring:",
+        "out property <brush> terminal-soft-fg:",
+        "out property <brush> terminal-dim-fg:",
     ] {
         assert!(
             tokens.contains(token),
@@ -30,22 +45,41 @@ fn semantic_theme_tokens_cover_shell_hierarchy_and_states() {
 }
 
 #[test]
-fn light_mode_text_tokens_raise_shell_contrast_for_small_misans_copy() {
+fn premium_default_tokens_encode_the_new_calm_surface_ladder() {
     let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
 
     assert!(
-        tokens.contains("out property <brush> text-secondary: dark-mode ? #b9c3d0 : #3f4d5d;"),
-        "light-mode secondary text should move to a darker shell contrast so 14px shell body copy stops reading as gray haze on Windows"
+        tokens.contains("out property <brush> titlebar-background: dark-mode ? #181f27 : #f7f9fc;"),
+        "titlebar should use a dedicated calm surface rather than sharing the app sheet"
     );
     assert!(
-        tokens.contains("out property <brush> text-muted: dark-mode ? #8794a6 : #5f7084;"),
-        "light-mode muted text should keep enough density for small shell captions instead of collapsing into low-contrast gray"
+        tokens.contains(
+            "out property <brush> terminal-frame-background: dark-mode ? #101824 : #edf2f6;"
+        ),
+        "terminal frame should sit one step behind the terminal canvas so the work surface stays visually dominant"
+    );
+    assert!(
+        tokens.contains("out property <brush> terminal-default-fg: dark-mode ? #e3eaf2 : #263240;"),
+        "terminal defaults should move off pure white / pure black to stay comfortable over long sessions"
+    );
+    assert!(
+        tokens.contains(
+            "out property <brush> sidebar-item-selected-background: dark-mode ? #293846 : #dce6f2;"
+        ),
+        "selected sidebar items should use a low-saturation filled state instead of a hard control button fill"
     );
 }
 
 #[test]
 fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
+    let titlebar = fs::read_to_string("ui/shell/titlebar.slint").expect("read titlebar");
     let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
+    let sidebar = fs::read_to_string("ui/shell/sidebar.slint").expect("read sidebar");
+    let assets_sidebar =
+        fs::read_to_string("ui/shell/assets-sidebar.slint").expect("read assets sidebar");
+    let right_panel = fs::read_to_string("ui/shell/right-panel.slint").expect("read right panel");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let workspace = fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace");
     let active_tab = fs::read_to_string("ui/components/active-tab.slint").expect("read active tab");
     let sidebar_button =
         fs::read_to_string("ui/components/sidebar-nav-button.slint").expect("read sidebar button");
@@ -60,25 +94,38 @@ fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
     let theme_spec = fs::read_to_string("src/theme/spec.rs").expect("read theme spec");
 
     assert!(
-        tabbar.contains("ThemeTokens.tabbar-surface"),
-        "tab strip should use a dedicated tabbar surface instead of reusing the titlebar surface"
+        titlebar.contains("ThemeTokens.titlebar-background"),
+        "titlebar should read from the dedicated titlebar background token"
+    );
+    assert!(
+        tabbar.contains("ThemeTokens.tabbar-background"),
+        "tab strip should use a dedicated tabbar background token instead of reusing the app sheet"
+    );
+    assert!(
+        sidebar.contains("ThemeTokens.sidebar-background")
+            && assets_sidebar.contains("ThemeTokens.sidebar-panel-background")
+            && right_panel.contains("ThemeTokens.right-panel-background")
+            && workspace.contains("ThemeTokens.terminal-frame-background"),
+        "shell chrome layers should explicitly consume the sidebar / panel / terminal frame ladder"
     );
     assert!(
         active_tab.contains("ThemeTokens.tab-active-surface")
-            && active_tab.contains("ThemeTokens.tab-inactive-surface")
-            && active_tab.contains("ThemeTokens.tab-active-indicator")
+            && active_tab.contains("ThemeTokens.tab-hover-surface")
+            && active_tab.contains("ThemeTokens.tab-active-line")
             && active_tab.contains("ThemeTokens.text-secondary"),
-        "active tabs should use semantic tab tokens for active/inactive hierarchy and secondary copy"
+        "active tabs should use the calmer tab token family instead of reading like raised buttons"
     );
     assert!(
-        sidebar_button.contains("ThemeTokens.sidebar-hover-surface")
-            && sidebar_button.contains("ThemeTokens.sidebar-selected-surface"),
-        "activity buttons should use semantic sidebar hover/selected tokens"
+        sidebar_button.contains("ThemeTokens.sidebar-item-hover-background")
+            && sidebar_button.contains("ThemeTokens.sidebar-item-selected-background")
+            && sidebar_button.contains("ThemeTokens.sidebar-item-selected-border"),
+        "activity buttons should use the new low-saturation selected fill and border tokens"
     );
     assert!(
-        asset_row.contains("ThemeTokens.sidebar-hover-surface")
-            && asset_row.contains("ThemeTokens.sidebar-selected-surface"),
-        "asset tree rows should share the same sidebar hover/selected token family"
+        asset_row.contains("ThemeTokens.sidebar-item-hover-background")
+            && asset_row.contains("ThemeTokens.sidebar-item-selected-background")
+            && asset_row.contains("ThemeTokens.sidebar-item-selected-border"),
+        "asset tree rows should share the same sidebar item state tokens"
     );
     assert!(
         search.contains("ThemeTokens.input-surface")
@@ -98,15 +145,22 @@ fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
         "terminal host chrome should use the shared panel surface token rather than a generic control fill"
     );
     assert!(
+        sidebar.contains("Click to collapse, drag to resize")
+            && sidebar.contains("Click to expand")
+            && right_panel.contains("Click to collapse, drag to resize")
+            && app_window.contains("text: \"Click to expand\""),
+        "edge handles and revive affordances should keep explicit, discoverable guidance"
+    );
+    assert!(
         theme_spec.contains("pub const TERMINAL_ROW_BANDING_ENABLED: bool = false;")
             && theme_spec.contains("pub const TERMINAL_ROW_BANDING_ALPHA: f32 = 0.0;")
             && theme_spec.contains("pub const TERMINAL_BG_GRAIN_ALPHA: f32 = 0.0;")
-            && theme_spec.contains("pub const TERMINAL_BG_BASE_DARK: u32 = 0x08_131d;")
-            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_TOP_DARK: u32 = 0x0b_1824;")
-            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_BOTTOM_DARK: u32 = 0x08_131d;")
-            && theme_spec.contains("pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xf2_f4f7;")
-            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xf6_f7f9;")
-            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xf2_f4f7;"),
+            && theme_spec.contains("pub const TERMINAL_BG_BASE_DARK: u32 = 0x0c_141c;")
+            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_TOP_DARK: u32 = 0x10_1924;")
+            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_BOTTOM_DARK: u32 = 0x0c_141c;")
+            && theme_spec.contains("pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xf8_fafc;")
+            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xfb_fcfd;")
+            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xf6_f8fb;"),
         "terminal palette spec should expose the shared calm viewport background constants, disable legacy row banding/grain, and keep soft dark/light gradient endpoints explicit"
     );
     assert!(

@@ -39,7 +39,7 @@ use crate::app::ssh::connection_progress::{ConnectionHeadlineState, ConnectionPr
 use crate::app::ssh::credentials::{CredentialStore, SystemCredentialStore};
 use crate::app::ssh::profile::ConnectionProfile;
 use crate::app::ssh::session_manager::{EnhancedSessionState, SessionRuntimeControl};
-use crate::theme::ThemeMode;
+use crate::theme::{ThemeMode, ThemeVariant};
 
 const DEFAULT_TERMINAL_ROWS: usize = 24;
 const DEFAULT_TERMINAL_COLS: usize = 80;
@@ -54,6 +54,13 @@ const WORKING_SET_TRIM_MIN_OUTPUT_BYTES: usize = 1024 * 1024;
 #[derive(Clone, Debug)]
 pub struct TerminalRuntimeDefaults {
     scrollback_lines: Arc<AtomicUsize>,
+    theme: Arc<Mutex<TerminalRuntimeThemeDefaults>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TerminalRuntimeThemeDefaults {
+    mode: ThemeMode,
+    variant: ThemeVariant,
 }
 
 impl Default for TerminalRuntimeDefaults {
@@ -66,6 +73,10 @@ impl TerminalRuntimeDefaults {
     pub fn new(scrollback_lines: usize) -> Self {
         Self {
             scrollback_lines: Arc::new(AtomicUsize::new(scrollback_lines.max(1))),
+            theme: Arc::new(Mutex::new(TerminalRuntimeThemeDefaults {
+                mode: ThemeMode::Dark,
+                variant: ThemeVariant::PremiumDefault,
+            })),
         }
     }
 
@@ -76,6 +87,23 @@ impl TerminalRuntimeDefaults {
     pub fn set_scrollback_lines(&self, scrollback_lines: usize) {
         self.scrollback_lines
             .store(scrollback_lines.max(1), Ordering::Relaxed);
+    }
+
+    pub fn theme_mode(&self) -> ThemeMode {
+        self.theme.lock().expect("lock terminal runtime theme").mode
+    }
+
+    pub fn theme_variant(&self) -> ThemeVariant {
+        self.theme
+            .lock()
+            .expect("lock terminal runtime theme")
+            .variant
+    }
+
+    pub fn set_theme(&self, mode: ThemeMode, variant: ThemeVariant) {
+        let mut theme = self.theme.lock().expect("lock terminal runtime theme");
+        theme.mode = mode;
+        theme.variant = variant;
     }
 }
 
@@ -147,11 +175,16 @@ impl SshSessionRuntime {
             format!("Resolving connection profile for {}", profile.name),
             "Target",
         );
-        let terminal = Arc::new(Mutex::new(TerminalSession::new_with_scrollback(
+        let mut terminal_session = TerminalSession::new_with_scrollback(
             DEFAULT_TERMINAL_ROWS,
             DEFAULT_TERMINAL_COLS,
             terminal_defaults.scrollback_lines(),
-        )));
+        );
+        terminal_session.set_theme(
+            terminal_defaults.theme_mode(),
+            terminal_defaults.theme_variant(),
+        );
+        let terminal = Arc::new(Mutex::new(terminal_session));
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         let config = Arc::new(ssh_client_config());
         resolve_step.finish(format!("Resolved connection profile for {}", profile.name));
@@ -281,13 +314,21 @@ impl SshSessionRuntime {
             .map_err(|_| anyhow!("ssh runtime paste channel is closed"))
     }
 
-    pub fn update_theme_mode(&self, mode: ThemeMode) -> Result<TerminalSurfaceState> {
+    pub fn update_theme(
+        &self,
+        mode: ThemeMode,
+        variant: ThemeVariant,
+    ) -> Result<TerminalSurfaceState> {
         let mut terminal = self
             .terminal
             .lock()
             .map_err(|_| anyhow!("failed to lock terminal for theme update"))?;
-        terminal.set_theme_mode(mode);
+        terminal.set_theme(mode, variant);
         Ok(terminal.surface_state(self.session_id))
+    }
+
+    pub fn update_theme_mode(&self, mode: ThemeMode) -> Result<TerminalSurfaceState> {
+        self.update_theme(mode, ThemeVariant::PremiumDefault)
     }
 
     pub fn scroll_viewport_lines(&self, delta: i32) -> Result<TerminalSurfaceState> {
@@ -356,8 +397,12 @@ impl SessionRuntimeControl for SshSessionRuntime {
         SshSessionRuntime::terminal_surface(self)
     }
 
-    fn update_theme_mode(&self, mode: ThemeMode) -> Result<Option<TerminalSurfaceState>> {
-        SshSessionRuntime::update_theme_mode(self, mode).map(Some)
+    fn update_theme(
+        &self,
+        mode: ThemeMode,
+        variant: ThemeVariant,
+    ) -> Result<Option<TerminalSurfaceState>> {
+        SshSessionRuntime::update_theme(self, mode, variant).map(Some)
     }
 
     fn scroll_viewport_lines(&self, delta: i32) -> Result<TerminalSurfaceState> {
@@ -434,5 +479,17 @@ mod tests {
 
         defaults.set_scrollback_lines(0);
         assert_eq!(defaults.scrollback_lines(), 1);
+    }
+
+    #[test]
+    fn terminal_runtime_defaults_store_theme_mode_and_variant() {
+        let defaults = TerminalRuntimeDefaults::default();
+
+        assert_eq!(defaults.theme_mode(), ThemeMode::Dark);
+        assert_eq!(defaults.theme_variant(), ThemeVariant::PremiumDefault);
+
+        defaults.set_theme(ThemeMode::Light, ThemeVariant::LegacyHackerGreen);
+        assert_eq!(defaults.theme_mode(), ThemeMode::Light);
+        assert_eq!(defaults.theme_variant(), ThemeVariant::LegacyHackerGreen);
     }
 }

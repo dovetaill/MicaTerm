@@ -2,4 +2,10 @@
 
 mod spec;
 
-pub use spec::{ThemeMode, ThemeTerminalPaletteSpec, terminal_palette_spec};
+pub use spec::{
+    AppThemeSpec, DecorationTheme, SearchMatchHighlightStrength, SemanticHighlightTheme,
+    SemanticRoleStyle, SemanticStyleRole, ShellChromeTheme, TerminalBackgroundTheme,
+    TerminalCursorTheme, TerminalForegroundTheme, TerminalOverlayTheme, TerminalScrollbarTheme,
+    TerminalTheme, ThemeMode, ThemeTerminalPaletteSpec, ThemeVariant, app_theme_spec,
+    terminal_palette_spec, terminal_palette_spec_for,
+};

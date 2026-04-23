@@ -18,8 +18,8 @@ use crate::app::ssh::runtime::{
 use crate::app::terminal_core::{
     SelectionState, TerminalCoreAdapter, TerminalFrameSnapshot, ViewportState,
 };
-use crate::app::terminal_theme::{palette_for_theme_mode, preset_for_theme_mode};
-use crate::theme::ThemeMode;
+use crate::app::terminal_theme::{palette_for_theme, preset_for_theme};
+use crate::theme::{ThemeMode, ThemeVariant};
 
 const DEFAULT_TERMINAL_ROWS: usize = 24;
 const DEFAULT_TERMINAL_COLS: usize = 80;
@@ -44,6 +44,7 @@ impl WeztermTerminalCoreAdapter {
         let writer = SharedWriteBuffer::default();
         let config = Arc::new(SessionTerminalConfig::new(
             ThemeMode::Dark,
+            ThemeVariant::PremiumDefault,
             scrollback_lines.max(1),
         ));
         let terminal = Terminal::new(
@@ -153,7 +154,7 @@ impl WeztermTerminalCoreAdapter {
     pub fn surface_state(&self, session_id: Uuid) -> TerminalSurfaceState {
         let size = self.terminal.get_size();
         let palette = self.terminal.palette();
-        let preset = preset_for_theme_mode(self.config.theme_mode());
+        let preset = preset_for_theme(self.config.theme_mode(), self.config.theme_variant());
         let visible_rows = self.visible_rows();
         let visible_lines = visible_lines_from_rows(&visible_rows);
         let cells = self.visible_cells(&palette);
@@ -226,10 +227,14 @@ impl WeztermTerminalCoreAdapter {
         self.viewport_offset_lines = 0;
     }
 
-    pub fn set_theme_mode(&mut self, mode: ThemeMode) {
-        if self.config.set_theme_mode(mode) {
+    pub fn set_theme(&mut self, mode: ThemeMode, variant: ThemeVariant) {
+        if self.config.set_theme(mode, variant) {
             self.terminal.increment_seqno();
         }
+    }
+
+    pub fn set_theme_mode(&mut self, mode: ThemeMode) {
+        self.set_theme(mode, ThemeVariant::PremiumDefault);
     }
 
     pub fn send_key_down(&mut self, key: KeyCode, modifiers: KeyModifiers) -> Result<Vec<u8>> {
@@ -722,26 +727,29 @@ struct SessionTerminalConfig {
 #[derive(Debug, Clone, Copy)]
 struct SessionTerminalConfigState {
     theme_mode: ThemeMode,
+    theme_variant: ThemeVariant,
     generation: usize,
 }
 
 impl SessionTerminalConfig {
-    fn new(theme_mode: ThemeMode, scrollback_lines: usize) -> Self {
+    fn new(theme_mode: ThemeMode, theme_variant: ThemeVariant, scrollback_lines: usize) -> Self {
         Self {
             scrollback_lines: scrollback_lines.max(1),
             state: Mutex::new(SessionTerminalConfigState {
                 theme_mode,
+                theme_variant,
                 generation: 0,
             }),
         }
     }
 
-    fn set_theme_mode(&self, theme_mode: ThemeMode) -> bool {
+    fn set_theme(&self, theme_mode: ThemeMode, theme_variant: ThemeVariant) -> bool {
         let mut state = self.state.lock().expect("lock session terminal config");
-        if state.theme_mode == theme_mode {
+        if state.theme_mode == theme_mode && state.theme_variant == theme_variant {
             return false;
         }
         state.theme_mode = theme_mode;
+        state.theme_variant = theme_variant;
         state.generation = state.generation.saturating_add(1);
         true
     }
@@ -751,6 +759,13 @@ impl SessionTerminalConfig {
             .lock()
             .expect("lock session terminal config")
             .theme_mode
+    }
+
+    fn theme_variant(&self) -> ThemeVariant {
+        self.state
+            .lock()
+            .expect("lock session terminal config")
+            .theme_variant
     }
 }
 
@@ -767,7 +782,7 @@ impl TerminalConfiguration for SessionTerminalConfig {
     }
 
     fn color_palette(&self) -> ColorPalette {
-        palette_for_theme_mode(self.theme_mode())
+        palette_for_theme(self.theme_mode(), self.theme_variant())
     }
 }
 
@@ -1019,8 +1034,8 @@ impl TerminalCoreAdapter for WeztermTerminalCoreAdapter {
         WeztermTerminalCoreAdapter::resize(self, rows, cols);
     }
 
-    fn set_theme_mode(&mut self, mode: ThemeMode) {
-        WeztermTerminalCoreAdapter::set_theme_mode(self, mode);
+    fn set_theme(&mut self, mode: ThemeMode, variant: ThemeVariant) {
+        WeztermTerminalCoreAdapter::set_theme(self, mode, variant);
     }
 
     fn scroll_viewport_lines(&mut self, delta: i32) {

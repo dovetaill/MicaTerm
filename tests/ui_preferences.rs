@@ -2,9 +2,10 @@
 
 use std::fs;
 
+use mica_term::app::terminal_semantic::OutputRuleProfile;
 use mica_term::app::ui_preferences::{DownloadConflictDefault, UiPreferences, UiPreferencesStore};
 use mica_term::shell::view_model::RightPanelView;
-use mica_term::theme::ThemeMode;
+use mica_term::theme::{SearchMatchHighlightStrength, ThemeMode};
 
 #[test]
 fn ui_preferences_default_to_dark_and_not_pinned() {
@@ -21,6 +22,18 @@ fn ui_preferences_default_terminal_settings_match_memory_plan() {
 
     assert_eq!(prefs.terminal_scrollback_limit, 1500);
     assert!(prefs.terminal_active_idle_shrink_enabled);
+    assert!(prefs.terminal_input_highlighting_enabled);
+    assert!(prefs.terminal_output_rule_highlighting_enabled);
+    assert!(prefs.terminal_command_decorations_enabled);
+    assert!(prefs.terminal_overview_markers_enabled);
+    assert_eq!(
+        prefs.terminal_output_rule_profile,
+        OutputRuleProfile::Default
+    );
+    assert_eq!(
+        prefs.terminal_search_match_highlight,
+        SearchMatchHighlightStrength::Balanced
+    );
 }
 
 #[test]
@@ -66,6 +79,12 @@ fn ui_preferences_roundtrip_terminal_settings() {
     let prefs = UiPreferences {
         terminal_scrollback_limit: 3000,
         terminal_active_idle_shrink_enabled: false,
+        terminal_input_highlighting_enabled: false,
+        terminal_output_rule_highlighting_enabled: false,
+        terminal_command_decorations_enabled: false,
+        terminal_overview_markers_enabled: false,
+        terminal_output_rule_profile: OutputRuleProfile::Focused,
+        terminal_search_match_highlight: SearchMatchHighlightStrength::Strong,
         ..UiPreferences::default()
     };
 

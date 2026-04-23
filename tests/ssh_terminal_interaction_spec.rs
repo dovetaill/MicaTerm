@@ -563,7 +563,8 @@ fn logging_runtime_source_omits_terminal_render_mode_metadata() {
         fs::read_to_string("src/app/logging/runtime.rs").expect("read logging runtime");
 
     assert!(
-        logging_runtime.contains("pub fn emit_runtime_profile_metadata(_profile: AppRuntimeProfile)")
+        logging_runtime
+            .contains("pub fn emit_runtime_profile_metadata(_profile: AppRuntimeProfile)")
             && !logging_runtime.contains("terminal_render_mode = ?profile.terminal_render_mode()"),
         "runtime logging should keep the runtime-profile helper as an intentional no-op instead of reintroducing terminal render mode startup noise"
     );

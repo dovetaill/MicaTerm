@@ -54,14 +54,18 @@ export component AssetNodeRow inherits Rectangle {
 
     height: root.row-height;
     border-radius: 8px;
-    border-width: root.focused ? 1px : 0px;
-    border-color: root.focused ? ThemeTokens.focus-ring : transparent;
-    background: touch.pressed
-        ? ThemeTokens.sidebar-selected-surface
+    border-width: root.focused || root.selected ? 1px : 0px;
+    border-color: root.focused
+        ? ThemeTokens.focus-ring
         : root.selected
-            ? ThemeTokens.sidebar-selected-surface
+            ? ThemeTokens.sidebar-item-selected-border
+            : transparent;
+    background: touch.pressed
+        ? ThemeTokens.sidebar-item-selected-background
+        : root.selected
+            ? ThemeTokens.sidebar-item-selected-background
             : touch.has-hover
-                ? ThemeTokens.sidebar-hover-surface
+                ? ThemeTokens.sidebar-item-hover-background
                 : transparent;
 
     Rectangle {

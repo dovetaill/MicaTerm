@@ -28,7 +28,7 @@ export component ActiveTab inherits Rectangle {
         : (content-hit-target.pressed || close-hit-target.pressed)
             ? ThemeTokens.control-pressed-surface
             : root.has-hover
-                ? ThemeTokens.tab-inactive-surface
+                ? ThemeTokens.tab-hover-surface
                 : transparent;
     clip: true;
 
@@ -65,7 +65,7 @@ export component ActiveTab inherits Rectangle {
         width: parent.width - 20px;
         height: 2px;
         border-radius: 1px;
-        background: ThemeTokens.tab-active-indicator;
+        background: ThemeTokens.tab-active-line;
         visible: root.active;
     }
 

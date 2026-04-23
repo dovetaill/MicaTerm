@@ -1,6 +1,7 @@
 //! ShellViewModel workspace domain impls.
 
 use super::*;
+use crate::app::terminal_semantic::count_search_query_matches_in_lines;
 
 impl ShellViewModel {
     pub fn active_workspace_tab_id(&self) -> Option<&str> {
@@ -186,6 +187,17 @@ impl ShellViewModel {
         self.active_workspace_terminal_surface()
             .map(|surface| surface.visible_lines.clone())
             .unwrap_or_default()
+    }
+
+    pub fn workspace_terminal_search_match_count(&self) -> usize {
+        if !self.workspace_terminal_search_open || self.workspace_terminal_search_query.is_empty() {
+            return 0;
+        }
+
+        count_search_query_matches_in_lines(
+            &self.workspace_terminal_visible_lines(),
+            &self.workspace_terminal_search_query,
+        )
     }
 
     pub fn workspace_session_host_mode(&self) -> &'static str {

@@ -32,9 +32,18 @@ use crate::app::terminal_renderer::wgpu_renderer::{
 };
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
-use crate::app::terminal_semantic::{SemanticInputOverlay, SemanticOutputOverlay};
+#[cfg(not(feature = "terminal-native-renderer"))]
+use crate::app::terminal_semantic::analyze_semantic_annotations_with_settings;
+use crate::app::terminal_semantic::{
+    CommandBlock, OutputRuleProfile, OverviewMarker, SemanticInputOverlay, SemanticOutputOverlay,
+    SemanticSpan, TerminalSemanticSettings,
+};
 #[cfg(feature = "terminal-native-renderer")]
-use crate::app::terminal_semantic::{detect_input_line_overlays, detect_output_block_overlays};
+use crate::app::terminal_semantic::{
+    analyze_semantic_annotations_with_settings, detect_input_line_overlays,
+    detect_output_block_overlays,
+};
+use crate::theme::{SearchMatchHighlightStrength, ThemeMode, ThemeVariant, app_theme_spec};
 
 #[allow(dead_code)]
 type PresenterFrameSnapshot = TerminalFrameSnapshot;
@@ -178,6 +187,9 @@ pub struct PresentableNativeFrame {
     pub underline_overlay: NativeUnderlineOverlay,
     pub semantic_overlays: Vec<SemanticOutputOverlay>,
     pub semantic_input_overlays: Vec<SemanticInputOverlay>,
+    pub semantic_spans: Vec<SemanticSpan>,
+    pub command_blocks: Vec<CommandBlock>,
+    pub overview_markers: Vec<OverviewMarker>,
     pub ime_preview_overlay: NativeImePreviewOverlay,
     pub renderer_stats: NativeRendererFrameStats,
 }
@@ -191,11 +203,39 @@ pub struct NativeTerminalFrame {
     pub presentable_frame: PresentableNativeFrame,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TerminalPresentationOptions {
     pub selection: Option<TerminalAtlasSelection>,
     pub selection_overlay_rgba: u32,
     pub ime_preview_overlay: NativeImePreviewOverlay,
+    pub theme_mode: ThemeMode,
+    pub theme_variant: ThemeVariant,
+    pub input_highlighting_enabled: bool,
+    pub output_rule_highlighting_enabled: bool,
+    pub output_rule_profile: OutputRuleProfile,
+    pub command_decorations_enabled: bool,
+    pub overview_markers_enabled: bool,
+    pub search_query: Option<String>,
+    pub search_match_highlight: SearchMatchHighlightStrength,
+}
+
+impl Default for TerminalPresentationOptions {
+    fn default() -> Self {
+        Self {
+            selection: None,
+            selection_overlay_rgba: 0,
+            ime_preview_overlay: NativeImePreviewOverlay::default(),
+            theme_mode: ThemeMode::Dark,
+            theme_variant: ThemeVariant::PremiumDefault,
+            input_highlighting_enabled: true,
+            output_rule_highlighting_enabled: true,
+            output_rule_profile: OutputRuleProfile::Default,
+            command_decorations_enabled: true,
+            overview_markers_enabled: true,
+            search_query: None,
+            search_match_highlight: SearchMatchHighlightStrength::Balanced,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -392,7 +432,25 @@ impl TerminalPresenter for BitmapAtlasPresenter {
         surface: &SurfaceState,
         options: TerminalPresentationOptions,
     ) -> Result<PresentedTerminalFrame> {
-        let frame_model = TerminalModelFrame::from_surface(surface, self.previous_frame.as_ref());
+        let mut frame_model =
+            TerminalModelFrame::from_surface(surface, self.previous_frame.as_ref());
+        let semantic_annotations = analyze_semantic_annotations_with_settings(
+            &frame_model,
+            TerminalSemanticSettings {
+                input_highlighting_enabled: options.input_highlighting_enabled,
+                output_rule_highlighting_enabled: options.output_rule_highlighting_enabled,
+                output_rule_profile: options.output_rule_profile,
+                command_decorations_enabled: options.command_decorations_enabled,
+                overview_markers_enabled: options.overview_markers_enabled,
+                search_query: options.search_query.clone(),
+            },
+        );
+        frame_model.apply_semantic_style_overlays(
+            self.previous_frame.as_ref(),
+            app_theme_spec(options.theme_mode, options.theme_variant),
+            &semantic_annotations.spans,
+            options.search_match_highlight,
+        );
         let grid_rows = frame_model.grid_rows;
         let grid_cols = frame_model.grid_cols;
         let atlas_surface = model_frame_to_surface(&frame_model);
@@ -626,8 +684,28 @@ fn prepare_native_terminal_frame_with_diagnostics(
 ) -> Result<(NativeTerminalFrame, TerminalPrepareDiagnostics)> {
     let prepare_started = Instant::now();
     let model_started = Instant::now();
-    let frame_model = TerminalModelFrame::from_surface(surface, context.previous_frame.as_ref());
+    let mut frame_model =
+        TerminalModelFrame::from_surface(surface, context.previous_frame.as_ref());
     let model_frame_us = model_started.elapsed().as_micros() as u64;
+    let semantic_overlays = detect_output_block_overlays(&frame_model);
+    let semantic_input_overlays = detect_input_line_overlays(&frame_model);
+    let semantic_annotations = analyze_semantic_annotations_with_settings(
+        &frame_model,
+        TerminalSemanticSettings {
+            input_highlighting_enabled: options.input_highlighting_enabled,
+            output_rule_highlighting_enabled: options.output_rule_highlighting_enabled,
+            output_rule_profile: options.output_rule_profile,
+            command_decorations_enabled: options.command_decorations_enabled,
+            overview_markers_enabled: options.overview_markers_enabled,
+            search_query: options.search_query.clone(),
+        },
+    );
+    frame_model.apply_semantic_style_overlays(
+        context.previous_frame.as_ref(),
+        app_theme_spec(options.theme_mode, options.theme_variant),
+        &semantic_annotations.spans,
+        options.search_match_highlight,
+    );
     let shape_started = Instant::now();
     let (rows, reused_shaped_row_count) = shape_rows_with_previous_cache(
         &frame_model,
@@ -681,8 +759,6 @@ fn prepare_native_terminal_frame_with_diagnostics(
         }
         None => NativeSelectionOverlay::default(),
     };
-    let semantic_overlays = detect_output_block_overlays(&frame_model);
-    let semantic_input_overlays = detect_input_line_overlays(&frame_model);
     let cursor = NativeCursorFrameState {
         row: frame_model.cursor.row,
         col: frame_model.cursor.col,
@@ -741,6 +817,9 @@ fn prepare_native_terminal_frame_with_diagnostics(
         },
         semantic_overlays,
         semantic_input_overlays,
+        semantic_spans: semantic_annotations.spans.clone(),
+        command_blocks: semantic_annotations.command_blocks.clone(),
+        overview_markers: semantic_annotations.overview_markers.clone(),
         ime_preview_overlay: options.ime_preview_overlay,
         renderer_stats: NativeRendererFrameStats {
             glyph_cache_entries: prepared.renderer_stats.glyph_cache_entries,
@@ -1289,6 +1368,172 @@ mod tests {
             font_system.shape_text_runs_calls(),
             8,
             "presenter row shaping should reuse cached row content from scrollback history even when the immediately previous viewport no longer contains the row"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn prepare_native_terminal_frame_invalidates_prepared_rows_when_theme_changes() -> Result<()> {
+        let session_id = Uuid::new_v4();
+        let mut surface = SurfaceState::from_visible_lines(
+            session_id,
+            1,
+            1,
+            32,
+            vec!["https://example.com ERROR".into()],
+        );
+        surface.visible_rows = vec![TerminalRowState {
+            index: 0,
+            text: "https://example.com ERROR".into(),
+            wrapped: false,
+        }];
+        surface.default_fg_rgba = 0xffd8_dfe8;
+        surface.default_bg_rgba = 0xff0c_1014;
+        surface.cells = surface.visible_rows[0]
+            .text
+            .chars()
+            .enumerate()
+            .map(|(col, ch)| TerminalCellState {
+                row: 0,
+                col: col as u32,
+                width: 1,
+                text: ch.to_string(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            })
+            .collect();
+
+        let mut font_system = CountingFontSystem::new()?;
+        let loaded_font = font_system.load_font(&FontRequest::default())?;
+        let mut shaper = TerminalTextShaper;
+        let mut renderer = WgpuTerminalRenderer::new_for_test()?;
+        let mut previous_frame = None;
+        let mut previous_shaped_rows = None;
+        let mut shaped_row_cache = PresenterShapedRowCache::default();
+
+        let mut context = NativeFramePreparationContext::new(
+            &mut font_system,
+            &mut shaper,
+            &mut renderer,
+            &loaded_font,
+            &mut previous_frame,
+            &mut previous_shaped_rows,
+            &mut shaped_row_cache,
+        );
+
+        prepare_native_terminal_frame_with_diagnostics(
+            &mut context,
+            &surface,
+            TerminalPresentationOptions {
+                theme_mode: ThemeMode::Dark,
+                theme_variant: ThemeVariant::PremiumDefault,
+                ..TerminalPresentationOptions::default()
+            },
+        )?;
+        surface.seqno = 2;
+        let (_, diagnostics) = prepare_native_terminal_frame_with_diagnostics(
+            &mut context,
+            &surface,
+            TerminalPresentationOptions {
+                theme_mode: ThemeMode::Light,
+                theme_variant: ThemeVariant::PremiumDefault,
+                ..TerminalPresentationOptions::default()
+            },
+        )?;
+
+        assert_eq!(
+            diagnostics.prepared_row_reuse_count, 0,
+            "switching semantic theme colors should invalidate retained prepared rows so the renderer cannot replay stale dark-theme glyph colors into the next light-theme frame"
+        );
+        assert_eq!(
+            diagnostics.dirty_row_count, 1,
+            "theme-driven semantic recoloring should still stay row-scoped instead of invalidating unrelated rows"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn prepare_native_terminal_frame_invalidates_prepared_rows_when_search_query_changes()
+    -> Result<()> {
+        let session_id = Uuid::new_v4();
+        let mut surface = SurfaceState::from_visible_lines(
+            session_id,
+            1,
+            1,
+            32,
+            vec!["https://example.com ERROR".into()],
+        );
+        surface.visible_rows = vec![TerminalRowState {
+            index: 0,
+            text: "https://example.com ERROR".into(),
+            wrapped: false,
+        }];
+        surface.default_fg_rgba = 0xffd8_dfe8;
+        surface.default_bg_rgba = 0xff0c_1014;
+        surface.cells = surface.visible_rows[0]
+            .text
+            .chars()
+            .enumerate()
+            .map(|(col, ch)| TerminalCellState {
+                row: 0,
+                col: col as u32,
+                width: 1,
+                text: ch.to_string(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            })
+            .collect();
+
+        let mut font_system = CountingFontSystem::new()?;
+        let loaded_font = font_system.load_font(&FontRequest::default())?;
+        let mut shaper = TerminalTextShaper;
+        let mut renderer = WgpuTerminalRenderer::new_for_test()?;
+        let mut previous_frame = None;
+        let mut previous_shaped_rows = None;
+        let mut shaped_row_cache = PresenterShapedRowCache::default();
+
+        let mut context = NativeFramePreparationContext::new(
+            &mut font_system,
+            &mut shaper,
+            &mut renderer,
+            &loaded_font,
+            &mut previous_frame,
+            &mut previous_shaped_rows,
+            &mut shaped_row_cache,
+        );
+
+        prepare_native_terminal_frame_with_diagnostics(
+            &mut context,
+            &surface,
+            TerminalPresentationOptions {
+                search_query: Some("example".into()),
+                search_match_highlight: SearchMatchHighlightStrength::Balanced,
+                ..TerminalPresentationOptions::default()
+            },
+        )?;
+        let (_, diagnostics) = prepare_native_terminal_frame_with_diagnostics(
+            &mut context,
+            &surface,
+            TerminalPresentationOptions {
+                search_query: Some("error".into()),
+                search_match_highlight: SearchMatchHighlightStrength::Balanced,
+                ..TerminalPresentationOptions::default()
+            },
+        )?;
+
+        assert_eq!(
+            diagnostics.prepared_row_reuse_count, 0,
+            "changing the terminal search query should invalidate retained prepared rows so native rendering cannot keep replaying stale search highlights"
+        );
+        assert_eq!(
+            diagnostics.dirty_row_count, 1,
+            "search-query-driven highlight changes should stay scoped to affected visible rows"
         );
 
         Ok(())

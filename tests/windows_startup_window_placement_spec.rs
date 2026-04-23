@@ -9,9 +9,8 @@ fn startup_window_bounds_use_slint_position_before_event_loop() {
         .expect("read slint winit adapter");
 
     assert!(
-        slint_backend.contains(
-            "with_winit_window()`] will only succeed when the event loop is active"
-        ),
+        slint_backend
+            .contains("with_winit_window()`] will only succeed when the event loop is active"),
         "the vendored Slint docs should keep documenting that direct winit window access is unavailable before the event loop starts"
     );
     assert!(

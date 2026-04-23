@@ -58,7 +58,7 @@ use mica_term::app::ssh::runtime::{
 use mica_term::app::ssh::session_manager::{
     EnhancementPolicy, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher,
 };
-use mica_term::app::terminal_theme::preset_for_theme_mode;
+use mica_term::app::terminal_theme::{preset_for_theme, preset_for_theme_mode};
 use mica_term::app::vault::bootstrap::{
     LocalVaultBootstrapState, load_local_vault_bootstrap_state, load_runtime_vault_key,
     save_local_vault_bootstrap_state,
@@ -83,6 +83,7 @@ use mica_term::shell::assets::{
 };
 use mica_term::shell::metrics::ShellMetrics;
 use mica_term::theme::ThemeMode;
+use mica_term::theme::ThemeVariant;
 use russh::keys::{HashAlg, PublicKey};
 use secrecy::SecretString;
 use slint::platform::{Key, PointerEventButton, WindowEvent};
@@ -8412,6 +8413,147 @@ fn workspace_terminal_input_callback_updates_active_session_surface() {
 }
 
 #[test]
+fn workspace_terminal_command_decorations_toggle_reprojects_existing_surface() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    app.invoke_workspace_session_text_input("pwd".into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    assert!(
+        app.get_workspace_session_command_blocks().row_count() > 0,
+        "an interactive prompt line should project at least one running command block while decorations stay enabled"
+    );
+    assert!(
+        app.get_workspace_session_overview_markers().row_count() > 0,
+        "command decorations should surface overview markers for the same projected command state"
+    );
+
+    app.invoke_settings_modal_terminal_command_decorations_enabled_changed(false);
+
+    assert_eq!(app.get_workspace_session_command_blocks().row_count(), 0);
+    assert_eq!(app.get_workspace_session_overview_markers().row_count(), 0);
+
+    app.invoke_settings_modal_terminal_command_decorations_enabled_changed(true);
+
+    assert!(
+        app.get_workspace_session_command_blocks().row_count() > 0,
+        "re-enabling decorations should re-project the existing workspace surface without waiting for new terminal output"
+    );
+    assert!(
+        app.get_workspace_session_overview_markers().row_count() > 0,
+        "overview markers should return together with command block decorations"
+    );
+}
+
+#[test]
+fn workspace_terminal_overview_markers_toggle_reprojects_existing_surface() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    app.invoke_workspace_session_text_input("pwd".into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    assert!(
+        app.get_workspace_session_command_blocks().row_count() > 0,
+        "command gutter decorations should be present before toggling overview markers"
+    );
+    assert!(
+        app.get_workspace_session_overview_markers().row_count() > 0,
+        "overview markers should be present before the dedicated toggle turns them off"
+    );
+
+    app.invoke_settings_modal_terminal_overview_markers_enabled_changed(false);
+
+    assert!(
+        app.get_workspace_session_command_blocks().row_count() > 0,
+        "disabling overview markers should keep command gutter decorations visible"
+    );
+    assert_eq!(app.get_workspace_session_overview_markers().row_count(), 0);
+
+    app.invoke_settings_modal_terminal_overview_markers_enabled_changed(true);
+
+    assert!(
+        app.get_workspace_session_command_blocks().row_count() > 0,
+        "re-enabling overview markers should leave existing command blocks intact"
+    );
+    assert!(
+        app.get_workspace_session_overview_markers().row_count() > 0,
+        "re-enabling overview markers should re-project them from the current workspace surface"
+    );
+}
+
+#[test]
+fn workspace_terminal_search_query_reprojects_visible_match_count() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    app.invoke_workspace_session_text_input("https://example.com/docs".into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    app.invoke_workspace_session_search_open_requested();
+    app.invoke_workspace_session_search_query_changed("example".into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    assert!(app.get_workspace_session_search_open());
+    assert_eq!(app.get_workspace_session_search_query().as_str(), "example");
+    assert!(
+        app.get_workspace_session_search_match_count() > 0,
+        "entering a visible search query should project live match counts from the current terminal viewport"
+    );
+
+    app.invoke_workspace_session_search_query_changed("no-match-token".into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    assert_eq!(app.get_workspace_session_search_match_count(), 0);
+
+    app.invoke_workspace_session_search_close_requested();
+    assert!(!app.get_workspace_session_search_open());
+}
+
+#[test]
 fn workspace_terminal_paste_callback_updates_active_session_surface() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -9589,6 +9731,35 @@ fn no_surface_terminal_projection_uses_catppuccin_defaults_and_tracks_theme_togg
         app.get_workspace_session_default_bg().as_argb_encoded(),
         0xff00_0000 | light_preset.background,
         "when no terminal surface is active the fallback terminal projection should still use the Catppuccin light background after a theme toggle"
+    );
+}
+
+#[test]
+fn changing_theme_variant_from_settings_reprojects_fallback_terminal_palette() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+
+    let premium = preset_for_theme(ThemeMode::Dark, ThemeVariant::PremiumDefault);
+    assert_eq!(
+        app.get_workspace_session_default_fg().as_argb_encoded(),
+        0xff00_0000 | premium.foreground
+    );
+
+    app.invoke_open_settings_panel_requested();
+    app.invoke_settings_modal_theme_variant_changed("legacy_hacker_green".into());
+
+    let legacy = preset_for_theme(ThemeMode::Dark, ThemeVariant::LegacyHackerGreen);
+    assert_eq!(
+        app.get_workspace_session_default_fg().as_argb_encoded(),
+        0xff00_0000 | legacy.foreground,
+        "changing theme variant from settings should refresh the fallback terminal foreground without needing an active surface"
+    );
+    assert_eq!(
+        app.get_workspace_session_default_bg().as_argb_encoded(),
+        0xff00_0000 | legacy.background,
+        "changing theme variant from settings should refresh the fallback terminal background too"
     );
 }
 

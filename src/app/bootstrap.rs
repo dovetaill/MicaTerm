@@ -35,6 +35,8 @@ use crate::QuickLaunchCardRow;
 use crate::QuickLaunchDetailRow;
 use crate::QuickLaunchGroupRow;
 use crate::SftpPanelItem;
+use crate::TerminalCommandBlockRow;
+use crate::TerminalOverviewMarkerRow;
 use crate::TransferCenterItem;
 use crate::WorkspaceTabItem;
 use crate::app::app_paths::app_root_paths_for_app;
@@ -84,6 +86,7 @@ use crate::app::ssh::session_manager::{
     SessionRuntimeLauncher, SessionState,
 };
 use crate::app::terminal_atlas::TerminalAtlasSelection;
+use crate::app::terminal_model::TerminalModelFrame;
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_presenter::WindowsNativePresenter;
 use crate::app::terminal_presenter::{
@@ -93,8 +96,13 @@ use crate::app::terminal_renderer::{
     NativeTerminalSurface, NativeTerminalSurfaceRect, TerminalRendererHost,
     TerminalRendererHostOptions,
 };
+use crate::app::terminal_semantic::{
+    CommandBlock, CommandBlockStatus, OverviewMarker, OverviewMarkerKind, TerminalSemanticSettings,
+    analyze_semantic_annotations_with_settings,
+};
 use crate::app::terminal_theme::{
-    TerminalThemePreset, preset_for_theme_mode, selection_overlay_rgba,
+    TerminalThemePreset, preset_for_theme, preset_for_theme_mode, selection_overlay_rgba,
+    selection_overlay_rgba_for,
 };
 #[cfg(any(target_os = "windows", test))]
 use crate::app::ui_preferences::PersistedWindowBounds;
@@ -175,7 +183,7 @@ use crate::shell::view_model::{
     RightPanelView, ShellViewModel, SnippetActivation, SshModalAction, SyncModalMode,
     SyncModalViewState, VaultPanelViewState,
 };
-use crate::theme::ThemeMode;
+use crate::theme::{ThemeMode, ThemeVariant};
 use russh::keys::ssh_key::{LineEnding, rand_core::OsRng};
 use russh::keys::{Algorithm, PrivateKey, PublicKey};
 
@@ -2055,8 +2063,86 @@ fn sync_workspace_terminal_shell_chrome(window: &AppWindow, preset: TerminalThem
     ));
 }
 
-fn terminal_selection_overlay_rgba(theme_mode: ThemeMode) -> u32 {
-    selection_overlay_rgba(theme_mode)
+fn clear_workspace_terminal_semantic_projection(window: &AppWindow) {
+    sync_vec_model(
+        window.get_workspace_session_command_blocks(),
+        Vec::<TerminalCommandBlockRow>::new(),
+        |model| window.set_workspace_session_command_blocks(model),
+    );
+    sync_vec_model(
+        window.get_workspace_session_overview_markers(),
+        Vec::<TerminalOverviewMarkerRow>::new(),
+        |model| window.set_workspace_session_overview_markers(model),
+    );
+}
+
+fn sync_workspace_terminal_semantic_projection(
+    window: &AppWindow,
+    command_blocks: Vec<TerminalCommandBlockRow>,
+    overview_markers: Vec<TerminalOverviewMarkerRow>,
+) {
+    sync_vec_model(
+        window.get_workspace_session_command_blocks(),
+        command_blocks,
+        |model| window.set_workspace_session_command_blocks(model),
+    );
+    sync_vec_model(
+        window.get_workspace_session_overview_markers(),
+        overview_markers,
+        |model| window.set_workspace_session_overview_markers(model),
+    );
+}
+
+fn project_terminal_command_blocks(blocks: &[CommandBlock]) -> Vec<TerminalCommandBlockRow> {
+    blocks
+        .iter()
+        .map(|block| TerminalCommandBlockRow {
+            start_row: i32::try_from(block.start_row).unwrap_or(i32::MAX),
+            end_row: i32::try_from(block.end_row).unwrap_or(i32::MAX),
+            status: match block.status {
+                CommandBlockStatus::Running => "running",
+                CommandBlockStatus::Success => "success",
+                CommandBlockStatus::Failure => "failure",
+            }
+            .into(),
+            label: block.command_text.clone().into(),
+        })
+        .collect()
+}
+
+fn project_terminal_overview_markers(markers: &[OverviewMarker]) -> Vec<TerminalOverviewMarkerRow> {
+    markers
+        .iter()
+        .map(|marker| TerminalOverviewMarkerRow {
+            row: i32::try_from(marker.row).unwrap_or(i32::MAX),
+            kind: match marker.kind {
+                OverviewMarkerKind::CommandRunning => "command_running",
+                OverviewMarkerKind::CommandSuccess => "command_success",
+                OverviewMarkerKind::CommandFailure => "command_failure",
+            }
+            .into(),
+        })
+        .collect()
+}
+
+fn analyze_workspace_terminal_semantic_projection(
+    surface: &TerminalSurfaceState,
+    settings: TerminalSemanticSettings,
+) -> (Vec<TerminalCommandBlockRow>, Vec<TerminalOverviewMarkerRow>) {
+    let frame_model = TerminalModelFrame::from_surface(surface, None);
+    let annotations = analyze_semantic_annotations_with_settings(&frame_model, settings);
+    (
+        project_terminal_command_blocks(&annotations.command_blocks),
+        project_terminal_overview_markers(&annotations.overview_markers),
+    )
+}
+
+fn terminal_selection_overlay_rgba(theme_mode: ThemeMode, theme_variant: ThemeVariant) -> u32 {
+    if theme_variant == ThemeVariant::PremiumDefault {
+        selection_overlay_rgba(theme_mode)
+    } else {
+        selection_overlay_rgba_for(theme_mode, theme_variant)
+    }
 }
 
 fn workspace_session_uses_host_selection_overlay(window: &AppWindow) -> bool {
@@ -2262,7 +2348,7 @@ fn present_surface_update_with_bitmap_fallback(
     options: TerminalRendererHostOptions,
     scale_factor: f32,
 ) -> Result<PresentedTerminalFrame> {
-    match host.present_surface_update(surface, options) {
+    match host.present_surface_update(surface, options.clone()) {
         Ok(frame) => Ok(frame),
         Err(first_err) => {
             let requested_render_mode = host.render_mode();
@@ -2470,6 +2556,9 @@ fn present_workspace_native_terminal_frame(window: &AppWindow, frame: NativeTerm
         selection_overlay_rects = presentable_frame.selection_overlay.rect_count,
         semantic_overlay_count = presentable_frame.semantic_overlays.len(),
         semantic_input_overlay_count = presentable_frame.semantic_input_overlays.len(),
+        semantic_span_count = presentable_frame.semantic_spans.len(),
+        command_block_count = presentable_frame.command_blocks.len(),
+        overview_marker_count = presentable_frame.overview_markers.len(),
         underline_overlay_runs = presentable_frame.underline_overlay.run_count,
         ime_preview_active = presentable_frame.ime_preview_overlay.active,
         cursor_visible = presentable_frame.cursor.visible,
@@ -2958,6 +3047,14 @@ fn sync_workspace_session_state_with_manager(
     window
         .set_active_workspace_session_id(state.active_workspace_session_id().unwrap_or("").into());
     window.set_workspace_session_host_mode(state.workspace_session_host_mode().into());
+    window.set_workspace_session_search_open(state.workspace_terminal_search_open());
+    window.set_workspace_session_search_query(state.workspace_terminal_search_query().into());
+    window.set_workspace_session_search_match_count(
+        i32::try_from(state.workspace_terminal_search_match_count()).unwrap_or(i32::MAX),
+    );
+    window.set_workspace_session_search_focus_sequence(
+        state.workspace_terminal_search_focus_sequence(),
+    );
     let visible_lines = state
         .workspace_terminal_visible_lines()
         .into_iter()
@@ -2968,7 +3065,14 @@ fn sync_workspace_session_state_with_manager(
         visible_lines,
         |model| window.set_workspace_session_visible_lines(model),
     );
-    sync_workspace_terminal_shell_chrome(window, preset_for_theme_mode(state.theme_mode));
+    sync_workspace_terminal_shell_chrome(
+        window,
+        if state.theme_variant == ThemeVariant::PremiumDefault {
+            preset_for_theme_mode(state.theme_mode)
+        } else {
+            preset_for_theme(state.theme_mode, state.theme_variant)
+        },
+    );
     sync_workspace_terminal_surface_projection_only(window, state);
     sync_workspace_connection_progress_state(window, state, manager);
 
@@ -3006,7 +3110,18 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
     window.set_workspace_session_cell_width(default_cell_width_px as f32 / scale_factor);
     window.set_workspace_session_cell_height(default_cell_height_px as f32 / scale_factor);
     sync_workspace_native_terminal_surface_geometry(window);
-    let terminal_theme_preset = preset_for_theme_mode(state.theme_mode);
+    let terminal_theme_preset = if state.theme_variant == ThemeVariant::PremiumDefault {
+        preset_for_theme_mode(state.theme_mode)
+    } else {
+        preset_for_theme(state.theme_mode, state.theme_variant)
+    };
+    let search_query = if state.workspace_terminal_search_open()
+        && !state.workspace_terminal_search_query().trim().is_empty()
+    {
+        Some(state.workspace_terminal_search_query().to_string())
+    } else {
+        None
+    };
 
     if let Some(surface) = state.active_workspace_terminal_surface() {
         let selection = if workspace_session_uses_host_selection_overlay(window) {
@@ -3014,7 +3129,8 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
         } else {
             active_workspace_terminal_selection(window)
         };
-        let selection_overlay_rgba = terminal_selection_overlay_rgba(state.theme_mode);
+        let selection_overlay_rgba =
+            terminal_selection_overlay_rgba(state.theme_mode, state.theme_variant);
         let mut native_frame_presented = false;
         let mut next_render_mode = None;
         let mut next_surface_seqno = None;
@@ -3022,6 +3138,7 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
             let mut host = host.borrow_mut();
             let Some(host) = host.as_mut() else {
                 clear_workspace_native_terminal_frame(window);
+                clear_workspace_terminal_semantic_projection(window);
                 next_surface_seqno = Some(0);
                 next_render_mode = Some(TerminalRenderMode::Bitmap);
                 return;
@@ -3033,6 +3150,19 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
                 TerminalRendererHostOptions {
                     selection,
                     selection_overlay_rgba,
+                    theme_mode: state.theme_mode,
+                    theme_variant: state.theme_variant,
+                    input_highlighting_enabled: state
+                        .settings_modal_terminal_input_highlighting_enabled(),
+                    output_rule_highlighting_enabled: state
+                        .settings_modal_terminal_output_rule_highlighting_enabled(),
+                    output_rule_profile: state.settings_modal_terminal_output_rule_profile(),
+                    command_decorations_enabled: state
+                        .settings_modal_terminal_command_decorations_enabled(),
+                    overview_markers_enabled: state
+                        .settings_modal_terminal_overview_markers_enabled(),
+                    search_query: search_query.clone(),
+                    search_match_highlight: state.settings_modal_terminal_search_match_highlight(),
                 },
                 scale_factor,
             ) {
@@ -3051,6 +3181,28 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
                     );
                     clear_workspace_retained_native_terminal_surface(window);
                     window.set_workspace_session_surface_image(frame.image);
+                    let (command_blocks, overview_markers) =
+                        analyze_workspace_terminal_semantic_projection(
+                            surface,
+                            TerminalSemanticSettings {
+                                input_highlighting_enabled: state
+                                    .settings_modal_terminal_input_highlighting_enabled(),
+                                output_rule_highlighting_enabled: state
+                                    .settings_modal_terminal_output_rule_highlighting_enabled(),
+                                output_rule_profile: state
+                                    .settings_modal_terminal_output_rule_profile(),
+                                command_decorations_enabled: state
+                                    .settings_modal_terminal_command_decorations_enabled(),
+                                overview_markers_enabled: state
+                                    .settings_modal_terminal_overview_markers_enabled(),
+                                search_query: search_query.clone(),
+                            },
+                        );
+                    sync_workspace_terminal_semantic_projection(
+                        window,
+                        command_blocks,
+                        overview_markers,
+                    );
                     next_surface_seqno = Some(i32::try_from(surface.seqno).unwrap_or(i32::MAX));
                     next_render_mode = Some(TerminalRenderMode::Bitmap);
                 }
@@ -3075,6 +3227,11 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
                         frame.cell_height_px as f32 / scale_factor,
                     );
                     sync_workspace_native_terminal_surface_geometry(window);
+                    sync_workspace_terminal_semantic_projection(
+                        window,
+                        project_terminal_command_blocks(&presentable_frame.command_blocks),
+                        project_terminal_overview_markers(&presentable_frame.overview_markers),
+                    );
                     present_workspace_native_terminal_frame(window, frame);
                     next_surface_seqno = Some(i32::try_from(surface.seqno).unwrap_or(i32::MAX));
                     next_render_mode = Some(TerminalRenderMode::Native);
@@ -3093,6 +3250,7 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
                         default_cell_height_px as f32 / scale_factor,
                     );
                     clear_workspace_native_terminal_frame(window);
+                    clear_workspace_terminal_semantic_projection(window);
                     next_surface_seqno = Some(0);
                     next_render_mode = Some(TerminalRenderMode::Bitmap);
                 }
@@ -3157,6 +3315,7 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
             0xff00_0000 | preset.background,
         ));
         clear_workspace_native_terminal_frame(window);
+        clear_workspace_terminal_semantic_projection(window);
         release_workspace_terminal_renderer_resources();
         window.set_workspace_session_mouse_grabbed(false);
         window.set_workspace_session_viewport_offset_lines(0);
@@ -3682,7 +3841,7 @@ fn install_windows_frame_adapter(_window: &AppWindow) {}
 fn windows_monitor_work_areas() -> Vec<MonitorWorkArea> {
     use windows_sys::Win32::Foundation::{BOOL, LPARAM, POINT, RECT};
     use windows_sys::Win32::Graphics::Gdi::{
-        EnumDisplayMonitors, HDC, MonitorFromPoint, MONITOR_DEFAULTTONEAREST,
+        EnumDisplayMonitors, HDC, MONITOR_DEFAULTTONEAREST, MonitorFromPoint,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
@@ -3692,19 +3851,14 @@ fn windows_monitor_work_areas() -> Vec<MonitorWorkArea> {
     }
 
     impl MonitorCollection {
-        unsafe fn push_hmonitor(
-            &mut self,
-            hmonitor: windows_sys::Win32::Graphics::Gdi::HMONITOR,
-        ) {
+        unsafe fn push_hmonitor(&mut self, hmonitor: windows_sys::Win32::Graphics::Gdi::HMONITOR) {
             let Some(work_area) = work_area_from_hmonitor(hmonitor as isize) else {
                 return;
             };
-            if self.seen.insert((
-                work_area.x,
-                work_area.y,
-                work_area.width,
-                work_area.height,
-            )) {
+            if self
+                .seen
+                .insert((work_area.x, work_area.y, work_area.width, work_area.height))
+            {
                 self.monitors.push(work_area);
             }
         }
@@ -3755,9 +3909,11 @@ fn apply_startup_window_bounds(window: &AppWindow, prefs: &UiPreferences) -> (u3
     };
 
     apply_restored_window_size(window, (bounds.width, bounds.height));
-    window.window().set_position(slint::WindowPosition::Physical(
-        slint::PhysicalPosition::new(bounds.x, bounds.y),
-    ));
+    window
+        .window()
+        .set_position(slint::WindowPosition::Physical(
+            slint::PhysicalPosition::new(bounds.x, bounds.y),
+        ));
     (bounds.width, bounds.height)
 }
 
@@ -4432,17 +4588,38 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         }
     }
     initial_view_model.theme_mode = prefs.theme_mode;
+    initial_view_model.theme_variant = prefs.theme_variant;
     initial_view_model.is_always_on_top = prefs.always_on_top;
     initial_view_model.set_right_panel_view(RightPanelView::from_id(&prefs.right_panel_view));
     if let Some(session_bridge) = session_bridge.as_ref() {
         session_bridge
             .terminal_defaults
             .set_scrollback_lines(prefs.terminal_scrollback_limit);
+        session_bridge
+            .terminal_defaults
+            .set_theme(prefs.theme_mode, prefs.theme_variant);
     }
     initial_view_model
         .set_settings_modal_terminal_scrollback_limit(prefs.terminal_scrollback_limit as i32);
     initial_view_model.set_settings_modal_terminal_active_idle_shrink_enabled(
         prefs.terminal_active_idle_shrink_enabled,
+    );
+    initial_view_model.set_settings_modal_terminal_input_highlighting_enabled(
+        prefs.terminal_input_highlighting_enabled,
+    );
+    initial_view_model.set_settings_modal_terminal_output_rule_highlighting_enabled(
+        prefs.terminal_output_rule_highlighting_enabled,
+    );
+    initial_view_model.set_settings_modal_terminal_command_decorations_enabled(
+        prefs.terminal_command_decorations_enabled,
+    );
+    initial_view_model.set_settings_modal_terminal_overview_markers_enabled(
+        prefs.terminal_overview_markers_enabled,
+    );
+    initial_view_model
+        .set_settings_modal_terminal_output_rule_profile(prefs.terminal_output_rule_profile.id());
+    initial_view_model.set_settings_modal_terminal_search_match_highlight(
+        prefs.terminal_search_match_highlight.id(),
     );
     initial_view_model
         .set_settings_modal_download_conflict_default(prefs.download_conflict_default.as_str());
@@ -4487,14 +4664,15 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let sftp_browser_controller = Rc::new(RefCell::new(SftpBrowserController::default()));
     let vault_session = Rc::new(RefCell::new(initial_vault_session));
     if let Some(session_bridge_ref) = session_bridge.as_ref()
-        && let Err(err) = session_bridge_ref
-            .manager
-            .set_theme_mode(view_model.borrow().theme_mode)
+        && let Err(err) = session_bridge_ref.manager.set_theme(
+            view_model.borrow().theme_mode,
+            view_model.borrow().theme_variant,
+        )
     {
         tracing::error!(
             target: "app.ssh",
             error = %err,
-            "failed to apply initial theme mode to SSH session manager"
+            "failed to apply initial theme state to SSH session manager"
         );
     }
     let controller = Rc::new(WindowController::new(window));
@@ -6524,6 +6702,60 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             return;
         };
         sync_workspace_native_terminal_surface_geometry(&window);
+    });
+
+    let state = Rc::clone(&view_model);
+    let window_handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    window.on_workspace_session_search_open_requested(move || {
+        let Some(window) = window_handle.upgrade() else {
+            return;
+        };
+        let mut state = state.borrow_mut();
+        state.open_workspace_terminal_search();
+        sync_workspace_session_state_with_manager(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
+    });
+
+    let state = Rc::clone(&view_model);
+    let window_handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    window.on_workspace_session_search_close_requested(move || {
+        let Some(window) = window_handle.upgrade() else {
+            return;
+        };
+        let mut state = state.borrow_mut();
+        state.close_workspace_terminal_search();
+        sync_workspace_session_state_with_manager(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
+    });
+
+    let state = Rc::clone(&view_model);
+    let window_handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    window.on_workspace_session_search_query_changed(move |query| {
+        let Some(window) = window_handle.upgrade() else {
+            return;
+        };
+        let mut state = state.borrow_mut();
+        state.set_workspace_terminal_search_query(query.to_string());
+        sync_workspace_session_state_with_manager(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
     });
 
     let state = Rc::clone(&view_model);

@@ -2,7 +2,8 @@ use std::fs;
 
 use mica_term::app::ssh::runtime::{TerminalKeyEvent, TerminalSession};
 use mica_term::app::terminal_core::TerminalCoreKind;
-use mica_term::theme::ThemeMode;
+use mica_term::app::terminal_theme::preset_for_theme;
+use mica_term::theme::{ThemeMode, ThemeVariant};
 use uuid::Uuid;
 
 fn parity_session(kind: TerminalCoreKind, rows: usize, cols: usize) -> TerminalSession {
@@ -119,4 +120,39 @@ fn experimental_alacritty_core_matches_wezterm_for_truecolor_and_writeback_contr
     );
     assert_eq!(alacritty_surface.cells, wezterm_surface.cells);
     assert_eq!(alacritty_writeback, wezterm_writeback);
+}
+
+#[test]
+fn experimental_alacritty_core_matches_wezterm_for_variant_aware_palette_projection() {
+    let mut wezterm = parity_session(TerminalCoreKind::Wezterm, 4, 20);
+    let mut alacritty = parity_session(TerminalCoreKind::AlacrittyExperimental, 4, 20);
+    let preset = preset_for_theme(ThemeMode::Dark, ThemeVariant::LegacyHackerGreen);
+
+    let color_script = b"\x1b[32mA\x1b[34mB\x1b[0m";
+    wezterm.apply_remote_bytes(color_script);
+    alacritty.apply_remote_bytes(color_script);
+    wezterm.set_theme(ThemeMode::Dark, ThemeVariant::LegacyHackerGreen);
+    alacritty.set_theme(ThemeMode::Dark, ThemeVariant::LegacyHackerGreen);
+
+    let wezterm_surface = wezterm.surface_state(Uuid::new_v4());
+    let alacritty_surface = alacritty.surface_state(Uuid::new_v4());
+
+    assert_eq!(
+        alacritty_surface.default_fg_rgba,
+        0xff00_0000 | preset.foreground
+    );
+    assert_eq!(
+        alacritty_surface.default_bg_rgba,
+        0xff00_0000 | preset.background
+    );
+    assert_eq!(
+        alacritty_surface.default_fg_rgba,
+        wezterm_surface.default_fg_rgba
+    );
+    assert_eq!(
+        alacritty_surface.default_bg_rgba,
+        wezterm_surface.default_bg_rgba
+    );
+    assert_eq!(alacritty_surface.cursor, wezterm_surface.cursor);
+    assert_eq!(alacritty_surface.cells, wezterm_surface.cells);
 }

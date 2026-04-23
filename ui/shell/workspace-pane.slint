@@ -4,7 +4,7 @@ import { ThemeTokens } from "../theme/tokens.slint";
 import { QuickLaunchCardRow, QuickLaunchDetailRow, QuickLaunchGroupRow } from "../welcome/quick-launch-types.slint";
 import { SftpWorkspaceHost } from "./sftp-workspace-host.slint";
 import { TabBar, WorkspaceTabItem } from "./tabbar.slint";
-import { ConnectionProgressDiagnosticRow, ConnectionProgressStepRow, TerminalSessionHost } from "./terminal-session-host.slint";
+import { ConnectionProgressDiagnosticRow, ConnectionProgressStepRow, TerminalCommandBlockRow, TerminalOverviewMarkerRow, TerminalSessionHost } from "./terminal-session-host.slint";
 
 export component WorkspacePane inherits Rectangle {
     in property <[WorkspaceTabItem]> workspace-tab-items: [];
@@ -58,6 +58,12 @@ export component WorkspacePane inherits Rectangle {
     in property <color> workspace-session-scrollbar-thumb-active: ThemeTokens.terminal-scrollbar-thumb-active-surface;
     in property <bool> workspace-session-mouse-grabbed: false;
     in property <[string]> workspace-session-visible-lines: [];
+    in property <[TerminalCommandBlockRow]> workspace-session-command-blocks: [];
+    in property <[TerminalOverviewMarkerRow]> workspace-session-overview-markers: [];
+    in property <bool> workspace-session-search-open: false;
+    in property <string> workspace-session-search-query: "";
+    in property <int> workspace-session-search-match-count: 0;
+    in property <int> workspace-session-search-focus-sequence: 0;
     in property <int> workspace-session-surface-seqno: 0;
     in property <int> workspace-session-viewport-offset-lines: 0;
     in property <int> workspace-session-viewport-max-offset-lines: 0;
@@ -93,6 +99,9 @@ export component WorkspacePane inherits Rectangle {
     callback scroll-jump-requested(float);
     callback mouse-input(string, string, int, int, bool, bool, bool);
     callback context-menu-open-changed(bool);
+    callback search-open-requested();
+    callback search-close-requested();
+    callback search-query-changed(string);
     callback welcome-quick-launch-asset-selected(string);
     callback welcome-quick-launch-search-changed(string);
     callback welcome-quick-launch-connect-requested(string);
@@ -107,7 +116,7 @@ export component WorkspacePane inherits Rectangle {
 
     horizontal-stretch: 1;
     min-width: 0px;
-    background: ThemeTokens.workspace-surface;
+    background: ThemeTokens.terminal-frame-background;
 
     VerticalLayout {
         width: 100%;
@@ -195,6 +204,12 @@ export component WorkspacePane inherits Rectangle {
                 session-scrollbar-thumb-active: root.workspace-session-scrollbar-thumb-active;
                 session-mouse-grabbed: root.workspace-session-mouse-grabbed;
                 session-visible-lines: root.workspace-session-visible-lines;
+                session-command-blocks: root.workspace-session-command-blocks;
+                session-overview-markers: root.workspace-session-overview-markers;
+                session-search-open: root.workspace-session-search-open;
+                session-search-query: root.workspace-session-search-query;
+                session-search-match-count: root.workspace-session-search-match-count;
+                session-search-focus-sequence: root.workspace-session-search-focus-sequence;
                 session-surface-seqno: root.workspace-session-surface-seqno;
                 session-viewport-offset-lines: root.workspace-session-viewport-offset-lines;
                 session-viewport-max-offset-lines: root.workspace-session-viewport-max-offset-lines;
@@ -260,6 +275,18 @@ export component WorkspacePane inherits Rectangle {
 
                 context-menu-open-changed(open) => {
                     root.context-menu-open-changed(open);
+                }
+
+                search-open-requested => {
+                    root.search-open-requested();
+                }
+
+                search-close-requested => {
+                    root.search-close-requested();
+                }
+
+                search-query-changed(query) => {
+                    root.search-query-changed(query);
                 }
 
                 welcome-quick-launch-asset-selected(asset-id) => {

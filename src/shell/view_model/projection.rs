@@ -147,6 +147,14 @@ impl ShellViewModel {
         self.settings_modal_state.open
     }
 
+    pub fn settings_modal_theme_variant(&self) -> crate::theme::ThemeVariant {
+        self.theme_variant
+    }
+
+    pub fn settings_modal_theme_variant_id(&self) -> &'static str {
+        self.theme_variant.id()
+    }
+
     pub fn settings_modal_terminal_scrollback_limit(&self) -> usize {
         self.settings_modal_state.terminal_scrollback_limit
     }
@@ -154,6 +162,59 @@ impl ShellViewModel {
     pub fn settings_modal_terminal_active_idle_shrink_enabled(&self) -> bool {
         self.settings_modal_state
             .terminal_active_idle_shrink_enabled
+    }
+
+    pub fn settings_modal_terminal_input_highlighting_enabled(&self) -> bool {
+        self.settings_modal_state
+            .terminal_input_highlighting_enabled
+    }
+
+    pub fn settings_modal_terminal_output_rule_highlighting_enabled(&self) -> bool {
+        self.settings_modal_state
+            .terminal_output_rule_highlighting_enabled
+    }
+
+    pub fn settings_modal_terminal_command_decorations_enabled(&self) -> bool {
+        self.settings_modal_state
+            .terminal_command_decorations_enabled
+    }
+
+    pub fn settings_modal_terminal_overview_markers_enabled(&self) -> bool {
+        self.settings_modal_state.terminal_overview_markers_enabled
+    }
+
+    pub fn settings_modal_terminal_output_rule_profile(
+        &self,
+    ) -> crate::app::terminal_semantic::OutputRuleProfile {
+        self.settings_modal_state.terminal_output_rule_profile
+    }
+
+    pub fn settings_modal_terminal_output_rule_profile_id(&self) -> &'static str {
+        self.settings_modal_state.terminal_output_rule_profile.id()
+    }
+
+    pub fn settings_modal_terminal_search_match_highlight(
+        &self,
+    ) -> crate::theme::SearchMatchHighlightStrength {
+        self.settings_modal_state.terminal_search_match_highlight
+    }
+
+    pub fn settings_modal_terminal_search_match_highlight_id(&self) -> &'static str {
+        self.settings_modal_state
+            .terminal_search_match_highlight
+            .id()
+    }
+
+    pub fn workspace_terminal_search_open(&self) -> bool {
+        self.workspace_terminal_search_open
+    }
+
+    pub fn workspace_terminal_search_query(&self) -> &str {
+        &self.workspace_terminal_search_query
+    }
+
+    pub fn workspace_terminal_search_focus_sequence(&self) -> i32 {
+        self.workspace_terminal_search_focus_sequence
     }
 
     pub fn settings_modal_download_conflict_default(
@@ -213,6 +274,10 @@ impl ShellViewModel {
         self.show_global_menu = false;
     }
 
+    pub fn set_settings_modal_theme_variant(&mut self, value: &str) {
+        self.theme_variant = crate::theme::ThemeVariant::from_id(value);
+    }
+
     pub fn set_settings_modal_terminal_scrollback_limit(&mut self, value: i32) {
         let value = value.max(1) as usize;
         self.settings_modal_state.terminal_scrollback_limit = value;
@@ -221,6 +286,53 @@ impl ShellViewModel {
     pub fn set_settings_modal_terminal_active_idle_shrink_enabled(&mut self, value: bool) {
         self.settings_modal_state
             .terminal_active_idle_shrink_enabled = value;
+    }
+
+    pub fn set_settings_modal_terminal_input_highlighting_enabled(&mut self, value: bool) {
+        self.settings_modal_state
+            .terminal_input_highlighting_enabled = value;
+    }
+
+    pub fn set_settings_modal_terminal_output_rule_highlighting_enabled(&mut self, value: bool) {
+        self.settings_modal_state
+            .terminal_output_rule_highlighting_enabled = value;
+    }
+
+    pub fn set_settings_modal_terminal_command_decorations_enabled(&mut self, value: bool) {
+        self.settings_modal_state
+            .terminal_command_decorations_enabled = value;
+    }
+
+    pub fn set_settings_modal_terminal_overview_markers_enabled(&mut self, value: bool) {
+        self.settings_modal_state.terminal_overview_markers_enabled = value;
+    }
+
+    pub fn set_settings_modal_terminal_output_rule_profile(&mut self, value: &str) {
+        self.settings_modal_state.terminal_output_rule_profile =
+            crate::app::terminal_semantic::OutputRuleProfile::from_id(value);
+    }
+
+    pub fn set_settings_modal_terminal_search_match_highlight(&mut self, value: &str) {
+        self.settings_modal_state.terminal_search_match_highlight =
+            crate::theme::SearchMatchHighlightStrength::from_id(value);
+    }
+
+    pub fn open_workspace_terminal_search(&mut self) {
+        self.workspace_terminal_search_open = true;
+        self.workspace_terminal_search_focus_sequence = self
+            .workspace_terminal_search_focus_sequence
+            .saturating_add(1);
+    }
+
+    pub fn close_workspace_terminal_search(&mut self) {
+        self.workspace_terminal_search_open = false;
+    }
+
+    pub fn set_workspace_terminal_search_query(&mut self, value: String) {
+        self.workspace_terminal_search_query = value;
+        if !self.workspace_terminal_search_query.is_empty() {
+            self.workspace_terminal_search_open = true;
+        }
     }
 
     pub fn set_settings_modal_download_conflict_default(&mut self, value: &str) {

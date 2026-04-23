@@ -31,6 +31,7 @@ use crate::app::ssh::credentials::{
     ssh_credential_ref,
 };
 use crate::app::ssh::runtime::TerminalSurfaceState;
+use crate::app::terminal_semantic::OutputRuleProfile;
 use crate::app::ui_preferences::DownloadConflictDefault;
 use crate::app::window_state::WindowPlacementKind;
 use crate::shell::assets::{
@@ -48,15 +49,15 @@ use crate::shell::keychain::{
     next_default_name_for_parent as next_default_keychain_name_for_parent, project_keychain_rows,
     rename_keychain_node,
 };
+use crate::shell::metrics::ShellMetrics;
 use crate::shell::quick_launch::{
     QUICK_LAUNCH_RECENT_LIMIT, QuickLaunchAssetRecord, QuickLaunchCardItem, QuickLaunchDetailItem,
     QuickLaunchGroupItem, collect_quick_launch_records, group_id_for_asset,
     matches_quick_launch_query, project_card_item, project_detail_item,
 };
-use crate::shell::metrics::ShellMetrics;
 use crate::shell::sidebar::SidebarDestination;
 use crate::shell::tabs::WorkspaceTab;
-use crate::theme::ThemeMode;
+use crate::theme::{SearchMatchHighlightStrength, ThemeMode, ThemeVariant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WelcomeAction {
@@ -249,6 +250,12 @@ pub struct SettingsModalViewState {
     pub open: bool,
     pub terminal_scrollback_limit: usize,
     pub terminal_active_idle_shrink_enabled: bool,
+    pub terminal_input_highlighting_enabled: bool,
+    pub terminal_output_rule_highlighting_enabled: bool,
+    pub terminal_command_decorations_enabled: bool,
+    pub terminal_overview_markers_enabled: bool,
+    pub terminal_output_rule_profile: OutputRuleProfile,
+    pub terminal_search_match_highlight: SearchMatchHighlightStrength,
     pub download_conflict_default: DownloadConflictDefault,
 }
 
@@ -258,6 +265,12 @@ impl Default for SettingsModalViewState {
             open: false,
             terminal_scrollback_limit: 1500,
             terminal_active_idle_shrink_enabled: true,
+            terminal_input_highlighting_enabled: true,
+            terminal_output_rule_highlighting_enabled: true,
+            terminal_command_decorations_enabled: true,
+            terminal_overview_markers_enabled: true,
+            terminal_output_rule_profile: OutputRuleProfile::Default,
+            terminal_search_match_highlight: SearchMatchHighlightStrength::Balanced,
             download_conflict_default: DownloadConflictDefault::Ask,
         }
     }
@@ -640,6 +653,7 @@ pub struct ShellViewModel {
     pub active_sidebar_destination: SidebarDestination,
     pub is_window_active: bool,
     pub theme_mode: ThemeMode,
+    pub theme_variant: ThemeVariant,
     pub is_always_on_top: bool,
     pub asset_view_mode: AssetViewMode,
     pub asset_search_expanded: bool,
@@ -674,6 +688,9 @@ pub struct ShellViewModel {
     active_workspace_tab_id: Option<String>,
     active_workspace_session_id: Option<String>,
     active_workspace_terminal_surface: Option<TerminalSurfaceState>,
+    workspace_terminal_search_open: bool,
+    workspace_terminal_search_query: String,
+    workspace_terminal_search_focus_sequence: i32,
     pending_ssh_modal_action: Option<PendingSshModalAction>,
     pending_snippet_create_action: Option<SnippetCreateAction>,
     pending_snippet_activation: Option<PendingSnippetActivation>,
@@ -725,6 +742,7 @@ impl Default for ShellViewModel {
             active_sidebar_destination: SidebarDestination::Console,
             is_window_active: true,
             theme_mode: ThemeMode::Dark,
+            theme_variant: ThemeVariant::PremiumDefault,
             is_always_on_top: false,
             asset_view_mode: AssetViewMode::Tree,
             asset_search_expanded: false,
@@ -759,6 +777,9 @@ impl Default for ShellViewModel {
             active_workspace_tab_id: None,
             active_workspace_session_id: None,
             active_workspace_terminal_surface: None,
+            workspace_terminal_search_open: false,
+            workspace_terminal_search_query: String::new(),
+            workspace_terminal_search_focus_sequence: 0,
             pending_ssh_modal_action: None,
             pending_snippet_create_action: None,
             pending_snippet_activation: None,

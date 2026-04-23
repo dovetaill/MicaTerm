@@ -28,7 +28,7 @@ import { QuickLaunchCardRow, QuickLaunchDetailRow, QuickLaunchGroupRow } from "w
 import { ConsoleAssetItem } from "shell/assets-sidebar.slint";
 import { RightPanel, SftpPanelItem } from "shell/right-panel.slint";
 import { Sidebar, SidebarNavItem } from "shell/sidebar.slint";
-import { ConnectionProgressDiagnosticRow, ConnectionProgressStepRow } from "shell/terminal-session-host.slint";
+import { ConnectionProgressDiagnosticRow, ConnectionProgressStepRow, TerminalCommandBlockRow, TerminalOverviewMarkerRow } from "shell/terminal-session-host.slint";
 import { WorkspaceTabItem } from "shell/tabbar.slint";
 import { Titlebar } from "shell/titlebar.slint";
 import { TransferCenter, TransferCenterItem } from "shell/transfer-center.slint";
@@ -44,8 +44,15 @@ export component AppWindow inherits Window {
     in-out property <bool> dark-mode <=> ThemeTokens.dark-mode;
     in-out property <bool> sync-modal-open: false;
     in-out property <bool> settings-modal-open: false;
+    in-out property <string> settings-modal-theme-variant: "premium_default";
     in-out property <int> settings-modal-terminal-scrollback-limit: 1500;
     in-out property <bool> settings-modal-terminal-active-idle-shrink-enabled: true;
+    in-out property <bool> settings-modal-terminal-input-highlighting-enabled: true;
+    in-out property <bool> settings-modal-terminal-output-rule-highlighting-enabled: true;
+    in-out property <bool> settings-modal-terminal-command-decorations-enabled: true;
+    in-out property <bool> settings-modal-terminal-overview-markers-enabled: true;
+    in-out property <string> settings-modal-terminal-output-rule-profile: "default";
+    in-out property <string> settings-modal-terminal-search-match-highlight: "balanced";
     in-out property <string> settings-modal-download-conflict-default: "ask";
     in-out property <string> sync-modal-mode: "not-configured";
     in-out property <string> sync-modal-title: "Sync Settings";
@@ -313,6 +320,12 @@ export component AppWindow inherits Window {
     in-out property <color> workspace-session-scrollbar-thumb-active: ThemeTokens.terminal-scrollbar-thumb-active-surface;
     in-out property <bool> workspace-session-mouse-grabbed: false;
     in-out property <[string]> workspace-session-visible-lines: [];
+    in-out property <[TerminalCommandBlockRow]> workspace-session-command-blocks: [];
+    in-out property <[TerminalOverviewMarkerRow]> workspace-session-overview-markers: [];
+    in-out property <bool> workspace-session-search-open: false;
+    in-out property <string> workspace-session-search-query: "";
+    in-out property <int> workspace-session-search-match-count: 0;
+    in-out property <int> workspace-session-search-focus-sequence: 0;
     in-out property <int> workspace-session-surface-seqno: 0;
     in-out property <int> workspace-session-viewport-offset-lines: 0;
     in-out property <int> workspace-session-viewport-max-offset-lines: 0;
@@ -419,8 +432,15 @@ export component AppWindow inherits Window {
     callback sync-modal-draft-changed(string, string);
     callback sync-modal-toggle-changed(string, bool);
     callback settings-modal-close-requested();
+    callback settings-modal-theme-variant-changed(string);
     callback settings-modal-terminal-scrollback-limit-changed(int);
     callback settings-modal-terminal-active-idle-shrink-enabled-changed(bool);
+    callback settings-modal-terminal-input-highlighting-enabled-changed(bool);
+    callback settings-modal-terminal-output-rule-highlighting-enabled-changed(bool);
+    callback settings-modal-terminal-command-decorations-enabled-changed(bool);
+    callback settings-modal-terminal-overview-markers-enabled-changed(bool);
+    callback settings-modal-terminal-output-rule-profile-changed(string);
+    callback settings-modal-terminal-search-match-highlight-changed(string);
     callback settings-modal-download-conflict-default-changed(string);
     callback open-settings-panel-requested();
     callback open-appearance-panel-requested();
@@ -513,6 +533,9 @@ export component AppWindow inherits Window {
     callback workspace-session-scroll-jump-requested(float);
     callback workspace-session-mouse-input(string, string, int, int, bool, bool, bool);
     callback workspace-session-context-menu-open-changed(bool);
+    callback workspace-session-search-open-requested();
+    callback workspace-session-search-close-requested();
+    callback workspace-session-search-query-changed(string);
     callback welcome-quick-launch-asset-selected(string);
     callback welcome-quick-launch-search-changed(string);
     callback welcome-quick-launch-connect-requested(string);
@@ -925,6 +948,12 @@ export component AppWindow inherits Window {
                         workspace-session-scrollbar-thumb-active: root.workspace-session-scrollbar-thumb-active;
                         workspace-session-mouse-grabbed: root.workspace-session-mouse-grabbed;
                         workspace-session-visible-lines: root.workspace-session-visible-lines;
+                        workspace-session-command-blocks: root.workspace-session-command-blocks;
+                        workspace-session-overview-markers: root.workspace-session-overview-markers;
+                        workspace-session-search-open: root.workspace-session-search-open;
+                        workspace-session-search-query: root.workspace-session-search-query;
+                        workspace-session-search-match-count: root.workspace-session-search-match-count;
+                        workspace-session-search-focus-sequence: root.workspace-session-search-focus-sequence;
                         workspace-session-surface-seqno: root.workspace-session-surface-seqno;
                         workspace-session-viewport-offset-lines: root.workspace-session-viewport-offset-lines;
                         workspace-session-viewport-max-offset-lines: root.workspace-session-viewport-max-offset-lines;
@@ -1002,6 +1031,18 @@ export component AppWindow inherits Window {
 
                         context-menu-open-changed(open) => {
                             root.workspace-session-context-menu-open-changed(open);
+                        }
+
+                        search-open-requested => {
+                            root.workspace-session-search-open-requested();
+                        }
+
+                        search-close-requested => {
+                            root.workspace-session-search-close-requested();
+                        }
+
+                        search-query-changed(query) => {
+                            root.workspace-session-search-query-changed(query);
                         }
 
                         welcome-quick-launch-asset-selected(asset-id) => {
@@ -1660,12 +1701,23 @@ export component AppWindow inherits Window {
             y: 0px;
             width: settings-modal-shell.content-width;
             height: settings-modal-shell.content-height;
+            theme-variant: root.settings-modal-theme-variant;
             terminal-scrollback-limit: root.settings-modal-terminal-scrollback-limit;
             terminal-active-idle-shrink-enabled: root.settings-modal-terminal-active-idle-shrink-enabled;
+            terminal-input-highlighting-enabled: root.settings-modal-terminal-input-highlighting-enabled;
+            terminal-output-rule-highlighting-enabled: root.settings-modal-terminal-output-rule-highlighting-enabled;
+            terminal-command-decorations-enabled: root.settings-modal-terminal-command-decorations-enabled;
+            terminal-overview-markers-enabled: root.settings-modal-terminal-overview-markers-enabled;
+            terminal-output-rule-profile: root.settings-modal-terminal-output-rule-profile;
+            terminal-search-match-highlight: root.settings-modal-terminal-search-match-highlight;
             download-conflict-default: root.settings-modal-download-conflict-default;
 
             close-requested => {
                 root.settings-modal-close-requested();
+            }
+
+            theme-variant-changed(value) => {
+                root.settings-modal-theme-variant-changed(value);
             }
 
             terminal-scrollback-limit-changed(value) => {
@@ -1674,6 +1726,30 @@ export component AppWindow inherits Window {
 
             terminal-active-idle-shrink-enabled-changed(value) => {
                 root.settings-modal-terminal-active-idle-shrink-enabled-changed(value);
+            }
+
+            terminal-input-highlighting-enabled-changed(value) => {
+                root.settings-modal-terminal-input-highlighting-enabled-changed(value);
+            }
+
+            terminal-output-rule-highlighting-enabled-changed(value) => {
+                root.settings-modal-terminal-output-rule-highlighting-enabled-changed(value);
+            }
+
+            terminal-command-decorations-enabled-changed(value) => {
+                root.settings-modal-terminal-command-decorations-enabled-changed(value);
+            }
+
+            terminal-overview-markers-enabled-changed(value) => {
+                root.settings-modal-terminal-overview-markers-enabled-changed(value);
+            }
+
+            terminal-output-rule-profile-changed(value) => {
+                root.settings-modal-terminal-output-rule-profile-changed(value);
+            }
+
+            terminal-search-match-highlight-changed(value) => {
+                root.settings-modal-terminal-search-match-highlight-changed(value);
             }
 
             download-conflict-default-changed(value) => {

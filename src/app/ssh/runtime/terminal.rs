@@ -13,7 +13,8 @@ use crate::app::terminal_core::{
     SelectionState, TerminalCoreAdapter, TerminalCoreKind, TerminalFrameSnapshot, ViewportState,
     create_terminal_core_adapter,
 };
-use crate::theme::ThemeMode;
+use crate::app::terminal_theme::preset_for_theme;
+use crate::theme::{ThemeMode, ThemeVariant};
 
 use super::{
     TerminalCursorShape, TerminalCursorState, TerminalKeyEvent, TerminalMouseInput,
@@ -246,7 +247,16 @@ impl TerminalCoreAdapter for ReleasedTerminalCoreAdapter {
         self.seqno = self.seqno.saturating_add(1);
     }
 
-    fn set_theme_mode(&mut self, _mode: ThemeMode) {}
+    fn set_theme(&mut self, mode: ThemeMode, variant: ThemeVariant) {
+        let preset = preset_for_theme(mode, variant);
+        self.default_fg_rgba = 0xff00_0000 | preset.foreground;
+        self.default_bg_rgba = 0xff00_0000 | preset.background;
+        self.row_bg_even_rgba = 0xff00_0000 | preset.viewport_bg_top;
+        self.row_bg_odd_rgba = 0xff00_0000 | preset.viewport_bg_bottom;
+        self.cursor_fg_rgba = 0xff00_0000 | preset.cursor_fg;
+        self.cursor_bg_rgba = 0xff00_0000 | preset.cursor_bg;
+        self.seqno = self.seqno.saturating_add(1);
+    }
 
     fn scroll_viewport_lines(&mut self, _delta: i32) {}
 
@@ -361,8 +371,12 @@ impl TerminalSession {
         self.core.scroll_viewport_lines(delta);
     }
 
+    pub fn set_theme(&mut self, mode: ThemeMode, variant: ThemeVariant) {
+        self.core.set_theme(mode, variant);
+    }
+
     pub fn set_theme_mode(&mut self, mode: ThemeMode) {
-        self.core.set_theme_mode(mode);
+        self.set_theme(mode, ThemeVariant::PremiumDefault);
     }
 
     pub fn send_mouse_input(&mut self, event: TerminalMouseInput) -> Result<Vec<u8>> {

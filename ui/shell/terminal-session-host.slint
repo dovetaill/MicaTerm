@@ -53,6 +53,18 @@ export struct ConnectionProgressDiagnosticRow {
     text: string,
 }
 
+export struct TerminalCommandBlockRow {
+    start_row: int,
+    end_row: int,
+    status: string,
+    label: string,
+}
+
+export struct TerminalOverviewMarkerRow {
+    row: int,
+    kind: string,
+}
+
 component ConnectionProgressActionButton inherits Rectangle {
     in property <string> label;
     in property <bool> enabled: true;
@@ -144,6 +156,12 @@ export component TerminalSessionHost inherits Rectangle {
     in property <color> session-scrollbar-thumb-active: ThemeTokens.terminal-scrollbar-thumb-active-surface;
     in property <bool> session-mouse-grabbed: false;
     in property <[string]> session-visible-lines: [];
+    in property <[TerminalCommandBlockRow]> session-command-blocks: [];
+    in property <[TerminalOverviewMarkerRow]> session-overview-markers: [];
+    in property <bool> session-search-open: false;
+    in property <string> session-search-query: "";
+    in property <int> session-search-match-count: 0;
+    in property <int> session-search-focus-sequence: 0;
     in property <int> session-surface-seqno: 0;
     in property <int> session-viewport-offset-lines: 0;
     in property <int> session-viewport-max-offset-lines: 0;
@@ -172,6 +190,9 @@ export component TerminalSessionHost inherits Rectangle {
     callback scroll-jump-requested(float);
     callback mouse-input(string, string, int, int, bool, bool, bool);
     callback context-menu-open-changed(bool);
+    callback search-open-requested();
+    callback search-close-requested();
+    callback search-query-changed(string);
     callback welcome-quick-launch-asset-selected(string);
     callback welcome-quick-launch-search-changed(string);
     callback welcome-quick-launch-connect-requested(string);
@@ -194,6 +215,12 @@ export component TerminalSessionHost inherits Rectangle {
     private property <length> terminal-padding-top: 8px;
     private property <length> terminal-padding-right: 10px;
     private property <length> terminal-padding-bottom: 8px;
+    private property <length> command-gutter-width: 4px;
+    private property <length> command-gutter-gap: 3px;
+    private property <length> command-gutter-min-height: 10px;
+    private property <length> overview-ruler-width: 3px;
+    private property <length> overview-ruler-gap: 5px;
+    private property <length> overview-marker-height: 10px;
     private property <length> scrollbar-reserved-width: 12px;
     private property <length> scrollbar-track-width: 7px;
     private property <length> scrollbar-thumb-min-height: 28px;
@@ -408,6 +435,51 @@ export component TerminalSessionHost inherits Rectangle {
         );
     }
 
+    function command-block-gutter-x() -> length {
+        return max(
+            0px,
+            root.terminal-surface-origin-x() - root.command-gutter-width - root.command-gutter-gap,
+        );
+    }
+
+    function command-block-local-y(start-row: int) -> length {
+        return max(
+            0px,
+            min(
+                root.snapped-terminal-visible-grid-height(),
+                root.terminal-local-cell-y(max(0, start-row)) + 2px,
+            ),
+        );
+    }
+
+    function command-block-local-height(start-row: int, end-row: int) -> length {
+        let y = root.command-block-local-y(start-row);
+        let raw-height = max(
+            root.command-gutter-min-height,
+            root.selection-local-span-height(start-row, end-row) - 4px,
+        );
+        return max(
+            0px,
+            min(root.snapped-terminal-visible-grid-height() - y, raw-height),
+        );
+    }
+
+    function overview-ruler-x() -> length {
+        return root.scrollbar-visible()
+            ? root.scrollbar-track-x() - root.overview-ruler-gap - root.overview-ruler-width
+            : root.width - root.terminal-padding-right - root.overview-ruler-width;
+    }
+
+    function overview-marker-local-y(row: int) -> length {
+        return max(
+            0px,
+            min(
+                max(0px, root.snapped-terminal-visible-grid-height() - root.overview-marker-height),
+                root.terminal-local-cell-y(max(0, row)) + 2px,
+            ),
+        );
+    }
+
     function terminal-hit-row(pointer-y: length) -> int {
         return max(0, min(
             root.session-rows - 1,
@@ -596,7 +668,20 @@ export component TerminalSessionHost inherits Rectangle {
     }
 
     function terminal-menu-height() -> length {
-        return 108px;
+        return 148px;
+    }
+
+    function search-match-summary() -> string {
+        if root.session-search-query == "" {
+            return "Find in terminal";
+        }
+        if root.session-search-match-count == 1 {
+            return "1 match";
+        }
+        if root.session-search-match-count == 0 {
+            return "No matches";
+        }
+        return "" + root.session-search-match-count + " matches";
     }
 
     function open-context-menu(pointer-x: length, pointer-y: length) {
@@ -694,6 +779,12 @@ export component TerminalSessionHost inherits Rectangle {
         root.context-menu-open-changed(root.context-menu-open);
     }
 
+    changed session-search-open => {
+        if !root.session-search-open && root.mode == "terminal" {
+            terminal-input.focus();
+        }
+    }
+
     cursor-blink-timer := Timer {
         interval: 520ms;
         running: false;
@@ -735,6 +826,10 @@ export component TerminalSessionHost inherits Rectangle {
 
             key-pressed(event) => {
                 if (event.text == Key.Control || event.text == Key.Shift || event.text == Key.Alt) {
+                    accept
+                } else if (event.modifiers.control && !event.modifiers.shift && !event.modifiers.alt
+                    && (event.text == "f" || event.text == "F" || event.text == "\u{6}")) {
+                    root.search-open-requested();
                     accept
                 } else if (event.modifiers.control && event.modifiers.shift && !event.modifiers.alt
                     && root.is-copy-shortcut-key(event.text)) {
@@ -797,6 +892,9 @@ export component TerminalSessionHost inherits Rectangle {
                     accept
                 } else if (event.text == Key.Backtab) {
                     root.key-input("tab", event.modifiers.alt, event.modifiers.control, true);
+                    accept
+                } else if (event.text == Key.Escape && root.session-search-open) {
+                    root.search-close-requested();
                     accept
                 } else if (event.text == Key.Escape) {
                     root.close-context-menu();
@@ -960,7 +1058,112 @@ export component TerminalSessionHost inherits Rectangle {
         height: parent.height;
         background: transparent;
 
+        search-bar := Rectangle {
+            visible: root.session-search-open;
+            x: max(14px, parent.width - self.width - 16px);
+            y: 14px;
+            width: min(352px, max(248px, parent.width * 0.28));
+            height: 38px;
+            private property <int> focus-sequence: root.session-search-focus-sequence;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: search-input.has-focus ? ThemeTokens.input-focus-ring : ThemeTokens.input-border;
+            background: ThemeTokens.input-surface;
+            z: 20;
 
+            glow-frame := Rectangle {
+                x: -1px;
+                y: -1px;
+                width: parent.width + 2px;
+                height: parent.height + 2px;
+                border-radius: parent.border-radius + 1px;
+                border-width: 1px;
+                border-color: ThemeTokens.input-focus-ring;
+                background: transparent;
+                opacity: search-input.has-focus ? (ThemeTokens.dark-mode ? 0.24 : 0.16) : 0;
+            }
+
+            search-input := TextInput {
+                x: 12px;
+                y: 7px;
+                width: max(48px, parent.width - 112px);
+                height: parent.height - 14px;
+                text: root.session-search-query;
+                color: ThemeTokens.text-primary;
+                selection-background-color: ThemeTokens.focus-ring;
+                selection-foreground-color: ThemeTokens.text-primary;
+
+                edited => {
+                    root.search-query-changed(self.text);
+                }
+
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) {
+                        root.search-close-requested();
+                        accept
+                    } else if (event.text == Key.Return) {
+                        root.search-query-changed(self.text);
+                        accept
+                    } else {
+                        reject
+                    }
+                }
+            }
+
+            if search-input.text == "" : placeholder := Text {
+                x: search-input.x;
+                y: search-input.y;
+                width: search-input.width;
+                height: search-input.height;
+                text: "Find in terminal";
+                color: ThemeTokens.text-muted;
+                vertical-alignment: center;
+            }
+
+            match-count := Text {
+                x: parent.width - 90px;
+                y: 0px;
+                width: 52px;
+                height: parent.height;
+                text: root.search-match-summary();
+                color: root.session-search-query != "" && root.session-search-match-count == 0
+                    ? ThemeTokens.status-error-accent
+                    : ThemeTokens.text-secondary;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                font-size: 11px;
+            }
+
+            close-touch := TouchArea {
+                x: parent.width - 34px;
+                y: 5px;
+                width: 28px;
+                height: 28px;
+
+                clicked => {
+                    root.search-close-requested();
+                }
+            }
+
+            close-glyph := Text {
+                x: close-touch.x;
+                y: close-touch.y;
+                width: close-touch.width;
+                height: close-touch.height;
+                text: "×";
+                color: close-touch.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                font-size: 16px;
+            }
+
+            changed focus-sequence => {
+                if root.session-search-open {
+                    search-input.focus();
+                }
+            }
+
+        }
 
         surface-frame := Rectangle {
             width: parent.width;
@@ -1162,6 +1365,52 @@ export component TerminalSessionHost inherits Rectangle {
                 }
             }
 
+            if root.session-command-blocks.length > 0 : command-block-gutter := Rectangle {
+                x: root.command-block-gutter-x();
+                y: root.terminal-surface-origin-y();
+                width: root.command-gutter-width;
+                height: root.snapped-terminal-visible-grid-height();
+                background: transparent;
+
+                for block in root.session-command-blocks : Rectangle {
+                    x: 0px;
+                    y: root.command-block-local-y(block.start_row);
+                    width: parent.width;
+                    height: root.command-block-local-height(block.start_row, block.end_row);
+                    border-radius: parent.width / 2;
+                    background: block.status == "failure"
+                        ? ThemeTokens.status-error-accent
+                        : block.status == "running"
+                            ? ThemeTokens.status-busy-accent
+                            : ThemeTokens.status-success-accent;
+                    opacity: block.status == "running" ? 1.0 : 0.88;
+                }
+            }
+
+            if root.session-overview-markers.length > 0 : overview-ruler := Rectangle {
+                x: root.overview-ruler-x();
+                y: root.terminal-surface-origin-y();
+                width: root.overview-ruler-width;
+                height: root.snapped-terminal-visible-grid-height();
+                border-radius: parent.width / 2;
+                background: ThemeTokens.terminal-scrollbar-track-surface;
+                opacity: 0.42;
+
+                for marker in root.session-overview-markers : Rectangle {
+                    x: 0px;
+                    y: root.overview-marker-local-y(marker.row);
+                    width: parent.width;
+                    height: root.overview-marker-height;
+                    border-radius: parent.width / 2;
+                    background: marker.kind == "command_failure"
+                        ? ThemeTokens.status-error-accent
+                        : marker.kind == "command_running"
+                            ? ThemeTokens.status-busy-accent
+                            : ThemeTokens.status-success-accent;
+                    opacity: marker.kind == "command_running" ? 1.0 : 0.9;
+                }
+            }
+
             if root.session-render-mode == "bitmap" && root.session-cursor-visible && root.cursor-blink-visible : cursor-overlay := Rectangle {
                 x: root.terminal-cell-x(root.session-cursor-col);
                 width: root.session-cursor-shape == "bar"
@@ -1307,6 +1556,16 @@ export component TerminalSessionHost inherits Rectangle {
                             root.selection-focus-col = max(0, root.session-cols);
                             root.sync-selection-state();
                             terminal-input.focus();
+                        }
+                    }
+
+                    find-row := TerminalContextMenuRow {
+                        width: parent.width;
+                        label: "Find";
+
+                        invoked => {
+                            root.close-context-menu();
+                            root.search-open-requested();
                         }
                     }
                 }

@@ -14,11 +14,25 @@ export component SettingsModal inherits Rectangle {
     callback drag-moved(length, length);
     callback drag-ended();
     callback focus-restore-requested();
+    in property <string> theme-variant: "premium_default";
     in property <int> terminal-scrollback-limit: 1500;
     in property <bool> terminal-active-idle-shrink-enabled: true;
+    in property <bool> terminal-input-highlighting-enabled: true;
+    in property <bool> terminal-output-rule-highlighting-enabled: true;
+    in property <bool> terminal-command-decorations-enabled: true;
+    in property <bool> terminal-overview-markers-enabled: true;
+    in property <string> terminal-output-rule-profile: "default";
+    in property <string> terminal-search-match-highlight: "balanced";
     in property <string> download-conflict-default: "ask";
     callback terminal-scrollback-limit-changed(int);
     callback terminal-active-idle-shrink-enabled-changed(bool);
+    callback terminal-input-highlighting-enabled-changed(bool);
+    callback terminal-output-rule-highlighting-enabled-changed(bool);
+    callback terminal-command-decorations-enabled-changed(bool);
+    callback terminal-overview-markers-enabled-changed(bool);
+    callback terminal-output-rule-profile-changed(string);
+    callback terminal-search-match-highlight-changed(string);
+    callback theme-variant-changed(string);
     callback download-conflict-default-changed(string);
 
     background: transparent;
@@ -32,7 +46,7 @@ export component SettingsModal inherits Rectangle {
             y: 0px;
             width: parent.width;
             title: "Settings";
-            subtitle: "Adjust terminal history, memory, and conflict defaults.";
+            subtitle: "Adjust terminal history, readability cues, memory, and conflict defaults.";
             prominent: true;
 
             close-requested => {
@@ -77,6 +91,47 @@ export component SettingsModal inherits Rectangle {
                 content-layout := VerticalLayout {
                     width: parent.width;
                     spacing: body.content-spacing;
+
+                    DialogFormSection {
+                        width: parent.width;
+                        title: "Theme preset";
+                        description: "Choose the default terminal personality without turning the whole app into a theme editor.";
+
+                        Text {
+                            width: parent.width;
+                            text: root.theme-variant == "legacy_hacker_green"
+                                ? "Legacy Hacker Green keeps the calm shell chrome but swaps the terminal into a nostalgic green phosphor palette."
+                                : "Premium Default keeps the premium calm graphite/canvas palette tuned for long sessions.";
+                            color: ThemeTokens.text-primary;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 38px;
+                            spacing: 10px;
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Premium Default";
+                                active: root.theme-variant == "premium_default";
+
+                                clicked => {
+                                    root.theme-variant-changed("premium_default");
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Legacy Green";
+                                active: root.theme-variant == "legacy_hacker_green";
+
+                                clicked => {
+                                    root.theme-variant-changed("legacy_hacker_green");
+                                }
+                            }
+                        }
+                    }
 
                     DialogFormSection {
                         width: parent.width;
@@ -174,6 +229,234 @@ export component SettingsModal inherits Rectangle {
 
                                 clicked => {
                                     root.terminal-active-idle-shrink-enabled-changed(false);
+                                }
+                            }
+                        }
+                    }
+
+                    DialogFormSection {
+                        width: parent.width;
+                        title: "Terminal readability";
+                        description: "Keep shell prompts, high-value output cues, and command status markers easy to scan without turning the terminal into a log viewer.";
+
+                        Text {
+                            width: parent.width;
+                            text: root.terminal-input-highlighting-enabled
+                                ? "Input highlighting is enabled."
+                                : "Input highlighting is disabled.";
+                            color: ThemeTokens.text-primary;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 38px;
+                            spacing: 10px;
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Input On";
+                                active: root.terminal-input-highlighting-enabled;
+
+                                clicked => {
+                                    root.terminal-input-highlighting-enabled-changed(true);
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Input Off";
+                                active: !root.terminal-input-highlighting-enabled;
+
+                                clicked => {
+                                    root.terminal-input-highlighting-enabled-changed(false);
+                                }
+                            }
+                        }
+
+                        Text {
+                            width: parent.width;
+                            text: root.terminal-output-rule-highlighting-enabled
+                                ? "Output rule cues are enabled."
+                                : "Output rule cues are disabled.";
+                            color: ThemeTokens.text-primary;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 38px;
+                            spacing: 10px;
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Output On";
+                                active: root.terminal-output-rule-highlighting-enabled;
+
+                                clicked => {
+                                    root.terminal-output-rule-highlighting-enabled-changed(true);
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Output Off";
+                                active: !root.terminal-output-rule-highlighting-enabled;
+
+                                clicked => {
+                                    root.terminal-output-rule-highlighting-enabled-changed(false);
+                                }
+                            }
+                        }
+
+                        Text {
+                            width: parent.width;
+                            text: root.terminal-command-decorations-enabled
+                                ? "Command status markers are enabled."
+                                : "Command status markers are disabled.";
+                            color: ThemeTokens.text-primary;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 38px;
+                            spacing: 10px;
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Status On";
+                                active: root.terminal-command-decorations-enabled;
+
+                                clicked => {
+                                    root.terminal-command-decorations-enabled-changed(true);
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Status Off";
+                                active: !root.terminal-command-decorations-enabled;
+
+                                clicked => {
+                                    root.terminal-command-decorations-enabled-changed(false);
+                                }
+                            }
+                        }
+
+                        Text {
+                            width: parent.width;
+                            text: root.terminal-overview-markers-enabled
+                                ? "Overview ruler markers are enabled."
+                                : "Overview ruler markers are disabled.";
+                            color: ThemeTokens.text-primary;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 38px;
+                            spacing: 10px;
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Ruler On";
+                                active: root.terminal-overview-markers-enabled;
+
+                                clicked => {
+                                    root.terminal-overview-markers-enabled-changed(true);
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Ruler Off";
+                                active: !root.terminal-overview-markers-enabled;
+
+                                clicked => {
+                                    root.terminal-overview-markers-enabled-changed(false);
+                                }
+                            }
+                        }
+
+                        Text {
+                            width: parent.width;
+                            text: root.terminal-output-rule-profile == "focused"
+                                ? "Focused output cues favor failures, links, paths, and diffs."
+                                : "Balanced output cues keep the full calm default rule set.";
+                            color: ThemeTokens.text-primary;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 38px;
+                            spacing: 10px;
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Balanced";
+                                active: root.terminal-output-rule-profile == "default";
+
+                                clicked => {
+                                    root.terminal-output-rule-profile-changed("default");
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Focused";
+                                active: root.terminal-output-rule-profile == "focused";
+
+                                clicked => {
+                                    root.terminal-output-rule-profile-changed("focused");
+                                }
+                            }
+                        }
+
+                        Text {
+                            width: parent.width;
+                            text: root.terminal-search-match-highlight == "strong"
+                                ? "Search matches will stand out more strongly."
+                                : root.terminal-search-match-highlight == "subtle"
+                                ? "Search matches will stay especially soft."
+                                : "Search matches will use the balanced default emphasis.";
+                            color: ThemeTokens.text-primary;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 38px;
+                            spacing: 10px;
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Subtle";
+                                active: root.terminal-search-match-highlight == "subtle";
+
+                                clicked => {
+                                    root.terminal-search-match-highlight-changed("subtle");
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Balanced";
+                                active: root.terminal-search-match-highlight == "balanced";
+
+                                clicked => {
+                                    root.terminal-search-match-highlight-changed("balanced");
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Strong";
+                                active: root.terminal-search-match-highlight == "strong";
+
+                                clicked => {
+                                    root.terminal-search-match-highlight-changed("strong");
                                 }
                             }
                         }

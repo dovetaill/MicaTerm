@@ -108,6 +108,24 @@ fn settings_modal_exposes_default_terminal_preferences() {
 
     assert_eq!(app.get_settings_modal_terminal_scrollback_limit(), 1500);
     assert!(app.get_settings_modal_terminal_active_idle_shrink_enabled());
+    assert!(app.get_settings_modal_terminal_input_highlighting_enabled());
+    assert!(app.get_settings_modal_terminal_output_rule_highlighting_enabled());
+    assert!(app.get_settings_modal_terminal_command_decorations_enabled());
+    assert!(app.get_settings_modal_terminal_overview_markers_enabled());
+    assert_eq!(
+        app.get_settings_modal_terminal_output_rule_profile()
+            .as_str(),
+        "default"
+    );
+    assert_eq!(
+        app.get_settings_modal_terminal_search_match_highlight()
+            .as_str(),
+        "balanced"
+    );
+    assert_eq!(
+        app.get_settings_modal_theme_variant().as_str(),
+        "premium_default"
+    );
 }
 
 #[test]
@@ -126,13 +144,45 @@ fn settings_modal_terminal_preferences_update_window_state_and_persist() {
     app.invoke_open_settings_panel_requested();
     app.invoke_settings_modal_terminal_scrollback_limit_changed(3000);
     app.invoke_settings_modal_terminal_active_idle_shrink_enabled_changed(false);
+    app.invoke_settings_modal_terminal_input_highlighting_enabled_changed(false);
+    app.invoke_settings_modal_terminal_output_rule_highlighting_enabled_changed(false);
+    app.invoke_settings_modal_terminal_command_decorations_enabled_changed(false);
+    app.invoke_settings_modal_terminal_overview_markers_enabled_changed(false);
+    app.invoke_settings_modal_terminal_output_rule_profile_changed("focused".into());
+    app.invoke_settings_modal_terminal_search_match_highlight_changed("strong".into());
+    app.invoke_settings_modal_theme_variant_changed("legacy_hacker_green".into());
 
     assert_eq!(app.get_settings_modal_terminal_scrollback_limit(), 3000);
     assert!(!app.get_settings_modal_terminal_active_idle_shrink_enabled());
+    assert!(!app.get_settings_modal_terminal_input_highlighting_enabled());
+    assert!(!app.get_settings_modal_terminal_output_rule_highlighting_enabled());
+    assert!(!app.get_settings_modal_terminal_command_decorations_enabled());
+    assert!(!app.get_settings_modal_terminal_overview_markers_enabled());
+    assert_eq!(
+        app.get_settings_modal_terminal_output_rule_profile()
+            .as_str(),
+        "focused"
+    );
+    assert_eq!(
+        app.get_settings_modal_terminal_search_match_highlight()
+            .as_str(),
+        "strong"
+    );
+    assert_eq!(
+        app.get_settings_modal_theme_variant().as_str(),
+        "legacy_hacker_green"
+    );
 
     let content = fs::read_to_string(&temp_path).expect("read persisted ui preferences");
     assert!(content.contains("\"terminal_scrollback_limit\": 3000"));
     assert!(content.contains("\"terminal_active_idle_shrink_enabled\": false"));
+    assert!(content.contains("\"terminal_input_highlighting_enabled\": false"));
+    assert!(content.contains("\"terminal_output_rule_highlighting_enabled\": false"));
+    assert!(content.contains("\"terminal_command_decorations_enabled\": false"));
+    assert!(content.contains("\"terminal_overview_markers_enabled\": false"));
+    assert!(content.contains("\"terminal_output_rule_profile\": \"focused\""));
+    assert!(content.contains("\"terminal_search_match_highlight\": \"strong\""));
+    assert!(content.contains("\"theme_variant\": \"legacy_hacker_green\""));
 
     let _ = std::fs::remove_file(temp_path);
 }

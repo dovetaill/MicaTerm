@@ -30,6 +30,8 @@ use mica_term::app::ssh::session_manager::{
     SessionRuntimeLauncher, SessionState,
 };
 use mica_term::app::ssh::shell_integration::runtime_shell_events;
+use mica_term::app::terminal_theme::preset_for_theme;
+use mica_term::theme::{ThemeMode, ThemeVariant};
 use russh::keys::PrivateKey;
 use russh::keys::ssh_key::rand_core::OsRng;
 use russh::server::{Auth, Session};
@@ -149,6 +151,9 @@ struct SurfacePullLauncher {
     surface: TerminalSurfaceState,
 }
 
+#[derive(Clone, Default)]
+struct ThemeTrackingLauncher;
+
 #[derive(Clone)]
 struct DelayedTrackingLauncher {
     disconnects: Arc<AtomicUsize>,
@@ -184,6 +189,11 @@ struct ScrollTrackingRuntimeControl {
 #[derive(Clone)]
 struct SurfacePullRuntimeControl {
     surface: TerminalSurfaceState,
+}
+
+struct ThemeTrackingRuntimeControl {
+    session_id: Uuid,
+    terminal: Arc<Mutex<TerminalSession>>,
 }
 
 #[derive(Default)]
@@ -584,6 +594,41 @@ impl SessionRuntimeLauncher for SurfacePullLauncher {
     }
 }
 
+impl SessionRuntimeLauncher for ThemeTrackingLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: Uuid,
+        _attempt_id: Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        Box::pin(async move {
+            let terminal = Arc::new(Mutex::new(TerminalSession::new(24, 80)));
+            {
+                let mut terminal_guard = terminal.lock().expect("lock theme tracking terminal");
+                terminal_guard.apply_remote_bytes(b"\x1b[32mready\x1b[0m");
+                let _ = event_tx.send(SessionRuntimeEvent::Connected);
+                let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(
+                    terminal_guard.surface_state(session_id),
+                ));
+            }
+
+            Ok(Box::new(ThemeTrackingRuntimeControl {
+                session_id,
+                terminal,
+            }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
 impl SessionRuntimeControl for TrackingRuntimeControl {
     fn disconnect(&self) -> Result<()> {
         self.disconnects.fetch_add(1, Ordering::SeqCst);
@@ -746,6 +791,47 @@ impl SessionRuntimeControl for SurfacePullRuntimeControl {
 
     fn terminal_surface(&self) -> Result<TerminalSurfaceState> {
         Ok(self.surface.clone())
+    }
+}
+
+impl SessionRuntimeControl for ThemeTrackingRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_text_input(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_key_input(&self, _event: TerminalKeyEvent) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_paste(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
+        Ok(())
+    }
+
+    fn terminal_surface(&self) -> Result<TerminalSurfaceState> {
+        let terminal = self.terminal.lock().expect("lock theme tracking terminal");
+        Ok(terminal.surface_state(self.session_id))
+    }
+
+    fn update_theme(
+        &self,
+        mode: ThemeMode,
+        variant: ThemeVariant,
+    ) -> Result<Option<TerminalSurfaceState>> {
+        let mut terminal = self.terminal.lock().expect("lock theme tracking terminal");
+        terminal.set_theme(mode, variant);
+        Ok(Some(terminal.surface_state(self.session_id)))
     }
 }
 
@@ -3578,6 +3664,64 @@ fn session_manager_populates_initial_surface_from_runtime_control_snapshot() {
         surface.visible_lines,
         vec!["warm".to_string(), "boot".to_string()]
     );
+}
+
+#[test]
+fn session_manager_variant_switch_updates_attached_runtime_palette_projection() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let manager =
+        SessionManager::new_with_launcher(runtime.handle(), Arc::new(ThemeTrackingLauncher));
+
+    let handle = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open session");
+
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    });
+
+    let premium_surface = manager
+        .terminal_surface(handle.session_id)
+        .expect("premium surface");
+    let premium_green = premium_surface
+        .cells
+        .iter()
+        .find(|cell| cell.col == 0)
+        .expect("premium green cell");
+
+    manager
+        .set_theme(ThemeMode::Dark, ThemeVariant::LegacyHackerGreen)
+        .expect("propagate legacy theme variant");
+
+    let legacy_surface = manager
+        .terminal_surface(handle.session_id)
+        .expect("legacy surface");
+    let legacy_green = legacy_surface
+        .cells
+        .iter()
+        .find(|cell| cell.col == 0)
+        .expect("legacy green cell");
+    let legacy_preset = preset_for_theme(ThemeMode::Dark, ThemeVariant::LegacyHackerGreen);
+
+    assert_eq!(
+        legacy_surface.default_bg_rgba,
+        0xff00_0000 | legacy_preset.background
+    );
+    assert_eq!(
+        legacy_surface.cursor.bg_rgba,
+        0xff00_0000 | legacy_preset.cursor_bg
+    );
+    assert_eq!(
+        legacy_green.fg_rgba,
+        0xff00_0000
+            | (u32::from(legacy_preset.ansi[2].0) << 16)
+            | (u32::from(legacy_preset.ansi[2].1) << 8)
+            | u32::from(legacy_preset.ansi[2].2)
+    );
+    assert_ne!(legacy_green.fg_rgba, premium_green.fg_rgba);
 }
 
 #[test]

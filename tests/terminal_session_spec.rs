@@ -3,8 +3,8 @@ use std::fs;
 use mica_term::app::ssh::runtime::{
     TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput, TerminalSession,
 };
-use mica_term::app::terminal_theme::preset_for_theme_mode;
-use mica_term::theme::ThemeMode;
+use mica_term::app::terminal_theme::{preset_for_theme, preset_for_theme_mode};
+use mica_term::theme::{ThemeMode, ThemeVariant};
 use termwiz::input::{KeyCode, Modifiers};
 use uuid::Uuid;
 
@@ -465,6 +465,66 @@ fn dark_theme_ansi_prompt_colors_use_higher_contrast_accents() {
 
     assert_eq!(green.fg_rgba, 0xff00_0000 | rgb_u32(preset.ansi[2]));
     assert_eq!(blue.fg_rgba, 0xff00_0000 | rgb_u32(preset.ansi[4]));
+}
+
+#[test]
+fn theme_variant_switch_reprojects_runtime_palette_for_existing_session_cells() {
+    let mut session = TerminalSession::new(24, 80);
+    session.apply_remote_bytes(b"\x1b[32mok\x1b[34mgo\x1b[0m");
+
+    let premium_snapshot = session.surface_state(Uuid::new_v4());
+    let premium_green = premium_snapshot
+        .cells
+        .iter()
+        .find(|cell| cell.col == 0)
+        .expect("premium green cell");
+    let premium_blue = premium_snapshot
+        .cells
+        .iter()
+        .find(|cell| cell.col == 2)
+        .expect("premium blue cell");
+
+    session.set_theme(ThemeMode::Dark, ThemeVariant::LegacyHackerGreen);
+
+    let legacy_snapshot = session.surface_state(Uuid::new_v4());
+    let legacy_preset = preset_for_theme(ThemeMode::Dark, ThemeVariant::LegacyHackerGreen);
+    let legacy_green = legacy_snapshot
+        .cells
+        .iter()
+        .find(|cell| cell.col == 0)
+        .expect("legacy green cell");
+    let legacy_blue = legacy_snapshot
+        .cells
+        .iter()
+        .find(|cell| cell.col == 2)
+        .expect("legacy blue cell");
+
+    assert_eq!(
+        legacy_snapshot.visible_lines,
+        premium_snapshot.visible_lines
+    );
+    assert_eq!(
+        legacy_snapshot.default_fg_rgba,
+        0xff00_0000 | legacy_preset.foreground
+    );
+    assert_eq!(
+        legacy_snapshot.default_bg_rgba,
+        0xff00_0000 | legacy_preset.background
+    );
+    assert_eq!(
+        legacy_snapshot.cursor.bg_rgba,
+        0xff00_0000 | legacy_preset.cursor_bg
+    );
+    assert_eq!(
+        legacy_green.fg_rgba,
+        0xff00_0000 | rgb_u32(legacy_preset.ansi[2])
+    );
+    assert_eq!(
+        legacy_blue.fg_rgba,
+        0xff00_0000 | rgb_u32(legacy_preset.ansi[4])
+    );
+    assert_ne!(legacy_green.fg_rgba, premium_green.fg_rgba);
+    assert_ne!(legacy_blue.fg_rgba, premium_blue.fg_rgba);
 }
 
 fn rgb_u32((red, green, blue): (u8, u8, u8)) -> u32 {

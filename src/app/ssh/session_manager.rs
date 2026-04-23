@@ -24,7 +24,7 @@ use crate::app::ssh::runtime::{
     SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput, TerminalSurfaceSignature,
     TerminalSurfaceState, UnknownHostKeyError,
 };
-use crate::theme::ThemeMode;
+use crate::theme::{ThemeMode, ThemeVariant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpenSessionMode {
@@ -115,8 +115,15 @@ pub trait SessionRuntimeControl: Send {
             "session runtime does not expose terminal surface snapshots"
         ))
     }
-    fn update_theme_mode(&self, _mode: ThemeMode) -> Result<Option<TerminalSurfaceState>> {
+    fn update_theme(
+        &self,
+        _mode: ThemeMode,
+        _variant: ThemeVariant,
+    ) -> Result<Option<TerminalSurfaceState>> {
         Ok(None)
+    }
+    fn update_theme_mode(&self, mode: ThemeMode) -> Result<Option<TerminalSurfaceState>> {
+        self.update_theme(mode, ThemeVariant::PremiumDefault)
     }
     fn scroll_viewport_lines(&self, _delta: i32) -> Result<TerminalSurfaceState> {
         Err(anyhow!("session runtime does not support local scrollback"))
@@ -768,10 +775,11 @@ impl SessionManager {
         self.scroll_session_viewport(session_id, delta)
     }
 
-    pub fn set_theme_mode(&self, mode: ThemeMode) -> Result<()> {
+    pub fn set_theme(&self, mode: ThemeMode, variant: ThemeVariant) -> Result<()> {
         let session_ids = {
             let mut registry = self.registry.lock().expect("lock session registry");
             registry.theme_mode = mode;
+            registry.theme_variant = variant;
             registry
                 .runtime_controls
                 .keys()
@@ -785,7 +793,7 @@ impl SessionManager {
                 let Some(runtime_control) = registry.runtime_controls.get(&session_id) else {
                     continue;
                 };
-                runtime_control.update_theme_mode(mode)?
+                runtime_control.update_theme(mode, variant)?
             };
 
             if let Some(surface) = surface {
@@ -794,6 +802,10 @@ impl SessionManager {
         }
 
         Ok(())
+    }
+
+    pub fn set_theme_mode(&self, mode: ThemeMode) -> Result<()> {
+        self.set_theme(mode, ThemeVariant::PremiumDefault)
     }
 
     pub fn close_session(&self, session_id: Uuid) -> Option<SessionHandle> {
@@ -1010,6 +1022,7 @@ struct SessionRegistry {
     pending_disconnects: HashSet<Uuid>,
     pending_resizes: HashMap<Uuid, (u32, u32)>,
     theme_mode: ThemeMode,
+    theme_variant: ThemeVariant,
 }
 
 impl Default for SessionRegistry {
@@ -1030,6 +1043,7 @@ impl Default for SessionRegistry {
             pending_disconnects: HashSet::new(),
             pending_resizes: HashMap::new(),
             theme_mode: ThemeMode::Dark,
+            theme_variant: ThemeVariant::PremiumDefault,
         }
     }
 }
@@ -1335,7 +1349,7 @@ fn attach_runtime_control(
     runtime_control: Box<dyn SessionRuntimeControl>,
 ) {
     let mut runtime_control = Some(runtime_control);
-    let (should_disconnect, pending_resize, theme_mode) = {
+    let (should_disconnect, pending_resize, theme_mode, theme_variant) = {
         let mut registry = registry.lock().expect("lock session registry");
         if !registry.sessions.contains_key(&session_id)
             || registry
@@ -1345,7 +1359,7 @@ fn attach_runtime_control(
                 .unwrap_or(true)
             || registry.pending_disconnects.remove(&session_id)
         {
-            (true, None, registry.theme_mode)
+            (true, None, registry.theme_mode, registry.theme_variant)
         } else {
             registry.runtime_controls.insert(
                 session_id,
@@ -1363,6 +1377,7 @@ fn attach_runtime_control(
                 false,
                 registry.pending_resizes.remove(&session_id),
                 registry.theme_mode,
+                registry.theme_variant,
             )
         }
     };
@@ -1378,7 +1393,10 @@ fn attach_runtime_control(
             .runtime_controls
             .get(&session_id)
             .and_then(|runtime_control| {
-                runtime_control.update_theme_mode(theme_mode).ok().flatten()
+                runtime_control
+                    .update_theme(theme_mode, theme_variant)
+                    .ok()
+                    .flatten()
             })
     };
     if let Some(surface) = theme_surface {

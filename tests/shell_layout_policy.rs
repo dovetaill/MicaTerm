@@ -79,7 +79,10 @@ fn layout_policy_uses_requested_panel_widths_when_budget_exactly_fits() {
 
     assert!(layout.show_assets_sidebar);
     assert!(layout.show_right_panel);
-    assert_eq!(layout.main_workspace_width, ShellMetrics::MAIN_WORKSPACE_MIN_WIDTH);
+    assert_eq!(
+        layout.main_workspace_width,
+        ShellMetrics::MAIN_WORKSPACE_MIN_WIDTH
+    );
 }
 
 #[test]

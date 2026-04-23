@@ -5,6 +5,8 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use crate::app::ssh::runtime::{TerminalCellState, TerminalCursorShape, TerminalSurfaceState};
+use crate::app::terminal_semantic::SemanticSpan;
+use crate::theme::{AppThemeSpec, SearchMatchHighlightStrength, SemanticStyleRole};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -166,6 +168,116 @@ impl TerminalModelFrame {
             dirty_rows,
         }
     }
+
+    pub fn apply_semantic_style_overlays(
+        &mut self,
+        previous: Option<&TerminalModelFrame>,
+        theme: AppThemeSpec,
+        spans: &[SemanticSpan],
+        search_match_highlight: SearchMatchHighlightStrength,
+    ) {
+        let mut spans_by_row = HashMap::<u32, Vec<&SemanticSpan>>::new();
+        for span in spans {
+            spans_by_row.entry(span.row).or_default().push(span);
+        }
+
+        for row in &mut self.rows {
+            let Some(row_spans) = spans_by_row.get(&row.row_index) else {
+                continue;
+            };
+
+            for cell in &mut row.cells {
+                if cell.width == 0 || cell.text.is_empty() {
+                    continue;
+                }
+
+                let mut desired_fg = None::<(u8, u32)>;
+                let mut desired_bg = None::<(u8, u32)>;
+                let mut underline = cell.underline;
+                let mut bold = cell.bold;
+                let mut search_background = None::<u32>;
+
+                for span in row_spans {
+                    if !cell_overlaps_semantic_span(cell, span) {
+                        continue;
+                    }
+
+                    if span.role == SemanticStyleRole::OutputGrepMatch {
+                        search_background = Some(blend_search_match_background(
+                            cell.bg_rgba,
+                            theme.terminal.search_match.rgb,
+                            search_match_alpha(theme, search_match_highlight),
+                        ));
+                        continue;
+                    }
+
+                    let style = theme.semantic_style(span.role);
+                    let priority = semantic_role_priority(span.role);
+                    if style.underline {
+                        underline = true;
+                    }
+                    if style.bold {
+                        bold = true;
+                    }
+
+                    if cell.fg_rgba == self.palette.default_fg_rgba
+                        && desired_fg
+                            .as_ref()
+                            .is_none_or(|(current_priority, _)| priority >= *current_priority)
+                    {
+                        desired_fg = Some((priority, 0xff00_0000 | style.foreground));
+                    }
+                    if let Some(background) = style.background
+                        && cell.bg_rgba == self.palette.default_bg_rgba
+                        && desired_bg
+                            .as_ref()
+                            .is_none_or(|(current_priority, _)| priority >= *current_priority)
+                    {
+                        desired_bg = Some((priority, 0xff00_0000 | background));
+                    }
+                }
+
+                if let Some((_, foreground)) = desired_fg {
+                    cell.fg_rgba = foreground;
+                }
+                if let Some((_, background)) = desired_bg {
+                    cell.bg_rgba = background;
+                }
+                if let Some(background) = search_background {
+                    cell.bg_rgba = background;
+                }
+                cell.underline = underline;
+                cell.bold = bold;
+            }
+        }
+
+        self.recompute_row_hashes(previous);
+    }
+
+    fn recompute_row_hashes(&mut self, previous: Option<&TerminalModelFrame>) {
+        self.dirty_rows = self
+            .rows
+            .iter_mut()
+            .filter_map(|row| {
+                row.content_hash = hash_row_content(&row.text, row.wrapped, &row.cells);
+                row.row_hash = hash_row(
+                    row.row_index,
+                    &row.text,
+                    row.wrapped,
+                    &row.cells,
+                    self.palette,
+                );
+                let previous_hash = previous
+                    .and_then(|frame| frame.rows.get(row.row_index as usize))
+                    .map(|value| value.row_hash);
+                if previous_hash == Some(row.row_hash) {
+                    None
+                } else {
+                    Some(row.row_index)
+                }
+            })
+            .collect();
+    }
 }
 
 impl TerminalModelCell {
@@ -223,4 +335,74 @@ fn hash_row_content_into(
         cell.fg_rgba.hash(hasher);
         cell.bg_rgba.hash(hasher);
     }
+}
+
+fn cell_overlaps_semantic_span(cell: &TerminalModelCell, span: &SemanticSpan) -> bool {
+    let cell_end = cell.col.saturating_add(cell.width.saturating_sub(1));
+    cell.col <= span.end_col && cell_end >= span.start_col
+}
+
+fn semantic_role_priority(role: SemanticStyleRole) -> u8 {
+    match role {
+        SemanticStyleRole::OutputDiffAdded
+        | SemanticStyleRole::OutputDiffRemoved
+        | SemanticStyleRole::OutputDiffHunk => 10,
+        SemanticStyleRole::InputArgument
+        | SemanticStyleRole::InputOption
+        | SemanticStyleRole::InputPath
+        | SemanticStyleRole::InputVariable
+        | SemanticStyleRole::InputOperator
+        | SemanticStyleRole::OutputUnixPath
+        | SemanticStyleRole::OutputWindowsPath
+        | SemanticStyleRole::OutputNetworkEndpoint
+        | SemanticStyleRole::OutputTimestamp
+        | SemanticStyleRole::OutputJsonKey
+        | SemanticStyleRole::OutputJsonString
+        | SemanticStyleRole::OutputJsonNumber
+        | SemanticStyleRole::OutputJsonBoolean => 20,
+        SemanticStyleRole::InputPrompt
+        | SemanticStyleRole::InputCommand
+        | SemanticStyleRole::InputSubcommand
+        | SemanticStyleRole::InputString
+        | SemanticStyleRole::InputInvalidCommand
+        | SemanticStyleRole::OutputSeverityError
+        | SemanticStyleRole::OutputSeverityWarning
+        | SemanticStyleRole::OutputSeverityInfo
+        | SemanticStyleRole::OutputSeverityDebug
+        | SemanticStyleRole::OutputSuccessKeyword
+        | SemanticStyleRole::OutputFailureKeyword
+        | SemanticStyleRole::OutputGrepMatch
+        | SemanticStyleRole::CommandStatusRunning
+        | SemanticStyleRole::CommandStatusSuccess
+        | SemanticStyleRole::CommandStatusFailure => 30,
+        SemanticStyleRole::OutputUrl | SemanticStyleRole::OutputLineReference => 40,
+    }
+}
+
+fn search_match_alpha(theme: AppThemeSpec, strength: SearchMatchHighlightStrength) -> f32 {
+    let base = theme.terminal.search_match.alpha;
+    match strength {
+        SearchMatchHighlightStrength::Subtle => (base * 0.72).clamp(0.08, 0.22),
+        SearchMatchHighlightStrength::Balanced => base.clamp(0.12, 0.34),
+        SearchMatchHighlightStrength::Strong => (base * 1.35).clamp(0.18, 0.46),
+    }
+}
+
+fn blend_search_match_background(base_rgba: u32, overlay_rgb: u32, alpha: f32) -> u32 {
+    let alpha = alpha.clamp(0.0, 1.0);
+    let base_red = ((base_rgba >> 16) & 0xff) as f32;
+    let base_green = ((base_rgba >> 8) & 0xff) as f32;
+    let base_blue = (base_rgba & 0xff) as f32;
+    let overlay_red = ((overlay_rgb >> 16) & 0xff) as f32;
+    let overlay_green = ((overlay_rgb >> 8) & 0xff) as f32;
+    let overlay_blue = (overlay_rgb & 0xff) as f32;
+
+    let mix = |base: f32, overlay: f32| -> u32 {
+        ((base * (1.0 - alpha)) + (overlay * alpha)).round() as u32
+    };
+
+    0xff00_0000
+        | (mix(base_red, overlay_red) << 16)
+        | (mix(base_green, overlay_green) << 8)
+        | mix(base_blue, overlay_blue)
 }

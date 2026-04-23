@@ -4,7 +4,7 @@ use termwiz::input::{KeyCode, Modifiers as KeyModifiers};
 use crate::app::ssh::runtime::{
     TerminalCellState, TerminalCursorState, TerminalKeyEvent, TerminalMouseInput, TerminalRowState,
 };
-use crate::theme::ThemeMode;
+use crate::theme::{ThemeMode, ThemeVariant};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TerminalCoreKind {
@@ -57,7 +57,10 @@ pub trait TerminalCoreAdapter: Send {
     fn visible_lines(&self) -> Vec<String>;
     fn frame_snapshot(&self) -> TerminalFrameSnapshot;
     fn resize(&mut self, rows: usize, cols: usize);
-    fn set_theme_mode(&mut self, mode: ThemeMode);
+    fn set_theme(&mut self, mode: ThemeMode, variant: ThemeVariant);
+    fn set_theme_mode(&mut self, mode: ThemeMode) {
+        self.set_theme(mode, ThemeVariant::PremiumDefault);
+    }
     fn scroll_viewport_lines(&mut self, delta: i32);
     fn send_key_down(&mut self, key: KeyCode, modifiers: KeyModifiers) -> Result<Vec<u8>>;
     fn send_key_event(&mut self, event: TerminalKeyEvent) -> Result<Vec<u8>>;

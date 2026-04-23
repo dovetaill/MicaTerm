@@ -19,13 +19,14 @@ use crate::app::ssh::runtime::{
 use crate::app::terminal_core::{
     SelectionState, TerminalCoreAdapter, TerminalFrameSnapshot, ViewportState,
 };
-use crate::app::terminal_theme::preset_for_theme_mode;
-use crate::theme::{ThemeMode, terminal_palette_spec};
+use crate::app::terminal_theme::preset_for_theme;
+use crate::theme::{ThemeMode, ThemeVariant, terminal_palette_spec_for};
 
 pub struct AlacrittyTerminalCoreAdapter {
     term: Term<VoidListener>,
     parser: Processor,
     theme_mode: ThemeMode,
+    theme_variant: ThemeVariant,
     sequence_number: usize,
     fallback_mouse_button: Option<TerminalMouseButton>,
 }
@@ -42,6 +43,7 @@ impl AlacrittyTerminalCoreAdapter {
             term: Term::new(config, &dimensions, VoidListener),
             parser: Processor::new(),
             theme_mode: ThemeMode::Dark,
+            theme_variant: ThemeVariant::PremiumDefault,
             sequence_number: 0,
             fallback_mouse_button: None,
         }
@@ -89,7 +91,7 @@ impl AlacrittyTerminalCoreAdapter {
                 continue;
             }
 
-            let (fg_rgba, bg_rgba) = resolve_cell_colors(self.theme_mode, cell);
+            let (fg_rgba, bg_rgba) = resolve_cell_colors(self.theme_mode, self.theme_variant, cell);
             cells.push(TerminalCellState {
                 row: row as u32,
                 col: indexed.point.column.0 as u32,
@@ -118,7 +120,7 @@ impl AlacrittyTerminalCoreAdapter {
         let visible = row >= 0
             && row < self.term.grid().screen_lines() as i32
             && !matches!(cursor.shape, CursorShape::Hidden);
-        let preset = preset_for_theme_mode(self.theme_mode);
+        let preset = preset_for_theme(self.theme_mode, self.theme_variant);
 
         TerminalCursorState {
             row: row.max(0) as u32,
@@ -213,7 +215,7 @@ impl TerminalCoreAdapter for AlacrittyTerminalCoreAdapter {
         let rows = self.visible_rows_internal();
         let lines = visible_lines_from_rows(&rows);
         let grid = self.term.grid();
-        let preset = preset_for_theme_mode(self.theme_mode);
+        let preset = preset_for_theme(self.theme_mode, self.theme_variant);
         let viewport_bg_top_rgba = pack_rgb_hex(preset.viewport_bg_top);
         let viewport_bg_bottom_rgba = pack_rgb_hex(preset.viewport_bg_bottom);
 
@@ -246,9 +248,10 @@ impl TerminalCoreAdapter for AlacrittyTerminalCoreAdapter {
         self.sequence_number = self.sequence_number.saturating_add(1);
     }
 
-    fn set_theme_mode(&mut self, mode: ThemeMode) {
-        if self.theme_mode != mode {
+    fn set_theme(&mut self, mode: ThemeMode, variant: ThemeVariant) {
+        if self.theme_mode != mode || self.theme_variant != variant {
             self.theme_mode = mode;
+            self.theme_variant = variant;
             self.sequence_number = self.sequence_number.saturating_add(1);
         }
     }
@@ -423,9 +426,13 @@ fn key_modifiers(alt: bool, ctrl: bool, shift: bool) -> KeyModifiers {
     modifiers
 }
 
-fn resolve_cell_colors(theme_mode: ThemeMode, cell: &Cell) -> (u32, u32) {
-    let mut fg = resolve_color(theme_mode, cell.fg, false);
-    let mut bg = resolve_color(theme_mode, cell.bg, true);
+fn resolve_cell_colors(
+    theme_mode: ThemeMode,
+    theme_variant: ThemeVariant,
+    cell: &Cell,
+) -> (u32, u32) {
+    let mut fg = resolve_color(theme_mode, theme_variant, cell.fg, false);
+    let mut bg = resolve_color(theme_mode, theme_variant, cell.bg, true);
     if cell.flags.contains(Flags::INVERSE) {
         std::mem::swap(&mut fg, &mut bg);
     }
@@ -435,16 +442,26 @@ fn resolve_cell_colors(theme_mode: ThemeMode, cell: &Cell) -> (u32, u32) {
     (fg, bg)
 }
 
-fn resolve_color(theme_mode: ThemeMode, color: Color, background: bool) -> u32 {
+fn resolve_color(
+    theme_mode: ThemeMode,
+    theme_variant: ThemeVariant,
+    color: Color,
+    background: bool,
+) -> u32 {
     match color {
         Color::Spec(rgb) => pack_rgb(rgb),
-        Color::Indexed(index) => resolve_indexed_color(theme_mode, index),
-        Color::Named(named) => resolve_named_color(theme_mode, named, background),
+        Color::Indexed(index) => resolve_indexed_color(theme_mode, theme_variant, index),
+        Color::Named(named) => resolve_named_color(theme_mode, theme_variant, named, background),
     }
 }
 
-fn resolve_named_color(theme_mode: ThemeMode, named: NamedColor, background: bool) -> u32 {
-    let spec = terminal_palette_spec(theme_mode);
+fn resolve_named_color(
+    theme_mode: ThemeMode,
+    theme_variant: ThemeVariant,
+    named: NamedColor,
+    background: bool,
+) -> u32 {
+    let spec = terminal_palette_spec_for(theme_mode, theme_variant);
     let dim = |value| dim_rgb(value);
 
     let rgb = match named {
@@ -488,9 +505,11 @@ fn resolve_named_color(theme_mode: ThemeMode, named: NamedColor, background: boo
     pack_rgb_hex(rgb)
 }
 
-fn resolve_indexed_color(theme_mode: ThemeMode, index: u8) -> u32 {
+fn resolve_indexed_color(theme_mode: ThemeMode, theme_variant: ThemeVariant, index: u8) -> u32 {
     match index {
-        0..=15 => pack_rgb_hex(terminal_palette_spec(theme_mode).ansi[index as usize]),
+        0..=15 => {
+            pack_rgb_hex(terminal_palette_spec_for(theme_mode, theme_variant).ansi[index as usize])
+        }
         16..=231 => {
             let index = index - 16;
             let r = index / 36;
