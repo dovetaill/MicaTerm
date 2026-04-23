@@ -6791,6 +6791,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     });
 
     let state = Rc::clone(&view_model);
+    window.on_workspace_session_open_url_requested(move |row, col| {
+        let state = state.borrow();
+        workspace_terminal::open_active_workspace_url(&state, row, col)
+    });
+
+    let state = Rc::clone(&view_model);
     window.on_workspace_session_copy_selection_requested(
         move |start_row, start_col, end_row, end_col| {
             let state = state.borrow();
@@ -8622,5 +8628,61 @@ mod tests {
             workspace_terminal::terminal_key_event("insert", false, false, false),
             Some(TerminalKeyEvent::named("insert", false, false, false))
         );
+    }
+
+    #[test]
+    fn workspace_terminal_detects_browser_safe_http_urls_without_trailing_punctuation() {
+        let session_id = Uuid::new_v4();
+        let row_text = "curl https://example.com/demo?q=1), then visit http://example.org/docs.";
+        let mut surface =
+            TerminalSurfaceState::from_visible_lines(session_id, 1, 4, 120, vec![row_text.into()]);
+        surface.cells = ascii_cells_for_row(0, row_text);
+
+        assert_eq!(
+            workspace_terminal::openable_url_at_surface(&surface, 0, 8),
+            Some("https://example.com/demo?q=1".into())
+        );
+        assert_eq!(
+            workspace_terminal::openable_url_at_surface(&surface, 0, 50),
+            Some("http://example.org/docs".into())
+        );
+    }
+
+    #[test]
+    fn workspace_terminal_ignores_non_browser_url_schemes() {
+        let session_id = Uuid::new_v4();
+        let row_text = "udp://:10086 -L tcp://:10086 -F relay+tls://38.54.71.181:10087";
+        let mut surface =
+            TerminalSurfaceState::from_visible_lines(session_id, 1, 4, 120, vec![row_text.into()]);
+        surface.cells = ascii_cells_for_row(0, row_text);
+
+        assert_eq!(
+            workspace_terminal::openable_url_at_surface(&surface, 0, 1),
+            None
+        );
+        assert_eq!(
+            workspace_terminal::openable_url_at_surface(&surface, 0, 16),
+            None
+        );
+        assert_eq!(
+            workspace_terminal::openable_url_at_surface(&surface, 0, 34),
+            None
+        );
+    }
+
+    fn ascii_cells_for_row(row: u32, text: &str) -> Vec<TerminalCellState> {
+        text.chars()
+            .enumerate()
+            .map(|(col, ch)| TerminalCellState {
+                row,
+                col: col as u32,
+                width: 1,
+                text: ch.to_string(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffff_ffff,
+                bg_rgba: 0xff0d_1117,
+            })
+            .collect()
     }
 }

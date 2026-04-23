@@ -337,14 +337,18 @@ impl AppThemeSpec {
                 bold: false,
                 underline: false,
             },
-            SemanticStyleRole::OutputUrl | SemanticStyleRole::OutputLineReference => {
-                SemanticRoleStyle {
-                    foreground: semantic.output_accent,
-                    background: None,
-                    bold: false,
-                    underline: true,
-                }
-            }
+            SemanticStyleRole::OutputUrl => SemanticRoleStyle {
+                foreground: semantic.output_accent,
+                background: None,
+                bold: false,
+                underline: false,
+            },
+            SemanticStyleRole::OutputLineReference => SemanticRoleStyle {
+                foreground: semantic.output_accent,
+                background: None,
+                bold: false,
+                underline: true,
+            },
             SemanticStyleRole::InputVariable | SemanticStyleRole::OutputTimestamp => {
                 SemanticRoleStyle {
                     foreground: decoration.info,

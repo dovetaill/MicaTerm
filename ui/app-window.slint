@@ -524,6 +524,7 @@ export component AppWindow inherits Window {
     callback workspace-session-resize-requested(int, int);
     callback workspace-session-normalize-hit-col(int, int) -> int;
     callback workspace-session-normalize-selection-hit-col(int, int) -> int;
+    callback workspace-session-open-url-requested(int, int) -> bool;
     callback workspace-session-copy-selection-requested(int, int, int, int);
     callback workspace-session-selection-changed();
     callback workspace-session-paste-requested();
@@ -995,6 +996,10 @@ export component AppWindow inherits Window {
 
                         normalize-selection-hit-col(row, col) => {
                             return root.workspace-session-normalize-selection-hit-col(row, col);
+                        }
+
+                        open-url-requested(row, col) => {
+                            return root.workspace-session-open-url-requested(row, col);
                         }
 
                         copy-selection-requested(start-row, start-col, end-row, end-col) => {

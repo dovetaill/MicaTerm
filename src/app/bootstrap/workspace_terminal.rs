@@ -603,6 +603,138 @@ pub(super) fn forward_active_workspace_copy_selection(
     }
 }
 
+pub(super) fn open_active_workspace_url(state: &ShellViewModel, row: i32, col: i32) -> bool {
+    let Some(surface) = state.active_workspace_terminal_surface() else {
+        return false;
+    };
+    let Some(url) = openable_url_at_surface(surface, row, col) else {
+        return false;
+    };
+
+    if let Err(err) = open_url_in_browser(url.as_str()) {
+        tracing::error!(
+            target: "app.ssh",
+            row,
+            col,
+            url,
+            error = %err,
+            "failed to open workspace terminal URL in browser"
+        );
+        return false;
+    }
+
+    true
+}
+
+pub(super) fn openable_url_at_surface(
+    surface: &TerminalSurfaceState,
+    row: i32,
+    col: i32,
+) -> Option<String> {
+    let row = row.max(0) as u32;
+    let col = col.max(0) as u32;
+    let mut row_cells = surface
+        .cells
+        .iter()
+        .filter(|cell| cell.row == row)
+        .collect::<Vec<_>>();
+    row_cells.sort_by_key(|cell| cell.col);
+
+    let hit_index = row_cells.iter().position(|cell| {
+        cell.width > 0 && col >= cell.col && col < cell.col.saturating_add(cell.width)
+    })?;
+    if row_cells[hit_index].text.chars().all(char::is_whitespace) {
+        return None;
+    }
+
+    let mut start = hit_index;
+    while start > 0 && !row_cells[start - 1].text.chars().all(char::is_whitespace) {
+        start -= 1;
+    }
+
+    let mut end = hit_index;
+    while end + 1 < row_cells.len() && !row_cells[end + 1].text.chars().all(char::is_whitespace) {
+        end += 1;
+    }
+
+    let token = row_cells[start..=end]
+        .iter()
+        .map(|cell| cell.text.as_str())
+        .collect::<String>();
+    let trimmed = trim_browser_url_token(token.as_str());
+    is_browser_openable_url(trimmed).then(|| trimmed.to_string())
+}
+
+fn trim_browser_url_token(token: &str) -> &str {
+    token
+        .trim_matches(|ch: char| {
+            matches!(
+                ch,
+                '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ',' | ';' | '"'
+            )
+        })
+        .trim_end_matches('.')
+}
+
+fn is_browser_openable_url(token: &str) -> bool {
+    (token.starts_with("http://") || token.starts_with("https://"))
+        && token.len() > "https://".len()
+}
+
+fn open_url_in_browser(url: &str) -> Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::Shell::ShellExecuteW;
+        use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+        use windows::core::PCWSTR;
+
+        let operation = windows_wide("open");
+        let target = windows_wide(url);
+        let result = unsafe {
+            ShellExecuteW(
+                None,
+                PCWSTR(operation.as_ptr()),
+                PCWSTR(target.as_ptr()),
+                PCWSTR::null(),
+                PCWSTR::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        if result.0 as usize <= 32 {
+            anyhow::bail!("ShellExecuteW returned status code {}", result.0 as usize);
+        }
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(url)
+            .spawn()
+            .map(|_| ())
+            .context("spawn macOS browser open command")?;
+        return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map(|_| ())
+            .context("spawn xdg-open browser command")?;
+        return Ok(());
+    }
+
+    #[allow(unreachable_code)]
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(Some(0)).collect()
+}
+
 pub(super) fn normalized_paste_newlines(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
 }

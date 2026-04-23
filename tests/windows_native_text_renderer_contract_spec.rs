@@ -46,7 +46,7 @@ fn windows_native_text_renderer_source_exposes_directwrite_primary_text_path() {
 }
 
 #[test]
-fn windows_native_text_renderer_source_uses_monitor_aware_clear_type_contract() {
+fn windows_native_text_renderer_source_defaults_terminal_text_to_grayscale_antialiasing() {
     let windows_backend_source =
         fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
             .expect("read windows native backend");
@@ -55,13 +55,20 @@ fn windows_native_text_renderer_source_uses_monitor_aware_clear_type_contract() 
         "CreateMonitorRenderingParams",
         "SetTextRenderingParams(",
         "SetTextAntialiasMode(",
-        "D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE",
+        "D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE",
     ] {
         assert!(
             windows_backend_source.contains(expected),
-            "windows native text path should reference `{expected}` so ClearType-friendly rendering uses monitor-aware params on the offscreen native target"
+            "windows native text path should reference `{expected}` so the packaged terminal defaults to grayscale antialiasing while still collecting monitor-aware DirectWrite params for diagnostics"
         );
     }
+
+    assert!(
+        windows_backend_source
+            .contains("let text_antialias_mode = D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE;")
+            || windows_backend_source.contains("unwrap_or(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE)"),
+        "windows native text path should pin the terminal text stage to grayscale antialiasing by default instead of letting monitor RGB/BGR geometry switch the shell into color-fringe-prone ClearType rendering"
+    );
 
     assert!(
         windows_backend_source.contains("CreateWicBitmapRenderTarget")

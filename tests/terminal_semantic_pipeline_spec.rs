@@ -271,8 +271,8 @@ fn premium_default_theme_maps_roles_to_product_grade_semantic_styles() {
 
     assert_eq!(command.foreground, theme.semantic.input_command);
     assert!(
-        url.underline,
-        "URL roles should carry an underline affordance instead of a loud solid fill"
+        !url.underline,
+        "browser-safe terminal URLs should stay un-underlined by default so shell output keeps a calm terminal-first reading rhythm"
     );
     assert!(
         error.bold,
@@ -343,8 +343,8 @@ fn semantic_style_projection_recolors_default_cells_but_preserves_explicit_ansi_
         "semantic styling should keep explicit ANSI foregrounds as the truth source"
     );
     assert!(
-        url_cell.underline,
-        "semantic styling can still add lightweight affordances like underline on top of ANSI text"
+        !url_cell.underline,
+        "semantic styling should keep browser-safe URLs free of permanent underlines and rely on Ctrl+click activation instead"
     );
 
     let error_cell = frame.rows[0]

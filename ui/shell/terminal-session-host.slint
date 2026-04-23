@@ -181,6 +181,7 @@ export component TerminalSessionHost inherits Rectangle {
     callback surface-resize-requested(int, int);
     callback normalize-hit-col(int, int) -> int;
     callback normalize-selection-hit-col(int, int) -> int;
+    callback open-url-requested(int, int) -> bool;
     callback copy-selection-requested(int, int, int, int);
     callback selection-changed();
     callback paste-requested();
@@ -1278,7 +1279,11 @@ export component TerminalSessionHost inherits Rectangle {
                         if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
                             terminal-input.focus();
                             root.close-context-menu();
-                            if root.session-mouse-grabbed {
+                            if !root.session-mouse-grabbed
+                                && event.modifiers.control && root.open-url-requested(row, col)
+                            {
+                                root.clear-selection();
+                            } else if root.session-mouse-grabbed {
                                 root.mouse-input(
                                     "down",
                                     "left",

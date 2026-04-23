@@ -752,6 +752,10 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "AppWindow should expose terminal mouse input forwarding for cell-relative pointer events"
     );
     assert!(
+        app_window.contains("callback workspace-session-open-url-requested(int, int) -> bool;"),
+        "AppWindow should expose a terminal URL-open callback so Ctrl+left-click can activate browser-safe http/https links without routing through normal selection or mouse-reporting paths"
+    );
+    assert!(
         app_window.contains("in-out property <int> workspace-session-viewport-offset-lines: 0;"),
         "AppWindow should expose the projected terminal viewport offset"
     );
@@ -836,6 +840,11 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "WorkspacePane should forward terminal mouse events back to the app shell"
     );
     assert!(
+        workspace_pane.contains("callback open-url-requested(int, int) -> bool;")
+            && workspace_pane.contains("open-url-requested(row, col) => {\n                    return root.open-url-requested(row, col);\n                }"),
+        "WorkspacePane should forward terminal URL-open requests back to the app shell so Ctrl+left-click stays on a dedicated browser-link path"
+    );
+    assert!(
         workspace_pane.contains("normalize-hit-col(row, col) =>"),
         "WorkspacePane should forward wide-char cell-hit normalization requests back to the app shell"
     );
@@ -883,6 +892,14 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
     assert!(
         terminal_host.contains("callback mouse-input(string, string, int, int, bool, bool, bool);"),
         "TerminalSessionHost should emit mouse input callbacks with terminal-relative coordinates"
+    );
+    assert!(
+        terminal_host.contains("callback open-url-requested(int, int) -> bool;"),
+        "TerminalSessionHost should expose a URL-open callback so Ctrl+left-click can activate browser-safe links without introducing persistent underline chrome"
+    );
+    assert!(
+        terminal_host.contains("event.modifiers.control && root.open-url-requested(row, col)"),
+        "TerminalSessionHost should gate Ctrl+left-click through a dedicated URL-open callback before entering normal selection flow"
     );
     assert!(
         terminal_host.contains("callback scroll-thumb-drag-requested(float);"),

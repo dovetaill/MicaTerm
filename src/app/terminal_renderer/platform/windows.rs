@@ -43,9 +43,8 @@ use windows::Win32::Graphics::Direct2D::Common::{
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_ALIASED, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
     D2D1_BITMAP_PROPERTIES, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_OPACITY_MASK_CONTENT_GRAPHICS,
-    D2D1_RENDER_TARGET_PROPERTIES, D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE,
-    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory, ID2D1Bitmap, ID2D1Factory,
-    ID2D1RenderTarget, ID2D1SolidColorBrush,
+    D2D1_RENDER_TARGET_PROPERTIES, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory,
+    ID2D1Bitmap, ID2D1Factory, ID2D1RenderTarget, ID2D1SolidColorBrush,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::DirectWrite::{
@@ -415,8 +414,8 @@ impl WindowsNativeSurfaceState {
         let render_target_properties = D2D1_RENDER_TARGET_PROPERTIES {
             pixelFormat: D2D1_PIXEL_FORMAT {
                 format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                // Keep the intermediate target opaque so Direct2D/DirectWrite can
-                // apply stable ClearType instead of falling back to transparent-surface AA.
+                // Keep the intermediate target opaque so Direct2D/DirectWrite text stays
+                // stable against the host-owned background readback path.
                 alphaMode: D2D1_ALPHA_MODE_IGNORE,
             },
             dpiX: 96.0,
@@ -1220,17 +1219,9 @@ impl WindowsNativeSurfaceState {
                 .and_then(|factory| Self::create_directwrite_rendering_params(factory, host_hwnd))
                 .map(|(params, snapshot)| (Some(params), Some(snapshot)))
                 .unwrap_or((None, None));
-            let text_antialias_mode = rendering_params_snapshot
-                .as_ref()
-                .map(|snapshot| {
-                    if snapshot.pixel_geometry == "flat" || snapshot.clear_type_level_per_mille == 0
-                    {
-                        D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE
-                    } else {
-                        D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE
-                    }
-                })
-                .unwrap_or(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
+            // Terminal text favors stable grayscale AA over monitor-dependent ClearType
+            // so dense shell output does not pick up RGB fringe artifacts at viewport edges.
+            let text_antialias_mode = D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE;
 
             unsafe {
                 render_target.SetTextAntialiasMode(text_antialias_mode);
@@ -1602,13 +1593,7 @@ impl WindowsNativeSurfaceState {
             return "bitmap-mask-compat";
         }
 
-        if self.active_pixel_geometry() == Some("flat")
-            || self.active_clear_type_level_per_mille() == Some(0)
-        {
-            "grayscale"
-        } else {
-            "cleartype"
-        }
+        "grayscale"
     }
 
     fn active_render_target_alpha_mode(&self) -> &'static str {

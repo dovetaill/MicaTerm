@@ -1127,8 +1127,8 @@ fn windows_backend_source_exposes_background_and_monochrome_draw_contract() {
         "windows backend should issue real DirectWrite glyph draw calls for the primary monochrome text path"
     );
     assert!(
-        windows_backend_source.contains("D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE"),
-        "windows backend should request ClearType-capable text antialiasing for the primary DirectWrite path"
+        windows_backend_source.contains("D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE"),
+        "windows backend should request grayscale text antialiasing for the primary DirectWrite path so the packaged terminal does not ship RGB ClearType color fringing on dense terminal text"
     );
 }
 
