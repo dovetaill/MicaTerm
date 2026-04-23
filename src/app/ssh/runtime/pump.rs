@@ -140,7 +140,12 @@ pub(super) async fn run_channel_pump(
                             break;
                         }
                     }
-                    Some(RuntimeCommand::Resize { rows, cols }) => {
+                    Some(RuntimeCommand::Resize {
+                        rows,
+                        cols,
+                        pixel_width,
+                        pixel_height,
+                    }) => {
                         if let Ok(mut terminal) = terminal.lock() {
                             terminal.resize(rows as usize, cols as usize);
                         }
@@ -157,7 +162,7 @@ pub(super) async fn run_channel_pump(
                             let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
                         }
                         if let Err(err) = channel
-                            .window_change(cols, rows, cols.saturating_mul(8), rows.saturating_mul(16))
+                            .window_change(cols, rows, pixel_width, pixel_height)
                             .await
                         {
                             let _ = event_tx.send(SessionRuntimeEvent::Error(format!(

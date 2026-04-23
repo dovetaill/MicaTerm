@@ -538,6 +538,18 @@ struct ObservingScrollbackLauncher {
     terminal_defaults: TerminalRuntimeDefaults,
 }
 
+#[derive(Default)]
+struct ObservingViewportLauncherState {
+    launch_viewports: Vec<(usize, usize, u32, u32)>,
+}
+
+#[derive(Clone)]
+struct ObservingViewportLauncher {
+    state: Arc<Mutex<ObservingViewportLauncherState>>,
+    terminal_defaults: TerminalRuntimeDefaults,
+    launch_delay: Duration,
+}
+
 #[derive(Clone)]
 struct SlowOpeningLauncher {
     state: Arc<Mutex<RecordingLauncherState>>,
@@ -2735,6 +2747,53 @@ impl SessionRuntimeLauncher for ObservingScrollbackLauncher {
                     24,
                     80,
                     vec!["welcome to mica-term".into()],
+                ),
+            ));
+            Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SessionRuntimeLauncher for ObservingViewportLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let state = Arc::clone(&self.state);
+        let terminal_defaults = self.terminal_defaults.clone();
+        let launch_delay = self.launch_delay;
+        Box::pin(async move {
+            tokio::time::sleep(launch_delay).await;
+            let viewport = (
+                terminal_defaults.viewport_rows(),
+                terminal_defaults.viewport_cols(),
+                terminal_defaults.viewport_pixel_width(),
+                terminal_defaults.viewport_pixel_height(),
+            );
+            state
+                .lock()
+                .expect("lock observing viewport launcher state")
+                .launch_viewports
+                .push(viewport);
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(
+                TerminalSurfaceState::from_visible_lines(
+                    session_id,
+                    1,
+                    viewport.0 as u32,
+                    viewport.1 as u32,
+                    vec!["viewport defaults captured".into()],
                 ),
             ));
             Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>)
@@ -7548,6 +7607,73 @@ fn settings_modal_scrollback_flows_into_newly_launched_saved_ssh_session() {
 }
 
 #[test]
+fn workspace_terminal_launch_captures_live_viewport_defaults_before_runtime_connects() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let terminal_defaults = TerminalRuntimeDefaults::default();
+    let launcher_state = Arc::new(Mutex::new(ObservingViewportLauncherState::default()));
+    let launcher = Arc::new(ObservingViewportLauncher {
+        state: Arc::clone(&launcher_state),
+        terminal_defaults: terminal_defaults.clone(),
+        launch_delay: Duration::from_millis(80),
+    });
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_terminal_defaults(
+        &app,
+        None,
+        default_platform_window_effects(),
+        None,
+        launcher,
+        Arc::new(MemoryCredentialStore::default()),
+        terminal_defaults,
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Viewport Probe", "10.0.0.44");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    let expected_rows = (app.get_layout_workspace_session_preferred_surface_height()
+        / app.get_workspace_session_cell_height())
+        .floor() as usize;
+    let expected_cols = (app.get_layout_workspace_session_preferred_surface_width()
+        / app.get_workspace_session_cell_width())
+        .floor() as usize;
+
+    wait_for_condition(Duration::from_millis(250), || {
+        launcher_state
+            .lock()
+            .expect("lock observing viewport launcher state")
+            .launch_viewports
+            .len()
+            == 1
+    });
+
+    let viewport = launcher_state
+        .lock()
+        .expect("lock observing viewport launcher state")
+        .launch_viewports
+        .first()
+        .copied()
+        .expect("captured launch viewport");
+
+    assert_eq!(
+        viewport.0,
+        expected_rows.max(1),
+        "new SSH launches should snapshot the host-computed viewport rows instead of booting with a stale 24-row default"
+    );
+    assert_eq!(
+        viewport.1,
+        expected_cols.max(1),
+        "new SSH launches should snapshot the host-computed viewport cols instead of booting with a stale 80-col default"
+    );
+    assert!(
+        viewport.2 > 0 && viewport.3 > 0,
+        "launch-time viewport defaults should carry non-zero pixel dimensions for the initial PTY request"
+    );
+}
+
+#[test]
 fn launcher_picker_folder_activation_does_not_attempt_to_open_session() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -8952,6 +9078,72 @@ fn opening_right_panel_clamps_terminal_surface_width_before_pty_resize_roundtrip
     assert!(
         app.get_layout_workspace_session_native_surface_width() < before,
         "terminal surface width should clamp to the shrunken content viewport immediately instead of waiting for a later PTY resize roundtrip, otherwise the software path flashes and hit-testing drifts under the right panel"
+    );
+}
+
+#[test]
+fn opening_right_panel_updates_live_terminal_viewport_defaults_immediately() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let terminal_defaults = TerminalRuntimeDefaults::default();
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_terminal_defaults(
+        &app,
+        None,
+        default_platform_window_effects(),
+        None,
+        Arc::new(WideProjectionLauncher { cols: 140 }),
+        Arc::new(MemoryCredentialStore::default()),
+        terminal_defaults.clone(),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    let before = (
+        terminal_defaults.viewport_rows(),
+        terminal_defaults.viewport_cols(),
+        terminal_defaults.viewport_pixel_width(),
+    );
+
+    app.invoke_open_sftp_panel_requested();
+    wait_for_condition(Duration::from_millis(250), || {
+        terminal_defaults.viewport_cols() < before.1
+    });
+
+    let after = (
+        terminal_defaults.viewport_rows(),
+        terminal_defaults.viewport_cols(),
+        terminal_defaults.viewport_pixel_width(),
+    );
+
+    let expected_after = (
+        app.get_layout_workspace_session_preferred_rows() as usize,
+        app.get_layout_workspace_session_preferred_cols() as usize,
+        app.get_layout_workspace_session_preferred_surface_width().round() as u32,
+    );
+    assert_eq!(
+        after.0, expected_after.0,
+        "opening the right panel should update the live viewport row contract to the latest preferred host rows"
+    );
+    assert!(
+        after.1 < before.1,
+        "opening the right panel should immediately shrink the live terminal cols contract so later PTY resizes do not lag one layout behind"
+    );
+    assert_eq!(
+        after.1, expected_after.1,
+        "opening the right panel should align the live viewport cols contract with the latest preferred host cols"
+    );
+    assert!(
+        after.2 < before.2,
+        "opening the right panel should immediately shrink the pixel viewport width stored for future PTY requests"
+    );
+    assert_eq!(
+        after.2,
+        expected_after.2,
+        "opening the right panel should update the stored pixel viewport width to the preferred host width"
     );
 }
 

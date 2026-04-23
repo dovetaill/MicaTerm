@@ -188,7 +188,7 @@ use russh::keys::ssh_key::{LineEnding, rand_core::OsRng};
 use russh::keys::{Algorithm, PrivateKey, PublicKey};
 
 #[derive(Clone)]
-struct ShellSessionBridge {
+pub(super) struct ShellSessionBridge {
     manager: SessionManager,
     terminal_defaults: TerminalRuntimeDefaults,
 }
@@ -2437,6 +2437,21 @@ fn should_forward_workspace_terminal_resize(window: &AppWindow, rows: i32, cols:
     rows > 0 && cols > 0
 }
 
+fn record_workspace_terminal_viewport_defaults(
+    window: &AppWindow,
+    bridge: &ShellSessionBridge,
+    rows: i32,
+    cols: i32,
+) {
+    let rect = workspace_native_terminal_rect(window);
+    bridge.terminal_defaults.set_viewport_size(
+        rows.max(1) as usize,
+        cols.max(1) as usize,
+        rect.width.max(0) as u32,
+        rect.height.max(0) as u32,
+    );
+}
+
 fn workspace_native_terminal_resize_target(
     rect: NativeTerminalSurfaceRect,
     cell_width_px: u32,
@@ -3089,6 +3104,55 @@ fn sync_workspace_session_state_with_manager(
         window.set_workspace_session_error_detail("".into());
         window.set_workspace_session_can_reconnect(false);
     }
+}
+
+pub(super) fn sync_workspace_terminal_runtime_defaults(
+    window: &AppWindow,
+    session_bridge: Option<&ShellSessionBridge>,
+) {
+    sync_workspace_terminal_runtime_defaults_with_defaults(
+        window,
+        session_bridge.map(|bridge| &bridge.terminal_defaults),
+    );
+}
+
+fn sync_workspace_terminal_runtime_defaults_with_defaults(
+    window: &AppWindow,
+    terminal_defaults: Option<&TerminalRuntimeDefaults>,
+) {
+    let Some(terminal_defaults) = terminal_defaults else {
+        return;
+    };
+    let width = window.get_layout_workspace_session_preferred_surface_width();
+    let height = window.get_layout_workspace_session_preferred_surface_height();
+    if width <= 0.0 || height <= 0.0 {
+        return;
+    }
+
+    let rows = window.get_layout_workspace_session_preferred_rows();
+    let cols = window.get_layout_workspace_session_preferred_cols();
+    let scale_factor = window_scale_factor(window);
+    terminal_defaults.set_viewport_size(
+        rows.max(1) as usize,
+        cols.max(1) as usize,
+        (width * scale_factor).round().max(0.0) as u32,
+        (height * scale_factor).round().max(0.0) as u32,
+    );
+}
+
+pub(super) fn schedule_workspace_terminal_runtime_defaults_sync(
+    window: &AppWindow,
+    terminal_defaults: Option<TerminalRuntimeDefaults>,
+) {
+    let Some(terminal_defaults) = terminal_defaults else {
+        return;
+    };
+    let handle = window.as_weak();
+    let _ = slint::invoke_from_event_loop(move || {
+        if let Some(window) = handle.upgrade() {
+            sync_workspace_terminal_runtime_defaults_with_defaults(&window, Some(&terminal_defaults));
+        }
+    });
 }
 
 fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &ShellViewModel) {
@@ -5874,6 +5938,13 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
+        sync_workspace_terminal_runtime_defaults(&window, session_bridge_ref.as_deref());
+        schedule_workspace_terminal_runtime_defaults_sync(
+            &window,
+            session_bridge_ref
+                .as_ref()
+                .map(|bridge| bridge.terminal_defaults.clone()),
+        );
         sync_saved_ssh_picker_state(&window, &state);
     });
 
@@ -5941,6 +6012,13 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
+        sync_workspace_terminal_runtime_defaults(&window, session_bridge_ref.as_deref());
+        schedule_workspace_terminal_runtime_defaults_sync(
+            &window,
+            session_bridge_ref
+                .as_ref()
+                .map(|bridge| bridge.terminal_defaults.clone()),
+        );
         sync_saved_ssh_picker_state(&window, &state);
         windowing::sync_ssh_host_key_modal_state(&window, &state);
         save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
@@ -5976,6 +6054,13 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             &state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
+        sync_workspace_terminal_runtime_defaults(&window, session_bridge_ref.as_deref());
+        schedule_workspace_terminal_runtime_defaults_sync(
+            &window,
+            session_bridge_ref
+                .as_ref()
+                .map(|bridge| bridge.terminal_defaults.clone()),
         );
         sync_saved_ssh_picker_state(&window, &state);
         windowing::sync_ssh_host_key_modal_state(&window, &state);
@@ -6068,6 +6153,13 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
+        sync_workspace_terminal_runtime_defaults(&window, session_bridge_ref.as_deref());
+        schedule_workspace_terminal_runtime_defaults_sync(
+            &window,
+            session_bridge_ref
+                .as_ref()
+                .map(|bridge| bridge.terminal_defaults.clone()),
+        );
         sync_saved_ssh_picker_state(&window, &state);
         windowing::sync_ssh_host_key_modal_state(&window, &state);
         save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
@@ -6118,6 +6210,13 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             &state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
+        sync_workspace_terminal_runtime_defaults(&window, session_bridge_ref.as_deref());
+        schedule_workspace_terminal_runtime_defaults_sync(
+            &window,
+            session_bridge_ref
+                .as_ref()
+                .map(|bridge| bridge.terminal_defaults.clone()),
         );
         windowing::sync_ssh_host_key_modal_state(&window, &state);
         assets_keychain::sync_asset_modal_state(&window, &state);
@@ -6686,6 +6785,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         );
         if !should_forward_workspace_terminal_resize(&window, rows, cols) {
             return;
+        }
+        if let Some(session_bridge) = session_bridge_ref.as_deref() {
+            record_workspace_terminal_viewport_defaults(&window, session_bridge, rows, cols);
         }
         let state = state.borrow();
         workspace_terminal::forward_active_workspace_resize(

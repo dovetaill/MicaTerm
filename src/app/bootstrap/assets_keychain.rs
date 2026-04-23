@@ -1517,6 +1517,13 @@ pub(super) fn bind_assets_keychain_callbacks(
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
+        sync_workspace_terminal_runtime_defaults(&window, session_bridge_ref.as_deref());
+        schedule_workspace_terminal_runtime_defaults_sync(
+            &window,
+            session_bridge_ref
+                .as_ref()
+                .map(|bridge| bridge.terminal_defaults.clone()),
+        );
         sync_assets_context_menu_state(&window, &state);
         sync_asset_modal_state(&window, &state);
         windowing::sync_ssh_host_key_modal_state(&window, &state);
@@ -1552,6 +1559,13 @@ pub(super) fn bind_assets_keychain_callbacks(
             &state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
+        sync_workspace_terminal_runtime_defaults(&window, session_bridge_ref.as_deref());
+        schedule_workspace_terminal_runtime_defaults_sync(
+            &window,
+            session_bridge_ref
+                .as_ref()
+                .map(|bridge| bridge.terminal_defaults.clone()),
         );
         windowing::sync_ssh_host_key_modal_state(&window, &state);
         sync_asset_modal_state(&window, &state);
@@ -1640,6 +1654,13 @@ pub(super) fn bind_assets_keychain_callbacks(
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
+        sync_workspace_terminal_runtime_defaults(&window, session_bridge_ref.as_deref());
+        schedule_workspace_terminal_runtime_defaults_sync(
+            &window,
+            session_bridge_ref
+                .as_ref()
+                .map(|bridge| bridge.terminal_defaults.clone()),
+        );
         sync_assets_context_menu_state(&window, &state);
         windowing::sync_ssh_host_key_modal_state(&window, &state);
     });
@@ -1692,6 +1713,13 @@ pub(super) fn bind_assets_keychain_callbacks(
             &state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
+        sync_workspace_terminal_runtime_defaults(&window, session_bridge_ref.as_deref());
+        schedule_workspace_terminal_runtime_defaults_sync(
+            &window,
+            session_bridge_ref
+                .as_ref()
+                .map(|bridge| bridge.terminal_defaults.clone()),
         );
         sync_assets_context_menu_state(&window, &state);
         windowing::sync_ssh_host_key_modal_state(&window, &state);
@@ -1833,6 +1861,13 @@ pub(super) fn bind_assets_keychain_callbacks(
             &state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
+        sync_workspace_terminal_runtime_defaults(&window, session_bridge_ref.as_deref());
+        schedule_workspace_terminal_runtime_defaults_sync(
+            &window,
+            session_bridge_ref
+                .as_ref()
+                .map(|bridge| bridge.terminal_defaults.clone()),
         );
         super::sftp::sync_right_panel_state(&window, &mut state);
         sync_asset_modal_state(&window, &state);

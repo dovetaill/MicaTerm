@@ -633,3 +633,38 @@ fn native_presenter_payload_threads_semantic_spans_blocks_and_overview_markers()
         "bootstrap tracing should keep the richer semantic payload visible while the renderer remains a pure consumer"
     );
 }
+
+#[test]
+fn alternate_screen_short_circuits_semantic_projection_layers() {
+    let mut surface = semantic_surface(&[
+        "[dev@mica ~]$ cargo test",
+        "ERROR Permission denied https://example.com/docs",
+    ]);
+    surface.alternate_screen_active = true;
+    let frame = TerminalModelFrame::from_surface(&surface, None);
+
+    let annotations = analyze_semantic_annotations_with_settings(
+        &frame,
+        TerminalSemanticSettings {
+            input_highlighting_enabled: true,
+            output_rule_highlighting_enabled: true,
+            output_rule_profile: OutputRuleProfile::Default,
+            command_decorations_enabled: true,
+            overview_markers_enabled: true,
+            search_query: Some("example".into()),
+        },
+    );
+
+    assert!(
+        annotations.spans.is_empty(),
+        "alt-screen should be treated as a hard semantic boundary so TUI redraws do not inherit shell highlight spans"
+    );
+    assert!(
+        annotations.command_blocks.is_empty(),
+        "alt-screen should suppress command block gutters that belong to shell scrollback analysis"
+    );
+    assert!(
+        annotations.overview_markers.is_empty(),
+        "alt-screen should suppress overview markers so shell summaries do not leak into full-screen TUIs"
+    );
+}

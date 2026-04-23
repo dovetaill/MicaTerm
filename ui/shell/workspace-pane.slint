@@ -82,6 +82,14 @@ export component WorkspacePane inherits Rectangle {
         session-host.native-surface-width;
     out property <length> layout-workspace-session-native-surface-height:
         session-host.native-surface-height;
+    out property <length> layout-workspace-session-preferred-surface-width:
+        session-host.preferred-surface-width;
+    out property <length> layout-workspace-session-preferred-surface-height:
+        session-host.preferred-surface-height;
+    out property <int> layout-workspace-session-preferred-rows:
+        session-host.preferred-terminal-rows;
+    out property <int> layout-workspace-session-preferred-cols:
+        session-host.preferred-terminal-cols;
     callback workspace-tab-selected(string);
     callback workspace-tab-close-requested(string);
     callback workspace-new-tab-requested();

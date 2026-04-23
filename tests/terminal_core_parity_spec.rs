@@ -156,3 +156,27 @@ fn experimental_alacritty_core_matches_wezterm_for_variant_aware_palette_project
     assert_eq!(alacritty_surface.cursor, wezterm_surface.cursor);
     assert_eq!(alacritty_surface.cells, wezterm_surface.cells);
 }
+
+#[test]
+fn experimental_alacritty_core_matches_wezterm_for_alt_screen_scrollback_clamp() {
+    let mut wezterm = parity_session(TerminalCoreKind::Wezterm, 4, 20);
+    let mut alacritty = parity_session(TerminalCoreKind::AlacrittyExperimental, 4, 20);
+
+    wezterm.apply_remote_bytes(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n\x1b[?1049h");
+    alacritty.apply_remote_bytes(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n\x1b[?1049h");
+
+    let wezterm_before = wezterm.surface_state(Uuid::new_v4());
+    let alacritty_before = alacritty.surface_state(Uuid::new_v4());
+    wezterm.scroll_viewport_lines(4);
+    alacritty.scroll_viewport_lines(4);
+    let wezterm_after = wezterm.surface_state(Uuid::new_v4());
+    let alacritty_after = alacritty.surface_state(Uuid::new_v4());
+
+    assert!(wezterm_before.alternate_screen_active);
+    assert!(alacritty_before.alternate_screen_active);
+    assert_eq!(wezterm_after.viewport_offset_lines, 0);
+    assert_eq!(alacritty_after.viewport_offset_lines, 0);
+    assert_eq!(wezterm_after.viewport_max_offset_lines, 0);
+    assert_eq!(alacritty_after.viewport_max_offset_lines, 0);
+    assert_eq!(alacritty_after.visible_lines, wezterm_after.visible_lines);
+}

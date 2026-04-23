@@ -149,6 +149,9 @@ impl AlacrittyTerminalCoreAdapter {
     }
 
     fn snap_viewport_to_bottom(&mut self) {
+        if self.term.mode().contains(TermMode::ALT_SCREEN) {
+            return;
+        }
         if self.term.grid().display_offset() > 0 {
             self.term.scroll_display(Scroll::Bottom);
             self.sequence_number = self.sequence_number.saturating_add(1);
@@ -218,6 +221,20 @@ impl TerminalCoreAdapter for AlacrittyTerminalCoreAdapter {
         let preset = preset_for_theme(self.theme_mode, self.theme_variant);
         let viewport_bg_top_rgba = pack_rgb_hex(preset.viewport_bg_top);
         let viewport_bg_bottom_rgba = pack_rgb_hex(preset.viewport_bg_bottom);
+        let alternate_screen_active = self.term.mode().contains(TermMode::ALT_SCREEN);
+        let viewport = if alternate_screen_active {
+            ViewportState {
+                offset_lines: 0,
+                max_offset_lines: 0,
+                at_bottom: true,
+            }
+        } else {
+            ViewportState {
+                offset_lines: grid.display_offset() as u32,
+                max_offset_lines: grid.history_size() as u32,
+                at_bottom: grid.display_offset() == 0,
+            }
+        };
 
         TerminalFrameSnapshot {
             seqno: self.sequence_number,
@@ -227,17 +244,13 @@ impl TerminalCoreAdapter for AlacrittyTerminalCoreAdapter {
             default_bg_rgba: pack_rgb_hex(preset.background),
             row_bg_even_rgba: viewport_bg_top_rgba,
             row_bg_odd_rgba: viewport_bg_bottom_rgba,
-            viewport: ViewportState {
-                offset_lines: grid.display_offset() as u32,
-                max_offset_lines: grid.history_size() as u32,
-                at_bottom: grid.display_offset() == 0,
-            },
+            viewport,
             visible_rows: rows,
             visible_lines: lines,
             cells: self.visible_cells_internal(),
             cursor: self.cursor_state_internal(),
             selection: self.selection_state_internal(),
-            alternate_screen_active: self.term.mode().contains(TermMode::ALT_SCREEN),
+            alternate_screen_active,
             mouse_grabbed: self.mouse_grabbed(),
             bracketed_paste_enabled: self.term.mode().contains(TermMode::BRACKETED_PASTE),
         }
@@ -257,7 +270,7 @@ impl TerminalCoreAdapter for AlacrittyTerminalCoreAdapter {
     }
 
     fn scroll_viewport_lines(&mut self, delta: i32) {
-        if delta == 0 {
+        if delta == 0 || self.term.mode().contains(TermMode::ALT_SCREEN) {
             return;
         }
 

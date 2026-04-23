@@ -95,7 +95,9 @@ impl WeztermTerminalCoreAdapter {
             let was_at_bottom = self.viewport_offset_lines == 0;
             let previous_total_rows = self.terminal.screen().scrollback_rows();
             self.terminal.advance_bytes(filtered.as_slice());
-            if !was_at_bottom {
+            if self.terminal.is_alt_screen_active() {
+                self.viewport_offset_lines = 0;
+            } else if !was_at_bottom {
                 let next_total_rows = self.terminal.screen().scrollback_rows();
                 let appended_rows = next_total_rows.saturating_sub(previous_total_rows);
                 self.viewport_offset_lines =
@@ -209,6 +211,10 @@ impl WeztermTerminalCoreAdapter {
     }
 
     pub fn scroll_viewport_lines(&mut self, delta: i32) {
+        if self.terminal.is_alt_screen_active() || delta == 0 {
+            self.viewport_offset_lines = 0;
+            return;
+        }
         if delta > 0 {
             self.viewport_offset_lines = self.viewport_offset_lines.saturating_add(delta as usize);
         } else if delta < 0 {
@@ -220,6 +226,10 @@ impl WeztermTerminalCoreAdapter {
     }
 
     pub fn scroll_viewport_to_top(&mut self) {
+        if self.terminal.is_alt_screen_active() {
+            self.viewport_offset_lines = 0;
+            return;
+        }
         self.viewport_offset_lines = self.max_viewport_offset_lines();
     }
 
@@ -410,6 +420,9 @@ impl WeztermTerminalCoreAdapter {
     }
 
     fn max_viewport_offset_lines(&self) -> usize {
+        if self.terminal.is_alt_screen_active() {
+            return 0;
+        }
         let size = self.terminal.get_size();
         self.terminal
             .screen()
@@ -418,6 +431,10 @@ impl WeztermTerminalCoreAdapter {
     }
 
     fn clamp_viewport_offset(&mut self) {
+        if self.terminal.is_alt_screen_active() {
+            self.viewport_offset_lines = 0;
+            return;
+        }
         self.viewport_offset_lines = self
             .viewport_offset_lines
             .min(self.max_viewport_offset_lines());

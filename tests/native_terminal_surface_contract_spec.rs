@@ -62,6 +62,18 @@ fn terminal_session_host_source_exposes_native_render_contract() {
         "terminal session host should expose snapped terminal-content viewport helpers so the host-owned terminal body can fill the pane even when the current grid is temporarily narrower than the available viewport"
     );
     assert!(
+        host_source.contains("function preferred-terminal-content-width() -> length")
+            && host_source.contains("function preferred-terminal-content-height() -> length"),
+        "terminal session host should expose preferred terminal-content helpers so PTY resize math can keep using the full live viewport contract even before the session grid catches up to the new pane size"
+    );
+    assert!(
+        host_source.contains("out property <length> preferred-surface-width: root.preferred-terminal-content-width();")
+            && host_source.contains("out property <length> preferred-surface-height: root.preferred-terminal-content-height();")
+            && host_source.contains("out property <int> preferred-terminal-rows: root.preferred-terminal-row-count();")
+            && host_source.contains("out property <int> preferred-terminal-cols: root.preferred-terminal-col-count();"),
+        "terminal session host should export preferred surface dimensions plus preferred rows/cols so bootstrap can thread the live viewport contract into initial and subsequent PTY winsize updates"
+    );
+    assert!(
         host_source.contains("clip: true;"),
         "terminal session host should clip the terminal surface frame so stale grid geometry cannot momentarily paint over sibling UI during software-surface resize races"
     );
@@ -127,6 +139,14 @@ fn terminal_session_host_source_exposes_native_render_contract() {
         host_source.contains("width: parent.width;")
             && host_source.contains("height: parent.height;"),
         "input capture inside the clipped viewport should track the visible terminal box, not the stale full-grid extent"
+    );
+    assert!(
+        host_source.contains("function preferred-terminal-row-count() -> int")
+            && host_source.contains("function preferred-terminal-col-count() -> int")
+            && host_source.contains("(root.preferred-terminal-content-height() / 1px) / (root.terminal-cell-height / 1px)")
+            && host_source.contains("(root.preferred-terminal-content-width() / 1px) / (root.terminal-cell-width / 1px)")
+            && host_source.contains("root.surface-resize-requested(\n                root.terminal-viewport-rows(),\n                root.terminal-viewport-cols(),"),
+        "surface resize requests should be derived from the preferred snapped content rect so PTY rows/cols track the exact live viewport contract rather than the stale session grid"
     );
 }
 
@@ -230,6 +250,31 @@ fn workspace_and_window_sources_thread_native_render_contract() {
         app_window_source
             .contains("in-out property <int> workspace-session-native-frame-token: 0;"),
         "app window should store the workspace terminal native frame token"
+    );
+}
+
+#[test]
+fn bootstrap_and_ssh_runtime_sources_thread_live_terminal_viewport_defaults() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let runtime_source = fs::read_to_string("src/app/ssh/runtime.rs").expect("read ssh runtime");
+    let pump_source = fs::read_to_string("src/app/ssh/runtime/pump.rs").expect("read ssh pump");
+
+    assert!(
+        bootstrap_source.contains("terminal_defaults.set_viewport_size("),
+        "bootstrap should publish the live terminal viewport contract into TerminalRuntimeDefaults whenever the host computes a new rows/cols resize"
+    );
+    assert!(
+        runtime_source.contains("terminal_defaults.viewport_rows()")
+            && runtime_source.contains("terminal_defaults.viewport_cols()")
+            && runtime_source.contains("terminal_defaults.viewport_pixel_width()")
+            && runtime_source.contains("terminal_defaults.viewport_pixel_height()"),
+        "SSH runtime should source its initial PTY request from the live viewport defaults instead of hard-coding 80x24"
+    );
+    assert!(
+        runtime_source.contains("pixel_width")
+            && runtime_source.contains("pixel_height")
+            && pump_source.contains(".window_change(cols, rows, pixel_width, pixel_height)"),
+        "subsequent SSH window_change resizes should keep using the live viewport pixel contract instead of falling back to a synthetic 8x16 cell estimate"
     );
 }
 

@@ -177,6 +177,10 @@ export component TerminalSessionHost inherits Rectangle {
     out property <length> native-surface-y: root.terminal-surface-origin-y();
     out property <length> native-surface-width: root.snapped-terminal-content-width();
     out property <length> native-surface-height: root.snapped-terminal-content-height();
+    out property <length> preferred-surface-width: root.preferred-terminal-content-width();
+    out property <length> preferred-surface-height: root.preferred-terminal-content-height();
+    out property <int> preferred-terminal-rows: root.preferred-terminal-row-count();
+    out property <int> preferred-terminal-cols: root.preferred-terminal-col-count();
     callback text-input(string);
     callback key-input(string, bool, bool, bool);
     callback surface-resize-requested(int, int);
@@ -320,6 +324,36 @@ export component TerminalSessionHost inherits Rectangle {
             return 0px;
         }
         return root.snap-length-to-device-pixel(root.terminal-content-height());
+    }
+
+    function preferred-terminal-content-width() -> length {
+        return root.snap-length-to-device-pixel(root.terminal-content-width());
+    }
+
+    function preferred-terminal-content-height() -> length {
+        return root.snap-length-to-device-pixel(root.terminal-content-height());
+    }
+
+    function preferred-terminal-row-count() -> int {
+        return max(
+            1,
+            (root.preferred-terminal-content-height() / 1px) / (root.terminal-cell-height / 1px),
+        );
+    }
+
+    function preferred-terminal-col-count() -> int {
+        return max(
+            1,
+            (root.preferred-terminal-content-width() / 1px) / (root.terminal-cell-width / 1px),
+        );
+    }
+
+    function terminal-viewport-rows() -> int {
+        return root.preferred-terminal-row-count();
+    }
+
+    function terminal-viewport-cols() -> int {
+        return root.preferred-terminal-col-count();
     }
 
     function scrollbar-visible() -> bool {
@@ -539,8 +573,8 @@ export component TerminalSessionHost inherits Rectangle {
     function emit-surface-resize() {
         if root.mode == "terminal" {
             root.surface-resize-requested(
-                max(1, (root.terminal-content-height() / 1px) / (root.terminal-cell-height / 1px)),
-                max(1, (root.terminal-content-width() / 1px) / (root.terminal-cell-width / 1px)),
+                root.terminal-viewport-rows(),
+                root.terminal-viewport-cols(),
             );
         }
     }

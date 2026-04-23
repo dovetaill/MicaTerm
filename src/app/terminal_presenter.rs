@@ -687,8 +687,16 @@ fn prepare_native_terminal_frame_with_diagnostics(
     let mut frame_model =
         TerminalModelFrame::from_surface(surface, context.previous_frame.as_ref());
     let model_frame_us = model_started.elapsed().as_micros() as u64;
-    let semantic_overlays = detect_output_block_overlays(&frame_model);
-    let semantic_input_overlays = detect_input_line_overlays(&frame_model);
+    let semantic_overlays = if frame_model.alternate_screen_active {
+        Vec::new()
+    } else {
+        detect_output_block_overlays(&frame_model)
+    };
+    let semantic_input_overlays = if frame_model.alternate_screen_active {
+        Vec::new()
+    } else {
+        detect_input_line_overlays(&frame_model)
+    };
     let semantic_annotations = analyze_semantic_annotations_with_settings(
         &frame_model,
         TerminalSemanticSettings {
@@ -1534,6 +1542,78 @@ mod tests {
         assert_eq!(
             diagnostics.dirty_row_count, 1,
             "search-query-driven highlight changes should stay scoped to affected visible rows"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn prepare_native_terminal_frame_drops_semantic_payloads_in_alternate_screen() -> Result<()> {
+        let session_id = Uuid::new_v4();
+        let mut surface = SurfaceState::from_visible_lines(
+            session_id,
+            1,
+            2,
+            48,
+            vec!["[dev@mica ~]$ cargo test".into(), "ERROR https://example.com".into()],
+        );
+        surface.alternate_screen_active = true;
+        surface.visible_rows = vec![
+            TerminalRowState {
+                index: 0,
+                text: "[dev@mica ~]$ cargo test".into(),
+                wrapped: false,
+            },
+            TerminalRowState {
+                index: 1,
+                text: "ERROR https://example.com".into(),
+                wrapped: false,
+            },
+        ];
+
+        let mut font_system = CountingFontSystem::new()?;
+        let loaded_font = font_system.load_font(&FontRequest::default())?;
+        let mut shaper = TerminalTextShaper;
+        let mut renderer = WgpuTerminalRenderer::new_for_test()?;
+        let mut previous_frame = None;
+        let mut previous_shaped_rows = None;
+        let mut shaped_row_cache = PresenterShapedRowCache::default();
+
+        let mut context = NativeFramePreparationContext::new(
+            &mut font_system,
+            &mut shaper,
+            &mut renderer,
+            &loaded_font,
+            &mut previous_frame,
+            &mut previous_shaped_rows,
+            &mut shaped_row_cache,
+        );
+
+        let frame = prepare_native_terminal_frame(
+            &mut context,
+            &surface,
+            TerminalPresentationOptions::default(),
+        )?;
+
+        assert!(
+            frame.presentable_frame.semantic_overlays.is_empty(),
+            "alternate-screen frames should not carry shell output block overlays into native presentation"
+        );
+        assert!(
+            frame.presentable_frame.semantic_input_overlays.is_empty(),
+            "alternate-screen frames should not carry shell input overlays into native presentation"
+        );
+        assert!(
+            frame.presentable_frame.semantic_spans.is_empty(),
+            "alternate-screen frames should not carry shell semantic spans into native presentation"
+        );
+        assert!(
+            frame.presentable_frame.command_blocks.is_empty(),
+            "alternate-screen frames should clear shell command block metadata"
+        );
+        assert!(
+            frame.presentable_frame.overview_markers.is_empty(),
+            "alternate-screen frames should clear shell overview markers"
         );
 
         Ok(())

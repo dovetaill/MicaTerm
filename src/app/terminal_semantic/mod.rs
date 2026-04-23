@@ -92,6 +92,10 @@ pub fn analyze_semantic_annotations_with_settings(
     frame: &TerminalModelFrame,
     settings: TerminalSemanticSettings,
 ) -> SemanticAnnotationSet {
+    if frame.alternate_screen_active {
+        return SemanticAnnotationSet::default();
+    }
+
     let mut spans = detect_input_semantic_spans(frame);
     if !settings.input_highlighting_enabled {
         spans.clear();

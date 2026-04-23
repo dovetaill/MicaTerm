@@ -206,6 +206,33 @@ fn semantic_input_overlay_is_disabled_when_tui_mouse_grab_is_active() {
 }
 
 #[test]
+fn alternate_screen_disables_local_scrollback_for_wezterm_core() {
+    let mut session = TerminalSession::new(4, 20);
+
+    session.apply_remote_bytes(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n");
+    session.apply_remote_bytes(b"\x1b[?1049h");
+    let before = session.surface_state(Uuid::new_v4());
+
+    session.scroll_viewport_lines(3);
+    let after = session.surface_state(Uuid::new_v4());
+
+    assert!(before.alternate_screen_active);
+    assert!(after.alternate_screen_active);
+    assert_eq!(
+        after.viewport_offset_lines, 0,
+        "alt-screen TUI should stay anchored to the live viewport bottom instead of reusing shell scrollback offsets"
+    );
+    assert_eq!(
+        after.viewport_max_offset_lines, 0,
+        "alt-screen TUI should not expose a local scrollback range that lets the viewport drift below the live screen"
+    );
+    assert_eq!(
+        after.visible_lines, before.visible_lines,
+        "local scroll gestures should be ignored while the alternate screen owns the full viewport"
+    );
+}
+
+#[test]
 fn renderer_migration_docs_describe_windows_native_status_and_native_only_shipping_path() {
     let readme = fs::read_to_string("readme.md").expect("read readme");
     let verification = fs::read_to_string("verification.md").expect("read verification");
