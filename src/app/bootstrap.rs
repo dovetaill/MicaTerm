@@ -6791,6 +6791,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     });
 
     let state = Rc::clone(&view_model);
+    window.on_workspace_session_open_url_hover_query(move |row, col| {
+        let state = state.borrow();
+        workspace_terminal::active_workspace_has_openable_url(&state, row, col)
+    });
+
+    let state = Rc::clone(&view_model);
     window.on_workspace_session_open_url_requested(move |row, col| {
         let state = state.borrow();
         workspace_terminal::open_active_workspace_url(&state, row, col)

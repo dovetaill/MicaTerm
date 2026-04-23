@@ -38,6 +38,36 @@ fn shape_row_with_mock_font(
 }
 
 #[test]
+fn terminal_shaper_defaults_to_non_ligatured_terminal_runs() -> anyhow::Result<()> {
+    let row = build_row(
+        "-- ---> != =>"
+            .chars()
+            .enumerate()
+            .map(|(index, ch)| TerminalModelCell {
+                row: 0,
+                col: index as u32,
+                width: 1,
+                text: ch.to_string(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            })
+            .collect(),
+        "-- ---> != =>",
+    );
+
+    let shaped = shape_row_with_mock_font(&row)?;
+
+    assert!(
+        shaped.runs.iter().all(|run| !run.allow_ligatures),
+        "terminal layout should default to non-ligatured shaping so permission bits, prompts, and shell operators keep their literal glyph forms"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn harfbuzz_layout_keeps_ascii_prompt_in_one_run_when_style_is_consistent() -> anyhow::Result<()> {
     let row = build_row(
         vec![

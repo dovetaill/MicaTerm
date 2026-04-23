@@ -1,7 +1,7 @@
 use std::fs;
 
 #[test]
-fn terminal_host_exposes_command_block_and_overview_marker_contracts() {
+fn terminal_host_keeps_command_block_projection_without_persistent_left_gutter_strips() {
     let host = fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read host");
     let workspace =
         fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
@@ -15,11 +15,11 @@ fn terminal_host_exposes_command_block_and_overview_marker_contracts() {
             && host.contains(
                 "in property <[TerminalOverviewMarkerRow]> session-overview-markers: [];"
             )
-            && host.contains("command-block-gutter := Rectangle {")
             && host.contains("overview-ruler := Rectangle {")
-            && host.contains("for block in root.session-command-blocks : Rectangle {")
-            && host.contains("for marker in root.session-overview-markers : Rectangle {"),
-        "terminal host should expose narrow command-block gutter and overview ruler contracts instead of leaving command status and failures trapped inside Rust-only semantic payloads"
+            && host.contains("for marker in root.session-overview-markers : Rectangle {")
+            && !host.contains("command-block-gutter := Rectangle {")
+            && !host.contains("for block in root.session-command-blocks : Rectangle {"),
+        "terminal host should keep command block data in the projection contract while removing the persistent left-edge status strips that read like colored rendering artifacts"
     );
 
     assert!(

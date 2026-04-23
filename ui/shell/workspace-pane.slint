@@ -90,6 +90,7 @@ export component WorkspacePane inherits Rectangle {
     callback surface-resize-requested(int, int);
     callback normalize-hit-col(int, int) -> int;
     callback normalize-selection-hit-col(int, int) -> int;
+    callback open-url-hover-query(int, int) -> bool;
     callback open-url-requested(int, int) -> bool;
     callback copy-selection-requested(int, int, int, int);
     callback selection-changed();
@@ -240,6 +241,10 @@ export component WorkspacePane inherits Rectangle {
 
                 normalize-selection-hit-col(row, col) => {
                     return root.normalize-selection-hit-col(row, col);
+                }
+
+                open-url-hover-query(row, col) => {
+                    return root.open-url-hover-query(row, col);
                 }
 
                 open-url-requested(row, col) => {

@@ -387,7 +387,7 @@ impl TextShapingRequest {
         Self {
             text: text.into(),
             feature_set: OpenTypeFeatureSet::common_terminal_features(),
-            allow_ligatures: true,
+            allow_ligatures: false,
         }
     }
 }

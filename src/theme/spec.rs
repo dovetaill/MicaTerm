@@ -289,7 +289,7 @@ impl AppThemeSpec {
         let semantic = self.semantic;
         match role {
             SemanticStyleRole::InputPrompt => SemanticRoleStyle {
-                foreground: shell.text_secondary,
+                foreground: terminal.foreground.default,
                 background: None,
                 bold: false,
                 underline: false,

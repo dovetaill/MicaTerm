@@ -756,6 +756,10 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "AppWindow should expose a terminal URL-open callback so Ctrl+left-click can activate browser-safe http/https links without routing through normal selection or mouse-reporting paths"
     );
     assert!(
+        app_window.contains("callback workspace-session-open-url-hover-query(int, int) -> bool;"),
+        "AppWindow should expose a terminal URL-hover query callback so the terminal host can show a pointer cursor and hint copy for browser-safe links before Ctrl+left-click activation"
+    );
+    assert!(
         app_window.contains("in-out property <int> workspace-session-viewport-offset-lines: 0;"),
         "AppWindow should expose the projected terminal viewport offset"
     );
@@ -845,6 +849,11 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "WorkspacePane should forward terminal URL-open requests back to the app shell so Ctrl+left-click stays on a dedicated browser-link path"
     );
     assert!(
+        workspace_pane.contains("callback open-url-hover-query(int, int) -> bool;")
+            && workspace_pane.contains("open-url-hover-query(row, col) => {\n                    return root.open-url-hover-query(row, col);\n                }"),
+        "WorkspacePane should forward terminal URL-hover queries back to the app shell so the terminal host can surface a pointer cursor and hover hint without opening the link prematurely"
+    );
+    assert!(
         workspace_pane.contains("normalize-hit-col(row, col) =>"),
         "WorkspacePane should forward wide-char cell-hit normalization requests back to the app shell"
     );
@@ -898,8 +907,19 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should expose a URL-open callback so Ctrl+left-click can activate browser-safe links without introducing persistent underline chrome"
     );
     assert!(
+        terminal_host.contains("callback open-url-hover-query(int, int) -> bool;"),
+        "TerminalSessionHost should expose a URL-hover query callback so browser-safe links can advertise Ctrl+left-click affordances before activation"
+    );
+    assert!(
         terminal_host.contains("event.modifiers.control && root.open-url-requested(row, col)"),
         "TerminalSessionHost should gate Ctrl+left-click through a dedicated URL-open callback before entering normal selection flow"
+    );
+    assert!(
+        terminal_host.contains(
+            "mouse-cursor: root.open-url-hover-active ? MouseCursor.pointer : MouseCursor.text;"
+        ) && terminal_host.contains("TitlebarTooltip {")
+            && terminal_host.contains("Hold Ctrl + Left Click to open link"),
+        "TerminalSessionHost should surface browser-safe links with a pointer cursor and explicit Ctrl+left-click tooltip instead of leaving link activation undiscoverable"
     );
     assert!(
         terminal_host.contains("callback scroll-thumb-drag-requested(float);"),

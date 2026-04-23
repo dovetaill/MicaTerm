@@ -264,11 +264,16 @@ fn semantic_pipeline_projects_terminal_search_matches_independently_of_output_ru
 fn premium_default_theme_maps_roles_to_product_grade_semantic_styles() {
     let theme = app_theme_spec(ThemeMode::Dark, ThemeVariant::PremiumDefault);
 
+    let prompt = theme.semantic_style(SemanticStyleRole::InputPrompt);
     let command = theme.semantic_style(SemanticStyleRole::InputCommand);
     let url = theme.semantic_style(SemanticStyleRole::OutputUrl);
     let error = theme.semantic_style(SemanticStyleRole::OutputSeverityError);
     let running = theme.semantic_style(SemanticStyleRole::CommandStatusRunning);
 
+    assert_eq!(
+        prompt.foreground, theme.terminal.foreground.default,
+        "active prompt text should stay at terminal-body readability instead of falling back to the shell secondary text ladder"
+    );
     assert_eq!(command.foreground, theme.semantic.input_command);
     assert!(
         !url.underline,
@@ -461,6 +466,27 @@ fn semantic_pipeline_supports_focused_output_rules_and_separate_overview_marker_
     assert!(
         annotations.overview_markers.is_empty(),
         "overview markers should be independently suppressible while gutter decorations stay active"
+    );
+}
+
+#[test]
+fn semantic_pipeline_does_not_treat_non_browser_uri_schemes_as_underlined_line_references() {
+    let frame = semantic_model_frame(&["udp://:38013 tcp://:38013 relay+tls://77.111.110.52:3801"]);
+    let annotations = analyze_semantic_annotations(&frame);
+
+    assert!(
+        !annotations
+            .spans
+            .iter()
+            .any(|span| span.role == SemanticStyleRole::OutputLineReference),
+        "non-browser URI schemes should not be misclassified as file:line references just because they contain `://`"
+    );
+    assert!(
+        !annotations
+            .spans
+            .iter()
+            .any(|span| span.role == SemanticStyleRole::OutputUrl),
+        "non-browser URI schemes should not be promoted into browser-safe URL styling"
     );
 }
 

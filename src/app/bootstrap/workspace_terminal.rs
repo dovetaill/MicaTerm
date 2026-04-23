@@ -626,6 +626,18 @@ pub(super) fn open_active_workspace_url(state: &ShellViewModel, row: i32, col: i
     true
 }
 
+pub(super) fn active_workspace_has_openable_url(
+    state: &ShellViewModel,
+    row: i32,
+    col: i32,
+) -> bool {
+    let Some(surface) = state.active_workspace_terminal_surface() else {
+        return false;
+    };
+
+    openable_url_at_surface(surface, row, col).is_some()
+}
+
 pub(super) fn openable_url_at_surface(
     surface: &TerminalSurfaceState,
     row: i32,

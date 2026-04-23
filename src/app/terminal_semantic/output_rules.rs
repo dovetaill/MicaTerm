@@ -426,6 +426,10 @@ fn is_line_reference(token: &str) -> bool {
 }
 
 fn line_reference_prefix(prefix: &str) -> bool {
+    if prefix.contains("://") {
+        return false;
+    }
+
     prefix.contains('/')
         || prefix.contains('\\')
         || prefix.ends_with(".rs")
