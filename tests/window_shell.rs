@@ -134,14 +134,14 @@ fn semantic_surface_tokens_lock_the_approved_dual_theme_values() {
     let content = std::fs::read_to_string("ui/theme/tokens.slint").unwrap();
 
     for line in [
-        "out property <brush> window-surface: dark-mode ? #171c24 : #f6f8fb;",
-        "out property <brush> titlebar-surface: dark-mode ? #1b212be8 : #fbfcfeee;",
-        "out property <brush> activity-surface: dark-mode ? #151b24 : #f2f5f9;",
-        "out property <brush> assets-surface: dark-mode ? #181f29 : #f7f9fc;",
-        "out property <brush> workspace-surface: dark-mode ? #10151d : #ffffff;",
-        "out property <brush> inspector-surface: panel-surface;",
-        "out property <brush> divider-subtle: dark-mode ? #ffffff12 : #0f172a14;",
-        "out property <brush> divider-strong: dark-mode ? #ffffff24 : #0f172a26;",
+        "out property <brush> window-surface: dark-mode ? #141b23 : #f2f5f8;",
+        "out property <brush> titlebar-surface: titlebar-background;",
+        "out property <brush> activity-surface: sidebar-background;",
+        "out property <brush> assets-surface: sidebar-panel-background;",
+        "out property <brush> workspace-surface: terminal-frame-background;",
+        "out property <brush> inspector-surface: right-panel-background;",
+        "out property <brush> divider-subtle: separator;",
+        "out property <brush> divider-strong: hairline;",
     ] {
         assert!(
             content.contains(line),

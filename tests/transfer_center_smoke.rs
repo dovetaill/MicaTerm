@@ -787,13 +787,13 @@ fn conflict_modal_light_theme_tokens_stay_soft_and_fluent() {
 
     assert!(
         tokens.contains(
-            "out property <brush> conflict-dialog-surface: dark-mode ? #1a2330 : #f2f6fb;"
+            "out property <brush> conflict-dialog-surface: dark-mode ? #1a2430 : #f6f9fc;"
         ) && tokens.contains(
-            "out property <brush> conflict-dialog-path-surface: dark-mode ? #101822 : #f7faff;"
+            "out property <brush> conflict-dialog-path-surface: dark-mode ? #111923 : #f7faff;"
         ) && tokens.contains(
-            "out property <brush> conflict-dialog-border: dark-mode ? #ffffff2d : #8ea4bf36;"
+            "out property <brush> conflict-dialog-border: dark-mode ? #ffffff24 : #8ea4bf30;"
         ) && tokens.contains(
-            "out property <brush> conflict-dialog-glow: dark-mode ? #7da8d914 : #7c9fc90c;"
+            "out property <brush> conflict-dialog-glow: dark-mode ? #7d9bc210 : #587daa0b;"
         ),
         "light-theme conflict dialog tokens should stay soft and elevated instead of drifting into stark white cards or noisy blue glow"
     );

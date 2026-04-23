@@ -479,7 +479,7 @@ fn tabbar_sizes_workspace_tabs_from_title_content_instead_of_even_stretch() {
         "tab row should keep unused width in a trailing spacer instead of stretching the last tab"
     );
     assert!(
-        tabbar.contains("background: ThemeTokens.tabbar-surface;"),
+        tabbar.contains("background: ThemeTokens.tabbar-background;"),
         "tab strip should sit on the dedicated semantic tabbar surface instead of the plain editor surface"
     );
     assert!(

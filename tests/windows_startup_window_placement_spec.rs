@@ -18,7 +18,7 @@ fn startup_window_bounds_use_slint_position_before_event_loop() {
         "the vendored Slint winit adapter should expose the buffered window position hook that works before the native window is active"
     );
     assert!(
-        bootstrap.contains("window.window().set_position("),
+        bootstrap.contains(".set_position(slint::WindowPosition::Physical("),
         "startup placement should go through Slint's window position API so the requested bounds survive pre-run window creation"
     );
     assert!(
