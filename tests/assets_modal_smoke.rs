@@ -136,6 +136,29 @@ fn snippet_modal_callback_contract_exposes_name_script_and_package_fields() {
 }
 
 #[test]
+fn snippet_modal_contract_routes_package_picker_through_dialog_select_field() {
+    let snippet_modal =
+        fs::read_to_string("ui/components/assets-snippet-modal.slint").expect("read snippet modal");
+
+    assert!(
+        snippet_modal.contains("DialogSelectField"),
+        "snippet modal should use the shared modal-local select trigger for package selection"
+    );
+    assert!(
+        !snippet_modal.contains("ComboBox {"),
+        "snippet modal should no longer rely on the stock ComboBox popup inside the modal body"
+    );
+    assert!(
+        snippet_modal.contains("\"package\""),
+        "snippet modal should continue emitting the stable package field id"
+    );
+    assert!(
+        snippet_modal.contains("value == \"No Package\" ? \"\" : value"),
+        "snippet modal should preserve the No Package -> empty-string mapping"
+    );
+}
+
+#[test]
 fn snippet_package_modal_visibility_round_trips_through_window_properties() {
     i_slint_backend_testing::init_no_event_loop();
 

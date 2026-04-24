@@ -1,6 +1,7 @@
-import { ComboBox } from "std-widgets.slint";
 import {
     DialogActionButton,
+    DialogSelectField,
+    DialogSelectPopup,
     DialogFormSection,
     DialogTextField,
     ModalBodyScrollArea,
@@ -26,13 +27,54 @@ export component AssetsSnippetModal inherits Rectangle {
     callback drag-moved(length, length);
     callback drag-ended();
     callback focus-restore-requested();
+    out property <bool> select-overlay-open: root.package-popup-open;
     private property <length> header-height: ThemeTokens.modal-header-height + 10px;
     private property <length> footer-height: root.validation-message == "" ? ThemeTokens.modal-footer-min-height : 118px;
+    private property <bool> package-popup-open: false;
+    private property <length> package-popup-x: 0px;
+    private property <length> package-popup-y: 0px;
+    private property <length> package-popup-width: 0px;
+    private property <length> package-popup-max-height: 240px;
+    private property <int> package-popup-highlighted-index: -1;
+    private property <int> package-popup-focus-sequence: 0;
+    private property <int> package-select-focus-sequence: 0;
 
     background: transparent;
 
     public function focus-input() {
         name-field.focus-input();
+    }
+
+    public function dismiss-open-select() {
+        if !root.package-popup-open {
+            return;
+        }
+
+        root.package-popup-open = false;
+        root.package-popup-highlighted-index = -1;
+        root.package-select-focus-sequence += 1;
+    }
+
+    function package-popup-preferred-height() -> length {
+        return min(240px, 8px + root.package-options.length * 32px + 8px);
+    }
+
+    function open-package-select(anchor-x: length, anchor-y: length, anchor-width: length) {
+        if root.package-popup-open {
+            root.dismiss-open-select();
+            return;
+        }
+
+        root.package-popup-x = anchor-x;
+        root.package-popup-y = anchor-y + 34px + 6px;
+        root.package-popup-width = anchor-width;
+        root.package-popup-max-height = min(
+            root.package-popup-preferred-height(),
+            max(120px, footer.y - root.package-popup-y - 8px)
+        );
+        root.package-popup-highlighted-index = 0;
+        root.package-popup-open = true;
+        root.package-popup-focus-sequence += 1;
     }
 
     changed focus-sequence => {
@@ -133,14 +175,21 @@ export component AssetsSnippetModal inherits Rectangle {
                                 overflow: elide;
                             }
 
-                            ComboBox {
+                            package-select := DialogSelectField {
                                 width: parent.width;
                                 height: 34px;
-                                model: root.package-options;
-                                current-value: root.package-selected-label;
+                                label: "Package";
+                                focus-sequence: root.package-select-focus-sequence;
+                                open: root.package-popup-open;
+                                selected-label: root.package-selected-label;
+                                placeholder-text: "No Package";
 
-                                selected(value) => {
-                                    root.draft-changed("package", value == "No Package" ? "" : value);
+                                toggle-requested => {
+                                    root.open-package-select(
+                                        self.absolute-position.x - root.absolute-position.x,
+                                        self.absolute-position.y - root.absolute-position.y,
+                                        self.width
+                                    );
                                 }
                             }
 
@@ -224,6 +273,48 @@ export component AssetsSnippetModal inherits Rectangle {
                         root.confirm-requested();
                     }
                 }
+            }
+        }
+
+        if root.package-popup-open : package-popup-dismiss-layer := TouchArea {
+            x: 0px;
+            y: header.height;
+            width: parent.width;
+            height: parent.height - header.height;
+
+            clicked => {
+                root.dismiss-open-select();
+            }
+        }
+
+        if root.package-popup-open : package-popup := DialogSelectPopup {
+            x: root.package-popup-x;
+            y: root.package-popup-y;
+            width: root.package-popup-width;
+            open: root.package-popup-open;
+            options: root.package-options;
+            focus-sequence: root.package-popup-focus-sequence;
+            highlighted-index: root.package-popup-highlighted-index;
+            popup-max-height: root.package-popup-max-height;
+
+            option-selected(value) => {
+                root.draft-changed("package", value == "No Package" ? "" : value);
+                root.dismiss-open-select();
+            }
+
+            dismiss-requested => {
+                root.dismiss-open-select();
+            }
+
+            move-highlight-requested(delta) => {
+                if root.package-options.length == 0 {
+                    return;
+                }
+
+                root.package-popup-highlighted-index = max(
+                    0,
+                    min(root.package-options.length - 1, root.package-popup-highlighted-index + delta)
+                );
             }
         }
     }

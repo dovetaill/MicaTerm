@@ -183,7 +183,7 @@ grep -F 'export component AssetsSnippetPackageModal inherits Rectangle {' "$SNIP
 grep -F 'export component AssetsFolderCreateModal inherits Rectangle {' "$FOLDER_MODAL" >/dev/null
 grep -F 'export component AssetsSshConnectionModal inherits Rectangle {' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> dialog-title: "New Snippet";' "$SNIPPET_MODAL" >/dev/null
-grep -F 'import { ComboBox } from "std-widgets.slint";' "$SNIPPET_MODAL" >/dev/null
+grep -F 'DialogSelectField {' "$SNIPPET_MODAL" >/dev/null
 grep -F 'ModalBodyScrollArea,' "$SNIPPET_MODAL" >/dev/null
 grep -F 'ModalFooterBar,' "$SNIPPET_MODAL" >/dev/null
 grep -F 'ModalHeaderBar,' "$SNIPPET_MODAL" >/dev/null
@@ -196,9 +196,13 @@ grep -F 'text: "Package";' "$SNIPPET_MODAL" >/dev/null
 grep -F 'text: "Package name";' "$SNIPPET_PACKAGE_MODAL" >/dev/null
 grep -F 'body := ModalBodyScrollArea {' "$SNIPPET_MODAL" >/dev/null
 grep -F 'content-column := Rectangle {' "$SNIPPET_MODAL" >/dev/null
-grep -F 'ComboBox {' "$SNIPPET_MODAL" >/dev/null
-grep -F 'model: root.package-options;' "$SNIPPET_MODAL" >/dev/null
-grep -F 'current-value: root.package-selected-label;' "$SNIPPET_MODAL" >/dev/null
+if grep -F 'ComboBox {' "$SNIPPET_MODAL" >/dev/null; then
+  echo "snippet modal must not keep stock ComboBox popups once modal-local selects land" >&2
+  exit 1
+fi
+grep -F 'selected-label: root.package-selected-label;' "$SNIPPET_MODAL" >/dev/null
+grep -F 'root.package-options' "$SNIPPET_MODAL" >/dev/null
+grep -F 'value == "No Package" ? "" : value' "$SNIPPET_MODAL" >/dev/null
 grep -F 'footer := ModalFooterBar {' "$SNIPPET_MODAL" >/dev/null
 ! grep -F 'package-input := TextInput {' "$SNIPPET_MODAL" >/dev/null
 grep -F 'callback draft-changed(string, string);' "$SNIPPET_MODAL" >/dev/null

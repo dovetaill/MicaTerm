@@ -916,6 +916,20 @@ fn ssh_modal_short_viewport_keeps_primary_auth_field_actionable() {
 }
 
 #[test]
+fn snippet_modal_source_uses_dialog_select_field_for_package_picker() {
+    let source = fs::read_to_string("ui/components/assets-snippet-modal.slint").unwrap();
+
+    assert!(
+        source.contains("DialogSelectField"),
+        "snippet modal should switch its package picker to the shared dialog select primitive"
+    );
+    assert!(
+        !source.contains("ComboBox {"),
+        "snippet modal should not keep stock ComboBox popups inside modal content"
+    );
+}
+
+#[test]
 fn sftp_conflict_modal_renders_info_cards_scope_card_and_footer_actions() {
     let modal = blocking_modal_rect(520, 396);
     let buffer = render_app(|app| {

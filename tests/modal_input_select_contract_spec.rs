@@ -94,3 +94,18 @@ fn ssh_modal_contract_uses_dialog_select_field_instead_of_combobox() {
         "ssh modal should stop using the stock ComboBox popup inside modal scroll content"
     );
 }
+
+#[test]
+fn snippet_modal_contract_uses_dialog_select_field_for_package_picker() {
+    let source = fs::read_to_string("ui/components/assets-snippet-modal.slint")
+        .expect("read snippet modal source");
+
+    assert!(
+        source.contains("DialogSelectField"),
+        "snippet modal should consume the shared modal-local select trigger for the package picker"
+    );
+    assert!(
+        !source.contains("ComboBox {"),
+        "snippet modal should stop using the stock ComboBox popup inside modal scroll content"
+    );
+}
