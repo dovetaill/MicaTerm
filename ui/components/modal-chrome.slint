@@ -71,6 +71,32 @@ component DialogIconButton inherits Rectangle {
     }
 }
 
+export component DialogFieldIconAction inherits Rectangle {
+    in property <image> icon-source;
+    in property <string> action-label: "";
+    in property <bool> enabled: true;
+    out property <bool> has-hover: icon-action.has-hover;
+    out property <bool> has-focus: icon-action.has-focus;
+    callback clicked();
+
+    width: 28px;
+    height: 28px;
+    background: transparent;
+    forward-focus: icon-action;
+
+    icon-action := DialogIconButton {
+        width: parent.width;
+        height: parent.height;
+        icon-source: root.icon-source;
+        action-label: root.action-label;
+        enabled: root.enabled;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
 export component DialogActionButton inherits Rectangle {
     in property <string> label: "";
     in property <bool> primary: false;
