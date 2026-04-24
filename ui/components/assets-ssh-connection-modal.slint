@@ -1,8 +1,9 @@
-import { ComboBox } from "std-widgets.slint";
 import {
     DialogActionButton,
     DialogFormSection,
     DialogInlineBanner,
+    DialogSelectField,
+    DialogSelectPopup,
     DialogSectionCard,
     DialogSegmentButton,
     DialogTextField,
@@ -56,11 +57,28 @@ export component AssetsSshConnectionModal inherits Rectangle {
     callback drag-moved(length, length);
     callback drag-ended();
     callback focus-restore-requested();
+    out property <bool> select-overlay-open: root.open-select-id != "";
 
     private property <bool> compact-layout: root.width < 620px;
     private property <bool> dense-layout: root.height < 620px;
     private property <image> eye-icon: @image-url("../../assets/icons/fluent/eye-20-regular.svg");
     private property <image> eye-off-icon: @image-url("../../assets/icons/fluent/eye-off-20-regular.svg");
+    private property <string> open-select-id: "";
+    private property <[string]> open-select-options: [];
+    private property <length> select-popup-x: 0px;
+    private property <length> select-popup-y: 0px;
+    private property <length> select-popup-width: 0px;
+    private property <length> select-popup-max-height: 0px;
+    private property <bool> select-popup-opens-upward: false;
+    private property <int> select-popup-highlighted-index: -1;
+    private property <int> select-popup-focus-sequence: 0;
+    private property <int> auth-source-select-focus-sequence: 0;
+    private property <int> keychain-identity-select-focus-sequence: 0;
+    private property <int> proxy-type-select-focus-sequence: 0;
+    private property <int> proxy-ssh-select-focus-sequence: 0;
+    private property <length> select-popup-gap: 6px;
+    private property <length> select-popup-option-height: 32px;
+    private property <length> select-popup-default-max-height: 240px;
     private property <length> footer-height: root.feedback-message != "" || root.validation-message != ""
         ? root.dense-layout ? 114px : 132px
         : ThemeTokens.modal-footer-min-height;
@@ -69,6 +87,68 @@ export component AssetsSshConnectionModal inherits Rectangle {
 
     public function focus-input() {
         modal-focus.focus();
+    }
+
+    public function dismiss-open-select() {
+        if root.open-select-id == "" {
+            return;
+        }
+
+        if root.open-select-id == "auth_source" {
+            root.auth-source-select-focus-sequence += 1;
+        } else if root.open-select-id == "keychain_identity_label" {
+            root.keychain-identity-select-focus-sequence += 1;
+        } else if root.open-select-id == "proxy_type" {
+            root.proxy-type-select-focus-sequence += 1;
+        } else if root.open-select-id == "proxy_ssh_asset_label" {
+            root.proxy-ssh-select-focus-sequence += 1;
+        } else {
+            modal-focus.focus();
+        }
+
+        root.open-select-id = "";
+        root.open-select-options = [];
+        root.select-popup-highlighted-index = -1;
+        root.select-popup-max-height = 0px;
+    }
+
+    function popup-preferred-height(option-count: int) -> length {
+        return min(
+            root.select-popup-default-max-height,
+            8px + option-count * root.select-popup-option-height + 8px
+        );
+    }
+
+    function open-select(
+        select-id: string,
+        anchor-x: length,
+        anchor-y: length,
+        anchor-width: length,
+        option-count: int,
+        highlighted-index: int,
+    ) {
+        if root.open-select-id == select-id {
+            root.dismiss-open-select();
+            return;
+        }
+
+        let preferred-height = root.popup-preferred-height(option-count);
+        let below-space = max(0px, footer.y - (anchor-y + 34px) - root.select-popup-gap);
+        let above-space = max(0px, anchor-y - body-scroll.y - root.select-popup-gap);
+        if below-space >= preferred-height || below-space >= above-space {
+            root.select-popup-opens-upward = false;
+            root.select-popup-max-height = min(preferred-height, below-space);
+            root.select-popup-y = anchor-y + 34px + root.select-popup-gap;
+        } else {
+            root.select-popup-opens-upward = true;
+            root.select-popup-max-height = min(preferred-height, above-space);
+            root.select-popup-y = anchor-y - root.select-popup-max-height - root.select-popup-gap;
+        }
+        root.select-popup-x = max(18px, min(root.width - anchor-width - 18px, anchor-x));
+        root.select-popup-width = anchor-width;
+        root.select-popup-highlighted-index = highlighted-index;
+        root.open-select-id = select-id;
+        root.select-popup-focus-sequence += 1;
     }
 
     changed focus-sequence => {
@@ -276,15 +356,27 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                     overflow: elide;
                                 }
 
-                                ComboBox {
+                                auth-source-select := DialogSelectField {
                                     width: parent.width;
                                     height: 34px;
-                                    model: ["Manual", "Keychain Identity"];
-                                    current-value: root.auth-source == "keychain-identity" ? "Keychain Identity" : "Manual";
+                                    label: "Source";
+                                    focus-sequence: root.auth-source-select-focus-sequence;
+                                    open: root.open-select-id == "auth_source";
+                                    selected-label: root.auth-source == "keychain-identity" ? "Keychain Identity" : "Manual";
+                                    placeholder-text: "Select source";
 
-                                    selected(value) => {
-                                        root.draft-changed("auth_source", value == "Keychain Identity" ? "keychain-identity" : "manual");
+                                    toggle-requested => {
+                                        root.open-select-options = ["Manual", "Keychain Identity"];
+                                        root.open-select(
+                                            "auth_source",
+                                            self.absolute-position.x - root.absolute-position.x,
+                                            self.absolute-position.y - root.absolute-position.y,
+                                            self.width,
+                                            root.open-select-options.length,
+                                            root.auth-source == "keychain-identity" ? 1 : 0
+                                        );
                                     }
+
                                 }
 
                                 Text {
@@ -345,15 +437,28 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 overflow: elide;
                             }
 
-                            ComboBox {
+                            keychain-identity-select := DialogSelectField {
                                 width: parent.width;
                                 height: 34px;
-                                model: root.keychain-identity-options;
-                                current-value: root.keychain-identity-selected-label;
+                                label: "Identity";
+                                focus-sequence: root.keychain-identity-select-focus-sequence;
+                                open: root.open-select-id == "keychain_identity_label";
+                                selected-label: root.keychain-identity-selected-label;
+                                placeholder-text: root.keychain-identity-options.length == 0 ? "No keychain identity available" : "Select identity";
+                                enabled: root.keychain-identity-options.length > 0;
 
-                                selected(value) => {
-                                    root.draft-changed("keychain_identity_label", value);
+                                toggle-requested => {
+                                    root.open-select-options = root.keychain-identity-options;
+                                    root.open-select(
+                                        "keychain_identity_label",
+                                        self.absolute-position.x - root.absolute-position.x,
+                                        self.absolute-position.y - root.absolute-position.y,
+                                        self.width,
+                                        root.open-select-options.length,
+                                        0
+                                    );
                                 }
+
                             }
 
                             Text {
@@ -489,24 +594,33 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                     overflow: elide;
                                 }
 
-                                ComboBox {
+                                proxy-type-select := DialogSelectField {
                                     width: parent.width;
                                     height: 34px;
-                                    model: ["None", "SOCKS5", "HTTP", "Existing SSH Connection"];
-                                    current-value: root.proxy-type == "socks5" ? "SOCKS5"
+                                    label: "Proxy type";
+                                    focus-sequence: root.proxy-type-select-focus-sequence;
+                                    open: root.open-select-id == "proxy_type";
+                                    selected-label: root.proxy-type == "socks5" ? "SOCKS5"
                                         : root.proxy-type == "http" ? "HTTP"
                                         : root.proxy-type == "ssh-asset" ? "Existing SSH Connection"
                                         : "None";
+                                    placeholder-text: "Select proxy type";
 
-                                    selected(value) => {
-                                        root.draft-changed(
+                                    toggle-requested => {
+                                        root.open-select-options = ["None", "SOCKS5", "HTTP", "Existing SSH Connection"];
+                                        root.open-select(
                                             "proxy_type",
-                                            value == "SOCKS5" ? "socks5"
-                                                : value == "HTTP" ? "http"
-                                                : value == "Existing SSH Connection" ? "ssh-asset"
-                                                : "none"
+                                            self.absolute-position.x - root.absolute-position.x,
+                                            self.absolute-position.y - root.absolute-position.y,
+                                            self.width,
+                                            root.open-select-options.length,
+                                            root.proxy-type == "socks5" ? 1
+                                                : root.proxy-type == "http" ? 2
+                                                : root.proxy-type == "ssh-asset" ? 3
+                                                : 0
                                         );
                                     }
+
                                 }
 
                                 Text {
@@ -628,15 +742,28 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 overflow: elide;
                             }
 
-                            ComboBox {
+                            proxy-ssh-select := DialogSelectField {
                                 width: parent.width;
                                 height: 34px;
-                                model: root.proxy-ssh-options;
-                                current-value: root.proxy-ssh-selected-label;
+                                label: "Upstream SSH connection";
+                                focus-sequence: root.proxy-ssh-select-focus-sequence;
+                                open: root.open-select-id == "proxy_ssh_asset_label";
+                                selected-label: root.proxy-ssh-selected-label;
+                                placeholder-text: root.proxy-ssh-options.length == 0 ? "No SSH connection available" : "Select SSH connection";
+                                enabled: root.proxy-ssh-options.length > 0;
 
-                                selected(value) => {
-                                    root.draft-changed("proxy_ssh_asset_label", value);
+                                toggle-requested => {
+                                    root.open-select-options = root.proxy-ssh-options;
+                                    root.open-select(
+                                        "proxy_ssh_asset_label",
+                                        self.absolute-position.x - root.absolute-position.x,
+                                        self.absolute-position.y - root.absolute-position.y,
+                                        self.width,
+                                        root.open-select-options.length,
+                                        0
+                                    );
                                 }
+
                             }
                         }
                     }
@@ -730,6 +857,73 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     clicked => {
                         root.action-requested("save");
                     }
+                }
+            }
+        }
+
+        if root.open-select-id != "" : select-popup-dismiss-layer := TouchArea {
+            x: 0px;
+            y: header.height;
+            width: parent.width;
+            height: parent.height - header.height;
+
+            clicked => {
+                root.dismiss-open-select();
+            }
+        }
+
+        if root.open-select-id != "" : select-popup := DialogSelectPopup {
+            x: root.select-popup-x;
+            y: root.select-popup-y;
+            width: root.select-popup-width;
+            open: true;
+            options: root.open-select-options;
+            focus-sequence: root.select-popup-focus-sequence;
+            highlighted-index: root.select-popup-highlighted-index;
+            popup-max-height: root.select-popup-max-height;
+            opens-upward: root.select-popup-opens-upward;
+
+            option-selected(value) => {
+                if root.open-select-id == "auth_source" {
+                    root.draft-changed(
+                        "auth_source",
+                        value == "Keychain Identity" ? "keychain-identity" : "manual"
+                    );
+                } else if root.open-select-id == "keychain_identity_label" {
+                    root.draft-changed("keychain_identity_label", value);
+                } else if root.open-select-id == "proxy_type" {
+                    root.draft-changed(
+                        "proxy_type",
+                        value == "SOCKS5" ? "socks5"
+                            : value == "HTTP" ? "http"
+                            : value == "Existing SSH Connection" ? "ssh-asset"
+                            : "none"
+                    );
+                } else if root.open-select-id == "proxy_ssh_asset_label" {
+                    root.draft-changed("proxy_ssh_asset_label", value);
+                }
+                root.dismiss-open-select();
+            }
+
+            dismiss-requested => {
+                root.dismiss-open-select();
+            }
+
+            move-highlight-requested(delta) => {
+                if root.open-select-options.length == 0 {
+                    return;
+                }
+
+                if root.select-popup-highlighted-index < 0 {
+                    root.select-popup-highlighted-index = delta > 0 ? 0 : root.open-select-options.length - 1;
+                } else {
+                    root.select-popup-highlighted-index = max(
+                        0,
+                        min(
+                            root.open-select-options.length - 1,
+                            root.select-popup-highlighted-index + delta
+                        )
+                    );
                 }
             }
         }

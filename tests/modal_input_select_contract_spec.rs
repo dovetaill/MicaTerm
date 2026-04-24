@@ -79,3 +79,18 @@ fn dialog_select_contract_exposes_modal_local_popup_primitives() {
         "shared modal select primitives should not wrap the stock ComboBox popup"
     );
 }
+
+#[test]
+fn ssh_modal_contract_uses_dialog_select_field_instead_of_combobox() {
+    let source = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
+        .expect("read ssh modal source");
+
+    assert!(
+        source.contains("DialogSelectField"),
+        "ssh modal should consume the shared modal-local select trigger"
+    );
+    assert!(
+        !source.contains("ComboBox {"),
+        "ssh modal should stop using the stock ComboBox popup inside modal scroll content"
+    );
+}

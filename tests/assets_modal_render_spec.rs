@@ -868,6 +868,17 @@ fn ssh_modal_footer_stays_visible_in_short_viewport() {
 
 #[test]
 fn ssh_modal_short_viewport_keeps_primary_auth_field_actionable() {
+    let source = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint").unwrap();
+
+    assert!(
+        source.contains("DialogSelectField"),
+        "ssh modal should switch its modal select triggers to the shared dialog select primitive"
+    );
+    assert!(
+        !source.contains("ComboBox {"),
+        "ssh modal should not keep stock ComboBox popups inside modal content"
+    );
+
     let short_height = 640;
     let modal_height = 528;
     let modal = blocking_modal_rect_for_viewport(WINDOW_WIDTH, short_height, 640, modal_height);

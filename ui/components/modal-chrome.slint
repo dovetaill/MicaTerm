@@ -101,6 +101,7 @@ export component DialogSelectField inherits Rectangle {
     in property <string> label: "";
     in property <string> selected-label: "";
     in property <string> placeholder-text: "";
+    in property <int> focus-sequence: 0;
     in property <bool> open: false;
     in property <bool> enabled: true;
     in property <bool> invalid: false;
@@ -128,6 +129,10 @@ export component DialogSelectField inherits Rectangle {
 
     public function focus-trigger() {
         select-focus.focus();
+    }
+
+    changed focus-sequence => {
+        root.focus-trigger();
     }
 
     Text {
@@ -185,6 +190,7 @@ export component DialogSelectField inherits Rectangle {
 export component DialogSelectPopup inherits Rectangle {
     in property <[string]> options: [];
     in property <bool> open: false;
+    in property <int> focus-sequence: 0;
     in property <int> highlighted-index: -1;
     in property <length> popup-max-height: 240px;
     in property <bool> opens-upward: false;
@@ -205,6 +211,18 @@ export component DialogSelectPopup inherits Rectangle {
 
     public function focus-popup() {
         popup-focus.focus();
+    }
+
+    changed focus-sequence => {
+        if root.open {
+            root.focus-popup();
+        }
+    }
+
+    changed open => {
+        if root.open {
+            root.focus-popup();
+        }
     }
 
     popup-scroll := ScrollView {

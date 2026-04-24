@@ -1995,18 +1995,6 @@ export component AppWindow inherits Window {
         offset-y: root.blocking-modal-offset-y;
         focus-sequence: root.blocking-modal-focus-sequence;
 
-        focus-restore-requested => {
-            main-workspace.restore-primary-focus();
-            root.blocking-modal-focus-restore-requested();
-        }
-
-        consume-event => {
-        }
-
-        escape-requested => {
-            root.close-asset-modal-requested();
-        }
-
         asset-ssh-modal-overlay := AssetsSshConnectionModal {
             x: 0px;
             y: 0px;
@@ -2076,6 +2064,27 @@ export component AppWindow inherits Window {
             focus-restore-requested => {
                 main-workspace.restore-primary-focus();
                 root.blocking-modal-focus-restore-requested();
+            }
+        }
+
+        focus-restore-requested => {
+            if !asset-ssh-modal-overlay.select-overlay-open {
+                main-workspace.restore-primary-focus();
+                root.blocking-modal-focus-restore-requested();
+            }
+        }
+
+        consume-event => {
+            if asset-ssh-modal-overlay.select-overlay-open {
+                asset-ssh-modal-overlay.dismiss-open-select();
+            }
+        }
+
+        escape-requested => {
+            if asset-ssh-modal-overlay.select-overlay-open {
+                asset-ssh-modal-overlay.dismiss-open-select();
+            } else {
+                root.close-asset-modal-requested();
             }
         }
     }

@@ -326,8 +326,11 @@ fi
 ! grep -F 'primary-action := Rectangle' "$SYNC_MODAL" >/dev/null
 ! grep -F 'can-clear-saved-secret: root.asset-ssh-modal-can-clear-saved-secret;' "$APP_WINDOW" >/dev/null
 ! grep -F 'clear-saved-secret-requested: root.asset-ssh-modal-clear-saved-secret-requested;' "$APP_WINDOW" >/dev/null
-grep -F 'import { ComboBox } from "std-widgets.slint";' "$SSH_MODAL" >/dev/null
-grep -F 'ComboBox {' "$SSH_MODAL" >/dev/null
+grep -F 'DialogSelectField {' "$SSH_MODAL" >/dev/null
+if grep -F 'ComboBox {' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal must not keep stock ComboBox popups once modal-local selects land" >&2
+  exit 1
+fi
 ! grep -F 'label: "Connect";' "$SSH_MODAL" >/dev/null
 ! grep -F 'label: "Save and Connect";' "$SSH_MODAL" >/dev/null
 ! grep -F 'label: "Test Connection";' "$SSH_MODAL" >/dev/null
@@ -338,8 +341,8 @@ grep -F 'Keychain Identity' "$SSH_MODAL" >/dev/null
 grep -F 'text: "Identity";' "$SSH_MODAL" >/dev/null
 grep -F 'text: "Username";' "$SSH_MODAL" >/dev/null
 grep -F 'text: "Authentication summary";' "$SSH_MODAL" >/dev/null
-grep -F 'root.draft-changed("auth_source"' "$SSH_MODAL" >/dev/null
-grep -F 'root.draft-changed("keychain_identity_label"' "$SSH_MODAL" >/dev/null
+grep -F '"auth_source"' "$SSH_MODAL" >/dev/null
+grep -F '"keychain_identity_label"' "$SSH_MODAL" >/dev/null
 if grep -F 'Use Existing Keychain Identity' "$SSH_MODAL" >/dev/null; then
   echo "ssh modal must replace the temporary keychain identity button with a real source picker" >&2
   exit 1

@@ -419,9 +419,28 @@ fn ssh_modal_contract_exposes_auth_source_switch_and_keychain_identity_summary()
     assert!(ssh_modal.contains("text: \"Identity\""));
     assert!(ssh_modal.contains("text: \"Username\""));
     assert!(ssh_modal.contains("text: \"Authentication summary\""));
-    assert!(ssh_modal.contains("root.draft-changed(\"auth_source\""));
-    assert!(ssh_modal.contains("root.draft-changed(\"keychain_identity_label\""));
+    assert!(ssh_modal.contains("\"auth_source\""));
+    assert!(ssh_modal.contains("\"keychain_identity_label\""));
     assert!(!ssh_modal.contains("Use Existing Keychain Identity"));
+}
+
+#[test]
+fn ssh_modal_contract_routes_selects_through_dialog_select_field() {
+    let ssh_modal = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
+        .expect("read ssh modal");
+
+    assert!(
+        ssh_modal.contains("DialogSelectField"),
+        "ssh modal should use the shared modal-local select trigger"
+    );
+    assert!(
+        !ssh_modal.contains("ComboBox {"),
+        "ssh modal should no longer rely on the stock ComboBox popup inside the modal body"
+    );
+    assert!(ssh_modal.contains("\"auth_source\""));
+    assert!(ssh_modal.contains("\"keychain_identity_label\""));
+    assert!(ssh_modal.contains("\"proxy_type\""));
+    assert!(ssh_modal.contains("\"proxy_ssh_asset_label\""));
 }
 
 #[test]
