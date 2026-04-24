@@ -171,6 +171,41 @@ fn bitmap_host_selection_source_exposes_local_overlay_contract() {
 }
 
 #[test]
+fn terminal_session_host_source_exposes_terminal_link_affordance_contract() {
+    let host_source =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        host_source.contains("in property <bool> link-hovered: false;")
+            && host_source.contains("in property <bool> link-armed: false;"),
+        "terminal session host should accept Rust-projected hovered and armed link-affordance state instead of reparsing visible lines inside Slint"
+    );
+    assert!(
+        host_source.contains("mouse-cursor:")
+            && host_source.contains("root.link-armed")
+            && host_source.contains("MouseCursor.pointer"),
+        "terminal session host should flip to a pointer cursor only when Rust marks the hovered terminal URL as armed"
+    );
+    assert!(
+        host_source.contains("root.link-armed ? \"Ctrl+click to open link\" : \"Hold Ctrl and click to open link\""),
+        "terminal session host should distinguish tooltip copy between plain hover and the armed Ctrl state"
+    );
+    assert!(
+        host_source.contains("root.mouse-input(")
+            && host_source.contains("\"move\"")
+            && host_source.contains("\"none\"")
+            && host_source.contains("\"down\"")
+            && host_source.contains("\"left\"")
+            && host_source.contains("\"up\""),
+        "terminal session host should keep link hover and Ctrl+click on the existing mouse-input callback chain instead of inventing a separate open-link callback"
+    );
+    assert!(
+        !host_source.contains("callback open-link-requested("),
+        "terminal session host should not add a dedicated open-link callback when the existing mouse-input callback can carry the armed Ctrl+click path"
+    );
+}
+
+#[test]
 fn workspace_and_window_sources_thread_native_render_contract() {
     let workspace_source =
         fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
@@ -230,6 +265,34 @@ fn workspace_and_window_sources_thread_native_render_contract() {
         app_window_source
             .contains("in-out property <int> workspace-session-native-frame-token: 0;"),
         "app window should store the workspace terminal native frame token"
+    );
+}
+
+#[test]
+fn workspace_and_window_sources_thread_terminal_link_affordance_contract() {
+    let workspace_source =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+    let app_window_source = fs::read_to_string("ui/app-window.slint").expect("read app window");
+
+    assert!(
+        workspace_source.contains("in property <bool> workspace-session-link-hovered: false;")
+            && workspace_source.contains("in property <bool> workspace-session-link-armed: false;"),
+        "workspace pane should expose hovered and armed terminal-link affordance props so bootstrap can project Rust-side link truth into the session host"
+    );
+    assert!(
+        workspace_source.contains("link-hovered: root.workspace-session-link-hovered;")
+            && workspace_source.contains("link-armed: root.workspace-session-link-armed;"),
+        "workspace pane should forward the terminal-link affordance props directly into TerminalSessionHost"
+    );
+    assert!(
+        app_window_source.contains("in-out property <bool> workspace-session-link-hovered: false;")
+            && app_window_source.contains("in-out property <bool> workspace-session-link-armed: false;"),
+        "app window should store the workspace terminal link-affordance props so bootstrap can update them from Rust"
+    );
+    assert!(
+        app_window_source.contains("workspace-session-link-hovered: root.workspace-session-link-hovered;")
+            && app_window_source.contains("workspace-session-link-armed: root.workspace-session-link-armed;"),
+        "app window should thread the terminal-link affordance props down into the workspace pane"
     );
 }
 
