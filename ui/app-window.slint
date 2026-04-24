@@ -1868,15 +1868,24 @@ export component AppWindow inherits Window {
         focus-sequence: root.blocking-modal-focus-sequence;
 
         focus-restore-requested => {
-            main-workspace.restore-primary-focus();
-            root.blocking-modal-focus-restore-requested();
+            if !asset-snippet-modal-overlay.select-overlay-open {
+                main-workspace.restore-primary-focus();
+                root.blocking-modal-focus-restore-requested();
+            }
         }
 
         consume-event => {
+            if asset-snippet-modal-overlay.select-overlay-open {
+                asset-snippet-modal-overlay.dismiss-open-select();
+            }
         }
 
         escape-requested => {
-            root.close-asset-modal-requested();
+            if asset-snippet-modal-overlay.select-overlay-open {
+                asset-snippet-modal-overlay.dismiss-open-select();
+            } else {
+                root.close-asset-modal-requested();
+            }
         }
 
         asset-snippet-modal-overlay := AssetsSnippetModal {

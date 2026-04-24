@@ -159,6 +159,38 @@ fn snippet_modal_contract_routes_package_picker_through_dialog_select_field() {
 }
 
 #[test]
+fn snippet_modal_shell_dismisses_local_select_overlay_before_closing_modal() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let block = app_window
+        .split("if root.asset-modal-open && root.asset-modal-kind == \"new-snippet\" : asset-snippet-modal-shell := BlockingModalShell {\n")
+        .nth(1)
+        .expect("extract snippet shell block");
+    let block = block
+        .split("asset-snippet-modal-overlay := AssetsSnippetModal {")
+        .next()
+        .expect("truncate snippet shell block");
+
+    assert!(
+        block.contains("if !asset-snippet-modal-overlay.select-overlay-open {")
+            && block.contains("main-workspace.restore-primary-focus();")
+            && block.contains("root.blocking-modal-focus-restore-requested();"),
+        "snippet shell should only restore workspace focus when its local select overlay is closed"
+    );
+    assert!(
+        block.contains("consume-event => {")
+            && block.contains("if asset-snippet-modal-overlay.select-overlay-open {")
+            && block.contains("asset-snippet-modal-overlay.dismiss-open-select();"),
+        "snippet shell should dismiss the package popup before letting backdrop clicks fall through"
+    );
+    assert!(
+        block.contains("escape-requested => {")
+            && block.contains("if asset-snippet-modal-overlay.select-overlay-open {")
+            && block.contains("} else {\n                root.close-asset-modal-requested();"),
+        "snippet shell should dismiss the package popup on Escape before closing the modal"
+    );
+}
+
+#[test]
 fn snippet_package_modal_visibility_round_trips_through_window_properties() {
     i_slint_backend_testing::init_no_event_loop();
 
