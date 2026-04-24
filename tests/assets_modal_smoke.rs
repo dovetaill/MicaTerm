@@ -328,10 +328,14 @@ fn ssh_modal_round_trips_password_visibility_without_secret_retention_flags() {
     app.set_asset_modal_kind("new-ssh-connection".into());
     app.set_asset_ssh_modal_password("secret".into());
     app.set_asset_ssh_modal_password_visible(false);
+    app.set_asset_ssh_modal_passphrase("hunter2".into());
+    app.set_asset_ssh_modal_passphrase_visible(true);
 
     assert!(app.get_asset_modal_open());
     assert_eq!(app.get_asset_ssh_modal_password().as_str(), "secret");
     assert!(!app.get_asset_ssh_modal_password_visible());
+    assert_eq!(app.get_asset_ssh_modal_passphrase().as_str(), "hunter2");
+    assert!(app.get_asset_ssh_modal_passphrase_visible());
 }
 
 #[test]

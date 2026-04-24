@@ -71,6 +71,9 @@ fn ssh_profile_normalizes_password_mode_from_modal_draft() {
     let mut draft = base_draft();
     draft.auth_method = "password".into();
     draft.password = "super-secret".into();
+    draft.password_visible = true;
+    draft.passphrase_visible = true;
+    draft.proxy_socks5_password_visible = true;
 
     let profile = ConnectionProfile::from_draft(&draft).expect("normalize password draft");
 

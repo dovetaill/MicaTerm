@@ -348,8 +348,12 @@ fn new_ssh_modal_is_a_grouped_single_page_form() {
     assert!(ssh_modal.contains("label: \"Password\""));
     assert!(ssh_modal.contains("title: \"Proxy chain\""));
     assert!(ssh_modal.contains("text: \"Proxy type\""));
+    assert!(ssh_modal.contains("trailing-icon-visible: true;"));
     assert!(
-        ssh_modal.contains("trailing-action-text: root.password-visible ? \"Hide\" : \"Show\"")
+        ssh_modal.contains("trailing-icon-source: root.password-visible ? root.eye-off-icon : root.eye-icon;")
+    );
+    assert!(
+        ssh_modal.contains("trailing-icon-label: root.password-visible ? \"Hide password\" : \"Show password\";")
     );
 }
 
@@ -490,8 +494,63 @@ fn new_ssh_modal_defaults_proxy_type_to_none() {
                 && draft.proxy_socks5_port.is_empty()
                 && draft.proxy_socks5_username.is_empty()
                 && draft.proxy_socks5_password.is_empty()
+                && !draft.passphrase_visible
                 && !draft.proxy_socks5_password_visible
                 && draft.proxy_ssh_asset_id.is_empty()
+    ));
+}
+
+#[test]
+fn ssh_modal_reveal_flags_reset_when_auth_source_changes() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.open_new_ssh_modal(None);
+    view_model.update_ssh_modal_field("auth_method", "private-key".into());
+    view_model.update_ssh_modal_field("password_visibility", "visible".into());
+    view_model.update_ssh_modal_field("passphrase_visibility", "visible".into());
+    view_model.update_ssh_modal_field("auth_source", "keychain-identity".into());
+
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection { ref draft, .. })
+            if draft.auth_source == "keychain-identity"
+                && !draft.password_visible
+                && !draft.passphrase_visible
+    ));
+}
+
+#[test]
+fn ssh_modal_reveal_flags_reset_when_auth_method_changes() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.open_new_ssh_modal(None);
+    view_model.update_ssh_modal_field("auth_method", "private-key".into());
+    view_model.update_ssh_modal_field("password_visibility", "visible".into());
+    view_model.update_ssh_modal_field("passphrase_visibility", "visible".into());
+    view_model.update_ssh_modal_field("auth_method", "password".into());
+
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection { ref draft, .. })
+            if draft.auth_method == "password"
+                && !draft.password_visible
+                && !draft.passphrase_visible
+    ));
+}
+
+#[test]
+fn ssh_modal_proxy_reveal_flag_resets_when_proxy_type_changes() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.open_new_ssh_modal(None);
+    view_model.update_ssh_modal_field("proxy_type", "socks5".into());
+    view_model.update_ssh_modal_field("proxy_socks5_password_visibility", "visible".into());
+    view_model.update_ssh_modal_field("proxy_type", "ssh-asset".into());
+
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection { ref draft, .. })
+            if draft.proxy_type == "ssh-asset" && !draft.proxy_socks5_password_visible
     ));
 }
 
@@ -1397,6 +1456,7 @@ fn editing_saved_ssh_modal_keeps_password_fields_hidden_until_secret_hydration_e
             if draft.password.is_empty()
                 && draft.private_key_content.is_empty()
                 && draft.passphrase.is_empty()
+                && !draft.passphrase_visible
                 && !draft.password_visible
     ));
 }
@@ -1436,6 +1496,7 @@ fn editing_saved_ssh_modal_allows_direct_password_editing_after_secret_hydration
             if draft.password == "rotated-secret"
                 && draft.private_key_content.is_empty()
                 && draft.passphrase.is_empty()
+                && !draft.passphrase_visible
                 && !draft.password_visible
     ));
     assert!(view_model.asset_create_modal_can_confirm());
@@ -1484,6 +1545,7 @@ fn hydrating_edit_ssh_modal_secret_updates_active_draft_and_inline_error() {
             && draft.password == "secret"
             && draft.private_key_content.is_empty()
             && draft.passphrase.is_empty()
+            && !draft.passphrase_visible
             && !draft.password_visible
             && draft.validation_message == "missing keyring entry"
     ));

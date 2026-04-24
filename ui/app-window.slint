@@ -227,6 +227,7 @@ export component AppWindow inherits Window {
     in-out property <string> asset-ssh-modal-private-key-path: "";
     in-out property <string> asset-ssh-modal-passphrase: "";
     in-out property <bool> asset-ssh-modal-password-visible: false;
+    in-out property <bool> asset-ssh-modal-passphrase-visible: false;
     in-out property <string> asset-ssh-modal-remark: "";
     in-out property <string> asset-ssh-modal-environment: "";
     in-out property <string> asset-ssh-modal-proxy-type: "none";
@@ -2021,6 +2022,7 @@ export component AppWindow inherits Window {
             private-key-path: root.asset-ssh-modal-private-key-path;
             passphrase: root.asset-ssh-modal-passphrase;
             password-visible: root.asset-ssh-modal-password-visible;
+            passphrase-visible: root.asset-ssh-modal-passphrase-visible;
             remark: root.asset-ssh-modal-remark;
             environment: root.asset-ssh-modal-environment;
             proxy-type: root.asset-ssh-modal-proxy-type;

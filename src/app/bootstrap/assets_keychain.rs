@@ -311,6 +311,7 @@ fn clear_asset_ssh_modal_fields(window: &AppWindow) {
     window.set_asset_ssh_modal_private_key_path("".into());
     window.set_asset_ssh_modal_passphrase("".into());
     window.set_asset_ssh_modal_password_visible(false);
+    window.set_asset_ssh_modal_passphrase_visible(false);
     window.set_asset_ssh_modal_remark("".into());
     window.set_asset_ssh_modal_environment("".into());
     window.set_asset_ssh_modal_proxy_type("none".into());
@@ -565,6 +566,7 @@ pub(super) fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel)
             window.set_asset_ssh_modal_private_key_path(draft.private_key_path.clone().into());
             window.set_asset_ssh_modal_passphrase(draft.passphrase.clone().into());
             window.set_asset_ssh_modal_password_visible(draft.password_visible);
+            window.set_asset_ssh_modal_passphrase_visible(draft.passphrase_visible);
             window.set_asset_ssh_modal_remark(draft.remark.clone().into());
             window.set_asset_ssh_modal_environment(draft.environment.clone().into());
             window.set_asset_ssh_modal_proxy_type(draft.proxy_type.clone().into());

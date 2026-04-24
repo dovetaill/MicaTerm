@@ -30,6 +30,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
     in property <string> private-key-path: "";
     in property <string> passphrase: "";
     in property <bool> password-visible: false;
+    in property <bool> passphrase-visible: false;
     in property <string> remark: "";
     in property <string> environment: "";
     in property <string> proxy-type: "none";
@@ -58,6 +59,8 @@ export component AssetsSshConnectionModal inherits Rectangle {
 
     private property <bool> compact-layout: root.width < 620px;
     private property <bool> dense-layout: root.height < 620px;
+    private property <image> eye-icon: @image-url("../../assets/icons/fluent/eye-20-regular.svg");
+    private property <image> eye-off-icon: @image-url("../../assets/icons/fluent/eye-off-20-regular.svg");
     private property <length> footer-height: root.feedback-message != "" || root.validation-message != ""
         ? root.dense-layout ? 114px : 132px
         : ThemeTokens.modal-footer-min-height;
@@ -390,14 +393,16 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             required: true;
                             value: root.password;
                             password-mode: !root.password-visible;
-                            trailing-action-text: root.password-visible ? "Hide" : "Show";
+                            trailing-icon-visible: true;
+                            trailing-icon-source: root.password-visible ? root.eye-off-icon : root.eye-icon;
+                            trailing-icon-label: root.password-visible ? "Hide password" : "Show password";
                             helper-text: "Use the keychain source above if you want this secret managed outside the connection profile.";
 
                             value-changed(value) => {
                                 root.draft-changed("password", value);
                             }
 
-                            trailing-action-requested => {
+                            trailing-icon-requested => {
                                 root.draft-changed(
                                     "password_visibility",
                                     root.password-visible ? "hidden" : "visible"
@@ -443,10 +448,20 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 width: parent.width;
                                 label: "Passphrase";
                                 value: root.passphrase;
-                                password-mode: true;
+                                password-mode: !root.passphrase-visible;
+                                trailing-icon-visible: true;
+                                trailing-icon-source: root.passphrase-visible ? root.eye-off-icon : root.eye-icon;
+                                trailing-icon-label: root.passphrase-visible ? "Hide passphrase" : "Show passphrase";
 
                                 value-changed(value) => {
                                     root.draft-changed("passphrase", value);
+                                }
+
+                                trailing-icon-requested => {
+                                    root.draft-changed(
+                                        "passphrase_visibility",
+                                        root.passphrase-visible ? "hidden" : "visible"
+                                    );
                                 }
                             }
                         }
@@ -581,13 +596,15 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 label: "Password";
                                 value: root.proxy-socks5-password;
                                 password-mode: !root.proxy-socks5-password-visible;
-                                trailing-action-text: root.proxy-socks5-password-visible ? "Hide" : "Show";
+                                trailing-icon-visible: true;
+                                trailing-icon-source: root.proxy-socks5-password-visible ? root.eye-off-icon : root.eye-icon;
+                                trailing-icon-label: root.proxy-socks5-password-visible ? "Hide proxy password" : "Show proxy password";
 
                                 value-changed(value) => {
                                     root.draft-changed("proxy_socks5_password", value);
                                 }
 
-                                trailing-action-requested => {
+                                trailing-icon-requested => {
                                     root.draft-changed(
                                         "proxy_socks5_password_visibility",
                                         root.proxy-socks5-password-visible ? "hidden" : "visible"

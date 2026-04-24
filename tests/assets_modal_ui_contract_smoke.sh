@@ -60,6 +60,7 @@ grep -F 'in-out property <string> asset-ssh-modal-proxy-socks5-port: "";' "$APP_
 grep -F 'in-out property <string> asset-ssh-modal-proxy-socks5-username: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-ssh-modal-proxy-socks5-password: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <bool> asset-ssh-modal-proxy-socks5-password-visible: false;' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <bool> asset-ssh-modal-passphrase-visible: false;' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-ssh-modal-proxy-ssh-asset-id: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <[string]> asset-ssh-modal-proxy-ssh-options: [];' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-ssh-modal-proxy-ssh-selected-label: "";' "$APP_WINDOW" >/dev/null
@@ -337,8 +338,14 @@ if grep -F 'Use Existing Keychain Identity' "$SSH_MODAL" >/dev/null; then
   echo "ssh modal must replace the temporary keychain identity button with a real source picker" >&2
   exit 1
 fi
-grep -F 'password-mode:' "$SSH_MODAL" >/dev/null
+grep -F 'eye-20-regular.svg' "$SSH_MODAL" >/dev/null
+grep -F 'eye-off-20-regular.svg' "$SSH_MODAL" >/dev/null
+grep -F 'trailing-icon-visible: true;' "$SSH_MODAL" >/dev/null
+grep -F 'trailing-icon-source: root.password-visible ? root.eye-off-icon : root.eye-icon;' "$SSH_MODAL" >/dev/null
+grep -F 'trailing-icon-source: root.passphrase-visible ? root.eye-off-icon : root.eye-icon;' "$SSH_MODAL" >/dev/null
+grep -F 'trailing-icon-source: root.proxy-socks5-password-visible ? root.eye-off-icon : root.eye-icon;' "$SSH_MODAL" >/dev/null
 grep -F 'password_visibility' "$SSH_MODAL" >/dev/null
+grep -F 'passphrase_visibility' "$SSH_MODAL" >/dev/null
 grep -F 'busy' "$SSH_MODAL" >/dev/null
 grep -F 'hover' "$TOKENS" >/dev/null
 grep -F 'pressed' "$TOKENS" >/dev/null
@@ -374,6 +381,7 @@ grep -F 'proxy-socks5-port: root.asset-ssh-modal-proxy-socks5-port;' "$APP_WINDO
 grep -F 'proxy-socks5-username: root.asset-ssh-modal-proxy-socks5-username;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-socks5-password: root.asset-ssh-modal-proxy-socks5-password;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-socks5-password-visible: root.asset-ssh-modal-proxy-socks5-password-visible;' "$APP_WINDOW" >/dev/null
+grep -F 'passphrase-visible: root.asset-ssh-modal-passphrase-visible;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-ssh-asset-id: root.asset-ssh-modal-proxy-ssh-asset-id;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-ssh-options: root.asset-ssh-modal-proxy-ssh-options;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-ssh-selected-label: root.asset-ssh-modal-proxy-ssh-selected-label;' "$APP_WINDOW" >/dev/null
