@@ -135,6 +135,103 @@ fn harfbuzz_layout_keeps_ascii_prompt_in_one_run_when_style_is_consistent() -> a
 }
 
 #[test]
+fn harfbuzz_layout_disables_ligatures_for_terminal_segments_by_default() -> anyhow::Result<()> {
+    let row = build_row(
+        vec![
+            TerminalModelCell {
+                row: 0,
+                col: 0,
+                width: 1,
+                text: ".".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+            TerminalModelCell {
+                row: 0,
+                col: 1,
+                width: 1,
+                text: "v".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+            TerminalModelCell {
+                row: 0,
+                col: 2,
+                width: 1,
+                text: "i".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+            TerminalModelCell {
+                row: 0,
+                col: 3,
+                width: 1,
+                text: "m".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+            TerminalModelCell {
+                row: 0,
+                col: 4,
+                width: 1,
+                text: "i".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+            TerminalModelCell {
+                row: 0,
+                col: 5,
+                width: 1,
+                text: "n".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+            TerminalModelCell {
+                row: 0,
+                col: 6,
+                width: 1,
+                text: "f".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+            TerminalModelCell {
+                row: 0,
+                col: 7,
+                width: 1,
+                text: "o".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+        ],
+        ".viminfo",
+    );
+
+    let shaped = shape_row_with_mock_font(&row)?;
+
+    assert!(
+        shaped.runs.iter().all(|run| !run.allow_ligatures),
+        "terminal text shaping should disable ligatures by default so filenames and permission clusters do not collapse into code-font stylistic joins"
+    );
+    Ok(())
+}
+
+#[test]
 fn harfbuzz_layout_keeps_wide_cjk_and_emoji_cluster_boundaries_stable() -> anyhow::Result<()> {
     let row = build_row(
         vec![

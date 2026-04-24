@@ -752,12 +752,9 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "AppWindow should expose terminal mouse input forwarding for cell-relative pointer events"
     );
     assert!(
-        app_window.contains("callback workspace-session-open-url-requested(int, int) -> bool;"),
-        "AppWindow should expose a terminal URL-open callback so Ctrl+left-click can activate browser-safe http/https links without routing through normal selection or mouse-reporting paths"
-    );
-    assert!(
-        app_window.contains("callback workspace-session-open-url-hover-query(int, int) -> bool;"),
-        "AppWindow should expose a terminal URL-hover query callback so the terminal host can show a pointer cursor and hint copy for browser-safe links before Ctrl+left-click activation"
+        app_window.contains("in-out property <bool> workspace-session-link-hovered: false;")
+            && app_window.contains("in-out property <bool> workspace-session-link-armed: false;"),
+        "AppWindow should store Rust-projected hovered and armed terminal-link affordance state instead of exposing a separate open-url callback pair"
     );
     assert!(
         app_window.contains("in-out property <int> workspace-session-viewport-offset-lines: 0;"),
@@ -844,14 +841,11 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "WorkspacePane should forward terminal mouse events back to the app shell"
     );
     assert!(
-        workspace_pane.contains("callback open-url-requested(int, int) -> bool;")
-            && workspace_pane.contains("open-url-requested(row, col) => {\n                    return root.open-url-requested(row, col);\n                }"),
-        "WorkspacePane should forward terminal URL-open requests back to the app shell so Ctrl+left-click stays on a dedicated browser-link path"
-    );
-    assert!(
-        workspace_pane.contains("callback open-url-hover-query(int, int) -> bool;")
-            && workspace_pane.contains("open-url-hover-query(row, col) => {\n                    return root.open-url-hover-query(row, col);\n                }"),
-        "WorkspacePane should forward terminal URL-hover queries back to the app shell so the terminal host can surface a pointer cursor and hover hint without opening the link prematurely"
+        workspace_pane.contains("in property <bool> workspace-session-link-hovered: false;")
+            && workspace_pane.contains("in property <bool> workspace-session-link-armed: false;")
+            && workspace_pane.contains("link-hovered: root.workspace-session-link-hovered;")
+            && workspace_pane.contains("link-armed: root.workspace-session-link-armed;"),
+        "WorkspacePane should forward Rust-projected hovered and armed terminal-link affordance state into TerminalSessionHost"
     );
     assert!(
         workspace_pane.contains("normalize-hit-col(row, col) =>"),
@@ -903,23 +897,36 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should emit mouse input callbacks with terminal-relative coordinates"
     );
     assert!(
-        terminal_host.contains("callback open-url-requested(int, int) -> bool;"),
-        "TerminalSessionHost should expose a URL-open callback so Ctrl+left-click can activate browser-safe links without introducing persistent underline chrome"
+        terminal_host.contains("in property <bool> link-hovered: false;")
+            && terminal_host.contains("in property <bool> link-armed: false;"),
+        "TerminalSessionHost should consume hovered and armed terminal-link affordance state from Rust instead of reparsing URLs in Slint"
     );
     assert!(
-        terminal_host.contains("callback open-url-hover-query(int, int) -> bool;"),
-        "TerminalSessionHost should expose a URL-hover query callback so browser-safe links can advertise Ctrl+left-click affordances before activation"
+        terminal_host.contains("private property <bool> link-press-active: false;"),
+        "TerminalSessionHost should keep a local pressed-link state so Ctrl+left-click can show a pressed affordance without adding another host callback"
     );
     assert!(
-        terminal_host.contains("event.modifiers.control && root.open-url-requested(row, col)"),
-        "TerminalSessionHost should gate Ctrl+left-click through a dedicated URL-open callback before entering normal selection flow"
+        terminal_host.contains("root.link-open-candidate = true;")
+            && terminal_host.contains("root.link-press-active = true;")
+            && terminal_host.contains("root.link-press-active = false;"),
+        "TerminalSessionHost should arm and clear a local pressed-link affordance around Ctrl+left-click interactions"
     );
     assert!(
-        terminal_host.contains(
-            "mouse-cursor: root.open-url-hover-active ? MouseCursor.pointer : MouseCursor.text;"
-        ) && terminal_host.contains("TitlebarTooltip {")
-            && terminal_host.contains("Hold Ctrl + Left Click to open link"),
-        "TerminalSessionHost should surface browser-safe links with a pointer cursor and explicit Ctrl+left-click tooltip instead of leaving link activation undiscoverable"
+        terminal_host.contains("mouse-cursor: root.link-hovered")
+            && terminal_host.contains("MouseCursor.pointer")
+            && terminal_host.contains("Hold Ctrl and click to open link")
+            && terminal_host.contains("Ctrl+click to open link")
+            && terminal_host.contains("animate y")
+            && terminal_host.contains("animate opacity"),
+        "TerminalSessionHost should surface browser-safe links with pointer, hover copy, armed copy, and a small pressed animation"
+    );
+    assert!(
+        terminal_host.contains("root.mouse-input(")
+            && terminal_host.contains("\"move\"")
+            && terminal_host.contains("\"down\"")
+            && terminal_host.contains("\"up\"")
+            && terminal_host.contains("\"left\""),
+        "TerminalSessionHost should keep Ctrl+left-click link interaction on the existing mouse-input callback chain instead of routing through a dedicated open-url callback"
     );
     assert!(
         terminal_host.contains("callback scroll-thumb-drag-requested(float);"),

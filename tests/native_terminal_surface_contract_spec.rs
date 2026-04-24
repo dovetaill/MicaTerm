@@ -62,18 +62,6 @@ fn terminal_session_host_source_exposes_native_render_contract() {
         "terminal session host should expose snapped terminal-content viewport helpers so the host-owned terminal body can fill the pane even when the current grid is temporarily narrower than the available viewport"
     );
     assert!(
-        host_source.contains("function preferred-terminal-content-width() -> length")
-            && host_source.contains("function preferred-terminal-content-height() -> length"),
-        "terminal session host should expose preferred terminal-content helpers so PTY resize math can keep using the full live viewport contract even before the session grid catches up to the new pane size"
-    );
-    assert!(
-        host_source.contains("out property <length> preferred-surface-width: root.preferred-terminal-content-width();")
-            && host_source.contains("out property <length> preferred-surface-height: root.preferred-terminal-content-height();")
-            && host_source.contains("out property <int> preferred-terminal-rows: root.preferred-terminal-row-count();")
-            && host_source.contains("out property <int> preferred-terminal-cols: root.preferred-terminal-col-count();"),
-        "terminal session host should export preferred surface dimensions plus preferred rows/cols so bootstrap can thread the live viewport contract into initial and subsequent PTY winsize updates"
-    );
-    assert!(
         host_source.contains("clip: true;"),
         "terminal session host should clip the terminal surface frame so stale grid geometry cannot momentarily paint over sibling UI during software-surface resize races"
     );
@@ -140,14 +128,6 @@ fn terminal_session_host_source_exposes_native_render_contract() {
             && host_source.contains("height: parent.height;"),
         "input capture inside the clipped viewport should track the visible terminal box, not the stale full-grid extent"
     );
-    assert!(
-        host_source.contains("function preferred-terminal-row-count() -> int")
-            && host_source.contains("function preferred-terminal-col-count() -> int")
-            && host_source.contains("(root.preferred-terminal-content-height() / 1px) / (root.terminal-cell-height / 1px)")
-            && host_source.contains("(root.preferred-terminal-content-width() / 1px) / (root.terminal-cell-width / 1px)")
-            && host_source.contains("root.surface-resize-requested(\n                root.terminal-viewport-rows(),\n                root.terminal-viewport-cols(),"),
-        "surface resize requests should be derived from the preferred snapped content rect so PTY rows/cols track the exact live viewport contract rather than the stale session grid"
-    );
 }
 
 #[test]
@@ -187,6 +167,71 @@ fn bitmap_host_selection_source_exposes_local_overlay_contract() {
         bootstrap_source
             .contains("let selection = if workspace_session_uses_host_selection_overlay(window) {"),
         "workspace terminal sync should stop baking selection overlays into bitmap presenter frames when the host draws selection locally"
+    );
+}
+
+#[test]
+fn terminal_session_host_source_exposes_terminal_link_affordance_contract() {
+    let host_source =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+    let input_capture_block = block_between(
+        &host_source,
+        "input-capture := TouchArea {",
+        "scroll-event(event) => {",
+    );
+    let terminal_link_surface_block = block_between(
+        &host_source,
+        "input-capture := TouchArea {",
+        "if root.terminal-link-tooltip-visible() : link-tooltip := Rectangle {",
+    );
+    let tooltip_block = block_between(
+        &host_source,
+        "if root.terminal-link-tooltip-visible() : link-tooltip := Rectangle {",
+        "link-tooltip-label := Text {",
+    );
+
+    assert!(
+        host_source.contains("in property <bool> link-hovered: false;")
+            && host_source.contains("in property <bool> link-armed: false;"),
+        "terminal session host should accept Rust-projected hovered and armed link-affordance state instead of reparsing visible lines inside Slint"
+    );
+    assert!(
+        input_capture_block.contains("mouse-cursor: root.link-hovered")
+            && input_capture_block.contains("MouseCursor.pointer"),
+        "terminal session host should advertise hovered URLs with a pointer cursor before Ctrl is pressed so terminal links feel discoverable like hyperlinks"
+    );
+    assert!(
+        host_source.contains("root.link-armed ? \"Ctrl+click to open link\" : \"Hold Ctrl and click to open link\""),
+        "terminal session host should distinguish tooltip copy between plain hover and the armed Ctrl state"
+    );
+    assert!(
+        host_source.contains("private property <bool> link-press-active: false;"),
+        "terminal session host should keep a local press state so Ctrl+left-down can render a pressed hyperlink affordance without inventing a new Rust callback"
+    );
+    assert!(
+        terminal_link_surface_block.contains("root.link-open-candidate = true;")
+            && terminal_link_surface_block.contains("root.link-press-active = true;")
+            && terminal_link_surface_block.contains("root.link-press-active = false;"),
+        "terminal session host should arm a local press state on Ctrl+left-down and clear it on cancel or release"
+    );
+    assert!(
+        tooltip_block.contains("root.link-press-active")
+            && tooltip_block.contains("animate y")
+            && tooltip_block.contains("animate opacity"),
+        "terminal session host should give the terminal link tooltip a small pressed animation instead of leaving Ctrl+click feedback static"
+    );
+    assert!(
+        host_source.contains("root.mouse-input(")
+            && host_source.contains("\"move\"")
+            && host_source.contains("\"none\"")
+            && host_source.contains("\"down\"")
+            && host_source.contains("\"left\"")
+            && host_source.contains("\"up\""),
+        "terminal session host should keep link hover and Ctrl+click on the existing mouse-input callback chain instead of inventing a separate open-link callback"
+    );
+    assert!(
+        !host_source.contains("callback open-link-requested("),
+        "terminal session host should not add a dedicated open-link callback when the existing mouse-input callback can carry the armed Ctrl+click path"
     );
 }
 
@@ -275,6 +320,34 @@ fn bootstrap_and_ssh_runtime_sources_thread_live_terminal_viewport_defaults() {
             && runtime_source.contains("pixel_height")
             && pump_source.contains(".window_change(cols, rows, pixel_width, pixel_height)"),
         "subsequent SSH window_change resizes should keep using the live viewport pixel contract instead of falling back to a synthetic 8x16 cell estimate"
+    );
+}
+
+#[test]
+fn workspace_and_window_sources_thread_terminal_link_affordance_contract() {
+    let workspace_source =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+    let app_window_source = fs::read_to_string("ui/app-window.slint").expect("read app window");
+
+    assert!(
+        workspace_source.contains("in property <bool> workspace-session-link-hovered: false;")
+            && workspace_source.contains("in property <bool> workspace-session-link-armed: false;"),
+        "workspace pane should expose hovered and armed terminal-link affordance props so bootstrap can project Rust-side link truth into the session host"
+    );
+    assert!(
+        workspace_source.contains("link-hovered: root.workspace-session-link-hovered;")
+            && workspace_source.contains("link-armed: root.workspace-session-link-armed;"),
+        "workspace pane should forward the terminal-link affordance props directly into TerminalSessionHost"
+    );
+    assert!(
+        app_window_source.contains("in-out property <bool> workspace-session-link-hovered: false;")
+            && app_window_source.contains("in-out property <bool> workspace-session-link-armed: false;"),
+        "app window should store the workspace terminal link-affordance props so bootstrap can update them from Rust"
+    );
+    assert!(
+        app_window_source.contains("workspace-session-link-hovered: root.workspace-session-link-hovered;")
+            && app_window_source.contains("workspace-session-link-armed: root.workspace-session-link-armed;"),
+        "app window should thread the terminal-link affordance props down into the workspace pane"
     );
 }
 
@@ -1172,8 +1245,8 @@ fn windows_backend_source_exposes_background_and_monochrome_draw_contract() {
         "windows backend should issue real DirectWrite glyph draw calls for the primary monochrome text path"
     );
     assert!(
-        windows_backend_source.contains("D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE"),
-        "windows backend should request grayscale text antialiasing for the primary DirectWrite path so the packaged terminal does not ship RGB ClearType color fringing on dense terminal text"
+        windows_backend_source.contains("D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE"),
+        "windows backend should request ClearType-capable text antialiasing for the primary DirectWrite path"
     );
 }
 

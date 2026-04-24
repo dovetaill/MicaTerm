@@ -58,7 +58,8 @@ fn selection_overlay_colors_stay_translucent_and_theme_specific() {
     let dark_preset = preset_for_theme(ThemeMode::Dark, ThemeVariant::PremiumDefault);
     let light_preset = preset_for_theme(ThemeMode::Light, ThemeVariant::PremiumDefault);
     let dark_overlay = selection_overlay_rgba_for(ThemeMode::Dark, ThemeVariant::PremiumDefault);
-    let light_overlay = selection_overlay_rgba_for(ThemeMode::Light, ThemeVariant::PremiumDefault);
+    let light_overlay =
+        selection_overlay_rgba_for(ThemeMode::Light, ThemeVariant::PremiumDefault);
 
     assert!(
         dark_preset.selection_bg.3 > 0.0 && dark_preset.selection_bg.3 < 1.0,
@@ -90,16 +91,16 @@ fn slint_terminal_tokens_match_shared_no_frame_defaults() {
     let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
 
     assert!(
-        tokens.contains("terminal-default-fg: dark-mode ? #e3eaf2 : #263240;"),
+        tokens.contains("terminal-default-fg: dark-mode ? #e5ebf5 : #243142;"),
         "Slint no-frame terminal foreground tokens should match the shared Mica Graphite/Canvas defaults used by the Rust fallback preset projection"
     );
     assert!(
-        tokens.contains("terminal-default-bg: terminal-canvas-surface;"),
+        tokens.contains("terminal-default-bg: dark-mode ? #08131d : #f2f4f7;"),
         "Slint no-frame terminal background tokens should match the shared Mica Graphite/Canvas defaults used by the Rust fallback preset projection"
     );
     assert!(
-        tokens.contains("terminal-cursor-fg: dark-mode ? #0c141c : #f8fafc;")
-            && tokens.contains("terminal-cursor-bg: dark-mode ? #dce6f3 : #2c3948;"),
+        tokens.contains("terminal-cursor-fg: dark-mode ? #08131d : #f2f4f7;")
+            && tokens.contains("terminal-cursor-bg: dark-mode ? #e5ebf5 : #243142;"),
         "Slint cursor tokens should stay aligned with the terminal fallback preset so no-frame terminal states do not drift from the live terminal palette"
     );
     assert!(

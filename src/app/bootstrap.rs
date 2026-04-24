@@ -193,6 +193,11 @@ pub(super) struct ShellSessionBridge {
     terminal_defaults: TerminalRuntimeDefaults,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WorkspaceTerminalLinkClickCandidate {
+    url: String,
+}
+
 const MAX_SSH_PROXY_CHAIN_DEPTH: usize = 8;
 const WORKSPACE_PASTE_EDITOR_LINE_THRESHOLD: usize = 4;
 const FALLBACK_WORKSPACE_TERMINAL_CELL_WIDTH_PX: u32 = 10;
@@ -453,6 +458,38 @@ impl VaultProviderFactory for DefaultVaultProviderFactory {
 pub struct ImportedPrivateKey {
     pub path: PathBuf,
     pub content: String,
+}
+
+#[doc(hidden)]
+pub use workspace_terminal::WorkspaceTerminalLinkAffordance;
+#[doc(hidden)]
+pub use crate::app::url_open::UrlOpenHandlerGuard;
+
+#[doc(hidden)]
+pub fn workspace_terminal_openable_url_at_surface_for_test(
+    surface: &TerminalSurfaceState,
+    row: u32,
+    col: u32,
+) -> Option<String> {
+    workspace_terminal::openable_url_at_surface(surface, row, col)
+}
+
+#[doc(hidden)]
+pub fn workspace_terminal_link_affordance_for_test(
+    surface: &TerminalSurfaceState,
+    row: u32,
+    col: u32,
+    ctrl: bool,
+) -> WorkspaceTerminalLinkAffordance {
+    workspace_terminal::link_affordance_at_surface(surface, row, col, ctrl)
+}
+
+#[doc(hidden)]
+pub fn install_url_open_handler_for_test<F>(handler: F) -> UrlOpenHandlerGuard
+where
+    F: Fn(&str) -> Result<()> + Send + Sync + 'static,
+{
+    crate::app::url_open::install_open_url_handler_for_test(handler)
 }
 
 pub trait PrivateKeyImporter: Send + Sync {
@@ -2170,6 +2207,68 @@ fn active_workspace_terminal_selection(window: &AppWindow) -> Option<TerminalAtl
     ))
 }
 
+enum WorkspaceTerminalLinkMouseDecision {
+    Forward,
+    LocalOnly,
+    Open(String),
+}
+
+fn workspace_terminal_link_mouse_decision(
+    state: &ShellViewModel,
+    kind: TerminalMouseEventKind,
+    button: TerminalMouseButton,
+    row: u32,
+    col: u32,
+    ctrl: bool,
+    candidate: &mut Option<WorkspaceTerminalLinkClickCandidate>,
+) -> WorkspaceTerminalLinkMouseDecision {
+    let Some(surface) = state.active_workspace_terminal_surface() else {
+        candidate.take();
+        return WorkspaceTerminalLinkMouseDecision::Forward;
+    };
+
+    if surface.alternate_screen_active || surface.mouse_grabbed {
+        candidate.take();
+        return WorkspaceTerminalLinkMouseDecision::Forward;
+    }
+
+    match (kind, button) {
+        (TerminalMouseEventKind::Move, _) => {
+            candidate.take();
+            WorkspaceTerminalLinkMouseDecision::LocalOnly
+        }
+        (TerminalMouseEventKind::Down, TerminalMouseButton::Left) => {
+            *candidate = ctrl
+                .then(|| workspace_terminal::openable_url_at_active_workspace_surface(state, row, col))
+                .flatten()
+                .map(|url| WorkspaceTerminalLinkClickCandidate { url });
+            WorkspaceTerminalLinkMouseDecision::LocalOnly
+        }
+        (TerminalMouseEventKind::Up, TerminalMouseButton::Left) => {
+            let current_url = ctrl
+                .then(|| workspace_terminal::openable_url_at_active_workspace_surface(state, row, col))
+                .flatten();
+            let decision = if candidate
+                .as_ref()
+                .zip(current_url.as_ref())
+                .is_some_and(|(candidate, current_url)| candidate.url == *current_url)
+            {
+                WorkspaceTerminalLinkMouseDecision::Open(
+                    current_url.expect("current URL should exist when the candidate matches"),
+                )
+            } else {
+                WorkspaceTerminalLinkMouseDecision::LocalOnly
+            };
+            candidate.take();
+            decision
+        }
+        _ => {
+            candidate.take();
+            WorkspaceTerminalLinkMouseDecision::Forward
+        }
+    }
+}
+
 fn sync_vec_model<T>(current: ModelRc<T>, next_rows: Vec<T>, replace: impl FnOnce(ModelRc<T>))
 where
     T: Clone + PartialEq + 'static,
@@ -3345,6 +3444,8 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
         window.set_workspace_session_default_fg(slint_color_from_rgba(surface.default_fg_rgba));
         window.set_workspace_session_default_bg(slint_color_from_rgba(surface.default_bg_rgba));
         window.set_workspace_session_mouse_grabbed(surface.mouse_grabbed);
+        window.set_workspace_session_link_hovered(false);
+        window.set_workspace_session_link_armed(false);
         window.set_workspace_session_viewport_offset_lines(
             i32::try_from(surface.viewport_offset_lines).unwrap_or(i32::MAX),
         );
@@ -3382,6 +3483,8 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
         clear_workspace_terminal_semantic_projection(window);
         release_workspace_terminal_renderer_resources();
         window.set_workspace_session_mouse_grabbed(false);
+        window.set_workspace_session_link_hovered(false);
+        window.set_workspace_session_link_armed(false);
         window.set_workspace_session_viewport_offset_lines(0);
         window.set_workspace_session_viewport_max_offset_lines(0);
         window.set_workspace_session_viewport_at_bottom(true);
@@ -6893,18 +6996,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     });
 
     let state = Rc::clone(&view_model);
-    window.on_workspace_session_open_url_hover_query(move |row, col| {
-        let state = state.borrow();
-        workspace_terminal::active_workspace_has_openable_url(&state, row, col)
-    });
-
-    let state = Rc::clone(&view_model);
-    window.on_workspace_session_open_url_requested(move |row, col| {
-        let state = state.borrow();
-        workspace_terminal::open_active_workspace_url(&state, row, col)
-    });
-
-    let state = Rc::clone(&view_model);
     window.on_workspace_session_copy_selection_requested(
         move |start_row, start_col, end_row, end_col| {
             let state = state.borrow();
@@ -6954,6 +7045,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let session_bridge_ref = session_bridge.clone();
     let window_handle = window.as_weak();
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let workspace_link_click_candidate =
+        Rc::new(RefCell::new(None::<WorkspaceTerminalLinkClickCandidate>));
+    let workspace_link_click_candidate_ref = Rc::clone(&workspace_link_click_candidate);
     window.on_workspace_session_mouse_input(move |kind, button, row, col, shift, ctrl, alt| {
         let mut state = state.borrow_mut();
         let Some(kind) = workspace_terminal::parse_terminal_mouse_kind(kind.as_str()) else {
@@ -6972,14 +7066,45 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             );
             return;
         };
+        let row = row.max(0) as u32;
+        let col = col.max(0) as u32;
+        let link_affordance =
+            workspace_terminal::link_affordance_at_active_workspace_surface(&state, row, col, ctrl);
+        if let Some(window) = window_handle.upgrade() {
+            window.set_workspace_session_link_hovered(link_affordance.hovered);
+            window.set_workspace_session_link_armed(link_affordance.armed);
+        }
+        match workspace_terminal_link_mouse_decision(
+            &state,
+            kind,
+            button,
+            row,
+            col,
+            ctrl,
+            &mut workspace_link_click_candidate_ref.borrow_mut(),
+        ) {
+            WorkspaceTerminalLinkMouseDecision::Open(url) => {
+                if let Err(err) = crate::app::url_open::open_url(url.as_str()) {
+                    tracing::warn!(
+                        target: "app.ssh",
+                        url,
+                        error = %err,
+                        "failed to open workspace terminal URL"
+                    );
+                }
+                return;
+            }
+            WorkspaceTerminalLinkMouseDecision::LocalOnly => return,
+            WorkspaceTerminalLinkMouseDecision::Forward => {}
+        }
         workspace_terminal::forward_active_workspace_mouse_input(
             &state,
             session_bridge_ref.as_deref(),
             TerminalMouseInput {
                 kind,
                 button,
-                row: row.max(0) as u32,
-                col: col.max(0) as u32,
+                row,
+                col,
                 shift,
                 ctrl,
                 alt,

@@ -24,6 +24,7 @@ pub mod terminal_renderer;
 pub mod terminal_semantic;
 pub mod terminal_theme;
 pub mod ui_preferences;
+pub(crate) mod url_open;
 pub mod vault;
 pub mod window_effects;
 pub mod window_geometry;

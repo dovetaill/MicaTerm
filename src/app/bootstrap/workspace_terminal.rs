@@ -2,6 +2,12 @@
 
 use super::*;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WorkspaceTerminalLinkAffordance {
+    pub hovered: bool,
+    pub armed: bool,
+}
+
 pub(super) fn projected_active_workspace_tab_id(
     state: &ShellViewModel,
     next_tabs: &[WorkspaceTab],
@@ -217,6 +223,129 @@ pub(super) fn normalize_active_workspace_selection_hit_col(
         .active_workspace_terminal_surface()
         .map(|surface| surface.normalize_selection_hit_col(safe_row, safe_col) as i32)
         .unwrap_or(col.max(0))
+}
+
+pub(super) fn openable_url_at_active_workspace_surface(
+    state: &ShellViewModel,
+    row: u32,
+    col: u32,
+) -> Option<String> {
+    let surface = state.active_workspace_terminal_surface()?;
+    openable_url_at_surface(surface, row, col)
+}
+
+pub(super) fn link_affordance_at_active_workspace_surface(
+    state: &ShellViewModel,
+    row: u32,
+    col: u32,
+    ctrl: bool,
+) -> WorkspaceTerminalLinkAffordance {
+    state
+        .active_workspace_terminal_surface()
+        .map(|surface| link_affordance_at_surface(surface, row, col, ctrl))
+        .unwrap_or_default()
+}
+
+pub(super) fn openable_url_at_surface(
+    surface: &TerminalSurfaceState,
+    row: u32,
+    col: u32,
+) -> Option<String> {
+    if !surface_allows_link_affordance(surface) {
+        return None;
+    }
+
+    url_token_hit_at_surface(surface, row, col).map(|(_, _, url)| url)
+}
+
+pub(super) fn link_affordance_at_surface(
+    surface: &TerminalSurfaceState,
+    row: u32,
+    col: u32,
+    ctrl: bool,
+) -> WorkspaceTerminalLinkAffordance {
+    if !surface_allows_link_affordance(surface) {
+        return WorkspaceTerminalLinkAffordance::default();
+    }
+
+    if openable_url_at_surface(surface, row, col).is_some() {
+        WorkspaceTerminalLinkAffordance {
+            hovered: true,
+            armed: ctrl,
+        }
+    } else {
+        WorkspaceTerminalLinkAffordance::default()
+    }
+}
+
+fn surface_allows_link_affordance(surface: &TerminalSurfaceState) -> bool {
+    !surface.alternate_screen_active && !surface.mouse_grabbed
+}
+
+fn url_token_hit_at_surface(
+    surface: &TerminalSurfaceState,
+    row: u32,
+    col: u32,
+) -> Option<(u32, u32, String)> {
+    if surface.cols == 0 {
+        return None;
+    }
+
+    let safe_col = col.min(surface.cols.saturating_sub(1));
+    let _ = token_char_at_surface(surface, row, safe_col)?;
+
+    let mut start_col = safe_col;
+    while start_col > 0 && token_char_at_surface(surface, row, start_col - 1).is_some() {
+        start_col -= 1;
+    }
+
+    let mut end_col = safe_col;
+    while end_col + 1 < surface.cols && token_char_at_surface(surface, row, end_col + 1).is_some()
+    {
+        end_col += 1;
+    }
+
+    let token = (start_col..=end_col)
+        .filter_map(|candidate_col| token_char_at_surface(surface, row, candidate_col))
+        .collect::<String>();
+    let trimmed = trim_openable_url_token(token.as_str())?;
+    let trimmed_width = trimmed.chars().count() as u32;
+    Some((
+        start_col,
+        start_col.saturating_add(trimmed_width),
+        trimmed.to_string(),
+    ))
+}
+
+fn token_char_at_surface(surface: &TerminalSurfaceState, row: u32, col: u32) -> Option<char> {
+    let cell = surface.cells.iter().find(|cell| {
+        cell.row == row && cell.col == col && cell.width == 1 && !cell.text.trim().is_empty()
+    })?;
+    let mut chars = cell.text.chars();
+    let ch = chars.next()?;
+    if chars.next().is_some() || ch.is_whitespace() {
+        return None;
+    }
+    Some(ch)
+}
+
+fn trim_openable_url_token(token: &str) -> Option<&str> {
+    let trimmed = token.trim_end_matches(|ch: char| {
+        matches!(
+            ch,
+            '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '>' | '"' | '\''
+        )
+    });
+
+    let minimum_len = if trimmed.starts_with("https://") {
+        "https://".len()
+    } else if trimmed.starts_with("http://") {
+        "http://".len()
+    } else {
+        return None;
+    };
+
+    (trimmed.len() > minimum_len).then_some(trimmed)
 }
 
 pub(super) fn refresh_projection_after_local_input_hint(
@@ -601,150 +730,6 @@ pub(super) fn forward_active_workspace_copy_selection(
             "failed to copy workspace terminal selection to clipboard"
         );
     }
-}
-
-pub(super) fn open_active_workspace_url(state: &ShellViewModel, row: i32, col: i32) -> bool {
-    let Some(surface) = state.active_workspace_terminal_surface() else {
-        return false;
-    };
-    let Some(url) = openable_url_at_surface(surface, row, col) else {
-        return false;
-    };
-
-    if let Err(err) = open_url_in_browser(url.as_str()) {
-        tracing::error!(
-            target: "app.ssh",
-            row,
-            col,
-            url,
-            error = %err,
-            "failed to open workspace terminal URL in browser"
-        );
-        return false;
-    }
-
-    true
-}
-
-pub(super) fn active_workspace_has_openable_url(
-    state: &ShellViewModel,
-    row: i32,
-    col: i32,
-) -> bool {
-    let Some(surface) = state.active_workspace_terminal_surface() else {
-        return false;
-    };
-
-    openable_url_at_surface(surface, row, col).is_some()
-}
-
-pub(super) fn openable_url_at_surface(
-    surface: &TerminalSurfaceState,
-    row: i32,
-    col: i32,
-) -> Option<String> {
-    let row = row.max(0) as u32;
-    let col = col.max(0) as u32;
-    let mut row_cells = surface
-        .cells
-        .iter()
-        .filter(|cell| cell.row == row)
-        .collect::<Vec<_>>();
-    row_cells.sort_by_key(|cell| cell.col);
-
-    let hit_index = row_cells.iter().position(|cell| {
-        cell.width > 0 && col >= cell.col && col < cell.col.saturating_add(cell.width)
-    })?;
-    if row_cells[hit_index].text.chars().all(char::is_whitespace) {
-        return None;
-    }
-
-    let mut start = hit_index;
-    while start > 0 && !row_cells[start - 1].text.chars().all(char::is_whitespace) {
-        start -= 1;
-    }
-
-    let mut end = hit_index;
-    while end + 1 < row_cells.len() && !row_cells[end + 1].text.chars().all(char::is_whitespace) {
-        end += 1;
-    }
-
-    let token = row_cells[start..=end]
-        .iter()
-        .map(|cell| cell.text.as_str())
-        .collect::<String>();
-    let trimmed = trim_browser_url_token(token.as_str());
-    is_browser_openable_url(trimmed).then(|| trimmed.to_string())
-}
-
-fn trim_browser_url_token(token: &str) -> &str {
-    token
-        .trim_matches(|ch: char| {
-            matches!(
-                ch,
-                '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ',' | ';' | '"'
-            )
-        })
-        .trim_end_matches('.')
-}
-
-fn is_browser_openable_url(token: &str) -> bool {
-    (token.starts_with("http://") || token.starts_with("https://"))
-        && token.len() > "https://".len()
-}
-
-fn open_url_in_browser(url: &str) -> Result<()> {
-    #[cfg(target_os = "windows")]
-    {
-        use windows::Win32::UI::Shell::ShellExecuteW;
-        use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-        use windows::core::PCWSTR;
-
-        let operation = windows_wide("open");
-        let target = windows_wide(url);
-        let result = unsafe {
-            ShellExecuteW(
-                None,
-                PCWSTR(operation.as_ptr()),
-                PCWSTR(target.as_ptr()),
-                PCWSTR::null(),
-                PCWSTR::null(),
-                SW_SHOWNORMAL,
-            )
-        };
-        if result.0 as usize <= 32 {
-            anyhow::bail!("ShellExecuteW returned status code {}", result.0 as usize);
-        }
-        return Ok(());
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(url)
-            .spawn()
-            .map(|_| ())
-            .context("spawn macOS browser open command")?;
-        return Ok(());
-    }
-
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(url)
-            .spawn()
-            .map(|_| ())
-            .context("spawn xdg-open browser command")?;
-        return Ok(());
-    }
-
-    #[allow(unreachable_code)]
-    Ok(())
-}
-
-#[cfg(target_os = "windows")]
-fn windows_wide(value: &str) -> Vec<u16> {
-    value.encode_utf16().chain(Some(0)).collect()
 }
 
 pub(super) fn normalized_paste_newlines(text: &str) -> String {

@@ -1,7 +1,6 @@
 // Workspace content host that switches between welcome, terminal, and error states.
 
 import { ThemeTokens } from "../theme/tokens.slint";
-import { TitlebarTooltip } from "../components/titlebar-tooltip.slint";
 import { QuickLaunchCardRow, QuickLaunchDetailRow, QuickLaunchGroupRow } from "../welcome/quick-launch-types.slint";
 import { WelcomeView } from "../welcome/welcome-view.slint";
 
@@ -156,6 +155,8 @@ export component TerminalSessionHost inherits Rectangle {
     in property <color> session-scrollbar-thumb: ThemeTokens.terminal-scrollbar-thumb-surface;
     in property <color> session-scrollbar-thumb-active: ThemeTokens.terminal-scrollbar-thumb-active-surface;
     in property <bool> session-mouse-grabbed: false;
+    in property <bool> link-hovered: false;
+    in property <bool> link-armed: false;
     in property <[string]> session-visible-lines: [];
     in property <[TerminalCommandBlockRow]> session-command-blocks: [];
     in property <[TerminalOverviewMarkerRow]> session-overview-markers: [];
@@ -186,8 +187,6 @@ export component TerminalSessionHost inherits Rectangle {
     callback surface-resize-requested(int, int);
     callback normalize-hit-col(int, int) -> int;
     callback normalize-selection-hit-col(int, int) -> int;
-    callback open-url-hover-query(int, int) -> bool;
-    callback open-url-requested(int, int) -> bool;
     callback copy-selection-requested(int, int, int, int);
     callback selection-changed();
     callback paste-requested();
@@ -239,16 +238,15 @@ export component TerminalSessionHost inherits Rectangle {
     private property <int> selection-focus-row: -1;
     private property <int> selection-focus-col: -1;
     private property <bool> selection-drag-active: false;
+    private property <bool> link-open-candidate: false;
+    private property <bool> link-press-active: false;
     private property <bool> scrollbar-thumb-drag-active: false;
     private property <bool> cursor-blink-visible: true;
-    private property <bool> open-url-hover-active: false;
-    private property <bool> open-url-hover-control-active: false;
-    private property <length> open-url-hover-anchor-x: 0px;
-    private property <length> open-url-hover-anchor-y: 0px;
-    private property <length> open-url-hover-anchor-width: 0px;
     in-out property <bool> context-menu-open: false;
     private property <length> terminal-context-menu-x: 12px;
     private property <length> terminal-context-menu-y: 12px;
+    private property <length> terminal-link-tooltip-x: 12px;
+    private property <length> terminal-link-tooltip-y: 12px;
     private property <bool> connection-progress-diagnostics-expanded: false;
 
     function terminal-content-width() -> length {
@@ -593,28 +591,9 @@ export component TerminalSessionHost inherits Rectangle {
         root.selection-focus-row = -1;
         root.selection-focus-col = -1;
         root.selection-drag-active = false;
+        root.link-open-candidate = false;
+        root.link-press-active = false;
         root.sync-selection-state();
-    }
-
-    function clear-open-url-hover() {
-        root.open-url-hover-active = false;
-        root.open-url-hover-control-active = false;
-        root.open-url-hover-anchor-width = 0px;
-    }
-
-    function sync-open-url-hover(row: int, col: int, ctrl-active: bool, pointer-x: length, pointer-y: length) {
-        let hover-active = !root.selection-drag-active
-            && !root.session-mouse-grabbed
-            && root.open-url-hover-query(row, col);
-        root.open-url-hover-active = hover-active;
-        root.open-url-hover-control-active = ctrl-active;
-        if hover-active {
-            root.open-url-hover-anchor-x = root.terminal-surface-origin-x() + pointer-x;
-            root.open-url-hover-anchor-y = root.terminal-surface-origin-y() + pointer-y + 18px;
-            root.open-url-hover-anchor-width = 0px;
-        } else {
-            root.open-url-hover-anchor-width = 0px;
-        }
     }
 
     function sync-selection-state() {
@@ -650,6 +629,19 @@ export component TerminalSessionHost inherits Rectangle {
 
     function close-context-menu() {
         root.context-menu-open = false;
+        root.link-open-candidate = false;
+        root.link-press-active = false;
+    }
+
+    function terminal-link-tooltip-text() -> string {
+        return root.link-armed ? "Ctrl+click to open link" : "Hold Ctrl and click to open link";
+    }
+
+    function terminal-link-tooltip-visible() -> bool {
+        return root.mode == "terminal"
+            && root.link-hovered
+            && !root.selection-drag-active
+            && !root.context-menu-open;
     }
 
     function has-selection() -> bool {
@@ -1297,13 +1289,11 @@ export component TerminalSessionHost inherits Rectangle {
                     y: 0px;
                     width: parent.width;
                     height: parent.height;
-                    mouse-cursor: root.open-url-hover-active ? MouseCursor.pointer : MouseCursor.text;
-
-                    changed has-hover => {
-                        if !self.has-hover {
-                            root.clear-open-url-hover();
-                        }
-                    }
+                    mouse-cursor: root.link-hovered
+                        && !root.selection-drag-active
+                        && !root.context-menu-open
+                        ? MouseCursor.pointer
+                        : MouseCursor.text;
 
                     scroll-event(event) => {
                         if event.delta-y > 0px || event.delta-y < 0px {
@@ -1344,21 +1334,24 @@ export component TerminalSessionHost inherits Rectangle {
                             row,
                             root.terminal-selection-hit-col(self.mouse-x),
                         );
-                        root.sync-open-url-hover(
-                            row,
-                            col,
-                            event.modifiers.control,
-                            self.mouse-x,
-                            self.mouse-y,
-                        );
+                        root.terminal-link-tooltip-x = self.mouse-x + 14px;
+                        root.terminal-link-tooltip-y = self.mouse-y + 14px;
                         if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
                             terminal-input.focus();
                             root.close-context-menu();
-                            if !root.session-mouse-grabbed
-                                && event.modifiers.control && root.open-url-requested(row, col)
-                            {
-                                root.clear-selection();
-                            } else if root.session-mouse-grabbed {
+                            if root.session-mouse-grabbed {
+                                root.mouse-input(
+                                    "down",
+                                    "left",
+                                    row,
+                                    col,
+                                    event.modifiers.shift,
+                                    event.modifiers.control,
+                                    event.modifiers.alt,
+                                );
+                            } else if root.link-armed {
+                                root.link-open-candidate = true;
+                                root.link-press-active = true;
                                 root.mouse-input(
                                     "down",
                                     "left",
@@ -1374,7 +1367,6 @@ export component TerminalSessionHost inherits Rectangle {
                                 root.selection-focus-row = row;
                                 root.selection-focus-col = col;
                                 root.selection-drag-active = true;
-                                root.clear-open-url-hover();
                                 root.sync-selection-state();
                             }
                         } else if event.kind == PointerEventKind.move {
@@ -1388,16 +1380,42 @@ export component TerminalSessionHost inherits Rectangle {
                                     event.modifiers.control,
                                     event.modifiers.alt,
                                 );
-                            } else if root.selection-drag-active {
-                                terminal-input.focus();
-                                root.selection-focus-row = row;
-                                root.selection-focus-col = selection-col;
-                                root.clear-open-url-hover();
-                                root.sync-selection-state();
+                            } else {
+                                root.mouse-input(
+                                    "move",
+                                    "none",
+                                    row,
+                                    col,
+                                    event.modifiers.shift,
+                                    event.modifiers.control,
+                                    event.modifiers.alt,
+                                );
+                                if root.link-open-candidate {
+                                    root.link-open-candidate = false;
+                                    root.link-press-active = false;
+                                }
+                                if root.selection-drag-active {
+                                    terminal-input.focus();
+                                    root.selection-focus-row = row;
+                                    root.selection-focus-col = selection-col;
+                                    root.sync-selection-state();
+                                }
                             }
                         } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
                             terminal-input.focus();
                             if root.session-mouse-grabbed {
+                                root.mouse-input(
+                                    "up",
+                                    "left",
+                                    row,
+                                    col,
+                                    event.modifiers.shift,
+                                    event.modifiers.control,
+                                    event.modifiers.alt,
+                                );
+                            } else if root.link-open-candidate {
+                                root.link-open-candidate = false;
+                                root.link-press-active = false;
                                 root.mouse-input(
                                     "up",
                                     "left",
@@ -1446,16 +1464,37 @@ export component TerminalSessionHost inherits Rectangle {
                     }
                 }
 
-                open-url-hover-tooltip := TitlebarTooltip {
-                    text: root.open-url-hover-control-active
-                        ? "Ctrl + Left Click to open link"
-                        : "Hold Ctrl + Left Click to open link";
-                    anchor-x: root.open-url-hover-anchor-x;
-                    anchor-y: root.open-url-hover-anchor-y;
-                    anchor-width: root.open-url-hover-anchor-width;
-                    tooltip-visible: root.open-url-hover-active;
-                    host-width: root.width;
-                    host-height: root.height;
+                if root.terminal-link-tooltip-visible() : link-tooltip := Rectangle {
+                    x: min(max(8px, root.terminal-link-tooltip-x), max(8px, parent.width - self.width - 8px));
+                    y: min(
+                        max(8px, root.terminal-link-tooltip-y + (root.link-press-active ? 2px : 0px)),
+                        max(8px, parent.height - self.height - 8px),
+                    );
+                    width: max(168px, link-tooltip-label.preferred-width + 20px);
+                    height: max(28px, link-tooltip-label.preferred-height + 10px);
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: root.link-press-active || root.link-armed
+                        ? ThemeTokens.link-accent
+                        : ThemeTokens.divider-subtle;
+                    background: root.link-press-active
+                        ? ThemeTokens.control-active-surface
+                        : root.link-armed
+                            ? ThemeTokens.menu-row-open-surface
+                            : ThemeTokens.menu-row-hover-surface;
+                    opacity: root.link-press-active ? 0.94 : 1;
+                    animate y { duration: 90ms; easing: ease-out; }
+                    animate opacity { duration: 90ms; }
+
+                    link-tooltip-label := Text {
+                        x: 10px;
+                        y: 0px;
+                        width: parent.width - 20px;
+                        height: parent.height;
+                        text: root.terminal-link-tooltip-text();
+                        color: ThemeTokens.text-primary;
+                        vertical-alignment: center;
+                    }
                 }
             }
 

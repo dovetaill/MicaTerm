@@ -78,24 +78,9 @@ fn legacy_hacker_green_keeps_the_same_shell_chrome_but_swaps_terminal_palette() 
     let premium = app_theme_spec(ThemeMode::Dark, ThemeVariant::PremiumDefault);
     let legacy = app_theme_spec(ThemeMode::Dark, ThemeVariant::LegacyHackerGreen);
 
-    assert_eq!(
-        legacy.shell.titlebar_background,
-        premium.shell.titlebar_background
-    );
-    assert_eq!(
-        legacy.shell.tabbar_background,
-        premium.shell.tabbar_background
-    );
-    assert_eq!(
-        legacy.shell.sidebar_background,
-        premium.shell.sidebar_background
-    );
-    assert_ne!(
-        legacy.terminal.background.base,
-        premium.terminal.background.base
-    );
-    assert_ne!(
-        legacy.terminal.foreground.default,
-        premium.terminal.foreground.default
-    );
+    assert_eq!(legacy.shell.titlebar_background, premium.shell.titlebar_background);
+    assert_eq!(legacy.shell.tabbar_background, premium.shell.tabbar_background);
+    assert_eq!(legacy.shell.sidebar_background, premium.shell.sidebar_background);
+    assert_ne!(legacy.terminal.background.base, premium.terminal.background.base);
+    assert_ne!(legacy.terminal.foreground.default, premium.terminal.foreground.default);
 }

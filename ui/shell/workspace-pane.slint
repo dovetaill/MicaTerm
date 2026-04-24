@@ -57,6 +57,8 @@ export component WorkspacePane inherits Rectangle {
     in property <color> workspace-session-scrollbar-thumb: ThemeTokens.terminal-scrollbar-thumb-surface;
     in property <color> workspace-session-scrollbar-thumb-active: ThemeTokens.terminal-scrollbar-thumb-active-surface;
     in property <bool> workspace-session-mouse-grabbed: false;
+    in property <bool> workspace-session-link-hovered: false;
+    in property <bool> workspace-session-link-armed: false;
     in property <[string]> workspace-session-visible-lines: [];
     in property <[TerminalCommandBlockRow]> workspace-session-command-blocks: [];
     in property <[TerminalOverviewMarkerRow]> workspace-session-overview-markers: [];
@@ -98,8 +100,6 @@ export component WorkspacePane inherits Rectangle {
     callback surface-resize-requested(int, int);
     callback normalize-hit-col(int, int) -> int;
     callback normalize-selection-hit-col(int, int) -> int;
-    callback open-url-hover-query(int, int) -> bool;
-    callback open-url-requested(int, int) -> bool;
     callback copy-selection-requested(int, int, int, int);
     callback selection-changed();
     callback paste-requested();
@@ -213,6 +213,8 @@ export component WorkspacePane inherits Rectangle {
                 session-scrollbar-thumb: root.workspace-session-scrollbar-thumb;
                 session-scrollbar-thumb-active: root.workspace-session-scrollbar-thumb-active;
                 session-mouse-grabbed: root.workspace-session-mouse-grabbed;
+                link-hovered: root.workspace-session-link-hovered;
+                link-armed: root.workspace-session-link-armed;
                 session-visible-lines: root.workspace-session-visible-lines;
                 session-command-blocks: root.workspace-session-command-blocks;
                 session-overview-markers: root.workspace-session-overview-markers;
@@ -249,14 +251,6 @@ export component WorkspacePane inherits Rectangle {
 
                 normalize-selection-hit-col(row, col) => {
                     return root.normalize-selection-hit-col(row, col);
-                }
-
-                open-url-hover-query(row, col) => {
-                    return root.open-url-hover-query(row, col);
-                }
-
-                open-url-requested(row, col) => {
-                    return root.open-url-requested(row, col);
                 }
 
                 copy-selection-requested(start-row, start-col, end-row, end-col) => {

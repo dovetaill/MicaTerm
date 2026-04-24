@@ -319,6 +319,8 @@ export component AppWindow inherits Window {
     in-out property <color> workspace-session-scrollbar-thumb: ThemeTokens.terminal-scrollbar-thumb-surface;
     in-out property <color> workspace-session-scrollbar-thumb-active: ThemeTokens.terminal-scrollbar-thumb-active-surface;
     in-out property <bool> workspace-session-mouse-grabbed: false;
+    in-out property <bool> workspace-session-link-hovered: false;
+    in-out property <bool> workspace-session-link-armed: false;
     in-out property <[string]> workspace-session-visible-lines: [];
     in-out property <[TerminalCommandBlockRow]> workspace-session-command-blocks: [];
     in-out property <[TerminalOverviewMarkerRow]> workspace-session-overview-markers: [];
@@ -532,8 +534,6 @@ export component AppWindow inherits Window {
     callback workspace-session-resize-requested(int, int);
     callback workspace-session-normalize-hit-col(int, int) -> int;
     callback workspace-session-normalize-selection-hit-col(int, int) -> int;
-    callback workspace-session-open-url-hover-query(int, int) -> bool;
-    callback workspace-session-open-url-requested(int, int) -> bool;
     callback workspace-session-copy-selection-requested(int, int, int, int);
     callback workspace-session-selection-changed();
     callback workspace-session-paste-requested();
@@ -957,6 +957,8 @@ export component AppWindow inherits Window {
                         workspace-session-scrollbar-thumb: root.workspace-session-scrollbar-thumb;
                         workspace-session-scrollbar-thumb-active: root.workspace-session-scrollbar-thumb-active;
                         workspace-session-mouse-grabbed: root.workspace-session-mouse-grabbed;
+                        workspace-session-link-hovered: root.workspace-session-link-hovered;
+                        workspace-session-link-armed: root.workspace-session-link-armed;
                         workspace-session-visible-lines: root.workspace-session-visible-lines;
                         workspace-session-command-blocks: root.workspace-session-command-blocks;
                         workspace-session-overview-markers: root.workspace-session-overview-markers;
@@ -1005,14 +1007,6 @@ export component AppWindow inherits Window {
 
                         normalize-selection-hit-col(row, col) => {
                             return root.workspace-session-normalize-selection-hit-col(row, col);
-                        }
-
-                        open-url-hover-query(row, col) => {
-                            return root.workspace-session-open-url-hover-query(row, col);
-                        }
-
-                        open-url-requested(row, col) => {
-                            return root.workspace-session-open-url-requested(row, col);
                         }
 
                         copy-selection-requested(start-row, start-col, end-row, end-col) => {

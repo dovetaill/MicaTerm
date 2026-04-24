@@ -456,9 +456,9 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
                     thumb_active: 0x66_788e,
                 },
                 ansi: [
-                    0x4a_5260, 0xc3_7a86, 0x86_b48f, 0xc6_a56a, 0x7d_9bc2, 0xa7_8cbf, 0x78_afae,
-                    0xc8_d1dc, 0x66_7180, 0xd6_949f, 0x9b_c6a4, 0xd8_ba83, 0x94_aed0, 0xb7_9ccb,
-                    0x8e_c0c0, 0xe7_edf4,
+                    0x4a_5260, 0xc3_7a86, 0x86_b48f, 0xc6_a56a, 0x7d_9bc2, 0xa7_8cbf,
+                    0x78_afae, 0xc8_d1dc, 0x66_7180, 0xd6_949f, 0x9b_c6a4, 0xd8_ba83,
+                    0x94_aed0, 0xb7_9ccb, 0x8e_c0c0, 0xe7_edf4,
                 ],
             },
             decoration: DecorationTheme {
@@ -514,9 +514,9 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
                     thumb_active: 0x9f_afbe,
                 },
                 ansi: [
-                    0x5a_6573, 0xb8_6470, 0x5f_8d69, 0x9d_7c41, 0x5b_80ae, 0x8f_73aa, 0x4e_9090,
-                    0xaa_b5c1, 0x73_8090, 0xc7_7a85, 0x76_9e7e, 0xb0_8d53, 0x72_95bf, 0xa2_86bb,
-                    0x68_a4a3, 0xd5_dce4,
+                    0x5a_6573, 0xb8_6470, 0x5f_8d69, 0x9d_7c41, 0x5b_80ae, 0x8f_73aa,
+                    0x4e_9090, 0xaa_b5c1, 0x73_8090, 0xc7_7a85, 0x76_9e7e, 0xb0_8d53,
+                    0x72_95bf, 0xa2_86bb, 0x68_a4a3, 0xd5_dce4,
                 ],
             },
             decoration: DecorationTheme {
@@ -577,9 +577,9 @@ fn legacy_hacker_green_spec(mode: ThemeMode) -> AppThemeSpec {
                     thumb_active: 0x43_735e,
                 },
                 ansi: [
-                    0x27_4033, 0xb9_6c72, 0x71_b488, 0xb8_a15f, 0x5e_91c2, 0x92_7cb5, 0x63_aaa4,
-                    0xbf_e2cc, 0x40_614f, 0xc9_858b, 0x8b_c8a0, 0xcc_b978, 0x79_a7d4, 0xa7_91c5,
-                    0x7c_beb8, 0xe2_f5e9,
+                    0x27_4033, 0xb9_6c72, 0x71_b488, 0xb8_a15f, 0x5e_91c2, 0x92_7cb5,
+                    0x63_aaa4, 0xbf_e2cc, 0x40_614f, 0xc9_858b, 0x8b_c8a0, 0xcc_b978,
+                    0x79_a7d4, 0xa7_91c5, 0x7c_beb8, 0xe2_f5e9,
                 ],
             },
             decoration: DecorationTheme {
@@ -635,9 +635,9 @@ fn legacy_hacker_green_spec(mode: ThemeMode) -> AppThemeSpec {
                     thumb_active: 0x8f_b29e,
                 },
                 ansi: [
-                    0x37_5645, 0xb0_6f76, 0x4c_8b67, 0x9a_8650, 0x5e_8db6, 0x8b_76a9, 0x58_9b95,
-                    0xb5_d7c4, 0x58_7967, 0xbf_8087, 0x63_9c76, 0xaf_995f, 0x75_9fc3, 0x9b_87b8,
-                    0x6e_ada6, 0xda_eee1,
+                    0x37_5645, 0xb0_6f76, 0x4c_8b67, 0x9a_8650, 0x5e_8db6, 0x8b_76a9,
+                    0x58_9b95, 0xb5_d7c4, 0x58_7967, 0xbf_8087, 0x63_9c76, 0xaf_995f,
+                    0x75_9fc3, 0x9b_87b8, 0x6e_ada6, 0xda_eee1,
                 ],
             },
             decoration: DecorationTheme {

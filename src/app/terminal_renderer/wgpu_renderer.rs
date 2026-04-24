@@ -982,11 +982,54 @@ fn glyph_cluster_visual_fit(
         return PreparedMonochromeGlyphVisualFit::BodyText;
     };
 
-    if cluster_text.chars().all(is_grid_fitted_symbol) {
+    if cluster_text.chars().all(is_grid_fitted_symbol)
+        || belongs_to_repeated_ascii_symbol_streak(run, cluster_start, '-')
+    {
         PreparedMonochromeGlyphVisualFit::GridSymbol
     } else {
         PreparedMonochromeGlyphVisualFit::BodyText
     }
+}
+
+fn belongs_to_repeated_ascii_symbol_streak(run: &GlyphRun, cluster_start: u32, symbol: char) -> bool {
+    let cluster_start = (cluster_start as usize).min(run.text.len());
+    let Some(cluster_index) = run
+        .clusters
+        .iter()
+        .position(|cluster| cluster.byte_range.start == cluster_start)
+    else {
+        return false;
+    };
+
+    let cluster = &run.clusters[cluster_index];
+    if !is_single_ascii_symbol_cluster(cluster, symbol) {
+        return false;
+    }
+
+    run.clusters
+        .get(cluster_index.wrapping_sub(1))
+        .is_some_and(|neighbor| adjacent_single_ascii_symbol_clusters(neighbor, cluster, symbol))
+        || run
+            .clusters
+            .get(cluster_index + 1)
+            .is_some_and(|neighbor| adjacent_single_ascii_symbol_clusters(cluster, neighbor, symbol))
+}
+
+fn adjacent_single_ascii_symbol_clusters(
+    left: &RunCluster,
+    right: &RunCluster,
+    symbol: char,
+) -> bool {
+    is_single_ascii_symbol_cluster(left, symbol)
+        && is_single_ascii_symbol_cluster(right, symbol)
+        && left.cell_range.end == right.cell_range.start
+}
+
+fn is_single_ascii_symbol_cluster(cluster: &RunCluster, symbol: char) -> bool {
+    let mut chars = cluster.text.chars();
+    matches!(chars.next(), Some(ch) if ch == symbol && ch.is_ascii())
+        && chars.next().is_none()
+        && cluster.cell_range.end == cluster.cell_range.start.saturating_add(1)
 }
 
 fn is_grid_fitted_symbol(ch: char) -> bool {
