@@ -2,6 +2,12 @@
 
 use super::*;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WorkspaceTerminalLinkAffordance {
+    pub hovered: bool,
+    pub armed: bool,
+}
+
 pub(super) fn projected_active_workspace_tab_id(
     state: &ShellViewModel,
     next_tabs: &[WorkspaceTab],
@@ -217,6 +223,129 @@ pub(super) fn normalize_active_workspace_selection_hit_col(
         .active_workspace_terminal_surface()
         .map(|surface| surface.normalize_selection_hit_col(safe_row, safe_col) as i32)
         .unwrap_or(col.max(0))
+}
+
+pub(super) fn openable_url_at_active_workspace_surface(
+    state: &ShellViewModel,
+    row: u32,
+    col: u32,
+) -> Option<String> {
+    let surface = state.active_workspace_terminal_surface()?;
+    openable_url_at_surface(surface, row, col)
+}
+
+pub(super) fn link_affordance_at_active_workspace_surface(
+    state: &ShellViewModel,
+    row: u32,
+    col: u32,
+    ctrl: bool,
+) -> WorkspaceTerminalLinkAffordance {
+    state
+        .active_workspace_terminal_surface()
+        .map(|surface| link_affordance_at_surface(surface, row, col, ctrl))
+        .unwrap_or_default()
+}
+
+pub(super) fn openable_url_at_surface(
+    surface: &TerminalSurfaceState,
+    row: u32,
+    col: u32,
+) -> Option<String> {
+    if !surface_allows_link_affordance(surface) {
+        return None;
+    }
+
+    url_token_hit_at_surface(surface, row, col).map(|(_, _, url)| url)
+}
+
+pub(super) fn link_affordance_at_surface(
+    surface: &TerminalSurfaceState,
+    row: u32,
+    col: u32,
+    ctrl: bool,
+) -> WorkspaceTerminalLinkAffordance {
+    if !surface_allows_link_affordance(surface) {
+        return WorkspaceTerminalLinkAffordance::default();
+    }
+
+    if openable_url_at_surface(surface, row, col).is_some() {
+        WorkspaceTerminalLinkAffordance {
+            hovered: true,
+            armed: ctrl,
+        }
+    } else {
+        WorkspaceTerminalLinkAffordance::default()
+    }
+}
+
+fn surface_allows_link_affordance(surface: &TerminalSurfaceState) -> bool {
+    !surface.alternate_screen_active && !surface.mouse_grabbed
+}
+
+fn url_token_hit_at_surface(
+    surface: &TerminalSurfaceState,
+    row: u32,
+    col: u32,
+) -> Option<(u32, u32, String)> {
+    if surface.cols == 0 {
+        return None;
+    }
+
+    let safe_col = col.min(surface.cols.saturating_sub(1));
+    let _ = token_char_at_surface(surface, row, safe_col)?;
+
+    let mut start_col = safe_col;
+    while start_col > 0 && token_char_at_surface(surface, row, start_col - 1).is_some() {
+        start_col -= 1;
+    }
+
+    let mut end_col = safe_col;
+    while end_col + 1 < surface.cols && token_char_at_surface(surface, row, end_col + 1).is_some()
+    {
+        end_col += 1;
+    }
+
+    let token = (start_col..=end_col)
+        .filter_map(|candidate_col| token_char_at_surface(surface, row, candidate_col))
+        .collect::<String>();
+    let trimmed = trim_openable_url_token(token.as_str())?;
+    let trimmed_width = trimmed.chars().count() as u32;
+    Some((
+        start_col,
+        start_col.saturating_add(trimmed_width),
+        trimmed.to_string(),
+    ))
+}
+
+fn token_char_at_surface(surface: &TerminalSurfaceState, row: u32, col: u32) -> Option<char> {
+    let cell = surface.cells.iter().find(|cell| {
+        cell.row == row && cell.col == col && cell.width == 1 && !cell.text.trim().is_empty()
+    })?;
+    let mut chars = cell.text.chars();
+    let ch = chars.next()?;
+    if chars.next().is_some() || ch.is_whitespace() {
+        return None;
+    }
+    Some(ch)
+}
+
+fn trim_openable_url_token(token: &str) -> Option<&str> {
+    let trimmed = token.trim_end_matches(|ch: char| {
+        matches!(
+            ch,
+            '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '>' | '"' | '\''
+        )
+    });
+
+    let minimum_len = if trimmed.starts_with("https://") {
+        "https://".len()
+    } else if trimmed.starts_with("http://") {
+        "http://".len()
+    } else {
+        return None;
+    };
+
+    (trimmed.len() > minimum_len).then_some(trimmed)
 }
 
 pub(super) fn refresh_projection_after_local_input_hint(

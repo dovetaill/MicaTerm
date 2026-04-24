@@ -30,6 +30,7 @@ use mica_term::app::bootstrap::{
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_terminal_defaults,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_transfer_store,
     build_shared_app_credential_store_for_paths, default_window_size,
+    install_url_open_handler_for_test,
 };
 use mica_term::app::keychain::KeychainCatalog;
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
@@ -52,8 +53,9 @@ use mica_term::app::ssh::known_hosts::{
 };
 use mica_term::app::ssh::profile::{ConnectionProfile, ConnectionProxyProfile, SshAuthMethod};
 use mica_term::app::ssh::runtime::{
-    SessionRuntimeEvent, TerminalKeyEvent, TerminalKeyKind, TerminalMouseInput,
-    TerminalRuntimeDefaults, TerminalSession, TerminalSurfaceState, UnknownHostKeyError,
+    SessionRuntimeEvent, TerminalKeyEvent, TerminalKeyKind, TerminalMouseButton,
+    TerminalMouseEventKind, TerminalMouseInput, TerminalRuntimeDefaults, TerminalSession,
+    TerminalSurfaceState, UnknownHostKeyError,
 };
 use mica_term::app::ssh::session_manager::{
     EnhancementPolicy, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher,
@@ -92,6 +94,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 static KNOWN_HOSTS_ENV_LOCK: Mutex<()> = Mutex::new(());
+static URL_OPEN_HOOK_LOCK: Mutex<()> = Mutex::new(());
 
 fn rgb_tuple_to_hex((red, green, blue): (u8, u8, u8)) -> u32 {
     (u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)
@@ -537,6 +540,19 @@ struct ObservingScrollbackLauncher {
     terminal_defaults: TerminalRuntimeDefaults,
 }
 
+#[derive(Clone, Default)]
+struct LinkInteractionLauncherState {
+    forwarded_mouse_inputs: Arc<Mutex<Vec<TerminalMouseInput>>>,
+}
+
+#[derive(Clone)]
+struct LinkInteractionLauncher {
+    state: LinkInteractionLauncherState,
+    line: &'static str,
+    alternate_screen_active: bool,
+    mouse_grabbed: bool,
+}
+
 #[derive(Clone)]
 struct SlowOpeningLauncher {
     state: Arc<Mutex<RecordingLauncherState>>,
@@ -562,6 +578,10 @@ struct FailingPrivateKeyImporter {
 struct UnavailableCredentialStore;
 
 struct NoopRuntimeControl;
+
+struct LinkInteractionRuntimeControl {
+    state: LinkInteractionLauncherState,
+}
 
 struct MemoryFileReader {
     cursor: Cursor<Vec<u8>>,
@@ -2423,6 +2443,37 @@ impl SessionRuntimeControl for InteractiveProjectionRuntimeControl {
     }
 }
 
+impl SessionRuntimeControl for LinkInteractionRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_text_input(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_key_input(&self, _event: TerminalKeyEvent) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_paste(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, event: TerminalMouseInput) -> Result<()> {
+        self.state
+            .forwarded_mouse_inputs
+            .lock()
+            .expect("lock forwarded mouse inputs")
+            .push(event);
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+}
+
 impl SessionRuntimeControl for KeyboardMatrixRuntimeControl {
     fn disconnect(&self) -> Result<()> {
         Ok(())
@@ -2737,6 +2788,37 @@ impl SessionRuntimeLauncher for ObservingScrollbackLauncher {
                 ),
             ));
             Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SessionRuntimeLauncher for LinkInteractionLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let state = self.state.clone();
+        let line = self.line;
+        let alternate_screen_active = self.alternate_screen_active;
+        let mouse_grabbed = self.mouse_grabbed;
+        Box::pin(async move {
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let mut surface = terminal_surface_with_cells(session_id, 1, 24, 80, vec![line.into()]);
+            surface.alternate_screen_active = alternate_screen_active;
+            surface.mouse_grabbed = mouse_grabbed;
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
+            Ok(Box::new(LinkInteractionRuntimeControl { state }) as Box<dyn SessionRuntimeControl>)
         })
     }
 
@@ -9402,11 +9484,21 @@ fn workspace_terminal_shift_home_end_shortcuts_jump_scrollback_locally() {
 }
 
 #[test]
-fn workspace_terminal_mouse_input_callback_updates_active_session_surface() {
+fn workspace_terminal_mouse_input_callback_forwards_events_when_runtime_owns_the_pointer() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
-    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    let launcher_state = LinkInteractionLauncherState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(LinkInteractionLauncher {
+            state: launcher_state.clone(),
+            line: "welcome to mica-term",
+            alternate_screen_active: false,
+            mouse_grabbed: true,
+        }),
+    );
 
     let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
     app.invoke_asset_activated(ssh_id.into());
@@ -9429,12 +9521,170 @@ fn workspace_terminal_mouse_input_callback_updates_active_session_surface() {
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
     slint::platform::update_timers_and_animations();
 
-    let visible_lines = app.get_workspace_session_visible_lines();
-    assert_eq!(app.get_workspace_session_surface_seqno(), 2);
-    assert_eq!(visible_lines.row_count(), 2);
+    let forwarded = launcher_state
+        .forwarded_mouse_inputs
+        .lock()
+        .expect("lock forwarded mouse inputs");
+    assert_eq!(forwarded.len(), 1);
     assert_eq!(
-        visible_lines.row_data(1).unwrap().as_str(),
-        "mouse input forwarded"
+        forwarded[0].kind,
+        TerminalMouseEventKind::Down,
+        "mouse-grabbed sessions should still forward workspace mouse events through the runtime callback"
+    );
+    assert_eq!(
+        forwarded[0].button,
+        TerminalMouseButton::Left,
+        "mouse-grabbed sessions should preserve the original button when forwarding workspace mouse input"
+    );
+}
+
+#[test]
+fn workspace_terminal_ctrl_click_opens_trimmed_url_without_forwarding_mouse_input() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let launcher_state = LinkInteractionLauncherState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(LinkInteractionLauncher {
+            state: launcher_state.clone(),
+            line: "see https://example.com).",
+            alternate_screen_active: false,
+            mouse_grabbed: false,
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    let _hook_lock = URL_OPEN_HOOK_LOCK.lock().expect("lock URL open hook");
+    let opened = Arc::new(Mutex::new(Vec::<String>::new()));
+    let opened_ref = Arc::clone(&opened);
+    let _guard = install_url_open_handler_for_test(move |url| {
+        opened_ref
+            .lock()
+            .expect("lock opened urls")
+            .push(url.to_string());
+        Ok(())
+    });
+
+    app.invoke_workspace_session_mouse_input("down".into(), "left".into(), 0, 8, false, true, false);
+    app.invoke_workspace_session_mouse_input("up".into(), "left".into(), 0, 8, false, true, false);
+
+    assert_eq!(
+        opened.lock().expect("lock opened urls").as_slice(),
+        ["https://example.com"],
+        "Ctrl+click should open the trimmed HTTP(S) URL instead of including trailing punctuation from terminal output"
+    );
+    assert!(
+        launcher_state
+            .forwarded_mouse_inputs
+            .lock()
+            .expect("lock forwarded mouse inputs")
+            .is_empty(),
+        "host-owned Ctrl+click link opens should short-circuit before forwarding remote mouse input"
+    );
+}
+
+#[test]
+fn workspace_terminal_ctrl_drag_does_not_open_link_or_forward_mouse_input() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let launcher_state = LinkInteractionLauncherState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(LinkInteractionLauncher {
+            state: launcher_state.clone(),
+            line: "see https://example.com",
+            alternate_screen_active: false,
+            mouse_grabbed: false,
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    let _hook_lock = URL_OPEN_HOOK_LOCK.lock().expect("lock URL open hook");
+    let opened = Arc::new(Mutex::new(Vec::<String>::new()));
+    let opened_ref = Arc::clone(&opened);
+    let _guard = install_url_open_handler_for_test(move |url| {
+        opened_ref
+            .lock()
+            .expect("lock opened urls")
+            .push(url.to_string());
+        Ok(())
+    });
+
+    app.invoke_workspace_session_mouse_input("down".into(), "left".into(), 0, 8, false, true, false);
+    app.invoke_workspace_session_mouse_input("move".into(), "none".into(), 0, 12, false, true, false);
+    app.invoke_workspace_session_mouse_input("up".into(), "left".into(), 0, 12, false, true, false);
+
+    assert!(
+        opened.lock().expect("lock opened urls").is_empty(),
+        "selection-like drags must cancel any pending Ctrl+click link candidate instead of opening a URL on release"
+    );
+    assert!(
+        launcher_state
+            .forwarded_mouse_inputs
+            .lock()
+            .expect("lock forwarded mouse inputs")
+            .is_empty(),
+        "local link drag suppression should stay on the host path instead of leaking drag events into the remote PTY"
+    );
+}
+
+#[test]
+fn workspace_terminal_alt_screen_ctrl_click_does_not_open_link_and_still_forwards_mouse_input() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let launcher_state = LinkInteractionLauncherState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(LinkInteractionLauncher {
+            state: launcher_state.clone(),
+            line: "see https://example.com",
+            alternate_screen_active: true,
+            mouse_grabbed: false,
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    let _hook_lock = URL_OPEN_HOOK_LOCK.lock().expect("lock URL open hook");
+    let opened = Arc::new(Mutex::new(Vec::<String>::new()));
+    let opened_ref = Arc::clone(&opened);
+    let _guard = install_url_open_handler_for_test(move |url| {
+        opened_ref
+            .lock()
+            .expect("lock opened urls")
+            .push(url.to_string());
+        Ok(())
+    });
+
+    app.invoke_workspace_session_mouse_input("down".into(), "left".into(), 0, 8, false, true, false);
+    app.invoke_workspace_session_mouse_input("up".into(), "left".into(), 0, 8, false, true, false);
+
+    assert!(
+        opened.lock().expect("lock opened urls").is_empty(),
+        "alternate-screen content should suppress host link opening even when the hovered token looks like a URL"
+    );
+    assert_eq!(
+        launcher_state
+            .forwarded_mouse_inputs
+            .lock()
+            .expect("lock forwarded mouse inputs")
+            .len(),
+        2,
+        "alternate-screen sessions should keep mouse ownership so Ctrl+click still forwards to the remote terminal"
     );
 }
 

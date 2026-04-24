@@ -1,5 +1,9 @@
 use std::fs;
 
+use mica_term::app::bootstrap::{
+    WorkspaceTerminalLinkAffordance, workspace_terminal_link_affordance_for_test,
+    workspace_terminal_openable_url_at_surface_for_test,
+};
 use mica_term::app::ssh::runtime::{
     TerminalCellState, TerminalKeyEvent, TerminalSession, TerminalSurfaceState,
     extract_current_working_directory_from_osc7,
@@ -258,6 +262,58 @@ fn surface_state_tracks_alternate_screen_activity_for_semantic_guards() {
     assert!(!initial.alternate_screen_active);
     assert!(alternate.alternate_screen_active);
     assert!(!restored.alternate_screen_active);
+}
+
+#[test]
+fn workspace_terminal_trims_trailing_punctuation_from_http_tokens() {
+    let mut session = TerminalSession::new(4, 80);
+    session.apply_remote_bytes(b"see https://example.com).\r\n");
+    let surface = session.surface_state(Uuid::new_v4());
+
+    assert_eq!(
+        workspace_terminal_openable_url_at_surface_for_test(&surface, 0, 8),
+        Some("https://example.com".into()),
+        "terminal link detection should trim trailing punctuation so log-style URL tokens open the actual URL instead of the surrounding sentence punctuation"
+    );
+}
+
+#[test]
+fn workspace_terminal_link_affordance_requires_safe_surface_state_and_ctrl_for_arming() {
+    let mut session = TerminalSession::new(4, 80);
+    session.apply_remote_bytes(b"see https://example.com\r\n");
+    let mut surface = session.surface_state(Uuid::new_v4());
+
+    assert_eq!(
+        workspace_terminal_link_affordance_for_test(&surface, 0, 8, false),
+        WorkspaceTerminalLinkAffordance {
+            hovered: true,
+            armed: false,
+        },
+        "hovering a URL without Ctrl should expose a detectable link affordance but keep activation gated"
+    );
+    assert_eq!(
+        workspace_terminal_link_affordance_for_test(&surface, 0, 8, true),
+        WorkspaceTerminalLinkAffordance {
+            hovered: true,
+            armed: true,
+        },
+        "holding Ctrl over a URL should arm the link affordance instead of requiring a separate parser path in the UI"
+    );
+
+    surface.alternate_screen_active = true;
+    assert_eq!(
+        workspace_terminal_link_affordance_for_test(&surface, 0, 8, true),
+        WorkspaceTerminalLinkAffordance::default(),
+        "alternate-screen TUI content should suppress host link affordances"
+    );
+
+    surface.alternate_screen_active = false;
+    surface.mouse_grabbed = true;
+    assert_eq!(
+        workspace_terminal_link_affordance_for_test(&surface, 0, 8, true),
+        WorkspaceTerminalLinkAffordance::default(),
+        "mouse-grabbed TUI sessions should suppress host link affordances so applications keep control of the pointer"
+    );
 }
 
 #[test]
