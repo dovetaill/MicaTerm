@@ -389,14 +389,30 @@ export component DialogTextField inherits Rectangle {
     in property <bool> invalid: false;
     in property <string> helper-text: "";
     in property <string> trailing-action-text: "";
+    in property <bool> trailing-icon-visible: false;
+    in property <image> trailing-icon-source;
+    in property <string> trailing-icon-label: "";
     callback value-changed(string);
     callback trailing-action-requested();
+    callback trailing-icon-requested();
     callback submitted();
 
     private property <length> field-height: root.multiline ? 120px : 40px;
     private property <length> helper-height: root.helper-text == "" ? 0px : helper-metric.preferred-height + 2px;
+    private property <length> trailing-action-width: root.trailing-action-text != "" ? 70px : 0px;
+    private property <length> trailing-icon-width: root.trailing-icon-visible ? 36px : 0px;
+    private property <length> text-input-x: 12px;
+    private property <length> text-input-y: 10px;
+    private property <length> text-input-width: max(
+        0px,
+        root.width - 24px - root.trailing-action-width - root.trailing-icon-width
+    );
+    private property <length> text-input-height: max(0px, root.field-height - 20px);
     private property <bool> active: field-input.has-focus;
-    private property <bool> hovered: field-touch.has-hover;
+    private property <bool> hovered: top-padding-focus.has-hover
+        || bottom-padding-focus.has-hover
+        || left-padding-focus.has-hover
+        || right-padding-focus.has-hover;
 
     min-width: 0px;
     preferred-width: 0px;
@@ -456,10 +472,10 @@ export component DialogTextField inherits Rectangle {
         background: ThemeTokens.modal-field-surface;
 
         field-input := TextInput {
-            x: 12px;
-            y: root.multiline ? 10px : 10px;
-            width: parent.width - 24px - (root.trailing-action-text != "" ? 70px : 0px);
-            height: parent.height - (root.multiline ? 20px : 20px);
+            x: root.text-input-x;
+            y: root.text-input-y;
+            width: root.text-input-width;
+            height: root.text-input-height;
             text: root.value;
             color: ThemeTokens.text-primary;
             single-line: !root.multiline;
@@ -481,8 +497,56 @@ export component DialogTextField inherits Rectangle {
             }
         }
 
+        top-padding-focus := TouchArea {
+            x: root.text-input-x;
+            y: 0px;
+            width: root.text-input-width;
+            height: root.text-input-y;
+            mouse-cursor: MouseCursor.text;
+
+            clicked => {
+                field-input.focus();
+            }
+        }
+
+        bottom-padding-focus := TouchArea {
+            x: root.text-input-x;
+            y: root.text-input-y + root.text-input-height;
+            width: root.text-input-width;
+            height: max(0px, parent.height - self.y);
+            mouse-cursor: MouseCursor.text;
+
+            clicked => {
+                field-input.focus();
+            }
+        }
+
+        left-padding-focus := TouchArea {
+            x: 0px;
+            y: 0px;
+            width: root.text-input-x;
+            height: parent.height;
+            mouse-cursor: MouseCursor.text;
+
+            clicked => {
+                field-input.focus();
+            }
+        }
+
+        right-padding-focus := TouchArea {
+            x: parent.width - 12px - root.trailing-action-width - root.trailing-icon-width;
+            y: 0px;
+            width: 12px;
+            height: parent.height;
+            mouse-cursor: MouseCursor.text;
+
+            clicked => {
+                field-input.focus();
+            }
+        }
+
         if root.trailing-action-text != "" : trailing-action := DialogActionButton {
-            x: parent.width - self.width - 8px;
+            x: parent.width - self.width - 8px - root.trailing-icon-width;
             y: (parent.height - self.height) / 2;
             width: 64px;
             height: 28px;
@@ -493,13 +557,14 @@ export component DialogTextField inherits Rectangle {
             }
         }
 
-        field-touch := TouchArea {
-            width: parent.width;
-            height: parent.height;
-            mouse-cursor: MouseCursor.text;
+        if root.trailing-icon-visible : trailing-icon-action := DialogFieldIconAction {
+            x: parent.width - self.width - 6px;
+            y: (parent.height - self.height) / 2;
+            icon-source: root.trailing-icon-source;
+            action-label: root.trailing-icon-label;
 
             clicked => {
-                field-input.focus();
+                root.trailing-icon-requested();
             }
         }
     }
