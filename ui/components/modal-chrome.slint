@@ -97,6 +97,192 @@ export component DialogFieldIconAction inherits Rectangle {
     }
 }
 
+export component DialogSelectField inherits Rectangle {
+    in property <string> label: "";
+    in property <string> selected-label: "";
+    in property <string> placeholder-text: "";
+    in property <bool> open: false;
+    in property <bool> enabled: true;
+    in property <bool> invalid: false;
+    out property <bool> has-focus: select-focus.has-focus;
+    callback toggle-requested();
+    private property <image> chevron-icon: @image-url("../../assets/icons/fluent/chevron-down-20-regular.svg");
+    private property <string> display-text: root.selected-label != ""
+        ? root.selected-label
+        : root.placeholder-text != "" ? root.placeholder-text
+        : root.label;
+
+    height: 34px;
+    border-radius: ThemeTokens.modal-control-radius;
+    border-width: 1px;
+    border-color: root.invalid ? ThemeTokens.status-error-accent
+        : root.has-focus ? ThemeTokens.input-focus-ring
+        : select-touch.has-hover ? ThemeTokens.modal-field-hover-border
+        : ThemeTokens.modal-field-border;
+    background: ThemeTokens.modal-field-surface;
+    accessible-role: AccessibleRole.button;
+    accessible-label: root.label != "" ? root.label : root.display-text;
+    accessible-action-default => { select-touch.clicked(); }
+    forward-focus: select-focus;
+    opacity: root.enabled ? 1 : 0.54;
+
+    public function focus-trigger() {
+        select-focus.focus();
+    }
+
+    Text {
+        x: 12px;
+        y: 0px;
+        width: max(0px, parent.width - 48px);
+        height: parent.height;
+        text: root.display-text;
+        color: root.selected-label == "" ? ThemeTokens.text-muted : ThemeTokens.text-primary;
+        vertical-alignment: center;
+        font-family: AppTypography.ui-font-family;
+        font-size: AppTypography.ui-font-size-body;
+        font-weight: AppTypography.ui-font-weight-regular;
+        overflow: elide;
+    }
+
+    Image {
+        x: parent.width - 30px;
+        y: (parent.height - self.height) / 2;
+        width: 18px;
+        height: 18px;
+        source: root.chevron-icon;
+        image-fit: contain;
+        colorize: ThemeTokens.text-secondary;
+    }
+
+    select-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.enabled;
+        mouse-cursor: MouseCursor.pointer;
+
+        clicked => {
+            root.toggle-requested();
+        }
+    }
+
+    select-focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        enabled: root.visible && root.enabled;
+        focus-on-tab-navigation: root.enabled;
+
+        key-pressed(event) => {
+            if event.text == " " || event.text == "\n" || event.text == Key.DownArrow || event.text == Key.UpArrow {
+                root.toggle-requested();
+                accept
+            } else {
+                reject
+            }
+        }
+    }
+}
+
+export component DialogSelectPopup inherits Rectangle {
+    in property <[string]> options: [];
+    in property <bool> open: false;
+    in property <int> highlighted-index: -1;
+    in property <length> popup-max-height: 240px;
+    in property <bool> opens-upward: false;
+    out property <bool> has-focus: popup-focus.has-focus;
+    callback option-selected(string);
+    callback dismiss-requested();
+    callback move-highlight-requested(int);
+    private property <length> option-height: 32px;
+    private property <length> content-height: 8px + root.options.length * root.option-height + 8px;
+
+    border-radius: ThemeTokens.modal-control-radius;
+    border-width: 1px;
+    border-color: ThemeTokens.modal-field-border;
+    background: ThemeTokens.modal-section-surface;
+    clip: true;
+    height: min(root.popup-max-height, root.content-height);
+    accessible-role: AccessibleRole.list;
+
+    public function focus-popup() {
+        popup-focus.focus();
+    }
+
+    popup-scroll := ScrollView {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        mouse-drag-pan-enabled: false;
+        horizontal-scrollbar-policy: always-off;
+        viewport-width: self.width;
+        viewport-height: max(self.height, root.content-height);
+
+        for option[index] in root.options : option-row := Rectangle {
+            x: 8px;
+            y: 8px + index * root.option-height;
+            width: max(0px, popup-scroll.visible-width - 16px);
+            height: root.option-height;
+            border-radius: ThemeTokens.modal-control-radius;
+            background: index == root.highlighted-index
+                ? ThemeTokens.modal-button-secondary-hover-surface
+                : option-touch.has-hover ? ThemeTokens.modal-button-secondary-surface
+                : transparent;
+
+            Text {
+                x: 10px;
+                y: 0px;
+                width: max(0px, parent.width - 20px);
+                height: parent.height;
+                text: option;
+                color: ThemeTokens.text-primary;
+                vertical-alignment: center;
+                font-family: AppTypography.ui-font-family;
+                font-size: 12px;
+                font-weight: AppTypography.ui-font-weight-regular;
+                overflow: elide;
+            }
+
+            option-touch := TouchArea {
+                width: parent.width;
+                height: parent.height;
+                enabled: root.open;
+                mouse-cursor: MouseCursor.pointer;
+
+                clicked => {
+                    root.option-selected(option);
+                }
+            }
+        }
+    }
+
+    popup-focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        enabled: root.visible && root.open;
+
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.dismiss-requested();
+                accept
+            } else if event.text == Key.DownArrow {
+                root.move-highlight-requested(1);
+                accept
+            } else if event.text == Key.UpArrow {
+                root.move-highlight-requested(-1);
+                accept
+            } else if (event.text == "\n" || event.text == Key.Return)
+                && root.highlighted-index >= 0
+                && root.highlighted-index < root.options.length
+            {
+                root.option-selected(root.options[root.highlighted-index]);
+                accept
+            } else {
+                reject
+            }
+        }
+    }
+}
+
 export component DialogActionButton inherits Rectangle {
     in property <string> label: "";
     in property <bool> primary: false;

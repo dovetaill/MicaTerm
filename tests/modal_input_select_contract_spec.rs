@@ -40,3 +40,42 @@ fn dialog_text_field_contract_only_uses_focus_helpers_outside_text_viewport() {
         "dialog text fields should expose a trailing icon slot for secret reveal affordances"
     );
 }
+
+#[test]
+fn dialog_select_contract_exposes_modal_local_popup_primitives() {
+    let source = fs::read_to_string("ui/components/modal-chrome.slint")
+        .expect("read modal chrome source");
+
+    assert!(
+        source.contains("export component DialogSelectField inherits Rectangle {"),
+        "modal chrome should export a shared select trigger primitive for modal-local overlays"
+    );
+    assert!(
+        source.contains("export component DialogSelectPopup inherits Rectangle {"),
+        "modal chrome should export a shared popup primitive for modal-local overlays"
+    );
+    assert!(
+        source.contains("in property <bool> open: false;"),
+        "shared select primitives should expose open state so modal owners can control overlay visibility"
+    );
+    assert!(
+        source.contains("callback option-selected(string);"),
+        "shared select popup should report the chosen label back to the modal owner"
+    );
+    assert!(
+        source.contains("callback dismiss-requested();"),
+        "shared select popup should expose an explicit dismiss callback for Esc and outside-click owners"
+    );
+    assert!(
+        source.contains("callback move-highlight-requested(int);"),
+        "shared select popup should expose a minimal highlight navigation callback"
+    );
+    assert!(
+        source.contains("in property <length> popup-max-height"),
+        "shared select popup should expose a max-height contract for bounded modal layouts"
+    );
+    assert!(
+        !source.contains("ComboBox {"),
+        "shared modal select primitives should not wrap the stock ComboBox popup"
+    );
+}

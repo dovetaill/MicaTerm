@@ -80,6 +80,12 @@ grep -F 'clicked => { }' "$APP_WINDOW" >/dev/null
 grep -F 'callback close-asset-modal-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback sync-modal-close-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'export component DialogFieldIconAction inherits Rectangle {' "$MODAL_CHROME" >/dev/null
+grep -F 'export component DialogSelectField inherits Rectangle {' "$MODAL_CHROME" >/dev/null
+grep -F 'export component DialogSelectPopup inherits Rectangle {' "$MODAL_CHROME" >/dev/null
+grep -F 'callback option-selected(string);' "$MODAL_CHROME" >/dev/null
+grep -F 'callback dismiss-requested();' "$MODAL_CHROME" >/dev/null
+grep -F 'callback move-highlight-requested(int);' "$MODAL_CHROME" >/dev/null
+grep -F 'in property <length> popup-max-height:' "$MODAL_CHROME" >/dev/null
 test -f "$ROOT_DIR/assets/icons/fluent/eye-20-regular.svg"
 test -f "$ROOT_DIR/assets/icons/fluent/eye-off-20-regular.svg"
 grep -F 'callback sync-modal-primary-action-requested();' "$APP_WINDOW" >/dev/null
