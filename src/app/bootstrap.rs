@@ -94,7 +94,8 @@ use crate::app::terminal_renderer::{
     TerminalRendererHostOptions,
 };
 use crate::app::terminal_theme::{
-    TerminalThemePreset, preset_for_theme_mode, selection_overlay_rgba,
+    TerminalThemePreset, preset_for_theme, preset_for_theme_mode, selection_overlay_rgba,
+    selection_overlay_rgba_for,
 };
 #[cfg(any(target_os = "windows", test))]
 use crate::app::ui_preferences::PersistedWindowBounds;
@@ -175,7 +176,7 @@ use crate::shell::view_model::{
     RightPanelView, ShellViewModel, SnippetActivation, SshModalAction, SyncModalMode,
     SyncModalViewState, VaultPanelViewState,
 };
-use crate::theme::ThemeMode;
+use crate::theme::{ThemeMode, ThemeVariant};
 use russh::keys::ssh_key::{LineEnding, rand_core::OsRng};
 use russh::keys::{Algorithm, PrivateKey, PublicKey};
 
@@ -2055,8 +2056,12 @@ fn sync_workspace_terminal_shell_chrome(window: &AppWindow, preset: TerminalThem
     ));
 }
 
-fn terminal_selection_overlay_rgba(theme_mode: ThemeMode) -> u32 {
-    selection_overlay_rgba(theme_mode)
+fn terminal_selection_overlay_rgba(theme_mode: ThemeMode, theme_variant: ThemeVariant) -> u32 {
+    if theme_variant == ThemeVariant::PremiumDefault {
+        selection_overlay_rgba(theme_mode)
+    } else {
+        selection_overlay_rgba_for(theme_mode, theme_variant)
+    }
 }
 
 fn workspace_session_uses_host_selection_overlay(window: &AppWindow) -> bool {
@@ -2968,7 +2973,14 @@ fn sync_workspace_session_state_with_manager(
         visible_lines,
         |model| window.set_workspace_session_visible_lines(model),
     );
-    sync_workspace_terminal_shell_chrome(window, preset_for_theme_mode(state.theme_mode));
+    sync_workspace_terminal_shell_chrome(
+        window,
+        if state.theme_variant == ThemeVariant::PremiumDefault {
+            preset_for_theme_mode(state.theme_mode)
+        } else {
+            preset_for_theme(state.theme_mode, state.theme_variant)
+        },
+    );
     sync_workspace_terminal_surface_projection_only(window, state);
     sync_workspace_connection_progress_state(window, state, manager);
 
@@ -3006,7 +3018,11 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
     window.set_workspace_session_cell_width(default_cell_width_px as f32 / scale_factor);
     window.set_workspace_session_cell_height(default_cell_height_px as f32 / scale_factor);
     sync_workspace_native_terminal_surface_geometry(window);
-    let terminal_theme_preset = preset_for_theme_mode(state.theme_mode);
+    let terminal_theme_preset = if state.theme_variant == ThemeVariant::PremiumDefault {
+        preset_for_theme_mode(state.theme_mode)
+    } else {
+        preset_for_theme(state.theme_mode, state.theme_variant)
+    };
 
     if let Some(surface) = state.active_workspace_terminal_surface() {
         let selection = if workspace_session_uses_host_selection_overlay(window) {
@@ -3014,7 +3030,8 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
         } else {
             active_workspace_terminal_selection(window)
         };
-        let selection_overlay_rgba = terminal_selection_overlay_rgba(state.theme_mode);
+        let selection_overlay_rgba =
+            terminal_selection_overlay_rgba(state.theme_mode, state.theme_variant);
         let mut native_frame_presented = false;
         let mut next_render_mode = None;
         let mut next_surface_seqno = None;

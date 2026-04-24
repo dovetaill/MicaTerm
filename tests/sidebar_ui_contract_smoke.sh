@@ -39,5 +39,10 @@ grep -F 'folder-open-20-regular.svg' "$BUTTON" >/dev/null
 grep -F 'window-console-20-regular.svg' "$BUTTON" >/dev/null
 grep -F 'document-code-16-regular.svg' "$BUTTON" >/dev/null
 grep -F 'key-multiple-20-regular.svg' "$BUTTON" >/dev/null
-grep -F 'ThemeTokens.sidebar-hover-surface' "$BUTTON" >/dev/null
-grep -F 'ThemeTokens.sidebar-selected-surface' "$BUTTON" >/dev/null
+grep -F 'Click to collapse, drag to resize' "$SIDEBAR" >/dev/null
+grep -F 'Click to expand' "$SIDEBAR" >/dev/null
+grep -F 'right-panel-revive-strip' "$APP_WINDOW" >/dev/null
+grep -F 'text: "Click to expand"' "$APP_WINDOW" >/dev/null
+grep -F 'ThemeTokens.sidebar-item-hover-background' "$BUTTON" >/dev/null
+grep -F 'ThemeTokens.sidebar-item-selected-background' "$BUTTON" >/dev/null
+grep -F 'ThemeTokens.sidebar-item-selected-border' "$BUTTON" >/dev/null
