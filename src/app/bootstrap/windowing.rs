@@ -241,9 +241,12 @@ pub(super) fn sync_sync_modal_state(window: &AppWindow, state: &ShellViewModel) 
     window.set_sync_modal_git_auth_mode(modal.git_auth_mode.clone().into());
     window.set_sync_modal_git_https_username(modal.git_https_username.clone().into());
     window.set_sync_modal_git_https_secret(modal.git_https_secret.clone().into());
+    window.set_sync_modal_git_https_secret_visible(modal.git_https_secret_visible);
     window.set_sync_modal_git_ssh_private_key(modal.git_ssh_private_key.clone().into());
     window.set_sync_modal_git_ssh_passphrase(modal.git_ssh_passphrase.clone().into());
+    window.set_sync_modal_git_ssh_passphrase_visible(modal.git_ssh_passphrase_visible);
     window.set_sync_modal_master_password(modal.master_password.clone().into());
+    window.set_sync_modal_master_password_visible(modal.master_password_visible);
     window.set_sync_modal_local_last_sync_text(modal.local_last_sync_text.clone().into());
     window.set_sync_modal_remote_last_update_text(modal.remote_last_update_text.clone().into());
     window.set_sync_modal_primary_revision_text(modal.primary_revision_text.clone().into());

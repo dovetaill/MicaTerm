@@ -480,6 +480,7 @@ pub(super) fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel)
             window.set_keychain_identity_modal_username(draft.username.clone().into());
             window.set_keychain_identity_modal_auth_kind(draft.auth_kind.clone().into());
             window.set_keychain_identity_modal_password(draft.password.clone().into());
+            window.set_keychain_identity_modal_password_visible(draft.password_visible);
             window.set_keychain_identity_modal_ssh_key_label(draft.ssh_key_label.clone().into());
             window.set_keychain_identity_modal_remark(draft.remark.clone().into());
         }
@@ -814,6 +815,7 @@ fn sync_keychain_modal_defaults(window: &AppWindow) {
     window.set_keychain_identity_modal_username("".into());
     window.set_keychain_identity_modal_auth_kind("password".into());
     window.set_keychain_identity_modal_password("".into());
+    window.set_keychain_identity_modal_password_visible(false);
     window.set_keychain_identity_modal_ssh_key_label("".into());
     window.set_keychain_identity_modal_remark("".into());
     window.set_keychain_ssh_key_modal_name("".into());

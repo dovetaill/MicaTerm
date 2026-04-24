@@ -17,6 +17,7 @@ export component AssetsKeychainIdentityModal inherits Rectangle {
     in property <string> username: "";
     in property <string> auth-kind: "password";
     in property <string> password: "";
+    in property <bool> password-visible: false;
     in property <string> ssh-key-label: "";
     in property <string> remark: "";
     in property <string> validation-message: "";
@@ -30,6 +31,8 @@ export component AssetsKeychainIdentityModal inherits Rectangle {
     callback drag-moved(length, length);
     callback drag-ended();
     callback focus-restore-requested();
+    private property <image> eye-icon: @image-url("../../assets/icons/fluent/eye-20-regular.svg");
+    private property <image> eye-off-icon: @image-url("../../assets/icons/fluent/eye-off-20-regular.svg");
     private property <length> footer-height: root.validation-message == "" ? ThemeTokens.modal-footer-min-height : 116px;
 
     background: transparent;
@@ -177,11 +180,21 @@ export component AssetsKeychainIdentityModal inherits Rectangle {
                             label: "Password";
                             required: true;
                             value: root.password;
-                            password-mode: true;
+                            password-mode: !root.password-visible;
+                            trailing-icon-visible: true;
+                            trailing-icon-source: root.password-visible ? root.eye-off-icon : root.eye-icon;
+                            trailing-icon-label: root.password-visible ? "Hide password" : "Show password";
                             helper-text: "Use the SSH key mode if this identity should point at a managed key instead of a stored password.";
 
                             value-changed(value) => {
                                 root.draft-changed("password", value);
+                            }
+
+                            trailing-icon-requested => {
+                                root.draft-changed(
+                                    "password_visibility",
+                                    root.password-visible ? "hidden" : "visible"
+                                );
                             }
                         }
 

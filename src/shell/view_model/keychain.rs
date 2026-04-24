@@ -5,6 +5,10 @@ use super::asset_modal_executor::{
 };
 use super::*;
 
+fn reset_keychain_identity_secret_visibility(draft: &mut KeychainIdentityDraft) {
+    draft.password_visible = false;
+}
+
 impl ShellViewModel {
     pub fn keychain_catalog(&self) -> &KeychainCatalog {
         &self.keychain_catalog
@@ -172,6 +176,7 @@ impl ShellViewModel {
                 } else {
                     String::new()
                 },
+                password_visible: false,
                 ssh_key_id,
                 ssh_key_label,
                 remark: spec.remark,
@@ -242,6 +247,7 @@ impl ShellViewModel {
                 let next_auth_kind = normalized_keychain_identity_auth_kind_id(value.as_str());
                 if draft.auth_kind != next_auth_kind {
                     draft.auth_kind = next_auth_kind.to_string();
+                    reset_keychain_identity_secret_visibility(draft);
                     if next_auth_kind == "password" {
                         draft.ssh_key_id.clear();
                         draft.ssh_key_label.clear();
@@ -251,6 +257,9 @@ impl ShellViewModel {
                 }
             }
             "password" => draft.password = value,
+            "password_visibility" => {
+                draft.password_visible = matches!(value.as_str(), "visible" | "show" | "true");
+            }
             "ssh_key_id" => draft.ssh_key_id = value,
             "ssh_key_label" => draft.ssh_key_label = value,
             "remark" => draft.remark = value,
@@ -273,6 +282,7 @@ impl ShellViewModel {
         } else {
             String::new()
         };
+        reset_keychain_identity_secret_visibility(draft);
     }
 
     pub fn select_first_keychain_identity_modal_ssh_key(&mut self) -> bool {

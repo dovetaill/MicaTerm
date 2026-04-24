@@ -288,3 +288,57 @@ fn editing_identity_can_switch_between_password_and_ssh_key_auth_without_losing_
     assert_eq!(app.get_keychain_identity_modal_username().as_str(), "ops");
     assert_eq!(app.get_keychain_identity_modal_remark().as_str(), "primary");
 }
+
+#[test]
+fn keychain_identity_password_reveal_resets_when_switching_auth_kind() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().expect("create app window");
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    bind_with_credential_store(&app, credential_store);
+
+    open_new_identity_modal(&app);
+    app.invoke_keychain_identity_modal_draft_changed("password_visibility".into(), "visible".into());
+    assert!(app.get_keychain_identity_modal_password_visible());
+
+    app.invoke_keychain_identity_modal_draft_changed("auth_kind".into(), "ssh-key".into());
+
+    assert_eq!(app.get_keychain_identity_modal_auth_kind().as_str(), "ssh-key");
+    assert!(!app.get_keychain_identity_modal_password_visible());
+}
+
+#[test]
+fn keychain_identity_password_reveal_resets_when_reopening_edit_modal() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().expect("create app window");
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    bind_with_credential_store(&app, Arc::clone(&credential_store));
+
+    open_new_identity_modal(&app);
+    app.invoke_keychain_identity_modal_draft_changed("name".into(), "Prod Identity".into());
+    app.invoke_keychain_identity_modal_draft_changed("username".into(), "ops".into());
+    app.invoke_keychain_identity_modal_draft_changed("password".into(), "secret".into());
+    app.invoke_confirm_asset_modal_requested();
+
+    let identity_id = find_keychain_row_id(&app, "identity", "Prod Identity");
+    app.invoke_asset_context_menu_requested(
+        identity_id.clone().into(),
+        "identity".into(),
+        96.0,
+        160.0,
+    );
+    app.invoke_assets_context_menu_action_invoked("edit-keychain-identity".into());
+    app.invoke_keychain_identity_modal_draft_changed("password_visibility".into(), "visible".into());
+    assert!(app.get_keychain_identity_modal_password_visible());
+
+    app.invoke_close_asset_modal_requested();
+    assert!(!app.get_asset_modal_open());
+
+    app.invoke_asset_context_menu_requested(identity_id.into(), "identity".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("edit-keychain-identity".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_keychain_identity_modal_password().as_str(), "secret");
+    assert!(!app.get_keychain_identity_modal_password_visible());
+}

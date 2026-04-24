@@ -62,9 +62,12 @@ export component SyncVaultModal inherits Rectangle {
     in property <string> git-auth-mode: "https";
     in property <string> git-https-username: "";
     in property <string> git-https-secret: "";
+    in property <bool> git-https-secret-visible: false;
     in property <string> git-ssh-private-key: "";
     in property <string> git-ssh-passphrase: "";
+    in property <bool> git-ssh-passphrase-visible: false;
     in property <string> master-password: "";
+    in property <bool> master-password-visible: false;
     in property <string> local-last-sync-text: "Never synced";
     in property <string> remote-last-update-text: "Unknown";
     in property <string> primary-revision-text: "Unknown";
@@ -81,6 +84,8 @@ export component SyncVaultModal inherits Rectangle {
     callback focus-restore-requested();
 
     private property <bool> compact-layout: root.height < 620px;
+    private property <image> eye-icon: @image-url("../../assets/icons/fluent/eye-20-regular.svg");
+    private property <image> eye-off-icon: @image-url("../../assets/icons/fluent/eye-off-20-regular.svg");
     private property <length> footer-height: ThemeTokens.modal-footer-min-height;
 
     background: transparent;
@@ -255,11 +260,21 @@ export component SyncVaultModal inherits Rectangle {
                             width: parent.width;
                             label: "Master password";
                             value: root.master-password;
-                            password-mode: true;
+                            password-mode: !root.master-password-visible;
+                            trailing-icon-visible: true;
+                            trailing-icon-source: root.master-password-visible ? root.eye-off-icon : root.eye-icon;
+                            trailing-icon-label: root.master-password-visible ? "Hide master password" : "Show master password";
                             helper-text: "Used only during initial setup or unlock-style flows. The actual mode-specific action still comes from the view model.";
 
                             value-changed(value) => {
                                 root.draft-changed("master-password", value);
+                            }
+
+                            trailing-icon-requested => {
+                                root.draft-changed(
+                                    "master-password-visibility",
+                                    root.master-password-visible ? "hidden" : "visible"
+                                );
                             }
                         }
                     }
@@ -336,10 +351,20 @@ export component SyncVaultModal inherits Rectangle {
                             width: parent.width;
                             label: "HTTPS secret";
                             value: root.git-https-secret;
-                            password-mode: true;
+                            password-mode: !root.git-https-secret-visible;
+                            trailing-icon-visible: true;
+                            trailing-icon-source: root.git-https-secret-visible ? root.eye-off-icon : root.eye-icon;
+                            trailing-icon-label: root.git-https-secret-visible ? "Hide HTTPS secret" : "Show HTTPS secret";
 
                             value-changed(value) => {
                                 root.draft-changed("git-https-secret", value);
+                            }
+
+                            trailing-icon-requested => {
+                                root.draft-changed(
+                                    "git-https-secret-visibility",
+                                    root.git-https-secret-visible ? "hidden" : "visible"
+                                );
                             }
                         }
 
@@ -359,10 +384,20 @@ export component SyncVaultModal inherits Rectangle {
                             width: parent.width;
                             label: "SSH passphrase";
                             value: root.git-ssh-passphrase;
-                            password-mode: true;
+                            password-mode: !root.git-ssh-passphrase-visible;
+                            trailing-icon-visible: true;
+                            trailing-icon-source: root.git-ssh-passphrase-visible ? root.eye-off-icon : root.eye-icon;
+                            trailing-icon-label: root.git-ssh-passphrase-visible ? "Hide SSH passphrase" : "Show SSH passphrase";
 
                             value-changed(value) => {
                                 root.draft-changed("git-ssh-passphrase", value);
+                            }
+
+                            trailing-icon-requested => {
+                                root.draft-changed(
+                                    "git-ssh-passphrase-visibility",
+                                    root.git-ssh-passphrase-visible ? "hidden" : "visible"
+                                );
                             }
                         }
                     }

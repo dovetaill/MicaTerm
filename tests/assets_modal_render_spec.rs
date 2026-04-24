@@ -685,6 +685,27 @@ fn sync_modal_footer_stays_visible_in_short_viewport() {
 
 #[test]
 fn sync_modal_short_viewport_keeps_master_password_field_actionable() {
+    let source = fs::read_to_string("ui/components/sync-vault-modal.slint").unwrap();
+
+    assert!(
+        source.contains(
+            "trailing-icon-source: root.master-password-visible ? root.eye-off-icon : root.eye-icon;"
+        ),
+        "sync modal should expose a Fluent eye toggle for the master password field"
+    );
+    assert!(
+        source.contains(
+            "trailing-icon-source: root.git-https-secret-visible ? root.eye-off-icon : root.eye-icon;"
+        ),
+        "sync modal should expose a Fluent eye toggle for the HTTPS secret field"
+    );
+    assert!(
+        source.contains(
+            "trailing-icon-source: root.git-ssh-passphrase-visible ? root.eye-off-icon : root.eye-icon;"
+        ),
+        "sync modal should expose a Fluent eye toggle for the SSH passphrase field"
+    );
+
     let short_height = 640;
     let modal = blocking_modal_rect_for_viewport(WINDOW_WIDTH, short_height, 640, 680);
     let footer_height = 82;

@@ -2,6 +2,16 @@
 
 use super::*;
 
+fn visible(value: &str) -> bool {
+    matches!(value, "visible" | "show" | "true")
+}
+
+fn reset_sync_modal_secret_visibility(modal: &mut SyncModalViewState) {
+    modal.master_password_visible = false;
+    modal.git_https_secret_visible = false;
+    modal.git_ssh_passphrase_visible = false;
+}
+
 impl ShellViewModel {
     pub fn visible_console_asset_rows(&self) -> Vec<VisibleAssetRow> {
         self.console_asset_tree
@@ -341,6 +351,7 @@ impl ShellViewModel {
     }
 
     pub fn open_sync_modal(&mut self) {
+        self.reset_sync_modal_secret_visibility();
         self.sync_modal_state.open = true;
         self.show_global_menu = false;
     }
@@ -355,24 +366,47 @@ impl ShellViewModel {
     }
 
     pub fn close_sync_modal(&mut self) {
+        self.reset_sync_modal_secret_visibility();
         self.sync_modal_state.open = false;
         self.show_global_menu = false;
     }
 
+    pub fn reset_sync_modal_secret_visibility(&mut self) {
+        reset_sync_modal_secret_visibility(&mut self.sync_modal_state);
+    }
+
     pub fn update_sync_modal_field(&mut self, field: &str, value: String) {
         let modal = self.sync_modal_state_mut();
+        let clears_error = !matches!(
+            field,
+            "git-https-secret-visibility"
+                | "git-ssh-passphrase-visibility"
+                | "master-password-visibility"
+        );
         match field {
             "git-remote-url" => modal.git_remote_url = value,
             "git-branch" => modal.git_branch = value,
-            "git-auth-mode" => modal.git_auth_mode = value,
+            "git-auth-mode" => {
+                if modal.git_auth_mode != value {
+                    modal.git_auth_mode = value;
+                    reset_sync_modal_secret_visibility(modal);
+                }
+            }
             "git-https-username" => modal.git_https_username = value,
             "git-https-secret" => modal.git_https_secret = value,
+            "git-https-secret-visibility" => modal.git_https_secret_visible = visible(&value),
             "git-ssh-private-key" => modal.git_ssh_private_key = value,
             "git-ssh-passphrase" => modal.git_ssh_passphrase = value,
+            "git-ssh-passphrase-visibility" => {
+                modal.git_ssh_passphrase_visible = visible(&value);
+            }
             "master-password" => modal.master_password = value,
+            "master-password-visibility" => modal.master_password_visible = visible(&value),
             _ => return,
         }
-        modal.error_text.clear();
+        if clears_error {
+            modal.error_text.clear();
+        }
     }
 
     pub fn update_sync_modal_toggle(&mut self, _field: &str, _value: bool) {

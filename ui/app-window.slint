@@ -70,9 +70,12 @@ export component AppWindow inherits Window {
     in-out property <string> sync-modal-git-auth-mode: "https";
     in-out property <string> sync-modal-git-https-username: "";
     in-out property <string> sync-modal-git-https-secret: "";
+    in-out property <bool> sync-modal-git-https-secret-visible: false;
     in-out property <string> sync-modal-git-ssh-private-key: "";
     in-out property <string> sync-modal-git-ssh-passphrase: "";
+    in-out property <bool> sync-modal-git-ssh-passphrase-visible: false;
     in-out property <string> sync-modal-master-password: "";
+    in-out property <bool> sync-modal-master-password-visible: false;
     in-out property <string> sync-modal-local-last-sync-text: "Never synced";
     in-out property <string> sync-modal-remote-last-update-text: "Unknown";
     in-out property <string> sync-modal-primary-revision-text: "Unknown";
@@ -261,6 +264,7 @@ export component AppWindow inherits Window {
     in-out property <string> keychain-identity-modal-username: "";
     in-out property <string> keychain-identity-modal-auth-kind: "password";
     in-out property <string> keychain-identity-modal-password: "";
+    in-out property <bool> keychain-identity-modal-password-visible: false;
     in-out property <string> keychain-identity-modal-ssh-key-label: "";
     in-out property <string> keychain-identity-modal-remark: "";
     in-out property <string> keychain-ssh-key-modal-name: "";
@@ -1641,9 +1645,12 @@ export component AppWindow inherits Window {
             git-auth-mode: root.sync-modal-git-auth-mode;
             git-https-username: root.sync-modal-git-https-username;
             git-https-secret: root.sync-modal-git-https-secret;
+            git-https-secret-visible: root.sync-modal-git-https-secret-visible;
             git-ssh-private-key: root.sync-modal-git-ssh-private-key;
             git-ssh-passphrase: root.sync-modal-git-ssh-passphrase;
+            git-ssh-passphrase-visible: root.sync-modal-git-ssh-passphrase-visible;
             master-password: root.sync-modal-master-password;
+            master-password-visible: root.sync-modal-master-password-visible;
             local-last-sync-text: root.sync-modal-local-last-sync-text;
             remote-last-update-text: root.sync-modal-remote-last-update-text;
             primary-revision-text: root.sync-modal-primary-revision-text;
@@ -2102,6 +2109,7 @@ export component AppWindow inherits Window {
             username: root.keychain-identity-modal-username;
             auth-kind: root.keychain-identity-modal-auth-kind;
             password: root.keychain-identity-modal-password;
+            password-visible: root.keychain-identity-modal-password-visible;
             ssh-key-label: root.keychain-identity-modal-ssh-key-label;
             remark: root.keychain-identity-modal-remark;
             validation-message: root.asset-modal-validation-message;
