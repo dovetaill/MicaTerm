@@ -312,6 +312,8 @@ export component AppWindow inherits Window {
     in-out property <color> workspace-session-scrollbar-thumb: ThemeTokens.terminal-scrollbar-thumb-surface;
     in-out property <color> workspace-session-scrollbar-thumb-active: ThemeTokens.terminal-scrollbar-thumb-active-surface;
     in-out property <bool> workspace-session-mouse-grabbed: false;
+    in-out property <bool> workspace-session-link-hovered: false;
+    in-out property <bool> workspace-session-link-armed: false;
     in-out property <[string]> workspace-session-visible-lines: [];
     in-out property <int> workspace-session-surface-seqno: 0;
     in-out property <int> workspace-session-viewport-offset-lines: 0;
@@ -924,6 +926,8 @@ export component AppWindow inherits Window {
                         workspace-session-scrollbar-thumb: root.workspace-session-scrollbar-thumb;
                         workspace-session-scrollbar-thumb-active: root.workspace-session-scrollbar-thumb-active;
                         workspace-session-mouse-grabbed: root.workspace-session-mouse-grabbed;
+                        workspace-session-link-hovered: root.workspace-session-link-hovered;
+                        workspace-session-link-armed: root.workspace-session-link-armed;
                         workspace-session-visible-lines: root.workspace-session-visible-lines;
                         workspace-session-surface-seqno: root.workspace-session-surface-seqno;
                         workspace-session-viewport-offset-lines: root.workspace-session-viewport-offset-lines;
