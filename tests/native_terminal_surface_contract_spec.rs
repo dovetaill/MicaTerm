@@ -174,6 +174,21 @@ fn bitmap_host_selection_source_exposes_local_overlay_contract() {
 fn terminal_session_host_source_exposes_terminal_link_affordance_contract() {
     let host_source =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+    let input_capture_block = block_between(
+        &host_source,
+        "input-capture := TouchArea {",
+        "scroll-event(event) => {",
+    );
+    let terminal_link_surface_block = block_between(
+        &host_source,
+        "input-capture := TouchArea {",
+        "if root.terminal-link-tooltip-visible() : link-tooltip := Rectangle {",
+    );
+    let tooltip_block = block_between(
+        &host_source,
+        "if root.terminal-link-tooltip-visible() : link-tooltip := Rectangle {",
+        "link-tooltip-label := Text {",
+    );
 
     assert!(
         host_source.contains("in property <bool> link-hovered: false;")
@@ -181,14 +196,29 @@ fn terminal_session_host_source_exposes_terminal_link_affordance_contract() {
         "terminal session host should accept Rust-projected hovered and armed link-affordance state instead of reparsing visible lines inside Slint"
     );
     assert!(
-        host_source.contains("mouse-cursor:")
-            && host_source.contains("root.link-armed")
-            && host_source.contains("MouseCursor.pointer"),
-        "terminal session host should flip to a pointer cursor only when Rust marks the hovered terminal URL as armed"
+        input_capture_block.contains("mouse-cursor: root.link-hovered")
+            && input_capture_block.contains("MouseCursor.pointer"),
+        "terminal session host should advertise hovered URLs with a pointer cursor before Ctrl is pressed so terminal links feel discoverable like hyperlinks"
     );
     assert!(
         host_source.contains("root.link-armed ? \"Ctrl+click to open link\" : \"Hold Ctrl and click to open link\""),
         "terminal session host should distinguish tooltip copy between plain hover and the armed Ctrl state"
+    );
+    assert!(
+        host_source.contains("private property <bool> link-press-active: false;"),
+        "terminal session host should keep a local press state so Ctrl+left-down can render a pressed hyperlink affordance without inventing a new Rust callback"
+    );
+    assert!(
+        terminal_link_surface_block.contains("root.link-open-candidate = true;")
+            && terminal_link_surface_block.contains("root.link-press-active = true;")
+            && terminal_link_surface_block.contains("root.link-press-active = false;"),
+        "terminal session host should arm a local press state on Ctrl+left-down and clear it on cancel or release"
+    );
+    assert!(
+        tooltip_block.contains("root.link-press-active")
+            && tooltip_block.contains("animate y")
+            && tooltip_block.contains("animate opacity"),
+        "terminal session host should give the terminal link tooltip a small pressed animation instead of leaving Ctrl+click feedback static"
     );
     assert!(
         host_source.contains("root.mouse-input(")

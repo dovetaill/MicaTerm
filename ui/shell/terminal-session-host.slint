@@ -208,6 +208,7 @@ export component TerminalSessionHost inherits Rectangle {
     private property <int> selection-focus-col: -1;
     private property <bool> selection-drag-active: false;
     private property <bool> link-open-candidate: false;
+    private property <bool> link-press-active: false;
     private property <bool> scrollbar-thumb-drag-active: false;
     private property <bool> cursor-blink-visible: true;
     in-out property <bool> context-menu-open: false;
@@ -485,6 +486,7 @@ export component TerminalSessionHost inherits Rectangle {
         root.selection-focus-col = -1;
         root.selection-drag-active = false;
         root.link-open-candidate = false;
+        root.link-press-active = false;
         root.sync-selection-state();
     }
 
@@ -522,6 +524,7 @@ export component TerminalSessionHost inherits Rectangle {
     function close-context-menu() {
         root.context-menu-open = false;
         root.link-open-candidate = false;
+        root.link-press-active = false;
     }
 
     function terminal-link-tooltip-text() -> string {
@@ -1049,7 +1052,7 @@ export component TerminalSessionHost inherits Rectangle {
                     y: 0px;
                     width: parent.width;
                     height: parent.height;
-                    mouse-cursor: root.link-armed
+                    mouse-cursor: root.link-hovered
                         && !root.selection-drag-active
                         && !root.context-menu-open
                         ? MouseCursor.pointer
@@ -1111,6 +1114,7 @@ export component TerminalSessionHost inherits Rectangle {
                                 );
                             } else if root.link-armed {
                                 root.link-open-candidate = true;
+                                root.link-press-active = true;
                                 root.mouse-input(
                                     "down",
                                     "left",
@@ -1151,6 +1155,7 @@ export component TerminalSessionHost inherits Rectangle {
                                 );
                                 if root.link-open-candidate {
                                     root.link-open-candidate = false;
+                                    root.link-press-active = false;
                                 }
                                 if root.selection-drag-active {
                                     terminal-input.focus();
@@ -1224,13 +1229,25 @@ export component TerminalSessionHost inherits Rectangle {
 
                 if root.terminal-link-tooltip-visible() : link-tooltip := Rectangle {
                     x: min(max(8px, root.terminal-link-tooltip-x), max(8px, parent.width - self.width - 8px));
-                    y: min(max(8px, root.terminal-link-tooltip-y), max(8px, parent.height - self.height - 8px));
+                    y: min(
+                        max(8px, root.terminal-link-tooltip-y + (root.link-press-active ? 2px : 0px)),
+                        max(8px, parent.height - self.height - 8px),
+                    );
                     width: max(168px, link-tooltip-label.preferred-width + 20px);
                     height: max(28px, link-tooltip-label.preferred-height + 10px);
                     border-radius: 8px;
                     border-width: 1px;
-                    border-color: ThemeTokens.divider-subtle;
-                    background: ThemeTokens.menu-row-open-surface;
+                    border-color: root.link-press-active || root.link-armed
+                        ? ThemeTokens.link-accent
+                        : ThemeTokens.divider-subtle;
+                    background: root.link-press-active
+                        ? ThemeTokens.control-active-surface
+                        : root.link-armed
+                            ? ThemeTokens.menu-row-open-surface
+                            : ThemeTokens.menu-row-hover-surface;
+                    opacity: root.link-press-active ? 0.94 : 1;
+                    animate y { duration: 90ms; easing: ease-out; }
+                    animate opacity { duration: 90ms; }
 
                     link-tooltip-label := Text {
                         x: 10px;
