@@ -12,8 +12,11 @@ use crate::app::terminal_font::{
 use crate::app::terminal_layout::run_segmentation::RunCluster;
 use crate::app::terminal_layout::{GlyphRun, ShapedRow};
 use crate::app::terminal_renderer::atlas::{
-    ColorGlyphCacheEntry, ColorGlyphCacheKey, GlyphAtlas, GlyphAtlasEntry,
+    ColorGlyphCacheEntry, ColorGlyphCacheKey, GeneratedGlyphAtlasKey, GlyphAtlas, GlyphAtlasEntry,
     MONOCHROME_ATLAS_HORIZONTAL_PADDING_PX,
+};
+use crate::app::terminal_renderer::custom_grid_glyphs::{
+    classify_custom_grid_glyph, generate_custom_grid_mask,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -49,6 +52,12 @@ pub enum PreparedMonochromeGlyphVisualFit {
     GridSymbol,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreparedMonochromeGlyphSourceKind {
+    FontOutline,
+    GeneratedMask,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreparedMonochromeGlyphDraw {
     pub row: u32,
@@ -71,6 +80,7 @@ pub struct PreparedMonochromeGlyphDraw {
     pub dest_y_px: i32,
     pub fg_rgba: u32,
     pub visual_fit: PreparedMonochromeGlyphVisualFit,
+    pub source_kind: PreparedMonochromeGlyphSourceKind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -533,6 +543,9 @@ impl WgpuTerminalRenderer {
                 let cluster_start = run.glyphs[glyph_index].cluster;
                 let (glyph_start_col, glyph_end_col) =
                     glyph_cell_span(run, cluster_start).unwrap_or((run.start_col(), run.end_col()));
+                let cluster_text = glyph_cluster_text(run, cluster_start).unwrap_or_default();
+                let cluster_cell_span =
+                    glyph_end_col.saturating_sub(glyph_start_col).saturating_add(1);
                 let visual_fit = glyph_cluster_visual_fit(run, cluster_start);
                 let glyph_span_rect = glyph_cell_span_rect(
                     row.row,
@@ -541,6 +554,73 @@ impl WgpuTerminalRenderer {
                     cell_width_px,
                     cell_height_px,
                 );
+                if let Some(kind) = classify_custom_grid_glyph(cluster_text, cluster_cell_span) {
+                    let atlas_key = GeneratedGlyphAtlasKey::new(
+                        kind,
+                        glyph_span_rect.width_px,
+                        glyph_span_rect.height_px,
+                        1.0,
+                        run.style.bold,
+                    );
+                    let upload = if self.atlas.contains_generated(atlas_key) {
+                        None
+                    } else {
+                        let mask = generate_custom_grid_mask(
+                            kind,
+                            glyph_span_rect.width_px,
+                            glyph_span_rect.height_px,
+                            1.0,
+                        );
+                        Some(PreparedMonochromeGlyphUploadPayload {
+                            width_px: mask.width_px,
+                            height_px: mask.height_px,
+                            padding_left_px: 0,
+                            padding_right_px: 0,
+                            bearing_x_px: 0,
+                            bearing_y_px: 0,
+                            advance_px: glyph_span_rect.width_px as i32,
+                            coverage: mask.alpha,
+                        })
+                    };
+                    let atlas_entry = self.atlas.upsert_generated(
+                        atlas_key,
+                        glyph_span_rect.width_px,
+                        glyph_span_rect.height_px,
+                    );
+                    artifacts
+                        .monochrome_glyph_draws
+                        .push(PreparedMonochromeGlyphDraw {
+                            row: row.row,
+                            start_col: glyph_start_col,
+                            end_col: glyph_end_col,
+                            glyph_id: cluster_text.chars().next().unwrap_or_default() as u32,
+                            face_key: run.resolved_face.face_key,
+                            font_family_name: run.resolved_face.family_name.clone(),
+                            font_em_size_px,
+                            atlas_entry,
+                            upload,
+                            advance_px: glyph_span_rect.width_px as i32,
+                            visible_left_px: 0,
+                            visible_top_px: 0,
+                            visible_width_px: glyph_span_rect.width_px,
+                            visible_height_px: glyph_span_rect.height_px,
+                            x_offset_px: 0,
+                            y_offset_px: 0,
+                            dest_x_px: glyph_span_rect.start_x_px,
+                            dest_y_px: glyph_span_rect.start_y_px,
+                            fg_rgba: run.style.fg_rgba,
+                            visual_fit,
+                            source_kind: PreparedMonochromeGlyphSourceKind::GeneratedMask,
+                        });
+                    monochrome_glyphs_prepared = monochrome_glyphs_prepared.saturating_add(1);
+                    while glyph_index < run.glyphs.len()
+                        && run.glyphs[glyph_index].cluster == cluster_start
+                    {
+                        glyph_index = glyph_index.saturating_add(1);
+                    }
+                    continue;
+                }
+
                 let cluster_origin_x_subpx =
                     (glyph_start_col as i32).saturating_mul(cell_width_px as i32) as f32;
                 let cluster_origin_x_px = cluster_origin_x_subpx.floor() as i32;
@@ -807,6 +887,7 @@ impl WgpuTerminalRenderer {
                                 dest_y_px: glyph.raw_dest_y_px,
                                 fg_rgba,
                                 visual_fit,
+                                source_kind: PreparedMonochromeGlyphSourceKind::FontOutline,
                             }),
                         PreparedClusterGlyphKind::Color {
                             cache_entry,

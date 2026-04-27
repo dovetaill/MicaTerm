@@ -2,6 +2,7 @@
 
 #[cfg(feature = "terminal-native-renderer")]
 pub mod atlas;
+pub mod custom_grid_glyphs;
 pub mod damage;
 pub mod diagnostics;
 pub mod host;

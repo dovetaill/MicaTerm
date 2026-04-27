@@ -10,7 +10,9 @@ use mica_term::app::terminal_layout::run_segmentation::RunCluster;
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_layout::{GlyphRun, PositionedGlyph, ShapedRow, TextStyleKey};
 #[cfg(feature = "terminal-native-renderer")]
-use mica_term::app::terminal_renderer::wgpu_renderer::PreparedMonochromeGlyphVisualFit;
+use mica_term::app::terminal_renderer::wgpu_renderer::{
+    PreparedMonochromeGlyphSourceKind, PreparedMonochromeGlyphVisualFit,
+};
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 
@@ -147,6 +149,20 @@ fn visual_fit_at_col(frame: &ShapedTerminalFrame, col: u32) -> Result<PreparedMo
 }
 
 #[cfg(feature = "terminal-native-renderer")]
+fn source_kind_at_col(frame: &ShapedTerminalFrame, col: u32) -> Result<PreparedMonochromeGlyphSourceKind> {
+    let mut renderer = WgpuTerminalRenderer::new_for_test()?;
+    let mut fonts = GlyphFitFontSystem;
+    let prepared = renderer.prepare(frame, &mut fonts)?;
+
+    Ok(prepared
+        .monochrome_glyph_draws
+        .iter()
+        .find(|draw| draw.start_col == col)
+        .expect("draw at requested col")
+        .source_kind)
+}
+
+#[cfg(feature = "terminal-native-renderer")]
 #[test]
 fn repeated_dash_streaks_use_grid_symbol_visual_fit() -> Result<()> {
     let frame = ascii_frame("-----");
@@ -201,6 +217,79 @@ fn permission_suffix_only_marks_the_repeated_dash_tail_as_grid_symbols() -> Resu
             "only the repeated dash tail should switch onto the grid-symbol path"
         );
     }
+
+    Ok(())
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn native_renderer_prepare_defaults_existing_body_text_draws_to_font_outline_source_kind() -> Result<()> {
+    let frame = ascii_frame("drwx-----");
+
+    for col in 0..9 {
+        assert_eq!(
+            source_kind_at_col(&frame, col)?,
+            PreparedMonochromeGlyphSourceKind::FontOutline,
+            "Task 3 should preserve the existing body-text source contract until generated-mask routing is explicitly enabled"
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn native_renderer_routes_v1_box_and_block_whitelist_clusters_to_generated_masks() -> Result<()> {
+    let frame = ascii_frame("│╭╮█▀▄▌▐");
+
+    for col in 0..8 {
+        assert_eq!(
+            source_kind_at_col(&frame, col)?,
+            PreparedMonochromeGlyphSourceKind::GeneratedMask,
+            "Task 5 should route the v1 box/block whitelist through the shared generated-mask path instead of continuing to treat those glyphs like ordinary font outlines"
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn native_renderer_only_routes_whitelisted_grid_clusters_off_the_body_text_path() -> Result<()> {
+    let mixed_ascii = ascii_frame("a│b");
+    let mixed_cjk = ascii_frame("中│");
+    let hyphenated_word = ascii_frame("co-op");
+
+    assert_eq!(
+        source_kind_at_col(&mixed_ascii, 0)?,
+        PreparedMonochromeGlyphSourceKind::FontOutline,
+        "body text before a box glyph should stay on the existing font-outline path"
+    );
+    assert_eq!(
+        source_kind_at_col(&mixed_ascii, 1)?,
+        PreparedMonochromeGlyphSourceKind::GeneratedMask,
+        "the single-cell box glyph inside a mixed row should switch onto the generated-mask path"
+    );
+    assert_eq!(
+        source_kind_at_col(&mixed_ascii, 2)?,
+        PreparedMonochromeGlyphSourceKind::FontOutline,
+        "body text after a box glyph should stay on the existing font-outline path"
+    );
+    assert_eq!(
+        source_kind_at_col(&mixed_cjk, 0)?,
+        PreparedMonochromeGlyphSourceKind::FontOutline,
+        "ordinary Chinese body text should keep the main font-outline pipeline"
+    );
+    assert_eq!(
+        source_kind_at_col(&mixed_cjk, 1)?,
+        PreparedMonochromeGlyphSourceKind::GeneratedMask,
+        "a neighboring box glyph should still take the generated-mask fast path in the same row"
+    );
+    assert_eq!(
+        source_kind_at_col(&hyphenated_word, 2)?,
+        PreparedMonochromeGlyphSourceKind::FontOutline,
+        "non-whitelist punctuation like the hyphen in co-op must not be reclassified as a generated grid glyph"
+    );
 
     Ok(())
 }

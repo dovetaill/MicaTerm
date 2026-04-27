@@ -8,9 +8,21 @@ use mica_term::app::terminal_font::{
     ShapedGlyph, ShapedGlyphRun, TextShapingRequest,
 };
 #[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_layout::run_segmentation::RunCluster;
+#[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_layout::{TerminalTextShaper, TextShaper};
 #[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_layout::{GlyphRun, PositionedGlyph, ShapedRow, TextStyleKey};
+#[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_model::{TerminalModelCell, TerminalModelRow};
+#[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_renderer::atlas::{GeneratedGlyphAtlasKey, GlyphAtlas, GlyphAtlasKey};
+#[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_renderer::custom_grid_glyphs::{
+    BoxDrawingGlyph, CustomGridGlyphKind,
+};
+#[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_renderer::wgpu_renderer::PreparedMonochromeGlyphSourceKind;
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 #[cfg(feature = "terminal-native-renderer")]
@@ -133,6 +145,61 @@ fn shape_rows(
     rows.iter()
         .map(|row| shaper.shape_row(row, loaded_font, font_system))
         .collect()
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+fn manual_single_cell_frame(seqno: u64, font: LoadedFont, text: &str) -> ShapedTerminalFrame {
+    let style = TextStyleKey {
+        fg_rgba: 0xffd8_dfe8,
+        bg_rgba: 0xff0c_1014,
+        bold: false,
+        underline: false,
+    };
+    let cell_width_px = font.metrics().cell_width_px.round() as i32;
+    let mut content_hasher = DefaultHasher::new();
+    text.hash(&mut content_hasher);
+    let content_hash = content_hasher.finish();
+
+    ShapedTerminalFrame {
+        seqno,
+        font: font.clone(),
+        rows: vec![ShapedRow {
+            row: 0,
+            content_hash,
+            row_hash: content_hash,
+            runs: vec![GlyphRun {
+                row: 0,
+                cell_range: 0..text.chars().count() as u32,
+                text: text.into(),
+                clusters: text
+                    .char_indices()
+                    .enumerate()
+                    .map(|(col, (byte_start, ch))| RunCluster {
+                        text: ch.to_string(),
+                        cell_range: col as u32..col as u32 + 1,
+                        byte_range: byte_start..byte_start + ch.len_utf8(),
+                    })
+                    .collect(),
+                glyphs: text
+                    .char_indices()
+                    .enumerate()
+                    .map(|(col, (byte_start, _ch))| PositionedGlyph {
+                        glyph_id: 500 + col as u32,
+                        cluster: byte_start as u32,
+                        x_advance: cell_width_px,
+                        y_advance: 0,
+                        x_offset: 0,
+                        y_offset: 0,
+                    })
+                    .collect(),
+                style,
+                resolved_face: FontFallbackFace::primary(&font),
+                feature_set: Default::default(),
+                allow_ligatures: true,
+                has_color_glyphs: false,
+            }],
+        }],
+    }
 }
 
 #[cfg(feature = "terminal-native-renderer")]
@@ -343,6 +410,114 @@ fn native_renderer_bounds_glyph_caches_after_pressure_triggers_reset() -> Result
     assert!(
         stats.glyph_raster_cache_entries <= 4,
         "glyph raster cache entries should stay bounded after the deferred reset rehydrates only the visible glyphs"
+    );
+
+    Ok(())
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn glyph_atlas_generated_keys_keep_a_separate_zero_padding_contract() -> Result<()> {
+    let mut font_system = CountingRasterFontSystem::new()?;
+    let loaded_font = font_system.load_font(&FontRequest::default())?;
+    let request = loaded_font.raster_request(7, false);
+    let rasterized = font_system.rasterize_glyph(&loaded_font, request)?;
+    let mut atlas = GlyphAtlas::default();
+
+    let font_entry = atlas.upsert(request, &rasterized);
+    let generated_key = GeneratedGlyphAtlasKey::new(
+        CustomGridGlyphKind::BoxDrawing(BoxDrawingGlyph::Horizontal),
+        8,
+        10,
+        1.0,
+        false,
+    );
+    let generated_entry = atlas.upsert_generated(generated_key, 8, 10);
+
+    assert_ne!(
+        GlyphAtlasKey::from(request),
+        GlyphAtlasKey::Generated(generated_key),
+        "generated masks should not share atlas key space with font glyph requests"
+    );
+    assert_eq!(
+        generated_entry.padding_left_px, 0,
+        "generated masks should keep zero horizontal padding so later full-bleed box/block work does not inherit font overhang padding"
+    );
+    assert_eq!(
+        generated_entry.padding_right_px, 0,
+        "generated masks should keep zero horizontal padding so later full-bleed box/block work does not inherit font overhang padding"
+    );
+    assert_ne!(
+        font_entry.slot, generated_entry.slot,
+        "generated masks should reserve an independent atlas slot instead of aliasing a font glyph entry"
+    );
+
+    Ok(())
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn native_renderer_generated_box_masks_reuse_atlas_entries_without_font_rasterization() -> Result<()> {
+    let mut font_system = CountingRasterFontSystem::new()?;
+    let loaded_font = font_system.load_font(&FontRequest::default())?;
+    let mut renderer = WgpuTerminalRenderer::new_for_test()?;
+
+    let first_frame = manual_single_cell_frame(1, loaded_font.clone(), "────");
+    let first_prepared = renderer.prepare(&first_frame, &mut font_system)?;
+
+    assert_eq!(
+        font_system.rasterize_glyph_calls(),
+        0,
+        "Task 5 should stop asking the font backend to rasterize repeated box-drawing runs once those clusters route to generated masks"
+    );
+    assert_eq!(
+        first_prepared
+            .monochrome_glyph_draws
+            .iter()
+            .filter(|draw| draw.source_kind == PreparedMonochromeGlyphSourceKind::GeneratedMask)
+            .count(),
+        4,
+        "every whitelisted box glyph in the row should be prepared as a generated mask"
+    );
+    assert_eq!(
+        first_prepared
+            .monochrome_glyph_draws
+            .iter()
+            .map(|draw| draw.atlas_entry.slot)
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        1,
+        "identical generated masks in the same row should reuse a single atlas slot instead of reserving one slot per cell"
+    );
+    assert_eq!(
+        first_prepared
+            .monochrome_glyph_draws
+            .iter()
+            .filter(|draw| draw.upload.is_some())
+            .count(),
+        1,
+        "only the first generated mask instance should upload atlas bytes; later identical cells should reuse the cached atlas entry"
+    );
+    assert_eq!(
+        renderer.glyph_raster_cache_entry_count(),
+        0,
+        "generated box glyphs should not populate the font raster cache at all"
+    );
+
+    let second_frame = manual_single_cell_frame(2, loaded_font, "────");
+    let second_prepared = renderer.prepare(&second_frame, &mut font_system)?;
+
+    assert_eq!(
+        font_system.rasterize_glyph_calls(),
+        0,
+        "re-preparing the same generated box row should stay entirely off the font rasterizer hot path"
+    );
+    assert!(
+        second_prepared
+            .monochrome_glyph_draws
+            .iter()
+            .all(|draw| draw.upload.is_none()),
+        "cached generated box rows should come back without upload payloads once the atlas entry already exists"
     );
 
     Ok(())

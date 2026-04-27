@@ -257,6 +257,30 @@ fn windows_native_text_renderer_source_avoids_duplicate_directwrite_rendering_mo
 }
 
 #[test]
+fn windows_native_text_renderer_source_splits_font_outlines_from_generated_masks() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows native backend");
+
+    for expected in [
+        "PreparedMonochromeGlyphSourceKind::GeneratedMask",
+        "PreparedMonochromeGlyphSourceKind::FontOutline",
+        "draw.source_kind == PreparedMonochromeGlyphSourceKind::FontOutline",
+        "draw.source_kind != PreparedMonochromeGlyphSourceKind::FontOutline",
+    ] {
+        assert!(
+            windows_backend_source.contains(expected),
+            "Task 5 should reference `{expected}` so DirectWrite only consumes body-text font outlines while generated box/block masks stay on the opacity-mask path"
+        );
+    }
+
+    assert!(
+        !windows_backend_source.contains("if self.last_directwrite_text_drawn {\n            return;\n        }"),
+        "Task 5 should stop bailing out of the monochrome bitmap stage wholesale after a DirectWrite text pass because mixed body-text + generated-mask frames still need their special glyph masks"
+    );
+}
+
+#[test]
 fn native_surface_diagnostics_source_exposes_text_renderer_path() {
     let diagnostics_source = fs::read_to_string("src/app/terminal_renderer/diagnostics.rs")
         .expect("read native surface diagnostics");

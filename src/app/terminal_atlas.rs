@@ -21,6 +21,9 @@ use crate::app::terminal_font::backend::{
     DEFAULT_TERMINAL_FONT_SIZE_PX, FontRenderProfile, map_glyph_coverage_to_alpha,
     terminal_cell_width_px,
 };
+use crate::app::terminal_renderer::custom_grid_glyphs::{
+    classify_custom_grid_glyph, generate_custom_grid_mask,
+};
 
 const SARASA_TERM_SC_FONT_BYTES: &[u8] =
     include_bytes!("../../assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-SemiBold.ttf");
@@ -43,6 +46,13 @@ pub struct TerminalAtlasMetrics {
 pub enum ClusterSpriteKind {
     MonoAlpha,
     ColorRgba,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RenderedClusterSourceKind {
+    FontRaster,
+    GeneratedMask,
+    ColorEmoji,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -116,6 +126,7 @@ pub struct RenderedCluster {
     pub col: u32,
     pub text: String,
     pub sprite_kind: ClusterSpriteKind,
+    pub source_kind: RenderedClusterSourceKind,
 }
 
 pub struct TerminalAtlasRenderer {
@@ -167,6 +178,7 @@ enum CachedClusterSprite {
         width: u32,
         height: u32,
         alpha: Vec<u8>,
+        source_kind: RenderedClusterSourceKind,
     },
     ColorRgba {
         width: u32,
@@ -200,6 +212,13 @@ impl CachedClusterSprite {
         match self {
             Self::MonoAlpha { .. } => ClusterSpriteKind::MonoAlpha,
             Self::ColorRgba { .. } => ClusterSpriteKind::ColorRgba,
+        }
+    }
+
+    fn source_kind(&self) -> RenderedClusterSourceKind {
+        match self {
+            Self::MonoAlpha { source_kind, .. } => *source_kind,
+            Self::ColorRgba { .. } => RenderedClusterSourceKind::ColorEmoji,
         }
     }
 }
@@ -482,6 +501,7 @@ impl TerminalAtlasRenderer {
                 col: cell.col,
                 text: cell.text.clone(),
                 sprite_kind: sprite.kind(),
+                source_kind: sprite.source_kind(),
             });
             blit_cached_sprite(
                 &mut self.pixels,
@@ -554,6 +574,21 @@ impl TerminalAtlasRenderer {
             }
         }
 
+        if let Some(kind) = classify_custom_grid_glyph(text, span) {
+            let mask = generate_custom_grid_mask(
+                kind,
+                self.raster_metrics.cell_width.saturating_mul(span.max(1)),
+                self.raster_metrics.cell_height,
+                self.raster_scale,
+            );
+            return CachedClusterSprite::MonoAlpha {
+                width: mask.width_px,
+                height: mask.height_px,
+                alpha: mask.alpha,
+                source_kind: RenderedClusterSourceKind::GeneratedMask,
+            };
+        }
+
         rasterize_mono_cluster_sprite(MonoRasterRequest {
             font: &self.font,
             swash_font: self.swash_font,
@@ -583,11 +618,17 @@ impl TerminalAtlasRenderer {
                 .get(&key)
                 .map(CachedClusterSprite::kind)
                 .unwrap_or(ClusterSpriteKind::MonoAlpha);
+            let source_kind = self
+                .sprite_cache
+                .get(&key)
+                .map(CachedClusterSprite::source_kind)
+                .unwrap_or(RenderedClusterSourceKind::FontRaster);
             rendered_clusters.push(RenderedCluster {
                 row: cell.row,
                 col: cell.col,
                 text: cell.text.clone(),
                 sprite_kind,
+                source_kind,
             });
         }
     }
@@ -676,6 +717,7 @@ fn rasterize_mono_cluster_sprite(request: MonoRasterRequest<'_>) -> CachedCluste
             width: width as u32,
             height: height as u32,
             alpha,
+            source_kind: RenderedClusterSourceKind::FontRaster,
         };
     }
 
@@ -698,6 +740,7 @@ fn rasterize_mono_cluster_sprite(request: MonoRasterRequest<'_>) -> CachedCluste
         width: width as u32,
         height: height as u32,
         alpha,
+        source_kind: RenderedClusterSourceKind::FontRaster,
     }
 }
 
@@ -1017,6 +1060,7 @@ fn blit_cached_sprite(
             width,
             height,
             alpha,
+            ..
         } => blit_mono_alpha(
             pixels,
             surface_width_px,

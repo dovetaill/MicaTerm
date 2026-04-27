@@ -10,6 +10,8 @@ use mica_term::app::terminal_layout::run_segmentation::RunCluster;
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_layout::{GlyphRun, PositionedGlyph, ShapedRow, TextStyleKey};
 #[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_renderer::wgpu_renderer::PreparedMonochromeGlyphSourceKind;
+#[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 
 #[cfg(feature = "terminal-native-renderer")]
@@ -805,6 +807,103 @@ fn native_renderer_preserves_fractional_x_phase_when_color_run_falls_back_to_mon
         prepared.monochrome_glyph_draws[0].atlas_entry.slot,
         prepared.monochrome_glyph_draws[1].atlas_entry.slot,
         "color-run monochrome fallback should reuse the same atlas slot when each cell restarts on the same whole-pixel phase"
+    );
+
+    Ok(())
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn native_renderer_generated_grid_masks_skip_fractional_x_phase_rasterization() -> Result<()> {
+    let style = TextStyleKey {
+        fg_rgba: 0xffd8_dfe8,
+        bg_rgba: 0xff0c_1014,
+        bold: false,
+        underline: false,
+    };
+    let shaped_frame = ShapedTerminalFrame {
+        seqno: 3,
+        font: fractional_phase_test_font(),
+        rows: vec![ShapedRow {
+            row: 0,
+            content_hash: 0,
+            row_hash: 0,
+            runs: vec![GlyphRun {
+                row: 0,
+                cell_range: 0..2,
+                text: "││".into(),
+                clusters: vec![
+                    RunCluster {
+                        text: "│".into(),
+                        cell_range: 0..1,
+                        byte_range: 0..3,
+                    },
+                    RunCluster {
+                        text: "│".into(),
+                        cell_range: 1..2,
+                        byte_range: 3..6,
+                    },
+                ],
+                glyphs: vec![
+                    PositionedGlyph {
+                        glyph_id: 1,
+                        cluster: 0,
+                        x_advance: 3,
+                        y_advance: 0,
+                        x_offset: 1,
+                        y_offset: 0,
+                    },
+                    PositionedGlyph {
+                        glyph_id: 2,
+                        cluster: 3,
+                        x_advance: 3,
+                        y_advance: 0,
+                        x_offset: 1,
+                        y_offset: 0,
+                    },
+                ],
+                style,
+                resolved_face: FontFallbackFace {
+                    face_key: FontFaceKey(1),
+                    family_name: "Fractional Terminal".into(),
+                },
+                feature_set: Default::default(),
+                allow_ligatures: true,
+                has_color_glyphs: false,
+            }],
+        }],
+    };
+    let mut renderer = WgpuTerminalRenderer::new_for_test()?;
+    let mut fonts = FractionalPhaseFontSystem::default();
+
+    let prepared = renderer.prepare(&shaped_frame, &mut fonts)?;
+
+    assert!(
+        fonts.requests.is_empty(),
+        "Task 5 should stop issuing font raster requests for whitelisted box glyphs so fractional x phase no longer perturbs their geometry"
+    );
+    assert_eq!(
+        prepared.monochrome_glyph_draws.len(),
+        2,
+        "each single-cell box glyph should still produce a prepared monochrome draw"
+    );
+    assert_eq!(
+        prepared.monochrome_glyph_draws[0].source_kind,
+        PreparedMonochromeGlyphSourceKind::GeneratedMask,
+        "generated box glyphs should be observable on the prepared native path"
+    );
+    assert_eq!(
+        prepared.monochrome_glyph_draws[1].source_kind,
+        PreparedMonochromeGlyphSourceKind::GeneratedMask,
+        "every whitelisted box glyph in the row should take the generated-mask path"
+    );
+    assert_eq!(
+        prepared.monochrome_glyph_draws[0].dest_x_px, 0,
+        "the first generated mask should anchor to the first cell boundary instead of inheriting any fractional font phase"
+    );
+    assert_eq!(
+        prepared.monochrome_glyph_draws[1].dest_x_px, 4,
+        "the second generated mask should restart from the next cell boundary instead of carrying shaped drift across cells"
     );
 
     Ok(())

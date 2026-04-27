@@ -19,7 +19,7 @@ use crate::app::terminal_renderer::diagnostics::{
     NativeTerminalSurfaceGlyphBoundsTrace, NativeTerminalSurfaceWindowsTextDiagnostics,
 };
 use crate::app::terminal_renderer::wgpu_renderer::{
-    PreparedColorGlyphDraw, PreparedMonochromeGlyphDraw,
+    PreparedColorGlyphDraw, PreparedMonochromeGlyphDraw, PreparedMonochromeGlyphSourceKind,
 };
 use crate::app::terminal_renderer::{
     NativeSurfaceDamage, NativeSurfaceDamageKind, NativeTerminalSurfaceDiagnostics,
@@ -1199,6 +1199,9 @@ impl WindowsNativeSurfaceState {
             let mut drawable_glyphs =
                 Vec::with_capacity(frame.frame.presentable_frame.monochrome_glyph_draws.len());
             for draw in &frame.frame.presentable_frame.monochrome_glyph_draws {
+                if draw.source_kind != PreparedMonochromeGlyphSourceKind::FontOutline {
+                    continue;
+                }
                 if draw.glyph_id > u16::MAX as u32 {
                     self.mark_directwrite_text_fallback("glyph-id-overflow");
                     return;
@@ -1230,7 +1233,7 @@ impl WindowsNativeSurfaceState {
                         D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE
                     }
                 })
-                .unwrap_or(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
+                .unwrap_or(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
 
             unsafe {
                 render_target.SetTextAntialiasMode(text_antialias_mode);
@@ -1286,11 +1289,6 @@ impl WindowsNativeSurfaceState {
     }
 
     fn draw_monochrome_glyphs(&mut self, frame: &RetainedNativeTerminalSurfaceFrame) {
-        if self.last_directwrite_text_drawn {
-            return;
-        }
-        self.last_drawn_monochrome_glyphs = 0;
-
         #[cfg(not(target_os = "windows"))]
         let _ = frame;
 
@@ -1300,6 +1298,15 @@ impl WindowsNativeSurfaceState {
                 return;
             };
             for draw in &frame.frame.presentable_frame.monochrome_glyph_draws {
+                if self.last_directwrite_text_drawn {
+                    if draw.source_kind == PreparedMonochromeGlyphSourceKind::FontOutline {
+                        continue;
+                    }
+                    if draw.source_kind == PreparedMonochromeGlyphSourceKind::GeneratedMask {
+                        // Keep generated box/block masks on the opacity-mask path even when
+                        // DirectWrite already handled body-text font outlines in the same frame.
+                    }
+                }
                 self.ensure_monochrome_glyph_bitmap(draw);
                 self.ensure_brush(draw.fg_rgba);
                 let Some(bitmap_state) = self.monochrome_glyph_bitmaps.get(&draw.atlas_entry.slot)
@@ -1686,6 +1693,9 @@ impl WindowsNativeSurfaceState {
 
         let mut font_chain = Vec::new();
         for draw in &frame.frame.presentable_frame.monochrome_glyph_draws {
+            if draw.source_kind != PreparedMonochromeGlyphSourceKind::FontOutline {
+                continue;
+            }
             if !font_chain.contains(&draw.font_family_name) {
                 font_chain.push(draw.font_family_name.clone());
             }
@@ -1699,7 +1709,8 @@ impl WindowsNativeSurfaceState {
             .frame
             .presentable_frame
             .monochrome_glyph_draws
-            .first()?;
+            .iter()
+            .find(|draw| draw.source_kind == PreparedMonochromeGlyphSourceKind::FontOutline)?;
         let row_top_px = (draw.row as i32).saturating_mul(frame.frame.cell_height_px as i32);
         Some(
             draw.dest_y_px
@@ -1727,6 +1738,7 @@ impl WindowsNativeSurfaceState {
             .presentable_frame
             .monochrome_glyph_draws
             .iter()
+            .filter(|draw| draw.source_kind == PreparedMonochromeGlyphSourceKind::FontOutline)
             .take(6)
             .map(|draw| NativeTerminalSurfaceGlyphBoundsTrace {
                 glyph_id: draw.glyph_id,
