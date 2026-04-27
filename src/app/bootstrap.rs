@@ -3058,6 +3058,10 @@ fn default_connection_progress_task_title(headline: ConnectionHeadlineState) -> 
     }
 }
 
+fn host_key_decision_task_detail() -> &'static str {
+    "Confirm the server identity to continue this connection."
+}
+
 fn connection_progress_page_mode(
     attempt: &ConnectionAttemptState,
     current_step: Option<&ConnectionStepStateItem>,
@@ -3102,6 +3106,14 @@ fn connection_progress_task_detail(
     attempt: &ConnectionAttemptState,
     current_step: Option<&ConnectionStepStateItem>,
 ) -> String {
+    if attempt.prompt.is_some()
+        || current_step.is_some_and(|step| {
+            step.step_kind == "verify-host-key" && step.state == ConnectionStepState::Blocked
+        })
+    {
+        return host_key_decision_task_detail().into();
+    }
+
     current_step
         .map(|step| step.detail.clone())
         .or_else(|| attempt.diagnostics.last().map(|line| line.message.clone()))

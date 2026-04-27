@@ -8364,11 +8364,16 @@ fn workspace_host_key_inline_prompt_projects_decision_page_semantics() {
         app.get_workspace_session_connection_task_title().as_str(),
         "Verify host key"
     );
+    assert_eq!(
+        app.get_workspace_session_connection_task_detail().as_str(),
+        "Confirm the server identity to continue this connection.",
+        "decision-mode task detail should become a short task-focused explanation instead of repeating host and fingerprint details"
+    );
     assert!(
-        app.get_workspace_session_connection_task_detail()
+        !app.get_workspace_session_connection_task_detail()
             .as_str()
-            .contains("Host key verification required for 10.0.0.12:22"),
-        "decision-mode task detail should summarize the blocking host-key verification step"
+            .contains("SHA256:"),
+        "decision-mode task detail should not duplicate the host-key fingerprint because the unified task panel renders fingerprint separately"
     );
 
     let _ = fs::remove_file(known_hosts_path);
@@ -8405,6 +8410,10 @@ fn trusting_unknown_host_key_retries_connection_in_same_workspace_tab() {
     assert_eq!(
         app.get_workspace_session_connection_headline().as_str(),
         "waiting-user"
+    );
+    assert_eq!(
+        app.get_workspace_session_connection_page_mode().as_str(),
+        "decision"
     );
     app.invoke_workspace_session_local_action_requested("trust-host-key".into());
     flush_runtime_projection();
@@ -8581,6 +8590,10 @@ fn rejecting_unknown_host_key_keeps_connection_timeline_in_same_tab() {
     );
     app.invoke_workspace_session_local_action_requested("reject-host-key".into());
     flush_runtime_projection();
+    assert_eq!(
+        app.get_workspace_session_connection_page_mode().as_str(),
+        "troubleshooting"
+    );
 
     let headline = app.get_workspace_session_connection_headline().to_string();
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);

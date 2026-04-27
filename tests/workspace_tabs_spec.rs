@@ -1417,6 +1417,28 @@ fn connection_progress_workspace_host_contract_exposes_inline_host_key_actions()
         terminal_host.contains("reject-host-key"),
         "host-key rejection should route back through the workspace local-action callback"
     );
+    let footer_cancel_guard_index = terminal_host
+        .find("function connection-progress-shows-cancel() -> bool {")
+        .expect("page-level cancel guard should remain defined");
+    let footer_cancel_guard_window = &terminal_host[footer_cancel_guard_index
+        ..(footer_cancel_guard_index + 240).min(terminal_host.len())];
+    assert!(
+        footer_cancel_guard_window.contains("root.connection-progress-page-mode == \"progressing\""),
+        "page-level cancel actions should stay out of decision mode so host-key prompts remain focused inside the unified task panel"
+    );
+    let action_bar_index = terminal_host
+        .find("if root.connection-progress-shows-cancel() : action-bar := HorizontalLayout {")
+        .expect("connection-progress host should still expose a dedicated page-level action bar");
+    let action_bar_window =
+        &terminal_host[action_bar_index..(action_bar_index + 320).min(terminal_host.len())];
+    assert!(
+        !action_bar_window.contains("trust-host-key"),
+        "page-level action bar should not duplicate host-key trust actions once the task panel owns the decision state"
+    );
+    assert!(
+        !action_bar_window.contains("reject-host-key"),
+        "page-level action bar should not duplicate host-key reject actions once the task panel owns the decision state"
+    );
     assert!(
         !terminal_host.contains("host-key-card := Rectangle {"),
         "connection-progress host should fold host-key verification into the unified current-task panel"
