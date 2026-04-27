@@ -1,7 +1,10 @@
 use anyhow::Result;
-use mica_term::app::ssh::runtime::{TerminalCellState, TerminalSession, TerminalSurfaceState};
+use mica_term::app::ssh::runtime::{
+    TerminalCellState, TerminalCursorShape, TerminalCursorState, TerminalRowState, TerminalSession,
+    TerminalSurfaceState,
+};
 use mica_term::app::terminal_atlas::{
-    ClusterSpriteKind, TerminalAtlasRenderer, TerminalAtlasSelection,
+    ClusterSpriteKind, RenderedClusterSourceKind, TerminalAtlasRenderer, TerminalAtlasSelection,
 };
 use mica_term::app::terminal_emoji::{
     EmojiFontRasterizeRequest, EmojiFontResolution, EmojiRasterizerBackend, EmojiSprite,
@@ -15,6 +18,53 @@ fn render_surface(rows: usize, cols: usize, text: &str) -> TerminalSurfaceState 
     let mut session = TerminalSession::new(rows, cols);
     session.apply_remote_bytes(text.as_bytes());
     session.surface_state(Uuid::new_v4())
+}
+
+fn manual_surface(rows: u32, cols: u32, cells: Vec<TerminalCellState>) -> TerminalSurfaceState {
+    let mut visible_lines = vec![String::new(); rows as usize];
+    for cell in &cells {
+        if let Some(line) = visible_lines.get_mut(cell.row as usize) {
+            line.push_str(&cell.text);
+        }
+    }
+    let visible_rows = visible_lines
+        .iter()
+        .enumerate()
+        .map(|(index, text)| TerminalRowState {
+            index: index as u32,
+            text: text.clone(),
+            wrapped: false,
+        })
+        .collect();
+
+    TerminalSurfaceState {
+        session_id: Uuid::new_v4(),
+        seqno: 1,
+        rows,
+        cols,
+        default_fg_rgba: 0xffd8_dfe8,
+        default_bg_rgba: 0xff0c_1014,
+        row_bg_even_rgba: 0xff0c_1014,
+        row_bg_odd_rgba: 0xff0c_1014,
+        viewport_offset_lines: 0,
+        viewport_max_offset_lines: 0,
+        viewport_at_bottom: true,
+        visible_rows,
+        visible_lines,
+        cells,
+        cursor: TerminalCursorState {
+            row: 0,
+            col: 0,
+            visible: false,
+            blinking: false,
+            shape: TerminalCursorShape::Block,
+            fg_rgba: 0xffd8_dfe8,
+            bg_rgba: 0xff0c_1014,
+        },
+        alternate_screen_active: false,
+        mouse_grabbed: false,
+        bracketed_paste_enabled: false,
+    }
 }
 
 fn unpack_rgba(color: u32) -> Rgba8Pixel {
@@ -484,4 +534,243 @@ fn atlas_renderer_draws_bold_cells_with_more_ink_than_plain_cells() -> Result<()
     );
 
     Ok(())
+}
+
+#[test]
+fn atlas_renderer_generated_box_masks_eliminate_seam_gaps_and_preserve_body_text_sources() -> Result<()>
+{
+    let mut renderer = TerminalAtlasRenderer::new()?;
+    let mut surface = manual_surface(
+        3,
+        8,
+        vec![
+            cell(0, 0, "╭"),
+            cell(0, 1, "─"),
+            cell(0, 2, "─"),
+            cell(0, 3, "─"),
+            cell(0, 4, "─"),
+            cell(0, 5, "╮"),
+            cell(1, 0, "│"),
+            cell(1, 1, "C"),
+            cell(1, 2, "o"),
+            cell(1, 3, "d"),
+            cell(1, 4, "e"),
+            cell(1, 5, "x"),
+            cell(1, 6, "│"),
+            cell(2, 0, "╰"),
+            cell(2, 1, "─"),
+            cell(2, 2, "─"),
+            cell(2, 3, "─"),
+            cell(2, 4, "─"),
+            cell(2, 5, "╯"),
+        ],
+    );
+
+    let frame = renderer.render(&surface)?;
+    assert_eq!(
+        frame
+            .rendered_clusters
+            .iter()
+            .find(|cluster| cluster.text == "╭")
+            .expect("box glyph cluster")
+            .source_kind,
+        RenderedClusterSourceKind::GeneratedMask,
+        "box-drawing glyphs should be observable as generated masks once Task 4 switches bitmap atlas rendering onto the shared generator"
+    );
+    assert_eq!(
+        frame
+            .rendered_clusters
+            .iter()
+            .find(|cluster| cluster.text == "C")
+            .expect("body text cluster")
+            .source_kind,
+        RenderedClusterSourceKind::FontRaster,
+        "body text inside the same bitmap frame should stay on the font-raster path"
+    );
+    assert_eq!(
+        seam_gap_count_for_verticals(&frame.image, &frame.raster_metrics, &surface),
+        0,
+        "generated vertical box strokes should not leave background leaks on row seams"
+    );
+    assert_eq!(
+        seam_gap_count_for_horizontals(&frame.image, &frame.raster_metrics, &frame.rendered_clusters, &surface),
+        0,
+        "generated horizontal box strokes should not leave background leaks on column seams"
+    );
+
+    surface = manual_surface(
+        1,
+        8,
+        vec![
+            cell(0, 0, "A"),
+            cell(0, 1, "╭"),
+            cell(0, 2, "─"),
+            cell(0, 3, "╮"),
+            cell(0, 4, "中"),
+        ],
+    );
+    let mixed = renderer.render(&surface)?;
+    for (text, expected_source) in [
+        ("A", RenderedClusterSourceKind::FontRaster),
+        ("╭", RenderedClusterSourceKind::GeneratedMask),
+        ("─", RenderedClusterSourceKind::GeneratedMask),
+        ("╮", RenderedClusterSourceKind::GeneratedMask),
+        ("中", RenderedClusterSourceKind::FontRaster),
+    ] {
+        assert_eq!(
+            mixed
+                .rendered_clusters
+                .iter()
+                .find(|cluster| cluster.text == text)
+                .expect("mixed cluster should exist")
+                .source_kind,
+            expected_source,
+            "mixed atlas rendering should keep `{text}` on the expected source path"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn atlas_renderer_generated_block_masks_keep_expected_fill_ratios_across_scales() -> Result<()> {
+    let surface = manual_surface(
+        1,
+        8,
+        vec![
+            cell(0, 0, "█"),
+            cell(0, 1, "▀"),
+            cell(0, 2, "▄"),
+            cell(0, 3, "▌"),
+            cell(0, 4, "▐"),
+        ],
+    );
+    let mut renderer = TerminalAtlasRenderer::new()?;
+
+    for scale in [1.0, 1.25, 2.0] {
+        renderer.set_raster_scale(scale);
+        let frame = renderer.render(&surface)?;
+
+        assert_eq!(
+            rendered_fill_ratio(&frame, "█"),
+            1.0,
+            "full block should stay fully filled at scale {scale}"
+        );
+        assert_half_fill(
+            rendered_fill_ratio(&frame, "▀"),
+            "upper half block should stay half filled at scale {scale}"
+        );
+        assert_half_fill(
+            rendered_fill_ratio(&frame, "▄"),
+            "lower half block should stay half filled at scale {scale}"
+        );
+        assert_half_fill(
+            rendered_fill_ratio(&frame, "▌"),
+            "left half block should stay half filled at scale {scale}"
+        );
+        assert_half_fill(
+            rendered_fill_ratio(&frame, "▐"),
+            "right half block should stay half filled at scale {scale}"
+        );
+    }
+
+    Ok(())
+}
+
+fn rendered_fill_ratio(
+    frame: &mica_term::app::terminal_atlas::TerminalSurfaceFrame,
+    text: &str,
+) -> f32 {
+    let cluster = frame
+        .rendered_clusters
+        .iter()
+        .find(|cluster| cluster.text == text)
+        .expect("cluster should exist");
+    let buffer = frame.image.to_rgba8().expect("rgba image");
+    let background = unpack_rgba(0xff0c_1014);
+    let start_x = cluster.col * frame.raster_metrics.cell_width;
+    let start_y = cluster.row * frame.raster_metrics.cell_height;
+    let mut lit = 0usize;
+    let mut total = 0usize;
+
+    for y in start_y..start_y + frame.raster_metrics.cell_height {
+        for x in start_x..start_x + frame.raster_metrics.cell_width {
+            let pixel = buffer.as_slice()[(y * buffer.width() + x) as usize];
+            total += 1;
+            if pixel != background {
+                lit += 1;
+            }
+        }
+    }
+
+    (lit as f32 / total as f32 * 100.0).round() / 100.0
+}
+
+fn seam_gap_count_for_verticals(
+    image: &slint::Image,
+    metrics: &mica_term::app::terminal_atlas::TerminalAtlasMetrics,
+    surface: &TerminalSurfaceState,
+) -> usize {
+    let background = unpack_rgba(surface.default_bg_rgba);
+    let buffer = image.to_rgba8().expect("rgba image");
+    let x = metrics.cell_width / 2;
+    let mut gaps = 0usize;
+
+    for seam_row in 1..surface.rows.saturating_sub(1) {
+        let y = seam_row * metrics.cell_height;
+        let pixel = buffer.as_slice()[(y * buffer.width() + x) as usize];
+        if pixel == background {
+            gaps += 1;
+        }
+    }
+
+    gaps
+}
+
+fn seam_gap_count_for_horizontals(
+    image: &slint::Image,
+    metrics: &mica_term::app::terminal_atlas::TerminalAtlasMetrics,
+    rendered_clusters: &[mica_term::app::terminal_atlas::RenderedCluster],
+    surface: &TerminalSurfaceState,
+) -> usize {
+    let background = unpack_rgba(surface.default_bg_rgba);
+    let buffer = image.to_rgba8().expect("rgba image");
+    let y = metrics.cell_height / 2;
+    let mut gaps = 0usize;
+
+    let seam_cols = rendered_clusters
+        .iter()
+        .filter(|cluster| cluster.row == 0 && cluster.source_kind == RenderedClusterSourceKind::GeneratedMask)
+        .map(|cluster| cluster.col)
+        .collect::<std::collections::BTreeSet<_>>();
+
+    for seam_col in seam_cols.into_iter().skip(1) {
+        let x = seam_col * metrics.cell_width;
+        let pixel = buffer.as_slice()[(y * buffer.width() + x) as usize];
+        if pixel == background {
+            gaps += 1;
+        }
+    }
+
+    gaps
+}
+
+fn cell(row: u32, col: u32, text: &str) -> TerminalCellState {
+    TerminalCellState {
+        row,
+        col,
+        width: 1,
+        text: text.to_string(),
+        bold: false,
+        underline: false,
+        fg_rgba: 0xffd8_dfe8,
+        bg_rgba: 0xff0c_1014,
+    }
+}
+
+fn assert_half_fill(ratio: f32, message: &str) {
+    assert!(
+        (ratio - 0.5).abs() <= 0.05,
+        "{message}: observed ratio {ratio}"
+    );
 }
