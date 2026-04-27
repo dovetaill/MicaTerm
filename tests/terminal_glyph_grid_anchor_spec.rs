@@ -10,7 +10,9 @@ use mica_term::app::terminal_layout::run_segmentation::RunCluster;
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_layout::{GlyphRun, PositionedGlyph, ShapedRow, TextStyleKey};
 #[cfg(feature = "terminal-native-renderer")]
-use mica_term::app::terminal_renderer::wgpu_renderer::PreparedMonochromeGlyphDraw;
+use mica_term::app::terminal_renderer::wgpu_renderer::{
+    PreparedMonochromeGlyphDraw, PreparedMonochromeGlyphSourceKind,
+};
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 
@@ -320,6 +322,92 @@ fn mixed_row_draw_origins_match_declared_start_cols_for_selection_grid() -> Resu
             visible_left(draw),
             draw.start_col as i32 * prepared.cell_width_px as i32,
             "prepared glyph draws should share the same horizontal cell grid as selection and hit-testing instead of drifting off the declared start column"
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn generated_grid_masks_anchor_to_the_cell_rect_instead_of_font_baseline_bearings() -> Result<()> {
+    let shaped_frame = ShapedTerminalFrame {
+        seqno: 4,
+        font: grid_test_font(),
+        rows: vec![ShapedRow {
+            row: 1,
+            content_hash: 0,
+            row_hash: 0,
+            runs: vec![GlyphRun {
+                row: 1,
+                cell_range: 0..2,
+                text: "╭╮".into(),
+                clusters: vec![
+                    RunCluster {
+                        text: "╭".into(),
+                        cell_range: 0..1,
+                        byte_range: 0..3,
+                    },
+                    RunCluster {
+                        text: "╮".into(),
+                        cell_range: 1..2,
+                        byte_range: 3..6,
+                    },
+                ],
+                glyphs: vec![
+                    PositionedGlyph {
+                        glyph_id: 11,
+                        cluster: 0,
+                        x_advance: 7,
+                        y_advance: 0,
+                        x_offset: 2,
+                        y_offset: -1,
+                    },
+                    PositionedGlyph {
+                        glyph_id: 11,
+                        cluster: 3,
+                        x_advance: 7,
+                        y_advance: 0,
+                        x_offset: 2,
+                        y_offset: -1,
+                    },
+                ],
+                style: style(),
+                resolved_face: FontFallbackFace {
+                    face_key: FontFaceKey(1),
+                    family_name: "Grid Terminal".into(),
+                },
+                feature_set: Default::default(),
+                allow_ligatures: true,
+                has_color_glyphs: false,
+            }],
+        }],
+    };
+    let mut renderer = WgpuTerminalRenderer::new_for_test()?;
+    let mut fonts = GridAnchorFontSystem;
+
+    let prepared = renderer.prepare(&shaped_frame, &mut fonts)?;
+
+    assert_eq!(
+        prepared.monochrome_glyph_draws.len(),
+        2,
+        "generated box glyph routing should still emit one prepared draw per visible cell"
+    );
+    for draw in &prepared.monochrome_glyph_draws {
+        assert_eq!(
+            draw.source_kind,
+            PreparedMonochromeGlyphSourceKind::GeneratedMask,
+            "Task 5 should mark generated box glyphs explicitly so the native renderer can keep them off the DirectWrite body-text path"
+        );
+        assert_eq!(
+            visible_left(draw),
+            draw.start_col as i32 * prepared.cell_width_px as i32,
+            "generated box glyphs should sit flush on the declared cell anchor instead of inheriting font bearing offsets"
+        );
+        assert_eq!(
+            draw.dest_y_px,
+            draw.row as i32 * prepared.cell_height_px as i32,
+            "generated box glyphs should anchor vertically to the row's snapped cell rect instead of the body-text baseline"
         );
     }
 

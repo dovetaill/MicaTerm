@@ -236,3 +236,60 @@ fn native_renderer_prepare_defaults_existing_body_text_draws_to_font_outline_sou
 
     Ok(())
 }
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn native_renderer_routes_v1_box_and_block_whitelist_clusters_to_generated_masks() -> Result<()> {
+    let frame = ascii_frame("│╭╮█▀▄▌▐");
+
+    for col in 0..8 {
+        assert_eq!(
+            source_kind_at_col(&frame, col)?,
+            PreparedMonochromeGlyphSourceKind::GeneratedMask,
+            "Task 5 should route the v1 box/block whitelist through the shared generated-mask path instead of continuing to treat those glyphs like ordinary font outlines"
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn native_renderer_only_routes_whitelisted_grid_clusters_off_the_body_text_path() -> Result<()> {
+    let mixed_ascii = ascii_frame("a│b");
+    let mixed_cjk = ascii_frame("中│");
+    let hyphenated_word = ascii_frame("co-op");
+
+    assert_eq!(
+        source_kind_at_col(&mixed_ascii, 0)?,
+        PreparedMonochromeGlyphSourceKind::FontOutline,
+        "body text before a box glyph should stay on the existing font-outline path"
+    );
+    assert_eq!(
+        source_kind_at_col(&mixed_ascii, 1)?,
+        PreparedMonochromeGlyphSourceKind::GeneratedMask,
+        "the single-cell box glyph inside a mixed row should switch onto the generated-mask path"
+    );
+    assert_eq!(
+        source_kind_at_col(&mixed_ascii, 2)?,
+        PreparedMonochromeGlyphSourceKind::FontOutline,
+        "body text after a box glyph should stay on the existing font-outline path"
+    );
+    assert_eq!(
+        source_kind_at_col(&mixed_cjk, 0)?,
+        PreparedMonochromeGlyphSourceKind::FontOutline,
+        "ordinary Chinese body text should keep the main font-outline pipeline"
+    );
+    assert_eq!(
+        source_kind_at_col(&mixed_cjk, 1)?,
+        PreparedMonochromeGlyphSourceKind::GeneratedMask,
+        "a neighboring box glyph should still take the generated-mask fast path in the same row"
+    );
+    assert_eq!(
+        source_kind_at_col(&hyphenated_word, 2)?,
+        PreparedMonochromeGlyphSourceKind::FontOutline,
+        "non-whitelist punctuation like the hyphen in co-op must not be reclassified as a generated grid glyph"
+    );
+
+    Ok(())
+}

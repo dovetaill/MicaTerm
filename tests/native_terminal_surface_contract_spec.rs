@@ -1248,6 +1248,33 @@ fn windows_backend_source_exposes_background_and_monochrome_draw_contract() {
         windows_backend_source.contains("D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE"),
         "windows backend should request ClearType-capable text antialiasing for the primary DirectWrite path"
     );
+    assert!(
+        windows_backend_source.contains("PreparedMonochromeGlyphSourceKind::GeneratedMask")
+            && windows_backend_source.contains("PreparedMonochromeGlyphSourceKind::FontOutline"),
+        "Task 5 should keep explicit prepared source kinds in the Windows present path so mixed DirectWrite text and generated masks can coexist in the same retained frame"
+    );
+}
+
+#[test]
+fn windows_backend_source_keeps_mixed_generated_mask_frames_off_the_full_fallback_path() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows platform backend");
+
+    for expected in [
+        "draw.source_kind == PreparedMonochromeGlyphSourceKind::FontOutline",
+        "draw.source_kind != PreparedMonochromeGlyphSourceKind::FontOutline",
+        "self.last_drawn_monochrome_glyphs =",
+    ] {
+        assert!(
+            windows_backend_source.contains(expected),
+            "Task 5 should reference `{expected}` so the Windows backend can keep counting body-text and generated-mask draws without misclassifying mixed frames as full bitmap fallback"
+        );
+    }
+    assert!(
+        !windows_backend_source.contains("if self.last_directwrite_text_drawn {\n            return;\n        }"),
+        "mixed DirectWrite + generated-mask frames should no longer short-circuit the monochrome bitmap stage after the text pass"
+    );
 }
 
 #[test]

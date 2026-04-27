@@ -117,6 +117,10 @@ impl GlyphAtlas {
         self.entries.contains_key(&GlyphAtlasKey::from(request))
     }
 
+    pub fn contains_generated(&self, key: GeneratedGlyphAtlasKey) -> bool {
+        self.entries.contains_key(&GlyphAtlasKey::Generated(key))
+    }
+
     pub fn upsert(
         &mut self,
         request: GlyphRasterRequest,
