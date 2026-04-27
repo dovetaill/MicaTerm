@@ -193,12 +193,11 @@ fn snippet_modal_shell_dismisses_local_select_overlay_before_closing_modal() {
 }
 
 #[test]
-fn ssh_proxy_upstream_select_fully_fits_inside_proxy_card() {
+fn ssh_proxy_upstream_select_uses_narrower_inset_width_than_primary_proxy_type_field() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
     app.show().expect("show app window");
-    bind_top_status_bar_with_store(&app, None);
 
     app.set_asset_modal_open(true);
     app.set_asset_modal_kind("new-ssh-connection".into());
@@ -212,16 +211,7 @@ fn ssh_proxy_upstream_select_fully_fits_inside_proxy_card() {
         "Mega".into(),
     ])));
 
-    let auth_source_select = ElementHandle::find_by_element_id(
-        &app,
-        "AssetsSshConnectionModal::auth-source-select",
-    )
-    .next()
-    .expect("find auth source select");
-    let scroll_position = slint::LogicalPosition::new(
-        auth_source_select.absolute_position().x + 20.0,
-        auth_source_select.absolute_position().y + 20.0,
-    );
+    let scroll_position = slint::LogicalPosition::new(520.0, 260.0);
 
     for _ in 0..8 {
         app.window().dispatch_event(WindowEvent::PointerScrolled {
@@ -231,12 +221,18 @@ fn ssh_proxy_upstream_select_fully_fits_inside_proxy_card() {
         });
     }
 
-    let proxy_group = ElementHandle::find_by_element_id(
+    let proxy_field_stack = ElementHandle::find_by_element_id(
         &app,
-        "AssetsSshConnectionModal::proxy-ssh-select-group",
+        "AssetsSshConnectionModal::proxy-ssh-field-stack",
     )
     .next()
-    .expect("find proxy ssh select group");
+    .expect("find proxy ssh field stack");
+    let proxy_type_select = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSshConnectionModal::proxy-type-select",
+    )
+    .next()
+    .expect("find proxy type select");
     let proxy_select = ElementHandle::find_by_element_id(
         &app,
         "AssetsSshConnectionModal::proxy-ssh-select",
@@ -244,22 +240,33 @@ fn ssh_proxy_upstream_select_fully_fits_inside_proxy_card() {
     .next()
     .expect("find proxy ssh select");
 
-    let group_bottom = proxy_group.absolute_position().y + proxy_group.size().height;
+    let group_bottom = proxy_field_stack.absolute_position().y + proxy_field_stack.size().height;
     let select_bottom = proxy_select.absolute_position().y + proxy_select.size().height;
 
     assert!(
         select_bottom <= group_bottom,
-        "upstream ssh select should fit fully inside its own layout group, group_bottom={group_bottom}, select_bottom={select_bottom}"
+        "upstream ssh select should fit fully inside its inset field stack, group_bottom={group_bottom}, select_bottom={select_bottom}"
+    );
+    assert!(
+        proxy_select.absolute_position().x >= proxy_type_select.absolute_position().x + 8.0,
+        "upstream ssh select should visibly inset from the primary proxy type field, proxy_x={}, primary_x={}",
+        proxy_select.absolute_position().x,
+        proxy_type_select.absolute_position().x,
+    );
+    assert!(
+        proxy_select.size().width + 24.0 <= proxy_type_select.size().width,
+        "upstream ssh select should read as a smaller nested field than the primary proxy type select, proxy_width={}, primary_width={}",
+        proxy_select.size().width,
+        proxy_type_select.size().width,
     );
 }
 
 #[test]
-fn ssh_keychain_identity_select_fully_fits_inside_identity_card() {
+fn ssh_keychain_identity_flow_uses_inset_select_and_keeps_summary_visible() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
     app.show().expect("show app window");
-    bind_top_status_bar_with_store(&app, None);
 
     app.set_asset_modal_open(true);
     app.set_asset_modal_kind("new-ssh-connection".into());
@@ -273,16 +280,7 @@ fn ssh_keychain_identity_select_fully_fits_inside_identity_card() {
         "Shared Identity".into(),
     ])));
 
-    let auth_source_select = ElementHandle::find_by_element_id(
-        &app,
-        "AssetsSshConnectionModal::auth-source-select",
-    )
-    .next()
-    .expect("find auth source select");
-    let scroll_position = slint::LogicalPosition::new(
-        auth_source_select.absolute_position().x + 20.0,
-        auth_source_select.absolute_position().y + 20.0,
-    );
+    let scroll_position = slint::LogicalPosition::new(520.0, 260.0);
 
     for _ in 0..3 {
         app.window().dispatch_event(WindowEvent::PointerScrolled {
@@ -292,25 +290,56 @@ fn ssh_keychain_identity_select_fully_fits_inside_identity_card() {
         });
     }
 
-    let identity_group = ElementHandle::find_by_element_id(
+    let identity_field_stack = ElementHandle::find_by_element_id(
         &app,
-        "AssetsSshConnectionModal::keychain-identity-select-group",
+        "AssetsSshConnectionModal::keychain-identity-field-stack",
     )
     .next()
-    .expect("find identity select group");
+    .expect("find identity field stack");
     let identity_select = ElementHandle::find_by_element_id(
         &app,
         "AssetsSshConnectionModal::keychain-identity-select",
     )
     .next()
     .expect("find keychain identity select");
+    let identity_summary_card = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSshConnectionModal::identity-summary-card",
+    )
+    .next()
+    .expect("find identity summary card");
+    let identity_summary_value = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSshConnectionModal::identity-auth-summary-value",
+    )
+    .next()
+    .expect("find identity auth summary value");
 
-    let group_bottom = identity_group.absolute_position().y + identity_group.size().height;
+    let group_bottom =
+        identity_field_stack.absolute_position().y + identity_field_stack.size().height;
     let select_bottom = identity_select.absolute_position().y + identity_select.size().height;
+    let summary_bottom =
+        identity_summary_value.absolute_position().y + identity_summary_value.size().height;
+    let card_bottom =
+        identity_summary_card.absolute_position().y + identity_summary_card.size().height;
 
     assert!(
         select_bottom <= group_bottom,
-        "keychain identity select should fit fully inside its own layout group, group_bottom={group_bottom}, select_bottom={select_bottom}"
+        "keychain identity select should fit fully inside its inset field stack, group_bottom={group_bottom}, select_bottom={select_bottom}"
+    );
+    assert!(
+        identity_field_stack.absolute_position().x > 430.0,
+        "keychain identity field stack should be inset from the main form column, field_x={}",
+        identity_field_stack.absolute_position().x,
+    );
+    assert!(
+        identity_select.size().width < 560.0,
+        "keychain identity select should read as a smaller nested field than the primary auth source field, identity_width={}",
+        identity_select.size().width,
+    );
+    assert!(
+        summary_bottom <= card_bottom - 10.0,
+        "identity authentication summary should stay fully visible inside its summary card, summary_bottom={summary_bottom}, card_bottom={card_bottom}"
     );
 }
 
@@ -320,7 +349,6 @@ fn snippet_package_select_fully_fits_inside_its_layout_group() {
 
     let app = AppWindow::new().unwrap();
     app.show().expect("show app window");
-    bind_top_status_bar_with_store(&app, None);
 
     app.set_asset_modal_open(true);
     app.set_asset_modal_kind("new-snippet".into());

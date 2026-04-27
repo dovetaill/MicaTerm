@@ -4,7 +4,6 @@ import {
     DialogInlineBanner,
     DialogSelectField,
     DialogSelectPopup,
-    DialogSectionCard,
     DialogSegmentButton,
     DialogTextField,
     ModalBodyScrollArea,
@@ -79,6 +78,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
     private property <length> select-popup-gap: 6px;
     private property <length> select-popup-option-height: 32px;
     private property <length> select-popup-default-max-height: 240px;
+    private property <length> nested-field-horizontal-inset: root.compact-layout ? 12px : 20px;
     private property <length> footer-height: root.feedback-message != "" || root.validation-message != ""
         ? root.dense-layout ? 114px : 132px
         : ThemeTokens.modal-footer-min-height;
@@ -422,82 +422,123 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             }
                         }
 
-                        if root.auth-source == "keychain-identity" : DialogSectionCard {
+                        if root.auth-source == "keychain-identity" : VerticalLayout {
                             width: parent.width;
-                            padding-horizontal: 16px;
-                            padding-vertical: 14px;
-                            spacing: 10px;
-                            surface: ThemeTokens.modal-section-surface;
+                            spacing: 12px;
 
-                            keychain-identity-select-group := Rectangle {
+                            keychain-identity-field-row := Rectangle {
                                 width: parent.width;
-                                height: 58px;
+                                height: keychain-identity-field-host.height + 2px;
                                 background: transparent;
 
-                                VerticalLayout {
-                                    width: parent.width;
-                                    spacing: 10px;
+                                keychain-identity-field-host := Rectangle {
+                                    x: root.nested-field-horizontal-inset;
+                                    width: max(0px, parent.width - (root.nested-field-horizontal-inset * 2));
+                                    height: keychain-identity-field-stack.preferred-height;
+                                    background: transparent;
 
-                                    Text {
+                                    keychain-identity-field-stack := VerticalLayout {
                                         width: parent.width;
-                                        text: "Identity";
+                                        spacing: 10px;
+
+                                        Text {
+                                            width: parent.width;
+                                            text: "Identity";
+                                            color: ThemeTokens.text-secondary;
+                                            font-size: 11px;
+                                            overflow: elide;
+                                        }
+
+                                        keychain-identity-select := DialogSelectField {
+                                            width: parent.width;
+                                            height: 34px;
+                                            label: "Identity";
+                                            focus-sequence: root.keychain-identity-select-focus-sequence;
+                                            open: root.open-select-id == "keychain_identity_label";
+                                            selected-label: root.keychain-identity-selected-label;
+                                            placeholder-text: root.keychain-identity-options.length == 0 ? "No keychain identity available" : "Select identity";
+                                            enabled: root.keychain-identity-options.length > 0;
+
+                                            toggle-requested => {
+                                                root.open-select-options = root.keychain-identity-options;
+                                                root.open-select(
+                                                    "keychain_identity_label",
+                                                    self.absolute-position.x - root.absolute-position.x,
+                                                    self.absolute-position.y - root.absolute-position.y,
+                                                    self.width,
+                                                    root.open-select-options.length,
+                                                    0
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            identity-summary-row := Rectangle {
+                                width: parent.width;
+                                height: identity-summary-card.height + 4px;
+                                background: transparent;
+
+                                identity-summary-card := Rectangle {
+                                    x: root.nested-field-horizontal-inset;
+                                    width: max(0px, parent.width - (root.nested-field-horizontal-inset * 2));
+                                    height: 16px
+                                        + identity-username-label.height
+                                        + 8px
+                                        + identity-username-value.height
+                                        + 12px
+                                        + identity-auth-summary-label.height
+                                        + 8px
+                                        + identity-auth-summary-value.height
+                                        + 20px;
+                                    border-radius: ThemeTokens.modal-section-radius;
+                                    border-width: 1px;
+                                    border-color: ThemeTokens.modal-inner-border;
+                                    background: ThemeTokens.modal-section-alt-surface;
+
+                                    identity-username-label := Text {
+                                        x: 18px;
+                                        y: 16px;
+                                        width: max(0px, parent.width - 36px);
+                                        height: self.preferred-height;
+                                        text: "Username";
                                         color: ThemeTokens.text-secondary;
                                         font-size: 11px;
                                         overflow: elide;
                                     }
 
-                                    keychain-identity-select := DialogSelectField {
-                                        width: parent.width;
-                                        height: 34px;
-                                        label: "Identity";
-                                        focus-sequence: root.keychain-identity-select-focus-sequence;
-                                        open: root.open-select-id == "keychain_identity_label";
-                                        selected-label: root.keychain-identity-selected-label;
-                                        placeholder-text: root.keychain-identity-options.length == 0 ? "No keychain identity available" : "Select identity";
-                                        enabled: root.keychain-identity-options.length > 0;
+                                    identity-username-value := Text {
+                                        x: 18px;
+                                        y: identity-username-label.y + identity-username-label.height + 8px;
+                                        width: max(0px, parent.width - 36px);
+                                        height: self.preferred-height;
+                                        text: root.keychain-identity-username == "" ? "Not selected" : root.keychain-identity-username;
+                                        color: ThemeTokens.text-primary;
+                                        wrap: word-wrap;
+                                    }
 
-                                        toggle-requested => {
-                                            root.open-select-options = root.keychain-identity-options;
-                                            root.open-select(
-                                                "keychain_identity_label",
-                                                self.absolute-position.x - root.absolute-position.x,
-                                                self.absolute-position.y - root.absolute-position.y,
-                                                self.width,
-                                                root.open-select-options.length,
-                                                0
-                                            );
-                                        }
+                                    identity-auth-summary-label := Text {
+                                        x: 18px;
+                                        y: identity-username-value.y + identity-username-value.height + 12px;
+                                        width: max(0px, parent.width - 36px);
+                                        height: self.preferred-height;
+                                        text: "Authentication summary";
+                                        color: ThemeTokens.text-secondary;
+                                        font-size: 11px;
+                                        overflow: elide;
+                                    }
+
+                                    identity-auth-summary-value := Text {
+                                        x: 18px;
+                                        y: identity-auth-summary-label.y + identity-auth-summary-label.height + 8px;
+                                        width: max(0px, parent.width - 36px);
+                                        height: self.preferred-height;
+                                        text: root.keychain-identity-auth-summary == "" ? "Not selected" : root.keychain-identity-auth-summary;
+                                        color: ThemeTokens.text-primary;
+                                        wrap: word-wrap;
                                     }
                                 }
-                            }
-                            Text {
-                                width: parent.width;
-                                text: "Username";
-                                color: ThemeTokens.text-secondary;
-                                font-size: 11px;
-                                overflow: elide;
-                            }
-
-                            Text {
-                                width: parent.width;
-                                text: root.keychain-identity-username == "" ? "Not selected" : root.keychain-identity-username;
-                                color: ThemeTokens.text-primary;
-                                wrap: word-wrap;
-                            }
-
-                            Text {
-                                width: parent.width;
-                                text: "Authentication summary";
-                                color: ThemeTokens.text-secondary;
-                                font-size: 11px;
-                                overflow: elide;
-                            }
-
-                            Text {
-                                width: parent.width;
-                                text: root.keychain-identity-auth-summary == "" ? "Not selected" : root.keychain-identity-auth-summary;
-                                color: ThemeTokens.text-primary;
-                                wrap: word-wrap;
                             }
                         }
 
@@ -736,19 +777,18 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             }
                         }
 
-                        if root.proxy-type == "ssh-asset" : DialogSectionCard {
+                        if root.proxy-type == "ssh-asset" : proxy-ssh-field-row := Rectangle {
                             width: parent.width;
-                            padding-horizontal: 16px;
-                            padding-vertical: 14px;
-                            spacing: 10px;
-                            surface: ThemeTokens.modal-section-alt-surface;
+                            height: proxy-ssh-field-host.height + 2px;
+                            background: transparent;
 
-                            proxy-ssh-select-group := Rectangle {
-                                width: parent.width;
-                                height: 58px;
+                            proxy-ssh-field-host := Rectangle {
+                                x: root.nested-field-horizontal-inset;
+                                width: max(0px, parent.width - (root.nested-field-horizontal-inset * 2));
+                                height: proxy-ssh-field-stack.preferred-height;
                                 background: transparent;
 
-                                VerticalLayout {
+                                proxy-ssh-field-stack := VerticalLayout {
                                     width: parent.width;
                                     spacing: 10px;
 

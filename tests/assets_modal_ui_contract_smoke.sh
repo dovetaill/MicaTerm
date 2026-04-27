@@ -260,7 +260,25 @@ if grep -F 'footer-panel := Rectangle {' "$SSH_MODAL" >/dev/null; then
   echo "ssh modal footer must not use an inner footer-panel wrapper" >&2
   exit 1
 fi
-grep -F 'surface: ThemeTokens.modal-section-alt-surface;' "$SSH_MODAL" >/dev/null
+grep -F 'keychain-identity-field-stack := VerticalLayout {' "$SSH_MODAL" >/dev/null
+grep -F 'identity-summary-card := Rectangle {' "$SSH_MODAL" >/dev/null
+grep -F 'proxy-ssh-field-stack := VerticalLayout {' "$SSH_MODAL" >/dev/null
+if grep -F 'keychain-identity-select-group := Rectangle {' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal must not revert keychain identity to the old nested select group wrapper" >&2
+  exit 1
+fi
+if grep -F 'proxy-ssh-select-group := Rectangle {' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal must not revert upstream ssh to the old nested select group wrapper" >&2
+  exit 1
+fi
+if grep -F 'if root.auth-source == "keychain-identity" : DialogSectionCard {' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal must keep keychain identity out of a nested section card" >&2
+  exit 1
+fi
+if grep -F 'if root.proxy-type == "ssh-asset" : DialogSectionCard {' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal must keep the upstream ssh selector out of a nested section card" >&2
+  exit 1
+fi
 grep -F 'in property <string> validation-message: "";' "$SSH_MODAL" >/dev/null
 grep -F 'in property <bool> can-confirm: false;' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> auth-source: "manual";' "$SSH_MODAL" >/dev/null
