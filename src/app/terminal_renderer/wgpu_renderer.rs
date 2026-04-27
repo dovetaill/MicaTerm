@@ -49,6 +49,12 @@ pub enum PreparedMonochromeGlyphVisualFit {
     GridSymbol,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreparedMonochromeGlyphSourceKind {
+    FontOutline,
+    GeneratedMask,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreparedMonochromeGlyphDraw {
     pub row: u32,
@@ -71,6 +77,7 @@ pub struct PreparedMonochromeGlyphDraw {
     pub dest_y_px: i32,
     pub fg_rgba: u32,
     pub visual_fit: PreparedMonochromeGlyphVisualFit,
+    pub source_kind: PreparedMonochromeGlyphSourceKind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -807,6 +814,7 @@ impl WgpuTerminalRenderer {
                                 dest_y_px: glyph.raw_dest_y_px,
                                 fg_rgba,
                                 visual_fit,
+                                source_kind: PreparedMonochromeGlyphSourceKind::FontOutline,
                             }),
                         PreparedClusterGlyphKind::Color {
                             cache_entry,

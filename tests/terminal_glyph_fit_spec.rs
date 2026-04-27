@@ -10,7 +10,9 @@ use mica_term::app::terminal_layout::run_segmentation::RunCluster;
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_layout::{GlyphRun, PositionedGlyph, ShapedRow, TextStyleKey};
 #[cfg(feature = "terminal-native-renderer")]
-use mica_term::app::terminal_renderer::wgpu_renderer::PreparedMonochromeGlyphVisualFit;
+use mica_term::app::terminal_renderer::wgpu_renderer::{
+    PreparedMonochromeGlyphSourceKind, PreparedMonochromeGlyphVisualFit,
+};
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 
@@ -147,6 +149,20 @@ fn visual_fit_at_col(frame: &ShapedTerminalFrame, col: u32) -> Result<PreparedMo
 }
 
 #[cfg(feature = "terminal-native-renderer")]
+fn source_kind_at_col(frame: &ShapedTerminalFrame, col: u32) -> Result<PreparedMonochromeGlyphSourceKind> {
+    let mut renderer = WgpuTerminalRenderer::new_for_test()?;
+    let mut fonts = GlyphFitFontSystem;
+    let prepared = renderer.prepare(frame, &mut fonts)?;
+
+    Ok(prepared
+        .monochrome_glyph_draws
+        .iter()
+        .find(|draw| draw.start_col == col)
+        .expect("draw at requested col")
+        .source_kind)
+}
+
+#[cfg(feature = "terminal-native-renderer")]
 #[test]
 fn repeated_dash_streaks_use_grid_symbol_visual_fit() -> Result<()> {
     let frame = ascii_frame("-----");
@@ -199,6 +215,22 @@ fn permission_suffix_only_marks_the_repeated_dash_tail_as_grid_symbols() -> Resu
             visual_fit_at_col(&frame, col)?,
             PreparedMonochromeGlyphVisualFit::GridSymbol,
             "only the repeated dash tail should switch onto the grid-symbol path"
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn native_renderer_prepare_defaults_existing_body_text_draws_to_font_outline_source_kind() -> Result<()> {
+    let frame = ascii_frame("drwx-----");
+
+    for col in 0..9 {
+        assert_eq!(
+            source_kind_at_col(&frame, col)?,
+            PreparedMonochromeGlyphSourceKind::FontOutline,
+            "Task 3 should preserve the existing body-text source contract until generated-mask routing is explicitly enabled"
         );
     }
 

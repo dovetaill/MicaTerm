@@ -12,6 +12,12 @@ use mica_term::app::terminal_layout::{TerminalTextShaper, TextShaper};
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_model::{TerminalModelCell, TerminalModelRow};
 #[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_renderer::atlas::{GeneratedGlyphAtlasKey, GlyphAtlas, GlyphAtlasKey};
+#[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_renderer::custom_grid_glyphs::{
+    BoxDrawingGlyph, CustomGridGlyphKind,
+};
+#[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 #[cfg(feature = "terminal-native-renderer")]
 use std::collections::hash_map::DefaultHasher;
@@ -343,6 +349,46 @@ fn native_renderer_bounds_glyph_caches_after_pressure_triggers_reset() -> Result
     assert!(
         stats.glyph_raster_cache_entries <= 4,
         "glyph raster cache entries should stay bounded after the deferred reset rehydrates only the visible glyphs"
+    );
+
+    Ok(())
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn glyph_atlas_generated_keys_keep_a_separate_zero_padding_contract() -> Result<()> {
+    let mut font_system = CountingRasterFontSystem::new()?;
+    let loaded_font = font_system.load_font(&FontRequest::default())?;
+    let request = loaded_font.raster_request(7, false);
+    let rasterized = font_system.rasterize_glyph(&loaded_font, request)?;
+    let mut atlas = GlyphAtlas::default();
+
+    let font_entry = atlas.upsert(request, &rasterized);
+    let generated_key = GeneratedGlyphAtlasKey::new(
+        CustomGridGlyphKind::BoxDrawing(BoxDrawingGlyph::Horizontal),
+        8,
+        10,
+        1.0,
+        false,
+    );
+    let generated_entry = atlas.upsert_generated(generated_key, 8, 10);
+
+    assert_ne!(
+        GlyphAtlasKey::from(request),
+        GlyphAtlasKey::Generated(generated_key),
+        "generated masks should not share atlas key space with font glyph requests"
+    );
+    assert_eq!(
+        generated_entry.padding_left_px, 0,
+        "generated masks should keep zero horizontal padding so later full-bleed box/block work does not inherit font overhang padding"
+    );
+    assert_eq!(
+        generated_entry.padding_right_px, 0,
+        "generated masks should keep zero horizontal padding so later full-bleed box/block work does not inherit font overhang padding"
+    );
+    assert_ne!(
+        font_entry.slot, generated_entry.slot,
+        "generated masks should reserve an independent atlas slot instead of aliasing a font glyph entry"
     );
 
     Ok(())
