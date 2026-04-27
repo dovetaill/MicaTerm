@@ -10886,6 +10886,27 @@ fn async_launch_failure_projects_error_tab_after_projection_timer_ticks() {
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
     assert_eq!(app.get_workspace_session_state().as_str(), "error");
     assert_eq!(
+        app.get_workspace_session_host_mode().as_str(),
+        "connection-progress",
+        "retry-capable launch failures should stay on the redesigned connection sheet instead of dropping into the generic session-error surface"
+    );
+    assert_eq!(
+        app.get_workspace_session_connection_page_mode().as_str(),
+        "troubleshooting",
+        "retry-capable launch failures should project troubleshooting mode on the connection sheet"
+    );
+    assert_eq!(
+        app.get_workspace_session_connection_task_title().as_str(),
+        "Connection failed",
+        "launch failures without a deeper active step should still expose a stable troubleshooting title"
+    );
+    assert!(
+        app.get_workspace_session_connection_task_detail()
+            .as_str()
+            .contains("missing SSH password secret"),
+        "retry-capable launch failures should keep the underlying failure summary inside the connection sheet"
+    );
+    assert_eq!(
         app.get_workspace_session_error_detail().as_str(),
         "missing SSH password secret for `SSH Connection 1`"
     );

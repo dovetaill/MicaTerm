@@ -3146,7 +3146,7 @@ fn sync_workspace_connection_progress_state(
     state: &ShellViewModel,
     manager: Option<&SessionManager>,
 ) {
-    if state.workspace_session_host_mode() != "connection-progress" {
+    if projected_workspace_session_host_mode(state, manager) != "connection-progress" {
         clear_workspace_connection_progress_state(window);
         return;
     }
@@ -3227,6 +3227,29 @@ fn sync_workspace_connection_progress_state(
     );
 }
 
+fn projected_workspace_session_host_mode(
+    state: &ShellViewModel,
+    manager: Option<&SessionManager>,
+) -> &'static str {
+    let host_mode = state.workspace_session_host_mode();
+    if host_mode != "session-error" {
+        return host_mode;
+    }
+
+    let Some(manager) = manager else {
+        return host_mode;
+    };
+    let Some(session_id) = active_workspace_session_uuid(state) else {
+        return host_mode;
+    };
+
+    if manager.connection_attempt(session_id).is_some() {
+        return "connection-progress";
+    }
+
+    host_mode
+}
+
 fn sync_workspace_session_state_with_manager(
     window: &AppWindow,
     state: &ShellViewModel,
@@ -3235,7 +3258,7 @@ fn sync_workspace_session_state_with_manager(
 ) {
     window
         .set_active_workspace_session_id(state.active_workspace_session_id().unwrap_or("").into());
-    window.set_workspace_session_host_mode(state.workspace_session_host_mode().into());
+    window.set_workspace_session_host_mode(projected_workspace_session_host_mode(state, manager).into());
     window.set_workspace_session_search_open(state.workspace_terminal_search_open());
     window.set_workspace_session_search_query(state.workspace_terminal_search_query().into());
     window.set_workspace_session_search_match_count(

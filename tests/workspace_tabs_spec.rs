@@ -1513,6 +1513,18 @@ fn connection_progress_workspace_host_contract_exposes_presentation_semantics_pr
         terminal_host.contains("in property <string> connection-progress-task-detail: \"\";"),
         "TerminalSessionHost should accept the projected connection task-detail property"
     );
+    assert!(
+        terminal_host.contains("if root.connection-progress-page-mode == \"troubleshooting\" : VerticalLayout {"),
+        "TerminalSessionHost should keep a dedicated troubleshooting block inside the unified connection task panel"
+    );
+    let session_error_index = terminal_host
+        .find("if root.mode == \"session-error\" : Rectangle {")
+        .expect("terminal host should still expose the generic session-error fallback branch");
+    let session_error_window = &terminal_host[session_error_index..];
+    assert!(
+        !session_error_window.contains("Retry"),
+        "generic session-error fallback should stay distinct from the retry-capable connection sheet troubleshooting state"
+    );
 }
 
 #[test]
