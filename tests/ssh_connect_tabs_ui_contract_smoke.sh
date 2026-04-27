@@ -56,8 +56,15 @@ grep -F 'workspace-session-connection-current-detail' "$APP_WINDOW" >/dev/null
 grep -F 'workspace-session-connection-steps' "$WORKSPACE_PANE" >/dev/null
 grep -F 'workspace-session-connection-diagnostics' "$WORKSPACE_PANE" >/dev/null
 grep -F 'if root.mode == "connection-progress"' "$WORKSPACE_HOST" >/dev/null
-grep -F 'Show Diagnostics' "$WORKSPACE_HOST" >/dev/null
-grep -F 'Copy Diagnostics' "$WORKSPACE_HOST" >/dev/null
+grep -F 'Trust key' "$WORKSPACE_HOST" >/dev/null
+grep -F 'Diagnostics' "$WORKSPACE_HOST" >/dev/null
+grep -F 'Copy details' "$WORKSPACE_HOST" >/dev/null
+grep -F 'trust-host-key' "$WORKSPACE_HOST" >/dev/null
+grep -F 'reject-host-key' "$WORKSPACE_HOST" >/dev/null
+! grep -F 'Trust and Continue' "$WORKSPACE_HOST" >/dev/null
+! grep -F 'Show Diagnostics' "$WORKSPACE_HOST" >/dev/null
+! grep -F 'Hide Diagnostics' "$WORKSPACE_HOST" >/dev/null
+! grep -F 'Copy Diagnostics' "$WORKSPACE_HOST" >/dev/null
 grep -F 'Cancel' "$WORKSPACE_HOST" >/dev/null
 grep -F 'Retry' "$WORKSPACE_HOST" >/dev/null
 ! grep -F 'Interactive terminal ready.' "$WORKSPACE_HOST" >/dev/null

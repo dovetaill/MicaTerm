@@ -1289,12 +1289,24 @@ fn connection_progress_workspace_host_contract_exposes_timeline_models_and_foote
         "TerminalSessionHost should render a dedicated connection-progress branch"
     );
     assert!(
-        terminal_host.contains("Show Diagnostics"),
-        "connection-progress host should expose a diagnostics disclosure control"
+        terminal_host.contains("Diagnostics"),
+        "connection-progress host should expose a diagnostics disclosure label"
     );
     assert!(
-        terminal_host.contains("Copy Diagnostics"),
-        "connection-progress host should expose a copy diagnostics footer action"
+        !terminal_host.contains("Show Diagnostics"),
+        "connection-progress host should stop exposing the old show diagnostics copy"
+    );
+    assert!(
+        !terminal_host.contains("Hide Diagnostics"),
+        "connection-progress host should stop exposing the old hide diagnostics copy"
+    );
+    assert!(
+        terminal_host.contains("Copy details"),
+        "connection-progress host should expose a copy details action"
+    );
+    assert!(
+        !terminal_host.contains("Copy Diagnostics"),
+        "connection-progress host should stop exposing the old copy diagnostics action"
     );
     assert!(
         terminal_host.contains("Cancel"),
@@ -1330,13 +1342,19 @@ fn connection_progress_workspace_host_contract_exposes_inline_host_key_actions()
         workspace_pane.contains("workspace-session-host-key-prompt-fingerprint"),
         "WorkspacePane should forward host-key prompt fingerprint state into TerminalSessionHost"
     );
+
+    let trust_action_index = terminal_host
+        .find("trust-host-key")
+        .expect("trust host key callback should remain routed");
+    let trust_action_window = &terminal_host[trust_action_index.saturating_sub(220)
+        ..(trust_action_index + 120).min(terminal_host.len())];
     assert!(
-        terminal_host.contains("Trust and Continue"),
+        trust_action_window.contains("Trust key"),
         "connection-progress host should expose an inline trust action for unknown host keys"
     );
     assert!(
-        terminal_host.contains("Reject"),
-        "connection-progress host should expose an inline reject action for unknown host keys"
+        !trust_action_window.contains("Trust and Continue"),
+        "connection-progress host should stop exposing the old inline trust copy for unknown host keys"
     );
     assert!(
         terminal_host.contains("trust-host-key"),
