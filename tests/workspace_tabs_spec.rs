@@ -1297,6 +1297,10 @@ fn connection_progress_workspace_host_contract_exposes_timeline_models_and_foote
         "connection-progress host should expose a compact workflow rail inside the redesigned single-sheet skeleton"
     );
     assert!(
+        terminal_host.contains("for step in root.connection-progress-steps"),
+        "connection-progress host should keep iterating over connection progress steps inside the workflow rail"
+    );
+    assert!(
         terminal_host.contains("current-task-panel := Rectangle {"),
         "connection-progress host should expose a unified current-task panel inside the redesigned single-sheet skeleton"
     );
@@ -1339,6 +1343,10 @@ fn connection_progress_workspace_host_contract_exposes_timeline_models_and_foote
     assert!(
         !terminal_host.contains("Copy Diagnostics"),
         "connection-progress host should stop exposing the old copy diagnostics action"
+    );
+    assert!(
+        !terminal_host.contains("ThemeTokens.status-success-surface"),
+        "connection-progress workflow rail should stop painting completed steps with the old success surface"
     );
     assert!(
         terminal_host.contains("Cancel"),

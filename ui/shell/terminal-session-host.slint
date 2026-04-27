@@ -804,6 +804,23 @@ export component TerminalSessionHost inherits Rectangle {
         return "" + root.connection-progress-diagnostics.length + " details";
     }
 
+    function connection-progress-step-is-active(state: string) -> bool {
+        return state == "running" || state == "blocked";
+    }
+
+    function connection-progress-step-is-error(state: string) -> bool {
+        return state == "failed" || state == "cancelled";
+    }
+
+    function connection-progress-step-shows-detail(state: string) -> bool {
+        return root.connection-progress-step-is-active(state)
+            || root.connection-progress-step-is-error(state);
+    }
+
+    function connection-progress-step-row-height(state: string) -> length {
+        return root.connection-progress-step-shows-detail(state) ? 42px : 30px;
+    }
+
     width: 100%;
     height: 100%;
     min-width: 0px;
@@ -1823,40 +1840,43 @@ export component TerminalSessionHost inherits Rectangle {
 
                         for step in root.connection-progress-steps : Rectangle {
                             width: parent.width;
-                            height: 48px;
+                            height: root.connection-progress-step-row-height(step.state);
                             border-radius: 9px;
-                            border-width: 1px;
-                            border-color: step.state == "running" || step.state == "blocked"
+                            border-width: root.connection-progress-step-is-active(step.state)
+                                || root.connection-progress-step-is-error(step.state)
+                                ? 1px
+                                : 0px;
+                            border-color: root.connection-progress-step-is-active(step.state)
                                 ? ThemeTokens.focus-ring
-                                : ThemeTokens.divider-subtle;
-                            background: step.state == "running" || step.state == "blocked"
-                                ? ThemeTokens.sidebar-selected-surface
-                                : step.state == "failed" || step.state == "cancelled"
-                                    ? ThemeTokens.status-error-surface
-                                    : step.state == "done"
-                                        ? ThemeTokens.status-success-surface
-                                        : ThemeTokens.input-surface;
+                                : root.connection-progress-step-is-error(step.state)
+                                    ? ThemeTokens.status-error-accent
+                                    : transparent;
+                            background: root.connection-progress-step-is-active(step.state)
+                                ? ThemeTokens.status-busy-surface
+                                : root.connection-progress-step-is-error(step.state)
+                                    ? ThemeTokens.input-surface
+                                    : transparent;
 
                             HorizontalLayout {
                                 width: parent.width;
                                 height: parent.height;
-                                padding-left: 12px;
-                                padding-top: 9px;
+                                padding-left: root.connection-progress-step-shows-detail(step.state) ? 12px : 6px;
+                                padding-top: root.connection-progress-step-shows-detail(step.state) ? 8px : 5px;
                                 padding-right: 12px;
-                                padding-bottom: 9px;
-                                spacing: 10px;
+                                padding-bottom: root.connection-progress-step-shows-detail(step.state) ? 8px : 5px;
+                                spacing: 8px;
 
                                 Rectangle {
-                                    width: 8px;
-                                    height: 8px;
-                                    border-radius: 4px;
-                                    y: 6px;
-                                    background: step.state == "running" || step.state == "blocked"
+                                    width: root.connection-progress-step-shows-detail(step.state) ? 8px : 6px;
+                                    height: root.connection-progress-step-shows-detail(step.state) ? 8px : 6px;
+                                    border-radius: root.connection-progress-step-shows-detail(step.state) ? 4px : 3px;
+                                    y: root.connection-progress-step-shows-detail(step.state) ? 6px : 4px;
+                                    background: root.connection-progress-step-is-active(step.state)
                                         ? ThemeTokens.status-busy-accent
-                                        : step.state == "failed" || step.state == "cancelled"
+                                        : root.connection-progress-step-is-error(step.state)
                                             ? ThemeTokens.status-error-accent
                                             : step.state == "done"
-                                                ? ThemeTokens.status-success-accent
+                                                ? ThemeTokens.text-muted
                                                 : ThemeTokens.divider-strong;
                                 }
 
@@ -1866,13 +1886,21 @@ export component TerminalSessionHost inherits Rectangle {
 
                                     Text {
                                         text: step.hop_label != "" ? step.hop_label + " · " + step.title : step.title;
-                                        color: ThemeTokens.text-primary;
+                                        color: root.connection-progress-step-is-active(step.state)
+                                            || root.connection-progress-step-is-error(step.state)
+                                            ? ThemeTokens.text-primary
+                                            : step.state == "done"
+                                                ? ThemeTokens.text-secondary
+                                                : ThemeTokens.text-muted;
                                         font-size: 11px;
-                                        font-weight: 600;
+                                        font-weight: root.connection-progress-step-is-active(step.state)
+                                            || root.connection-progress-step-is-error(step.state)
+                                            ? 600
+                                            : 500;
                                         overflow: elide;
                                     }
 
-                                    Text {
+                                    if root.connection-progress-step-shows-detail(step.state) : Text {
                                         text: step.detail;
                                         color: ThemeTokens.text-secondary;
                                         font-size: 10px;
