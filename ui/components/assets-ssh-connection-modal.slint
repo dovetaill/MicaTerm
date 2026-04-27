@@ -1,9 +1,9 @@
-import { ComboBox } from "std-widgets.slint";
 import {
     DialogActionButton,
     DialogFormSection,
     DialogInlineBanner,
-    DialogSectionCard,
+    DialogSelectField,
+    DialogSelectPopup,
     DialogSegmentButton,
     DialogTextField,
     ModalBodyScrollArea,
@@ -30,6 +30,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
     in property <string> private-key-path: "";
     in property <string> passphrase: "";
     in property <bool> password-visible: false;
+    in property <bool> passphrase-visible: false;
     in property <string> remark: "";
     in property <string> environment: "";
     in property <string> proxy-type: "none";
@@ -55,9 +56,29 @@ export component AssetsSshConnectionModal inherits Rectangle {
     callback drag-moved(length, length);
     callback drag-ended();
     callback focus-restore-requested();
+    out property <bool> select-overlay-open: root.open-select-id != "";
 
     private property <bool> compact-layout: root.width < 620px;
     private property <bool> dense-layout: root.height < 620px;
+    private property <image> eye-icon: @image-url("../../assets/icons/fluent/eye-20-regular.svg");
+    private property <image> eye-off-icon: @image-url("../../assets/icons/fluent/eye-off-20-regular.svg");
+    private property <string> open-select-id: "";
+    private property <[string]> open-select-options: [];
+    private property <length> select-popup-x: 0px;
+    private property <length> select-popup-y: 0px;
+    private property <length> select-popup-width: 0px;
+    private property <length> select-popup-max-height: 0px;
+    private property <bool> select-popup-opens-upward: false;
+    private property <int> select-popup-highlighted-index: -1;
+    private property <int> select-popup-focus-sequence: 0;
+    private property <int> auth-source-select-focus-sequence: 0;
+    private property <int> keychain-identity-select-focus-sequence: 0;
+    private property <int> proxy-type-select-focus-sequence: 0;
+    private property <int> proxy-ssh-select-focus-sequence: 0;
+    private property <length> select-popup-gap: 6px;
+    private property <length> select-popup-option-height: 32px;
+    private property <length> select-popup-default-max-height: 240px;
+    private property <length> nested-field-horizontal-inset: root.compact-layout ? 12px : 20px;
     private property <length> footer-height: root.feedback-message != "" || root.validation-message != ""
         ? root.dense-layout ? 114px : 132px
         : ThemeTokens.modal-footer-min-height;
@@ -66,6 +87,68 @@ export component AssetsSshConnectionModal inherits Rectangle {
 
     public function focus-input() {
         modal-focus.focus();
+    }
+
+    public function dismiss-open-select() {
+        if root.open-select-id == "" {
+            return;
+        }
+
+        if root.open-select-id == "auth_source" {
+            root.auth-source-select-focus-sequence += 1;
+        } else if root.open-select-id == "keychain_identity_label" {
+            root.keychain-identity-select-focus-sequence += 1;
+        } else if root.open-select-id == "proxy_type" {
+            root.proxy-type-select-focus-sequence += 1;
+        } else if root.open-select-id == "proxy_ssh_asset_label" {
+            root.proxy-ssh-select-focus-sequence += 1;
+        } else {
+            modal-focus.focus();
+        }
+
+        root.open-select-id = "";
+        root.open-select-options = [];
+        root.select-popup-highlighted-index = -1;
+        root.select-popup-max-height = 0px;
+    }
+
+    function popup-preferred-height(option-count: int) -> length {
+        return min(
+            root.select-popup-default-max-height,
+            8px + option-count * root.select-popup-option-height + 8px
+        );
+    }
+
+    function open-select(
+        select-id: string,
+        anchor-x: length,
+        anchor-y: length,
+        anchor-width: length,
+        option-count: int,
+        highlighted-index: int,
+    ) {
+        if root.open-select-id == select-id {
+            root.dismiss-open-select();
+            return;
+        }
+
+        let preferred-height = root.popup-preferred-height(option-count);
+        let below-space = max(0px, footer.y - (anchor-y + 34px) - root.select-popup-gap);
+        let above-space = max(0px, anchor-y - body-scroll.y - root.select-popup-gap);
+        if below-space >= preferred-height || below-space >= above-space {
+            root.select-popup-opens-upward = false;
+            root.select-popup-max-height = min(preferred-height, below-space);
+            root.select-popup-y = anchor-y + 34px + root.select-popup-gap;
+        } else {
+            root.select-popup-opens-upward = true;
+            root.select-popup-max-height = min(preferred-height, above-space);
+            root.select-popup-y = anchor-y - root.select-popup-max-height - root.select-popup-gap;
+        }
+        root.select-popup-x = max(18px, min(root.width - anchor-width - 18px, anchor-x));
+        root.select-popup-width = anchor-width;
+        root.select-popup-highlighted-index = highlighted-index;
+        root.open-select-id = select-id;
+        root.select-popup-focus-sequence += 1;
     }
 
     changed focus-sequence => {
@@ -273,15 +356,27 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                     overflow: elide;
                                 }
 
-                                ComboBox {
+                                auth-source-select := DialogSelectField {
                                     width: parent.width;
                                     height: 34px;
-                                    model: ["Manual", "Keychain Identity"];
-                                    current-value: root.auth-source == "keychain-identity" ? "Keychain Identity" : "Manual";
+                                    label: "Source";
+                                    focus-sequence: root.auth-source-select-focus-sequence;
+                                    open: root.open-select-id == "auth_source";
+                                    selected-label: root.auth-source == "keychain-identity" ? "Keychain Identity" : "Manual";
+                                    placeholder-text: "Select source";
 
-                                    selected(value) => {
-                                        root.draft-changed("auth_source", value == "Keychain Identity" ? "keychain-identity" : "manual");
+                                    toggle-requested => {
+                                        root.open-select-options = ["Manual", "Keychain Identity"];
+                                        root.open-select(
+                                            "auth_source",
+                                            self.absolute-position.x - root.absolute-position.x,
+                                            self.absolute-position.y - root.absolute-position.y,
+                                            self.width,
+                                            root.open-select-options.length,
+                                            root.auth-source == "keychain-identity" ? 1 : 0
+                                        );
                                     }
+
                                 }
 
                                 Text {
@@ -327,60 +422,123 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             }
                         }
 
-                        if root.auth-source == "keychain-identity" : DialogSectionCard {
+                        if root.auth-source == "keychain-identity" : VerticalLayout {
                             width: parent.width;
-                            padding-horizontal: 16px;
-                            padding-vertical: 14px;
-                            spacing: 10px;
-                            surface: ThemeTokens.modal-section-surface;
+                            spacing: 12px;
 
-                            Text {
+                            keychain-identity-field-row := Rectangle {
                                 width: parent.width;
-                                text: "Identity";
-                                color: ThemeTokens.text-secondary;
-                                font-size: 11px;
-                                overflow: elide;
-                            }
+                                height: keychain-identity-field-host.height + 2px;
+                                background: transparent;
 
-                            ComboBox {
-                                width: parent.width;
-                                height: 34px;
-                                model: root.keychain-identity-options;
-                                current-value: root.keychain-identity-selected-label;
+                                keychain-identity-field-host := Rectangle {
+                                    x: root.nested-field-horizontal-inset;
+                                    width: max(0px, parent.width - (root.nested-field-horizontal-inset * 2));
+                                    height: keychain-identity-field-stack.preferred-height;
+                                    background: transparent;
 
-                                selected(value) => {
-                                    root.draft-changed("keychain_identity_label", value);
+                                    keychain-identity-field-stack := VerticalLayout {
+                                        width: parent.width;
+                                        spacing: 10px;
+
+                                        Text {
+                                            width: parent.width;
+                                            text: "Identity";
+                                            color: ThemeTokens.text-secondary;
+                                            font-size: 11px;
+                                            overflow: elide;
+                                        }
+
+                                        keychain-identity-select := DialogSelectField {
+                                            width: parent.width;
+                                            height: 34px;
+                                            label: "Identity";
+                                            focus-sequence: root.keychain-identity-select-focus-sequence;
+                                            open: root.open-select-id == "keychain_identity_label";
+                                            selected-label: root.keychain-identity-selected-label;
+                                            placeholder-text: root.keychain-identity-options.length == 0 ? "No keychain identity available" : "Select identity";
+                                            enabled: root.keychain-identity-options.length > 0;
+
+                                            toggle-requested => {
+                                                root.open-select-options = root.keychain-identity-options;
+                                                root.open-select(
+                                                    "keychain_identity_label",
+                                                    self.absolute-position.x - root.absolute-position.x,
+                                                    self.absolute-position.y - root.absolute-position.y,
+                                                    self.width,
+                                                    root.open-select-options.length,
+                                                    0
+                                                );
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
-                            Text {
+                            identity-summary-row := Rectangle {
                                 width: parent.width;
-                                text: "Username";
-                                color: ThemeTokens.text-secondary;
-                                font-size: 11px;
-                                overflow: elide;
-                            }
+                                height: identity-summary-card.height + 4px;
+                                background: transparent;
 
-                            Text {
-                                width: parent.width;
-                                text: root.keychain-identity-username == "" ? "Not selected" : root.keychain-identity-username;
-                                color: ThemeTokens.text-primary;
-                                wrap: word-wrap;
-                            }
+                                identity-summary-card := Rectangle {
+                                    x: root.nested-field-horizontal-inset;
+                                    width: max(0px, parent.width - (root.nested-field-horizontal-inset * 2));
+                                    height: 16px
+                                        + identity-username-label.height
+                                        + 8px
+                                        + identity-username-value.height
+                                        + 12px
+                                        + identity-auth-summary-label.height
+                                        + 8px
+                                        + identity-auth-summary-value.height
+                                        + 20px;
+                                    border-radius: ThemeTokens.modal-section-radius;
+                                    border-width: 1px;
+                                    border-color: ThemeTokens.modal-inner-border;
+                                    background: ThemeTokens.modal-section-alt-surface;
 
-                            Text {
-                                width: parent.width;
-                                text: "Authentication summary";
-                                color: ThemeTokens.text-secondary;
-                                font-size: 11px;
-                                overflow: elide;
-                            }
+                                    identity-username-label := Text {
+                                        x: 18px;
+                                        y: 16px;
+                                        width: max(0px, parent.width - 36px);
+                                        height: self.preferred-height;
+                                        text: "Username";
+                                        color: ThemeTokens.text-secondary;
+                                        font-size: 11px;
+                                        overflow: elide;
+                                    }
 
-                            Text {
-                                width: parent.width;
-                                text: root.keychain-identity-auth-summary == "" ? "Not selected" : root.keychain-identity-auth-summary;
-                                color: ThemeTokens.text-primary;
-                                wrap: word-wrap;
+                                    identity-username-value := Text {
+                                        x: 18px;
+                                        y: identity-username-label.y + identity-username-label.height + 8px;
+                                        width: max(0px, parent.width - 36px);
+                                        height: self.preferred-height;
+                                        text: root.keychain-identity-username == "" ? "Not selected" : root.keychain-identity-username;
+                                        color: ThemeTokens.text-primary;
+                                        wrap: word-wrap;
+                                    }
+
+                                    identity-auth-summary-label := Text {
+                                        x: 18px;
+                                        y: identity-username-value.y + identity-username-value.height + 12px;
+                                        width: max(0px, parent.width - 36px);
+                                        height: self.preferred-height;
+                                        text: "Authentication summary";
+                                        color: ThemeTokens.text-secondary;
+                                        font-size: 11px;
+                                        overflow: elide;
+                                    }
+
+                                    identity-auth-summary-value := Text {
+                                        x: 18px;
+                                        y: identity-auth-summary-label.y + identity-auth-summary-label.height + 8px;
+                                        width: max(0px, parent.width - 36px);
+                                        height: self.preferred-height;
+                                        text: root.keychain-identity-auth-summary == "" ? "Not selected" : root.keychain-identity-auth-summary;
+                                        color: ThemeTokens.text-primary;
+                                        wrap: word-wrap;
+                                    }
+                                }
                             }
                         }
 
@@ -390,14 +548,16 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             required: true;
                             value: root.password;
                             password-mode: !root.password-visible;
-                            trailing-action-text: root.password-visible ? "Hide" : "Show";
+                            trailing-icon-visible: true;
+                            trailing-icon-source: root.password-visible ? root.eye-off-icon : root.eye-icon;
+                            trailing-icon-label: root.password-visible ? "Hide password" : "Show password";
                             helper-text: "Use the keychain source above if you want this secret managed outside the connection profile.";
 
                             value-changed(value) => {
                                 root.draft-changed("password", value);
                             }
 
-                            trailing-action-requested => {
+                            trailing-icon-requested => {
                                 root.draft-changed(
                                     "password_visibility",
                                     root.password-visible ? "hidden" : "visible"
@@ -443,10 +603,20 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 width: parent.width;
                                 label: "Passphrase";
                                 value: root.passphrase;
-                                password-mode: true;
+                                password-mode: !root.passphrase-visible;
+                                trailing-icon-visible: true;
+                                trailing-icon-source: root.passphrase-visible ? root.eye-off-icon : root.eye-icon;
+                                trailing-icon-label: root.passphrase-visible ? "Hide passphrase" : "Show passphrase";
 
                                 value-changed(value) => {
                                     root.draft-changed("passphrase", value);
+                                }
+
+                                trailing-icon-requested => {
+                                    root.draft-changed(
+                                        "passphrase_visibility",
+                                        root.passphrase-visible ? "hidden" : "visible"
+                                    );
                                 }
                             }
                         }
@@ -474,24 +644,33 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                     overflow: elide;
                                 }
 
-                                ComboBox {
+                                proxy-type-select := DialogSelectField {
                                     width: parent.width;
                                     height: 34px;
-                                    model: ["None", "SOCKS5", "HTTP", "Existing SSH Connection"];
-                                    current-value: root.proxy-type == "socks5" ? "SOCKS5"
+                                    label: "Proxy type";
+                                    focus-sequence: root.proxy-type-select-focus-sequence;
+                                    open: root.open-select-id == "proxy_type";
+                                    selected-label: root.proxy-type == "socks5" ? "SOCKS5"
                                         : root.proxy-type == "http" ? "HTTP"
                                         : root.proxy-type == "ssh-asset" ? "Existing SSH Connection"
                                         : "None";
+                                    placeholder-text: "Select proxy type";
 
-                                    selected(value) => {
-                                        root.draft-changed(
+                                    toggle-requested => {
+                                        root.open-select-options = ["None", "SOCKS5", "HTTP", "Existing SSH Connection"];
+                                        root.open-select(
                                             "proxy_type",
-                                            value == "SOCKS5" ? "socks5"
-                                                : value == "HTTP" ? "http"
-                                                : value == "Existing SSH Connection" ? "ssh-asset"
-                                                : "none"
+                                            self.absolute-position.x - root.absolute-position.x,
+                                            self.absolute-position.y - root.absolute-position.y,
+                                            self.width,
+                                            root.open-select-options.length,
+                                            root.proxy-type == "socks5" ? 1
+                                                : root.proxy-type == "http" ? 2
+                                                : root.proxy-type == "ssh-asset" ? 3
+                                                : 0
                                         );
                                     }
+
                                 }
 
                                 Text {
@@ -581,13 +760,15 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 label: "Password";
                                 value: root.proxy-socks5-password;
                                 password-mode: !root.proxy-socks5-password-visible;
-                                trailing-action-text: root.proxy-socks5-password-visible ? "Hide" : "Show";
+                                trailing-icon-visible: true;
+                                trailing-icon-source: root.proxy-socks5-password-visible ? root.eye-off-icon : root.eye-icon;
+                                trailing-icon-label: root.proxy-socks5-password-visible ? "Hide proxy password" : "Show proxy password";
 
                                 value-changed(value) => {
                                     root.draft-changed("proxy_socks5_password", value);
                                 }
 
-                                trailing-action-requested => {
+                                trailing-icon-requested => {
                                     root.draft-changed(
                                         "proxy_socks5_password_visibility",
                                         root.proxy-socks5-password-visible ? "hidden" : "visible"
@@ -596,29 +777,51 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             }
                         }
 
-                        if root.proxy-type == "ssh-asset" : DialogSectionCard {
+                        if root.proxy-type == "ssh-asset" : proxy-ssh-field-row := Rectangle {
                             width: parent.width;
-                            padding-horizontal: 16px;
-                            padding-vertical: 14px;
-                            spacing: 10px;
-                            surface: ThemeTokens.modal-section-alt-surface;
+                            height: proxy-ssh-field-host.height + 2px;
+                            background: transparent;
 
-                            Text {
-                                width: parent.width;
-                                text: "Upstream SSH connection";
-                                color: ThemeTokens.text-secondary;
-                                font-size: 11px;
-                                overflow: elide;
-                            }
+                            proxy-ssh-field-host := Rectangle {
+                                x: root.nested-field-horizontal-inset;
+                                width: max(0px, parent.width - (root.nested-field-horizontal-inset * 2));
+                                height: proxy-ssh-field-stack.preferred-height;
+                                background: transparent;
 
-                            ComboBox {
-                                width: parent.width;
-                                height: 34px;
-                                model: root.proxy-ssh-options;
-                                current-value: root.proxy-ssh-selected-label;
+                                proxy-ssh-field-stack := VerticalLayout {
+                                    width: parent.width;
+                                    spacing: 10px;
 
-                                selected(value) => {
-                                    root.draft-changed("proxy_ssh_asset_label", value);
+                                    Text {
+                                        width: parent.width;
+                                        text: "Upstream SSH connection";
+                                        color: ThemeTokens.text-secondary;
+                                        font-size: 11px;
+                                        overflow: elide;
+                                    }
+
+                                    proxy-ssh-select := DialogSelectField {
+                                        width: parent.width;
+                                        height: 34px;
+                                        label: "Upstream SSH connection";
+                                        focus-sequence: root.proxy-ssh-select-focus-sequence;
+                                        open: root.open-select-id == "proxy_ssh_asset_label";
+                                        selected-label: root.proxy-ssh-selected-label;
+                                        placeholder-text: root.proxy-ssh-options.length == 0 ? "No SSH connection available" : "Select SSH connection";
+                                        enabled: root.proxy-ssh-options.length > 0;
+
+                                        toggle-requested => {
+                                            root.open-select-options = root.proxy-ssh-options;
+                                            root.open-select(
+                                                "proxy_ssh_asset_label",
+                                                self.absolute-position.x - root.absolute-position.x,
+                                                self.absolute-position.y - root.absolute-position.y,
+                                                self.width,
+                                                root.open-select-options.length,
+                                                0
+                                            );
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -713,6 +916,73 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     clicked => {
                         root.action-requested("save");
                     }
+                }
+            }
+        }
+
+        if root.open-select-id != "" : select-popup-dismiss-layer := TouchArea {
+            x: 0px;
+            y: header.height;
+            width: parent.width;
+            height: parent.height - header.height;
+
+            clicked => {
+                root.dismiss-open-select();
+            }
+        }
+
+        if root.open-select-id != "" : select-popup := DialogSelectPopup {
+            x: root.select-popup-x;
+            y: root.select-popup-y;
+            width: root.select-popup-width;
+            open: true;
+            options: root.open-select-options;
+            focus-sequence: root.select-popup-focus-sequence;
+            highlighted-index: root.select-popup-highlighted-index;
+            popup-max-height: root.select-popup-max-height;
+            opens-upward: root.select-popup-opens-upward;
+
+            option-selected(value) => {
+                if root.open-select-id == "auth_source" {
+                    root.draft-changed(
+                        "auth_source",
+                        value == "Keychain Identity" ? "keychain-identity" : "manual"
+                    );
+                } else if root.open-select-id == "keychain_identity_label" {
+                    root.draft-changed("keychain_identity_label", value);
+                } else if root.open-select-id == "proxy_type" {
+                    root.draft-changed(
+                        "proxy_type",
+                        value == "SOCKS5" ? "socks5"
+                            : value == "HTTP" ? "http"
+                            : value == "Existing SSH Connection" ? "ssh-asset"
+                            : "none"
+                    );
+                } else if root.open-select-id == "proxy_ssh_asset_label" {
+                    root.draft-changed("proxy_ssh_asset_label", value);
+                }
+                root.dismiss-open-select();
+            }
+
+            dismiss-requested => {
+                root.dismiss-open-select();
+            }
+
+            move-highlight-requested(delta) => {
+                if root.open-select-options.length == 0 {
+                    return;
+                }
+
+                if root.select-popup-highlighted-index < 0 {
+                    root.select-popup-highlighted-index = delta > 0 ? 0 : root.open-select-options.length - 1;
+                } else {
+                    root.select-popup-highlighted-index = max(
+                        0,
+                        min(
+                            root.open-select-options.length - 1,
+                            root.select-popup-highlighted-index + delta
+                        )
+                    );
                 }
             }
         }

@@ -23,11 +23,12 @@ impl ShellViewModel {
             "auth_source" => {
                 if value == SSH_AUTH_SOURCE_MANUAL || value == SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY {
                     draft.auth_source = value;
+                    draft.password_visible = false;
+                    draft.passphrase_visible = false;
                     if draft.auth_source == SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY {
                         draft.password.clear();
                         draft.private_key_content.clear();
                         draft.passphrase.clear();
-                        draft.password_visible = false;
                     }
                 }
             }
@@ -38,6 +39,8 @@ impl ShellViewModel {
             "auth_method" => {
                 if matches!(value.as_str(), "password" | "private-key") {
                     draft.auth_method = value;
+                    draft.password_visible = false;
+                    draft.passphrase_visible = false;
                 }
             }
             "private_key_source" => {
@@ -59,11 +62,15 @@ impl ShellViewModel {
             "password_visibility" => {
                 draft.password_visible = matches!(value.as_str(), "visible" | "show" | "true");
             }
+            "passphrase_visibility" => {
+                draft.passphrase_visible = matches!(value.as_str(), "visible" | "show" | "true");
+            }
             "remark" => draft.remark = value,
             "environment" => draft.environment = value,
             "proxy_type" => {
                 if matches!(value.as_str(), "none" | "socks5" | "http" | "ssh-asset") {
                     draft.proxy_type = value;
+                    draft.proxy_socks5_password_visible = false;
                 }
             }
             "proxy_socks5_host" => draft.proxy_socks5_host = value,

@@ -222,11 +222,14 @@ fn editing_saved_password_mode_persists_proxy_password_alongside_ssh_auth_secret
     let draft = AssetSshConnectionDraft {
         auth_method: "password".into(),
         password: "ssh-secret".into(),
+        password_visible: true,
+        passphrase_visible: true,
         proxy_type: "socks5".into(),
         proxy_socks5_host: "proxy.example.net".into(),
         proxy_socks5_port: "1080".into(),
         proxy_socks5_username: "ops-proxy".into(),
         proxy_socks5_password: "proxy-secret".into(),
+        proxy_socks5_password_visible: true,
         ..AssetSshConnectionDraft::default()
     };
 

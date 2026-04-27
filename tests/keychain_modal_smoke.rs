@@ -58,6 +58,31 @@ fn keychain_identity_modal_contract_exposes_identity_fields_and_auth_choices() {
 }
 
 #[test]
+fn keychain_identity_modal_contract_uses_fluent_eye_toggle_for_password_reveal() {
+    let identity_modal = fs::read_to_string("ui/components/assets-keychain-identity-modal.slint")
+        .expect("read keychain identity modal");
+
+    assert!(
+        identity_modal.contains("eye-20-regular.svg"),
+        "identity modal should use the shared Fluent eye icon for password reveal"
+    );
+    assert!(
+        identity_modal.contains("eye-off-20-regular.svg"),
+        "identity modal should use the shared Fluent eye-off icon for password hide"
+    );
+    assert!(
+        identity_modal.contains(
+            "trailing-icon-source: root.password-visible ? root.eye-off-icon : root.eye-icon;"
+        ),
+        "identity modal should drive password reveal through the shared trailing icon slot"
+    );
+    assert!(
+        identity_modal.contains("\"password_visibility\""),
+        "identity modal should keep the stable password_visibility field id when toggling reveal"
+    );
+}
+
+#[test]
 fn keychain_ssh_key_modal_contract_exposes_import_generate_and_copy_actions() {
     let ssh_key_modal = fs::read_to_string("ui/components/assets-keychain-ssh-key-modal.slint")
         .expect("read keychain ssh key modal");

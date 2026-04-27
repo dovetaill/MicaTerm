@@ -3888,6 +3888,7 @@ fn hydrate_sync_modal_draft(
     vault: &VaultSessionState,
     credential_store: &dyn CredentialStore,
 ) {
+    state.reset_sync_modal_secret_visibility();
     let modal = state.sync_modal_state_mut();
     let bundle = configured_sync_bundle(vault);
     let primary = bundle.and_then(BootstrapBundle::primary_remote);
@@ -5880,6 +5881,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         ) {
             tracing::error!(target: "app.vault", error = %err, "failed to submit sync modal password");
             vault_sync::set_sync_modal_error(&mut state, &vault, err.to_string());
+        } else {
+            state.reset_sync_modal_secret_visibility();
         }
         sync_shell_state(
             &window,
@@ -5928,6 +5931,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     ) {
                         tracing::error!(target: "app.vault", error = %err, "failed to enable sync from sync settings");
                         vault_sync::set_sync_modal_error(&mut state, &vault, err.to_string());
+                    } else {
+                        state.reset_sync_modal_secret_visibility();
                     }
                 }
             }
@@ -5937,6 +5942,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 {
                     vault_sync::set_sync_modal_error(&mut state, &vault, err.to_string());
                 } else {
+                    state.reset_sync_modal_secret_visibility();
                     drop(vault);
                     drop(state);
                     run_vault_sync_ref(VaultSyncTrigger::Manual);

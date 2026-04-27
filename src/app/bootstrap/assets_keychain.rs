@@ -311,6 +311,7 @@ fn clear_asset_ssh_modal_fields(window: &AppWindow) {
     window.set_asset_ssh_modal_private_key_path("".into());
     window.set_asset_ssh_modal_passphrase("".into());
     window.set_asset_ssh_modal_password_visible(false);
+    window.set_asset_ssh_modal_passphrase_visible(false);
     window.set_asset_ssh_modal_remark("".into());
     window.set_asset_ssh_modal_environment("".into());
     window.set_asset_ssh_modal_proxy_type("none".into());
@@ -479,6 +480,7 @@ pub(super) fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel)
             window.set_keychain_identity_modal_username(draft.username.clone().into());
             window.set_keychain_identity_modal_auth_kind(draft.auth_kind.clone().into());
             window.set_keychain_identity_modal_password(draft.password.clone().into());
+            window.set_keychain_identity_modal_password_visible(draft.password_visible);
             window.set_keychain_identity_modal_ssh_key_label(draft.ssh_key_label.clone().into());
             window.set_keychain_identity_modal_remark(draft.remark.clone().into());
         }
@@ -565,6 +567,7 @@ pub(super) fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel)
             window.set_asset_ssh_modal_private_key_path(draft.private_key_path.clone().into());
             window.set_asset_ssh_modal_passphrase(draft.passphrase.clone().into());
             window.set_asset_ssh_modal_password_visible(draft.password_visible);
+            window.set_asset_ssh_modal_passphrase_visible(draft.passphrase_visible);
             window.set_asset_ssh_modal_remark(draft.remark.clone().into());
             window.set_asset_ssh_modal_environment(draft.environment.clone().into());
             window.set_asset_ssh_modal_proxy_type(draft.proxy_type.clone().into());
@@ -812,6 +815,7 @@ fn sync_keychain_modal_defaults(window: &AppWindow) {
     window.set_keychain_identity_modal_username("".into());
     window.set_keychain_identity_modal_auth_kind("password".into());
     window.set_keychain_identity_modal_password("".into());
+    window.set_keychain_identity_modal_password_visible(false);
     window.set_keychain_identity_modal_ssh_key_label("".into());
     window.set_keychain_identity_modal_remark("".into());
     window.set_keychain_ssh_key_modal_name("".into());

@@ -11,6 +11,7 @@ SSH_MODAL="$ROOT_DIR/ui/components/assets-ssh-connection-modal.slint"
 CREATE_MENU="$ROOT_DIR/ui/components/assets-create-menu.slint"
 ASSET_NODE_ROW="$ROOT_DIR/ui/components/asset-node-row.slint"
 CONTEXT_MENU="$ROOT_DIR/src/shell/context_menu.rs"
+MODAL_CHROME="$ROOT_DIR/ui/components/modal-chrome.slint"
 
 [[ -f "$SIDEBAR" ]] || {
   echo "missing ui/shell/assets-sidebar.slint" >&2
@@ -48,9 +49,12 @@ grep -F 'key-multiple-20-regular.svg' "$ASSET_NODE_ROW" >/dev/null
 grep -F 'ContextTargetKind::KeychainBlankArea' "$CONTEXT_MENU" >/dev/null
 grep -F 'ContextTargetKind::KeychainIdentity' "$CONTEXT_MENU" >/dev/null
 grep -F 'ContextTargetKind::KeychainSshKey' "$CONTEXT_MENU" >/dev/null
+grep -F 'export component DialogFieldIconAction inherits Rectangle {' "$MODAL_CHROME" >/dev/null
+test -f "$ROOT_DIR/assets/icons/fluent/eye-20-regular.svg"
+test -f "$ROOT_DIR/assets/icons/fluent/eye-off-20-regular.svg"
 grep -F 'Manual' "$SSH_MODAL" >/dev/null
 grep -F 'Keychain Identity' "$SSH_MODAL" >/dev/null
-grep -F 'Authentication Summary' "$SSH_MODAL" >/dev/null
+grep -F 'Authentication summary' "$SSH_MODAL" >/dev/null
 if grep -F 'Use Existing Keychain Identity' "$SSH_MODAL" >/dev/null; then
   echo "ssh modal must no longer expose the temporary keychain identity button" >&2
   exit 1

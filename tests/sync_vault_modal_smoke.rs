@@ -478,6 +478,49 @@ fn sync_modal_can_switch_between_https_and_ssh_auth_modes() {
 }
 
 #[test]
+fn sync_modal_round_trips_secret_visibility_flags() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.set_sync_modal_master_password_visible(true);
+    app.set_sync_modal_git_https_secret_visible(true);
+    app.set_sync_modal_git_ssh_passphrase_visible(true);
+
+    assert!(app.get_sync_modal_master_password_visible());
+    assert!(app.get_sync_modal_git_https_secret_visible());
+    assert!(app.get_sync_modal_git_ssh_passphrase_visible());
+}
+
+#[test]
+fn sync_modal_secret_visibility_resets_on_close_and_auth_mode_change() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_draft_changed("master-password-visibility".into(), "visible".into());
+    assert!(app.get_sync_modal_master_password_visible());
+
+    app.invoke_sync_modal_close_requested();
+    app.invoke_open_sync_modal_requested();
+    assert!(!app.get_sync_modal_master_password_visible());
+
+    app.invoke_sync_modal_draft_changed("git-auth-mode".into(), "https".into());
+    app.invoke_sync_modal_draft_changed("git-https-secret-visibility".into(), "visible".into());
+    assert!(app.get_sync_modal_git_https_secret_visible());
+    app.invoke_sync_modal_draft_changed("git-auth-mode".into(), "ssh".into());
+    assert!(!app.get_sync_modal_git_https_secret_visible());
+
+    app.invoke_sync_modal_draft_changed("git-ssh-passphrase-visibility".into(), "visible".into());
+    assert!(app.get_sync_modal_git_ssh_passphrase_visible());
+    app.invoke_sync_modal_draft_changed("git-auth-mode".into(), "https".into());
+    assert!(!app.get_sync_modal_git_ssh_passphrase_visible());
+}
+
+#[test]
 fn sync_modal_never_enters_locked_mode_after_sync_is_enabled() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -516,6 +559,44 @@ fn sync_modal_never_enters_locked_mode_after_sync_is_enabled() {
     assert_ne!(app.get_sync_modal_mode().as_str(), "locked");
     assert_eq!(app.get_sync_modal_mode().as_str(), "ready");
     assert_ne!(app.get_sync_modal_secondary_action_label().as_str(), "Lock");
+}
+
+#[test]
+fn sync_modal_master_password_visibility_resets_after_successful_submit() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("visibility-reset-after-submit");
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let mirror = Arc::new(MockVaultProvider::new(
+        "remote-mirror",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(primary);
+    provider_factory.insert(mirror);
+
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(MemoryCredentialStore::default()),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+        },
+    );
+
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_draft_changed("master-password-visibility".into(), "visible".into());
+    assert!(app.get_sync_modal_master_password_visible());
+
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+
+    assert_eq!(app.get_sync_modal_mode().as_str(), "ready");
+    assert!(!app.get_sync_modal_master_password_visible());
 }
 
 #[test]

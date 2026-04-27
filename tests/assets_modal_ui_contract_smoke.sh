@@ -60,6 +60,7 @@ grep -F 'in-out property <string> asset-ssh-modal-proxy-socks5-port: "";' "$APP_
 grep -F 'in-out property <string> asset-ssh-modal-proxy-socks5-username: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-ssh-modal-proxy-socks5-password: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <bool> asset-ssh-modal-proxy-socks5-password-visible: false;' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <bool> asset-ssh-modal-passphrase-visible: false;' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-ssh-modal-proxy-ssh-asset-id: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <[string]> asset-ssh-modal-proxy-ssh-options: [];' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-ssh-modal-proxy-ssh-selected-label: "";' "$APP_WINDOW" >/dev/null
@@ -78,6 +79,15 @@ grep -F 'root.available-height > root.modal-height' "$MODAL_SHELL" >/dev/null
 grep -F 'clicked => { }' "$APP_WINDOW" >/dev/null
 grep -F 'callback close-asset-modal-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback sync-modal-close-requested();' "$APP_WINDOW" >/dev/null
+grep -F 'export component DialogFieldIconAction inherits Rectangle {' "$MODAL_CHROME" >/dev/null
+grep -F 'export component DialogSelectField inherits Rectangle {' "$MODAL_CHROME" >/dev/null
+grep -F 'export component DialogSelectPopup inherits Rectangle {' "$MODAL_CHROME" >/dev/null
+grep -F 'callback option-selected(string);' "$MODAL_CHROME" >/dev/null
+grep -F 'callback dismiss-requested();' "$MODAL_CHROME" >/dev/null
+grep -F 'callback move-highlight-requested(int);' "$MODAL_CHROME" >/dev/null
+grep -F 'in property <length> popup-max-height:' "$MODAL_CHROME" >/dev/null
+test -f "$ROOT_DIR/assets/icons/fluent/eye-20-regular.svg"
+test -f "$ROOT_DIR/assets/icons/fluent/eye-off-20-regular.svg"
 grep -F 'callback sync-modal-primary-action-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback sync-modal-secondary-action-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback sync-modal-draft-changed(string, string);' "$APP_WINDOW" >/dev/null
@@ -128,8 +138,9 @@ grep -F 'export component SyncVaultModal inherits Rectangle {' "$SYNC_MODAL" >/d
 grep -F 'export component ModalHeaderBar inherits Rectangle {' "$MODAL_CHROME" >/dev/null
 grep -F 'export component ModalBodyScrollArea inherits Rectangle {' "$MODAL_CHROME" >/dev/null
 grep -F 'export component ModalFooterBar inherits Rectangle {' "$MODAL_CHROME" >/dev/null
-grep -F 'import { ScrollView } from "std-widgets.slint";' "$SYNC_MODAL" >/dev/null
-grep -F 'import { ModalBodyScrollArea, ModalFooterBar, ModalHeaderBar } from "./modal-chrome.slint";' "$SYNC_MODAL" >/dev/null
+grep -F 'ModalBodyScrollArea,' "$SYNC_MODAL" >/dev/null
+grep -F 'ModalFooterBar,' "$SYNC_MODAL" >/dev/null
+grep -F 'ModalHeaderBar,' "$SYNC_MODAL" >/dev/null
 grep -F 'in property <string> mode: "not-configured";' "$SYNC_MODAL" >/dev/null
 grep -F 'in property <string> title: "Sync Settings";' "$SYNC_MODAL" >/dev/null
 grep -F 'in property <string> local-last-sync-text: "Never synced";' "$SYNC_MODAL" >/dev/null
@@ -145,12 +156,12 @@ grep -F 'body := ModalBodyScrollArea {' "$SYNC_MODAL" >/dev/null
 grep -F 'mouse-drag-pan-enabled: false;' "$MODAL_CHROME" >/dev/null
 grep -F 'horizontal-scrollbar-policy: always-off;' "$MODAL_CHROME" >/dev/null
 grep -F 'scroll-body := Rectangle {' "$MODAL_CHROME" >/dev/null
-grep -F 'body-panel := Rectangle {' "$MODAL_CHROME" >/dev/null
-grep -F 'x: root.resolved-frame-padding;' "$MODAL_CHROME" >/dev/null
+grep -F 'background: root.viewport-surface;' "$MODAL_CHROME" >/dev/null
 grep -F 'out property <length> content-column-width:' "$MODAL_CHROME" >/dev/null
-grep -F 'width: root.resolved-panel-width;' "$MODAL_CHROME" >/dev/null
+grep -F 'private property <length> resolved-panel-width:' "$MODAL_CHROME" >/dev/null
 grep -F 'width: root.content-column-width;' "$MODAL_CHROME" >/dev/null
 grep -F 'body-content-host := Rectangle {' "$MODAL_CHROME" >/dev/null
+grep -F 'x: root.resolved-frame-padding + root.resolved-content-padding-horizontal;' "$MODAL_CHROME" >/dev/null
 grep -F 'body-content := VerticalLayout {' "$MODAL_CHROME" >/dev/null
 grep -F 'private property <length> resolved-content-padding-bottom:' "$MODAL_CHROME" >/dev/null
 grep -F 'viewport-width: scroll-body.width;' "$MODAL_CHROME" >/dev/null
@@ -159,33 +170,39 @@ grep -F 'height: max(' "$MODAL_CHROME" >/dev/null
 grep -F 'body-scroll.visible-height,' "$MODAL_CHROME" >/dev/null
 grep -F 'footer := ModalFooterBar {' "$SYNC_MODAL" >/dev/null
 grep -F 'y: parent.height - root.footer-height;' "$SYNC_MODAL" >/dev/null
-grep -F 'divider-color: ThemeTokens.divider-strong;' "$SYNC_MODAL" >/dev/null
-grep -F 'error-banner := Rectangle {' "$SYNC_MODAL" >/dev/null
+grep -F 'if root.error-text != "" : DialogInlineBanner {' "$SYNC_MODAL" >/dev/null
 grep -F 'label: "Local last sync";' "$SYNC_MODAL" >/dev/null
 grep -F 'prominent: true;' "$SYNC_MODAL" >/dev/null
-grep -F 'panel-surface: ThemeTokens.window-surface;' "$SYNC_MODAL" >/dev/null
-grep -F 'surface: ThemeTokens.activity-surface;' "$SYNC_MODAL" >/dev/null
-grep -F 'SyncModalTextField {' "$SYNC_MODAL" >/dev/null
+grep -F 'panel-surface: ThemeTokens.modal-body-surface;' "$SYNC_MODAL" >/dev/null
+grep -F 'surface: ThemeTokens.modal-section-alt-surface;' "$SYNC_MODAL" >/dev/null
+grep -F 'DialogTextField {' "$SYNC_MODAL" >/dev/null
 grep -F 'content-column := Rectangle {' "$SYNC_MODAL" >/dev/null
-grep -F 'if root.mode == "not-configured" : password-field := SyncModalTextField {' "$SYNC_MODAL" >/dev/null
+grep -F 'if root.mode == "not-configured" : DialogFormSection {' "$SYNC_MODAL" >/dev/null
+grep -F 'label: "Master password";' "$SYNC_MODAL" >/dev/null
 grep -F 'export component AssetsSnippetPackageModal inherits Rectangle {' "$SNIPPET_PACKAGE_MODAL" >/dev/null
 grep -F 'export component AssetsFolderCreateModal inherits Rectangle {' "$FOLDER_MODAL" >/dev/null
 grep -F 'export component AssetsSshConnectionModal inherits Rectangle {' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> dialog-title: "New Snippet";' "$SNIPPET_MODAL" >/dev/null
-grep -F 'import { ComboBox, ScrollView } from "std-widgets.slint";' "$SNIPPET_MODAL" >/dev/null
-grep -F 'import { ModalBodyScrollArea, ModalFooterBar, ModalHeaderBar } from "./modal-chrome.slint";' "$SNIPPET_MODAL" >/dev/null
+grep -F 'DialogSelectField {' "$SNIPPET_MODAL" >/dev/null
+grep -F 'ModalBodyScrollArea,' "$SNIPPET_MODAL" >/dev/null
+grep -F 'ModalFooterBar,' "$SNIPPET_MODAL" >/dev/null
+grep -F 'ModalHeaderBar,' "$SNIPPET_MODAL" >/dev/null
 grep -F 'in property <[string]> package-options: [];' "$SNIPPET_MODAL" >/dev/null
 grep -F 'in property <string> package-selected-label: "";' "$SNIPPET_MODAL" >/dev/null
 grep -F 'in property <string> dialog-title: "New Package";' "$SNIPPET_PACKAGE_MODAL" >/dev/null
-grep -F 'text: "Name";' "$SNIPPET_MODAL" >/dev/null
-grep -F 'text: "Script";' "$SNIPPET_MODAL" >/dev/null
+grep -F 'label: "Name";' "$SNIPPET_MODAL" >/dev/null
+grep -F 'title: "Script";' "$SNIPPET_MODAL" >/dev/null
 grep -F 'text: "Package";' "$SNIPPET_MODAL" >/dev/null
 grep -F 'text: "Package name";' "$SNIPPET_PACKAGE_MODAL" >/dev/null
 grep -F 'body := ModalBodyScrollArea {' "$SNIPPET_MODAL" >/dev/null
 grep -F 'content-column := Rectangle {' "$SNIPPET_MODAL" >/dev/null
-grep -F 'ComboBox {' "$SNIPPET_MODAL" >/dev/null
-grep -F 'model: root.package-options;' "$SNIPPET_MODAL" >/dev/null
-grep -F 'current-value: root.package-selected-label;' "$SNIPPET_MODAL" >/dev/null
+if grep -F 'ComboBox {' "$SNIPPET_MODAL" >/dev/null; then
+  echo "snippet modal must not keep stock ComboBox popups once modal-local selects land" >&2
+  exit 1
+fi
+grep -F 'selected-label: root.package-selected-label;' "$SNIPPET_MODAL" >/dev/null
+grep -F 'root.package-options' "$SNIPPET_MODAL" >/dev/null
+grep -F 'value == "No Package" ? "" : value' "$SNIPPET_MODAL" >/dev/null
 grep -F 'footer := ModalFooterBar {' "$SNIPPET_MODAL" >/dev/null
 ! grep -F 'package-input := TextInput {' "$SNIPPET_MODAL" >/dev/null
 grep -F 'callback draft-changed(string, string);' "$SNIPPET_MODAL" >/dev/null
@@ -198,11 +215,10 @@ grep -F 'header := ModalHeaderBar {' "$SNIPPET_MODAL" >/dev/null
 grep -F 'drag-touch := TouchArea {' "$SNIPPET_PACKAGE_MODAL" >/dev/null
 grep -F 'close-button := Rectangle {' "$SNIPPET_PACKAGE_MODAL" >/dev/null
 grep -F 'in property <string> dialog-title: "New Folder";' "$FOLDER_MODAL" >/dev/null
-grep -F 'header := Rectangle {' "$FOLDER_MODAL" >/dev/null
+grep -F 'header := ModalHeaderBar {' "$FOLDER_MODAL" >/dev/null
 grep -F 'x: 0px;' "$FOLDER_MODAL" >/dev/null
 grep -F 'y: 0px;' "$FOLDER_MODAL" >/dev/null
-grep -F 'footer := Rectangle {' "$FOLDER_MODAL" >/dev/null
-grep -F 'footer-content := VerticalLayout {' "$FOLDER_MODAL" >/dev/null
+grep -F 'footer := ModalFooterBar {' "$FOLDER_MODAL" >/dev/null
 if grep -F 'footer-panel := Rectangle {' "$FOLDER_MODAL" >/dev/null; then
   echo "folder modal footer must not use an inner footer-panel wrapper" >&2
   exit 1
@@ -211,35 +227,32 @@ if grep -F 'footer-divider := Rectangle {' "$FOLDER_MODAL" >/dev/null; then
   echo "folder modal footer must not draw a dedicated footer divider" >&2
   exit 1
 fi
-grep -F 'drag-touch := TouchArea {' "$FOLDER_MODAL" >/dev/null
-grep -F 'close-button := Rectangle {' "$FOLDER_MODAL" >/dev/null
 grep -F 'in property <string> dialog-title: "Rename Asset";' "$RENAME_MODAL" >/dev/null
-grep -F 'footer := Rectangle {' "$RENAME_MODAL" >/dev/null
-grep -F 'drag-touch := TouchArea {' "$RENAME_MODAL" >/dev/null
-grep -F 'close-button := Rectangle {' "$RENAME_MODAL" >/dev/null
+grep -F 'header := ModalHeaderBar {' "$RENAME_MODAL" >/dev/null
+grep -F 'footer := ModalFooterBar {' "$RENAME_MODAL" >/dev/null
 grep -F 'in property <string> dialog-title: "Delete Asset";' "$DELETE_MODAL" >/dev/null
-grep -F 'footer := Rectangle {' "$DELETE_MODAL" >/dev/null
-grep -F 'drag-touch := TouchArea {' "$DELETE_MODAL" >/dev/null
-grep -F 'close-button := Rectangle {' "$DELETE_MODAL" >/dev/null
+grep -F 'header := ModalHeaderBar {' "$DELETE_MODAL" >/dev/null
+grep -F 'footer := ModalFooterBar {' "$DELETE_MODAL" >/dev/null
 grep -F 'in property <string> dialog-title: "Verify Host Key";' "$ROOT_DIR/ui/components/ssh-host-key-confirm-modal.slint" >/dev/null
-grep -F 'footer := Rectangle {' "$ROOT_DIR/ui/components/ssh-host-key-confirm-modal.slint" >/dev/null
-grep -F 'drag-touch := TouchArea {' "$ROOT_DIR/ui/components/ssh-host-key-confirm-modal.slint" >/dev/null
-grep -F 'close-button := Rectangle {' "$ROOT_DIR/ui/components/ssh-host-key-confirm-modal.slint" >/dev/null
+grep -F 'header := ModalHeaderBar {' "$ROOT_DIR/ui/components/ssh-host-key-confirm-modal.slint" >/dev/null
+grep -F 'footer := ModalFooterBar {' "$ROOT_DIR/ui/components/ssh-host-key-confirm-modal.slint" >/dev/null
 grep -F 'in-out property <string> asset-modal-validation-message: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in property <string> validation-message: "";' "$FOLDER_MODAL" >/dev/null
 grep -F 'in property <bool> can-confirm: false;' "$FOLDER_MODAL" >/dev/null
 grep -F 'export component AssetsRenameModal inherits Rectangle {' "$RENAME_MODAL" >/dev/null
 grep -F 'export component AssetsDeleteConfirmModal inherits Rectangle {' "$DELETE_MODAL" >/dev/null
 grep -F 'in property <string> dialog-title: "New SSH Connection";' "$SSH_MODAL" >/dev/null
-grep -F 'import { ModalBodyScrollArea, ModalFooterBar, ModalHeaderBar } from "./modal-chrome.slint";' "$SSH_MODAL" >/dev/null
+grep -F 'ModalBodyScrollArea,' "$SSH_MODAL" >/dev/null
+grep -F 'ModalFooterBar,' "$SSH_MODAL" >/dev/null
+grep -F 'ModalHeaderBar,' "$SSH_MODAL" >/dev/null
 grep -F 'header := ModalHeaderBar {' "$SSH_MODAL" >/dev/null
-grep -F 'text: "Basic";' "$SSH_MODAL" >/dev/null
-grep -F 'text: "Authentication";' "$SSH_MODAL" >/dev/null
-grep -F 'text: "Proxy";' "$SSH_MODAL" >/dev/null
+grep -F 'title: "Connection";' "$SSH_MODAL" >/dev/null
+grep -F 'title: "Authentication";' "$SSH_MODAL" >/dev/null
+grep -F 'title: "Proxy chain";' "$SSH_MODAL" >/dev/null
 if grep -F 'text: "Connection Options";' "$SSH_MODAL" >/dev/null; then
   exit 1
 fi
-grep -F 'text: "Notes";' "$SSH_MODAL" >/dev/null
+grep -F 'title: "Notes";' "$SSH_MODAL" >/dev/null
 grep -F 'body-scroll := ModalBodyScrollArea {' "$SSH_MODAL" >/dev/null
 grep -F 'content-column := Rectangle {' "$SSH_MODAL" >/dev/null
 grep -F 'footer := ModalFooterBar {' "$SSH_MODAL" >/dev/null
@@ -247,7 +260,25 @@ if grep -F 'footer-panel := Rectangle {' "$SSH_MODAL" >/dev/null; then
   echo "ssh modal footer must not use an inner footer-panel wrapper" >&2
   exit 1
 fi
-grep -F 'surface: ThemeTokens.activity-surface;' "$SSH_MODAL" >/dev/null
+grep -F 'keychain-identity-field-stack := VerticalLayout {' "$SSH_MODAL" >/dev/null
+grep -F 'identity-summary-card := Rectangle {' "$SSH_MODAL" >/dev/null
+grep -F 'proxy-ssh-field-stack := VerticalLayout {' "$SSH_MODAL" >/dev/null
+if grep -F 'keychain-identity-select-group := Rectangle {' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal must not revert keychain identity to the old nested select group wrapper" >&2
+  exit 1
+fi
+if grep -F 'proxy-ssh-select-group := Rectangle {' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal must not revert upstream ssh to the old nested select group wrapper" >&2
+  exit 1
+fi
+if grep -F 'if root.auth-source == "keychain-identity" : DialogSectionCard {' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal must keep keychain identity out of a nested section card" >&2
+  exit 1
+fi
+if grep -F 'if root.proxy-type == "ssh-asset" : DialogSectionCard {' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal must keep the upstream ssh selector out of a nested section card" >&2
+  exit 1
+fi
 grep -F 'in property <string> validation-message: "";' "$SSH_MODAL" >/dev/null
 grep -F 'in property <bool> can-confirm: false;' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> auth-source: "manual";' "$SSH_MODAL" >/dev/null
@@ -268,14 +299,12 @@ grep -F 'in property <bool> proxy-socks5-password-visible: false;' "$SSH_MODAL" 
 grep -F 'in property <string> proxy-ssh-asset-id: "";' "$SSH_MODAL" >/dev/null
 grep -F 'in property <[string]> proxy-ssh-options: [];' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> proxy-ssh-selected-label: "";' "$SSH_MODAL" >/dev/null
-grep -F 'text: "Proxy Type";' "$SSH_MODAL" >/dev/null
-grep -F 'label: "SOCKS5 Host";' "$SSH_MODAL" >/dev/null
-grep -F 'label: "SOCKS5 Port";' "$SSH_MODAL" >/dev/null
-grep -F 'label: "HTTP Host";' "$SSH_MODAL" >/dev/null
-grep -F 'label: "HTTP Port";' "$SSH_MODAL" >/dev/null
+grep -F 'text: "Proxy type";' "$SSH_MODAL" >/dev/null
+grep -F 'label: root.proxy-type == "http" ? "HTTP host" : "SOCKS5 host";' "$SSH_MODAL" >/dev/null
+grep -F 'label: root.proxy-type == "http" ? "HTTP port" : "SOCKS5 port";' "$SSH_MODAL" >/dev/null
 grep -F 'label: "Username";' "$SSH_MODAL" >/dev/null
 grep -F 'label: "Password";' "$SSH_MODAL" >/dev/null
-grep -F 'text: "Upstream SSH Connection";' "$SSH_MODAL" >/dev/null
+grep -F 'text: "Upstream SSH connection";' "$SSH_MODAL" >/dev/null
 if grep -F 'label: "Proxy Method";' "$SSH_MODAL" >/dev/null; then
   exit 1
 fi
@@ -285,7 +314,7 @@ fi
 ! grep -F 'callback tab-selected(string);' "$SSH_MODAL" >/dev/null
 grep -F 'callback draft-changed(string, string);' "$SSH_MODAL" >/dev/null
 grep -F 'callback action-requested(string);' "$SSH_MODAL" >/dev/null
-grep -F 'min-width: 0px;' "$SSH_MODAL" >/dev/null
+grep -F 'private property <bool> compact-layout:' "$SSH_MODAL" >/dev/null
 if grep -F '"Standard"' "$SSH_MODAL" >/dev/null; then
   echo "ssh modal must not keep the legacy Standard tab label" >&2
   exit 1
@@ -319,8 +348,11 @@ fi
 ! grep -F 'primary-action := Rectangle' "$SYNC_MODAL" >/dev/null
 ! grep -F 'can-clear-saved-secret: root.asset-ssh-modal-can-clear-saved-secret;' "$APP_WINDOW" >/dev/null
 ! grep -F 'clear-saved-secret-requested: root.asset-ssh-modal-clear-saved-secret-requested;' "$APP_WINDOW" >/dev/null
-grep -F 'import { ComboBox, ScrollView } from "std-widgets.slint";' "$SSH_MODAL" >/dev/null
-grep -F 'ComboBox {' "$SSH_MODAL" >/dev/null
+grep -F 'DialogSelectField {' "$SSH_MODAL" >/dev/null
+if grep -F 'ComboBox {' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal must not keep stock ComboBox popups once modal-local selects land" >&2
+  exit 1
+fi
 ! grep -F 'label: "Connect";' "$SSH_MODAL" >/dev/null
 ! grep -F 'label: "Save and Connect";' "$SSH_MODAL" >/dev/null
 ! grep -F 'label: "Test Connection";' "$SSH_MODAL" >/dev/null
@@ -330,15 +362,21 @@ grep -F 'Manual' "$SSH_MODAL" >/dev/null
 grep -F 'Keychain Identity' "$SSH_MODAL" >/dev/null
 grep -F 'text: "Identity";' "$SSH_MODAL" >/dev/null
 grep -F 'text: "Username";' "$SSH_MODAL" >/dev/null
-grep -F 'text: "Authentication Summary";' "$SSH_MODAL" >/dev/null
-grep -F 'root.draft-changed("auth_source"' "$SSH_MODAL" >/dev/null
-grep -F 'root.draft-changed("keychain_identity_label"' "$SSH_MODAL" >/dev/null
+grep -F 'text: "Authentication summary";' "$SSH_MODAL" >/dev/null
+grep -F '"auth_source"' "$SSH_MODAL" >/dev/null
+grep -F '"keychain_identity_label"' "$SSH_MODAL" >/dev/null
 if grep -F 'Use Existing Keychain Identity' "$SSH_MODAL" >/dev/null; then
   echo "ssh modal must replace the temporary keychain identity button with a real source picker" >&2
   exit 1
 fi
-grep -F 'InputType.password' "$SSH_MODAL" >/dev/null
+grep -F 'eye-20-regular.svg' "$SSH_MODAL" >/dev/null
+grep -F 'eye-off-20-regular.svg' "$SSH_MODAL" >/dev/null
+grep -F 'trailing-icon-visible: true;' "$SSH_MODAL" >/dev/null
+grep -F 'trailing-icon-source: root.password-visible ? root.eye-off-icon : root.eye-icon;' "$SSH_MODAL" >/dev/null
+grep -F 'trailing-icon-source: root.passphrase-visible ? root.eye-off-icon : root.eye-icon;' "$SSH_MODAL" >/dev/null
+grep -F 'trailing-icon-source: root.proxy-socks5-password-visible ? root.eye-off-icon : root.eye-icon;' "$SSH_MODAL" >/dev/null
 grep -F 'password_visibility' "$SSH_MODAL" >/dev/null
+grep -F 'passphrase_visibility' "$SSH_MODAL" >/dev/null
 grep -F 'busy' "$SSH_MODAL" >/dev/null
 grep -F 'hover' "$TOKENS" >/dev/null
 grep -F 'pressed' "$TOKENS" >/dev/null
@@ -374,6 +412,7 @@ grep -F 'proxy-socks5-port: root.asset-ssh-modal-proxy-socks5-port;' "$APP_WINDO
 grep -F 'proxy-socks5-username: root.asset-ssh-modal-proxy-socks5-username;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-socks5-password: root.asset-ssh-modal-proxy-socks5-password;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-socks5-password-visible: root.asset-ssh-modal-proxy-socks5-password-visible;' "$APP_WINDOW" >/dev/null
+grep -F 'passphrase-visible: root.asset-ssh-modal-passphrase-visible;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-ssh-asset-id: root.asset-ssh-modal-proxy-ssh-asset-id;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-ssh-options: root.asset-ssh-modal-proxy-ssh-options;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-ssh-selected-label: root.asset-ssh-modal-proxy-ssh-selected-label;' "$APP_WINDOW" >/dev/null

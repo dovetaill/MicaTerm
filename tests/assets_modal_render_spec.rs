@@ -685,6 +685,27 @@ fn sync_modal_footer_stays_visible_in_short_viewport() {
 
 #[test]
 fn sync_modal_short_viewport_keeps_master_password_field_actionable() {
+    let source = fs::read_to_string("ui/components/sync-vault-modal.slint").unwrap();
+
+    assert!(
+        source.contains(
+            "trailing-icon-source: root.master-password-visible ? root.eye-off-icon : root.eye-icon;"
+        ),
+        "sync modal should expose a Fluent eye toggle for the master password field"
+    );
+    assert!(
+        source.contains(
+            "trailing-icon-source: root.git-https-secret-visible ? root.eye-off-icon : root.eye-icon;"
+        ),
+        "sync modal should expose a Fluent eye toggle for the HTTPS secret field"
+    );
+    assert!(
+        source.contains(
+            "trailing-icon-source: root.git-ssh-passphrase-visible ? root.eye-off-icon : root.eye-icon;"
+        ),
+        "sync modal should expose a Fluent eye toggle for the SSH passphrase field"
+    );
+
     let short_height = 640;
     let modal = blocking_modal_rect_for_viewport(WINDOW_WIDTH, short_height, 640, 680);
     let footer_height = 82;
@@ -800,10 +821,9 @@ fn ssh_modal_narrow_viewport_preserves_right_gutter_after_trailing_action() {
     let chrome = fs::read_to_string("ui/components/modal-chrome.slint").unwrap();
 
     assert!(
-        chrome.contains(
-            "width: parent.width - 24px - (root.trailing-action-text != \"\" ? 70px : 0px);"
-        ) && chrome.contains("x: parent.width - self.width - 8px;"),
-        "shared dialog fields should reserve input width and an explicit 8px trailing gutter when an inline action button is present"
+        chrome.contains("root.trailing-icon-visible ? 36px : 0px")
+            && chrome.contains("x: parent.width - self.width - 6px;"),
+        "shared dialog fields should reserve a stable trailing icon slot with a 6px gutter for reveal actions in narrow SSH layouts"
     );
 }
 
@@ -848,6 +868,17 @@ fn ssh_modal_footer_stays_visible_in_short_viewport() {
 
 #[test]
 fn ssh_modal_short_viewport_keeps_primary_auth_field_actionable() {
+    let source = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint").unwrap();
+
+    assert!(
+        source.contains("DialogSelectField"),
+        "ssh modal should switch its modal select triggers to the shared dialog select primitive"
+    );
+    assert!(
+        !source.contains("ComboBox {"),
+        "ssh modal should not keep stock ComboBox popups inside modal content"
+    );
+
     let short_height = 640;
     let modal_height = 528;
     let modal = blocking_modal_rect_for_viewport(WINDOW_WIDTH, short_height, 640, modal_height);
@@ -881,6 +912,20 @@ fn ssh_modal_short_viewport_keeps_primary_auth_field_actionable() {
     assert!(
         password_field_pixels >= 1200,
         "ssh modal should keep the first authentication field visibly above the sticky footer in short viewports, only found {password_field_pixels} distinct pixels"
+    );
+}
+
+#[test]
+fn snippet_modal_source_uses_dialog_select_field_for_package_picker() {
+    let source = fs::read_to_string("ui/components/assets-snippet-modal.slint").unwrap();
+
+    assert!(
+        source.contains("DialogSelectField"),
+        "snippet modal should switch its package picker to the shared dialog select primitive"
+    );
+    assert!(
+        !source.contains("ComboBox {"),
+        "snippet modal should not keep stock ComboBox popups inside modal content"
     );
 }
 

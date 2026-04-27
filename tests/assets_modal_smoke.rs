@@ -11,7 +11,8 @@ use mica_term::app::ssh::known_hosts::{KnownHostCheck, KnownHostsService};
 use mica_term::app::window_effects::default_platform_window_effects;
 use russh::keys::{HashAlg, PublicKey};
 use slint::Model;
-use slint::{ModelRc, VecModel};
+use slint::platform::WindowEvent;
+use slint::{ComponentHandle, ModelRc, VecModel};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs;
@@ -19,6 +20,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use anyhow::Result;
+use i_slint_backend_testing::ElementHandle;
 
 #[derive(Default)]
 struct ModalAssetRepoState {
@@ -132,6 +134,251 @@ fn snippet_modal_callback_contract_exposes_name_script_and_package_fields() {
             ("script".into(), "kubectl rollout restart deploy/api".into()),
             ("package".into(), "Operations".into()),
         ]
+    );
+}
+
+#[test]
+fn snippet_modal_contract_routes_package_picker_through_dialog_select_field() {
+    let snippet_modal =
+        fs::read_to_string("ui/components/assets-snippet-modal.slint").expect("read snippet modal");
+
+    assert!(
+        snippet_modal.contains("DialogSelectField"),
+        "snippet modal should use the shared modal-local select trigger for package selection"
+    );
+    assert!(
+        !snippet_modal.contains("ComboBox {"),
+        "snippet modal should no longer rely on the stock ComboBox popup inside the modal body"
+    );
+    assert!(
+        snippet_modal.contains("\"package\""),
+        "snippet modal should continue emitting the stable package field id"
+    );
+    assert!(
+        snippet_modal.contains("value == \"No Package\" ? \"\" : value"),
+        "snippet modal should preserve the No Package -> empty-string mapping"
+    );
+}
+
+#[test]
+fn snippet_modal_shell_dismisses_local_select_overlay_before_closing_modal() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let block = app_window
+        .split("if root.asset-modal-open && root.asset-modal-kind == \"new-snippet\" : asset-snippet-modal-shell := BlockingModalShell {\n")
+        .nth(1)
+        .expect("extract snippet shell block");
+    let block = block
+        .split("asset-snippet-modal-overlay := AssetsSnippetModal {")
+        .next()
+        .expect("truncate snippet shell block");
+
+    assert!(
+        block.contains("if !asset-snippet-modal-overlay.select-overlay-open {")
+            && block.contains("main-workspace.restore-primary-focus();")
+            && block.contains("root.blocking-modal-focus-restore-requested();"),
+        "snippet shell should only restore workspace focus when its local select overlay is closed"
+    );
+    assert!(
+        block.contains("consume-event => {")
+            && block.contains("if asset-snippet-modal-overlay.select-overlay-open {")
+            && block.contains("asset-snippet-modal-overlay.dismiss-open-select();"),
+        "snippet shell should dismiss the package popup before letting backdrop clicks fall through"
+    );
+    assert!(
+        block.contains("escape-requested => {")
+            && block.contains("if asset-snippet-modal-overlay.select-overlay-open {")
+            && block.contains("} else {\n                root.close-asset-modal-requested();"),
+        "snippet shell should dismiss the package popup on Escape before closing the modal"
+    );
+}
+
+#[test]
+fn ssh_proxy_upstream_select_uses_narrower_inset_width_than_primary_proxy_type_field() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    app.show().expect("show app window");
+
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-ssh-connection".into());
+    app.set_asset_ssh_modal_name("Prod".into());
+    app.set_asset_ssh_modal_host("10.0.0.12".into());
+    app.set_asset_ssh_modal_user("ops".into());
+    app.set_asset_ssh_modal_port("22".into());
+    app.set_asset_ssh_modal_proxy_type("ssh-asset".into());
+    app.set_asset_ssh_modal_proxy_ssh_selected_label("Mega".into());
+    app.set_asset_ssh_modal_proxy_ssh_options(ModelRc::new(VecModel::from(vec![
+        "Mega".into(),
+    ])));
+
+    let scroll_position = slint::LogicalPosition::new(520.0, 260.0);
+
+    for _ in 0..8 {
+        app.window().dispatch_event(WindowEvent::PointerScrolled {
+            position: scroll_position,
+            delta_x: 0.0,
+            delta_y: -120.0,
+        });
+    }
+
+    let proxy_field_stack = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSshConnectionModal::proxy-ssh-field-stack",
+    )
+    .next()
+    .expect("find proxy ssh field stack");
+    let proxy_type_select = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSshConnectionModal::proxy-type-select",
+    )
+    .next()
+    .expect("find proxy type select");
+    let proxy_select = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSshConnectionModal::proxy-ssh-select",
+    )
+    .next()
+    .expect("find proxy ssh select");
+
+    let group_bottom = proxy_field_stack.absolute_position().y + proxy_field_stack.size().height;
+    let select_bottom = proxy_select.absolute_position().y + proxy_select.size().height;
+
+    assert!(
+        select_bottom <= group_bottom,
+        "upstream ssh select should fit fully inside its inset field stack, group_bottom={group_bottom}, select_bottom={select_bottom}"
+    );
+    assert!(
+        proxy_select.absolute_position().x >= proxy_type_select.absolute_position().x + 8.0,
+        "upstream ssh select should visibly inset from the primary proxy type field, proxy_x={}, primary_x={}",
+        proxy_select.absolute_position().x,
+        proxy_type_select.absolute_position().x,
+    );
+    assert!(
+        proxy_select.size().width + 24.0 <= proxy_type_select.size().width,
+        "upstream ssh select should read as a smaller nested field than the primary proxy type select, proxy_width={}, primary_width={}",
+        proxy_select.size().width,
+        proxy_type_select.size().width,
+    );
+}
+
+#[test]
+fn ssh_keychain_identity_flow_uses_inset_select_and_keeps_summary_visible() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    app.show().expect("show app window");
+
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-ssh-connection".into());
+    app.set_asset_ssh_modal_name("Prod".into());
+    app.set_asset_ssh_modal_host("10.0.0.12".into());
+    app.set_asset_ssh_modal_user("ops".into());
+    app.set_asset_ssh_modal_port("22".into());
+    app.set_asset_ssh_modal_auth_source("keychain-identity".into());
+    app.set_asset_ssh_modal_keychain_identity_selected_label("Shared Identity".into());
+    app.set_asset_ssh_modal_keychain_identity_options(ModelRc::new(VecModel::from(vec![
+        "Shared Identity".into(),
+    ])));
+
+    let scroll_position = slint::LogicalPosition::new(520.0, 260.0);
+
+    for _ in 0..3 {
+        app.window().dispatch_event(WindowEvent::PointerScrolled {
+            position: scroll_position,
+            delta_x: 0.0,
+            delta_y: -120.0,
+        });
+    }
+
+    let identity_field_stack = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSshConnectionModal::keychain-identity-field-stack",
+    )
+    .next()
+    .expect("find identity field stack");
+    let identity_select = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSshConnectionModal::keychain-identity-select",
+    )
+    .next()
+    .expect("find keychain identity select");
+    let identity_summary_card = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSshConnectionModal::identity-summary-card",
+    )
+    .next()
+    .expect("find identity summary card");
+    let identity_summary_value = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSshConnectionModal::identity-auth-summary-value",
+    )
+    .next()
+    .expect("find identity auth summary value");
+
+    let group_bottom =
+        identity_field_stack.absolute_position().y + identity_field_stack.size().height;
+    let select_bottom = identity_select.absolute_position().y + identity_select.size().height;
+    let summary_bottom =
+        identity_summary_value.absolute_position().y + identity_summary_value.size().height;
+    let card_bottom =
+        identity_summary_card.absolute_position().y + identity_summary_card.size().height;
+
+    assert!(
+        select_bottom <= group_bottom,
+        "keychain identity select should fit fully inside its inset field stack, group_bottom={group_bottom}, select_bottom={select_bottom}"
+    );
+    assert!(
+        identity_field_stack.absolute_position().x > 430.0,
+        "keychain identity field stack should be inset from the main form column, field_x={}",
+        identity_field_stack.absolute_position().x,
+    );
+    assert!(
+        identity_select.size().width < 560.0,
+        "keychain identity select should read as a smaller nested field than the primary auth source field, identity_width={}",
+        identity_select.size().width,
+    );
+    assert!(
+        summary_bottom <= card_bottom - 10.0,
+        "identity authentication summary should stay fully visible inside its summary card, summary_bottom={summary_bottom}, card_bottom={card_bottom}"
+    );
+}
+
+#[test]
+fn snippet_package_select_fully_fits_inside_its_layout_group() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    app.show().expect("show app window");
+
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-snippet".into());
+    app.set_asset_snippet_modal_name("Deploy".into());
+    app.set_asset_snippet_modal_script("kubectl rollout restart deploy/api".into());
+    app.set_asset_snippet_modal_package_selected_label("Operations".into());
+    app.set_asset_snippet_modal_package_options(ModelRc::new(VecModel::from(vec![
+        "No Package".into(),
+        "Operations".into(),
+    ])));
+
+    let package_group = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSnippetModal::snippet-package-select-group",
+    )
+    .next()
+    .expect("find snippet package select group");
+    let package_select = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSnippetModal::package-select",
+    )
+    .next()
+    .expect("find snippet package select");
+
+    let group_bottom = package_group.absolute_position().y + package_group.size().height;
+    let select_bottom = package_select.absolute_position().y + package_select.size().height;
+
+    assert!(
+        select_bottom <= group_bottom,
+        "snippet package select should fit fully inside its own layout group, group_bottom={group_bottom}, select_bottom={select_bottom}"
     );
 }
 
@@ -328,10 +575,14 @@ fn ssh_modal_round_trips_password_visibility_without_secret_retention_flags() {
     app.set_asset_modal_kind("new-ssh-connection".into());
     app.set_asset_ssh_modal_password("secret".into());
     app.set_asset_ssh_modal_password_visible(false);
+    app.set_asset_ssh_modal_passphrase("hunter2".into());
+    app.set_asset_ssh_modal_passphrase_visible(true);
 
     assert!(app.get_asset_modal_open());
     assert_eq!(app.get_asset_ssh_modal_password().as_str(), "secret");
     assert!(!app.get_asset_ssh_modal_password_visible());
+    assert_eq!(app.get_asset_ssh_modal_passphrase().as_str(), "hunter2");
+    assert!(app.get_asset_ssh_modal_passphrase_visible());
 }
 
 #[test]
@@ -415,9 +666,28 @@ fn ssh_modal_contract_exposes_auth_source_switch_and_keychain_identity_summary()
     assert!(ssh_modal.contains("text: \"Identity\""));
     assert!(ssh_modal.contains("text: \"Username\""));
     assert!(ssh_modal.contains("text: \"Authentication summary\""));
-    assert!(ssh_modal.contains("root.draft-changed(\"auth_source\""));
-    assert!(ssh_modal.contains("root.draft-changed(\"keychain_identity_label\""));
+    assert!(ssh_modal.contains("\"auth_source\""));
+    assert!(ssh_modal.contains("\"keychain_identity_label\""));
     assert!(!ssh_modal.contains("Use Existing Keychain Identity"));
+}
+
+#[test]
+fn ssh_modal_contract_routes_selects_through_dialog_select_field() {
+    let ssh_modal = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
+        .expect("read ssh modal");
+
+    assert!(
+        ssh_modal.contains("DialogSelectField"),
+        "ssh modal should use the shared modal-local select trigger"
+    );
+    assert!(
+        !ssh_modal.contains("ComboBox {"),
+        "ssh modal should no longer rely on the stock ComboBox popup inside the modal body"
+    );
+    assert!(ssh_modal.contains("\"auth_source\""));
+    assert!(ssh_modal.contains("\"keychain_identity_label\""));
+    assert!(ssh_modal.contains("\"proxy_type\""));
+    assert!(ssh_modal.contains("\"proxy_ssh_asset_label\""));
 }
 
 #[test]

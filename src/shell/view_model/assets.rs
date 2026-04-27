@@ -693,6 +693,7 @@ impl ShellViewModel {
                 private_key_path: spec.private_key_path,
                 passphrase: String::new(),
                 password_visible: false,
+                passphrase_visible: false,
                 remark: spec.remark,
                 environment: spec.environment,
                 proxy_type,
@@ -728,6 +729,7 @@ impl ShellViewModel {
         draft.private_key_content = private_key_content.unwrap_or_default();
         draft.passphrase = passphrase.unwrap_or_default();
         draft.password_visible = false;
+        draft.passphrase_visible = false;
         draft.proxy_socks5_password_visible = false;
         draft.validation_message = inline_error.unwrap_or_default();
     }
