@@ -167,29 +167,40 @@ export component AssetsSnippetModal inherits Rectangle {
                             width: parent.width;
                             spacing: 8px;
 
-                            Text {
+                            snippet-package-select-group := Rectangle {
                                 width: parent.width;
-                                text: "Package";
-                                color: ThemeTokens.text-secondary;
-                                font-size: 11px;
-                                overflow: elide;
-                            }
+                                height: 58px;
+                                background: transparent;
 
-                            package-select := DialogSelectField {
-                                width: parent.width;
-                                height: 34px;
-                                label: "Package";
-                                focus-sequence: root.package-select-focus-sequence;
-                                open: root.package-popup-open;
-                                selected-label: root.package-selected-label;
-                                placeholder-text: "No Package";
+                                VerticalLayout {
+                                    width: parent.width;
+                                    spacing: 10px;
 
-                                toggle-requested => {
-                                    root.open-package-select(
-                                        self.absolute-position.x - root.absolute-position.x,
-                                        self.absolute-position.y - root.absolute-position.y,
-                                        self.width
-                                    );
+                                    Text {
+                                        width: parent.width;
+                                        text: "Package";
+                                        color: ThemeTokens.text-secondary;
+                                        font-size: 11px;
+                                        overflow: elide;
+                                    }
+
+                                    package-select := DialogSelectField {
+                                        width: parent.width;
+                                        height: 34px;
+                                        label: "Package";
+                                        focus-sequence: root.package-select-focus-sequence;
+                                        open: root.package-popup-open;
+                                        selected-label: root.package-selected-label;
+                                        placeholder-text: "No Package";
+
+                                        toggle-requested => {
+                                            root.open-package-select(
+                                                self.absolute-position.x - root.absolute-position.x,
+                                                self.absolute-position.y - root.absolute-position.y,
+                                                self.width
+                                            );
+                                        }
+                                    }
                                 }
                             }
 

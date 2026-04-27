@@ -429,38 +429,47 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             spacing: 10px;
                             surface: ThemeTokens.modal-section-surface;
 
-                            Text {
+                            keychain-identity-select-group := Rectangle {
                                 width: parent.width;
-                                text: "Identity";
-                                color: ThemeTokens.text-secondary;
-                                font-size: 11px;
-                                overflow: elide;
-                            }
+                                height: 58px;
+                                background: transparent;
 
-                            keychain-identity-select := DialogSelectField {
-                                width: parent.width;
-                                height: 34px;
-                                label: "Identity";
-                                focus-sequence: root.keychain-identity-select-focus-sequence;
-                                open: root.open-select-id == "keychain_identity_label";
-                                selected-label: root.keychain-identity-selected-label;
-                                placeholder-text: root.keychain-identity-options.length == 0 ? "No keychain identity available" : "Select identity";
-                                enabled: root.keychain-identity-options.length > 0;
+                                VerticalLayout {
+                                    width: parent.width;
+                                    spacing: 10px;
 
-                                toggle-requested => {
-                                    root.open-select-options = root.keychain-identity-options;
-                                    root.open-select(
-                                        "keychain_identity_label",
-                                        self.absolute-position.x - root.absolute-position.x,
-                                        self.absolute-position.y - root.absolute-position.y,
-                                        self.width,
-                                        root.open-select-options.length,
-                                        0
-                                    );
+                                    Text {
+                                        width: parent.width;
+                                        text: "Identity";
+                                        color: ThemeTokens.text-secondary;
+                                        font-size: 11px;
+                                        overflow: elide;
+                                    }
+
+                                    keychain-identity-select := DialogSelectField {
+                                        width: parent.width;
+                                        height: 34px;
+                                        label: "Identity";
+                                        focus-sequence: root.keychain-identity-select-focus-sequence;
+                                        open: root.open-select-id == "keychain_identity_label";
+                                        selected-label: root.keychain-identity-selected-label;
+                                        placeholder-text: root.keychain-identity-options.length == 0 ? "No keychain identity available" : "Select identity";
+                                        enabled: root.keychain-identity-options.length > 0;
+
+                                        toggle-requested => {
+                                            root.open-select-options = root.keychain-identity-options;
+                                            root.open-select(
+                                                "keychain_identity_label",
+                                                self.absolute-position.x - root.absolute-position.x,
+                                                self.absolute-position.y - root.absolute-position.y,
+                                                self.width,
+                                                root.open-select-options.length,
+                                                0
+                                            );
+                                        }
+                                    }
                                 }
-
                             }
-
                             Text {
                                 width: parent.width;
                                 text: "Username";
@@ -734,36 +743,46 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             spacing: 10px;
                             surface: ThemeTokens.modal-section-alt-surface;
 
-                            Text {
+                            proxy-ssh-select-group := Rectangle {
                                 width: parent.width;
-                                text: "Upstream SSH connection";
-                                color: ThemeTokens.text-secondary;
-                                font-size: 11px;
-                                overflow: elide;
-                            }
+                                height: 58px;
+                                background: transparent;
 
-                            proxy-ssh-select := DialogSelectField {
-                                width: parent.width;
-                                height: 34px;
-                                label: "Upstream SSH connection";
-                                focus-sequence: root.proxy-ssh-select-focus-sequence;
-                                open: root.open-select-id == "proxy_ssh_asset_label";
-                                selected-label: root.proxy-ssh-selected-label;
-                                placeholder-text: root.proxy-ssh-options.length == 0 ? "No SSH connection available" : "Select SSH connection";
-                                enabled: root.proxy-ssh-options.length > 0;
+                                VerticalLayout {
+                                    width: parent.width;
+                                    spacing: 10px;
 
-                                toggle-requested => {
-                                    root.open-select-options = root.proxy-ssh-options;
-                                    root.open-select(
-                                        "proxy_ssh_asset_label",
-                                        self.absolute-position.x - root.absolute-position.x,
-                                        self.absolute-position.y - root.absolute-position.y,
-                                        self.width,
-                                        root.open-select-options.length,
-                                        0
-                                    );
+                                    Text {
+                                        width: parent.width;
+                                        text: "Upstream SSH connection";
+                                        color: ThemeTokens.text-secondary;
+                                        font-size: 11px;
+                                        overflow: elide;
+                                    }
+
+                                    proxy-ssh-select := DialogSelectField {
+                                        width: parent.width;
+                                        height: 34px;
+                                        label: "Upstream SSH connection";
+                                        focus-sequence: root.proxy-ssh-select-focus-sequence;
+                                        open: root.open-select-id == "proxy_ssh_asset_label";
+                                        selected-label: root.proxy-ssh-selected-label;
+                                        placeholder-text: root.proxy-ssh-options.length == 0 ? "No SSH connection available" : "Select SSH connection";
+                                        enabled: root.proxy-ssh-options.length > 0;
+
+                                        toggle-requested => {
+                                            root.open-select-options = root.proxy-ssh-options;
+                                            root.open-select(
+                                                "proxy_ssh_asset_label",
+                                                self.absolute-position.x - root.absolute-position.x,
+                                                self.absolute-position.y - root.absolute-position.y,
+                                                self.width,
+                                                root.open-select-options.length,
+                                                0
+                                            );
+                                        }
+                                    }
                                 }
-
                             }
                         }
                     }

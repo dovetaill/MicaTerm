@@ -11,7 +11,8 @@ use mica_term::app::ssh::known_hosts::{KnownHostCheck, KnownHostsService};
 use mica_term::app::window_effects::default_platform_window_effects;
 use russh::keys::{HashAlg, PublicKey};
 use slint::Model;
-use slint::{ModelRc, VecModel};
+use slint::platform::WindowEvent;
+use slint::{ComponentHandle, ModelRc, VecModel};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs;
@@ -19,6 +20,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use anyhow::Result;
+use i_slint_backend_testing::ElementHandle;
 
 #[derive(Default)]
 struct ModalAssetRepoState {
@@ -187,6 +189,168 @@ fn snippet_modal_shell_dismisses_local_select_overlay_before_closing_modal() {
             && block.contains("if asset-snippet-modal-overlay.select-overlay-open {")
             && block.contains("} else {\n                root.close-asset-modal-requested();"),
         "snippet shell should dismiss the package popup on Escape before closing the modal"
+    );
+}
+
+#[test]
+fn ssh_proxy_upstream_select_fully_fits_inside_proxy_card() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    app.show().expect("show app window");
+    bind_top_status_bar_with_store(&app, None);
+
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-ssh-connection".into());
+    app.set_asset_ssh_modal_name("Prod".into());
+    app.set_asset_ssh_modal_host("10.0.0.12".into());
+    app.set_asset_ssh_modal_user("ops".into());
+    app.set_asset_ssh_modal_port("22".into());
+    app.set_asset_ssh_modal_proxy_type("ssh-asset".into());
+    app.set_asset_ssh_modal_proxy_ssh_selected_label("Mega".into());
+    app.set_asset_ssh_modal_proxy_ssh_options(ModelRc::new(VecModel::from(vec![
+        "Mega".into(),
+    ])));
+
+    let auth_source_select = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSshConnectionModal::auth-source-select",
+    )
+    .next()
+    .expect("find auth source select");
+    let scroll_position = slint::LogicalPosition::new(
+        auth_source_select.absolute_position().x + 20.0,
+        auth_source_select.absolute_position().y + 20.0,
+    );
+
+    for _ in 0..8 {
+        app.window().dispatch_event(WindowEvent::PointerScrolled {
+            position: scroll_position,
+            delta_x: 0.0,
+            delta_y: -120.0,
+        });
+    }
+
+    let proxy_group = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSshConnectionModal::proxy-ssh-select-group",
+    )
+    .next()
+    .expect("find proxy ssh select group");
+    let proxy_select = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSshConnectionModal::proxy-ssh-select",
+    )
+    .next()
+    .expect("find proxy ssh select");
+
+    let group_bottom = proxy_group.absolute_position().y + proxy_group.size().height;
+    let select_bottom = proxy_select.absolute_position().y + proxy_select.size().height;
+
+    assert!(
+        select_bottom <= group_bottom,
+        "upstream ssh select should fit fully inside its own layout group, group_bottom={group_bottom}, select_bottom={select_bottom}"
+    );
+}
+
+#[test]
+fn ssh_keychain_identity_select_fully_fits_inside_identity_card() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    app.show().expect("show app window");
+    bind_top_status_bar_with_store(&app, None);
+
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-ssh-connection".into());
+    app.set_asset_ssh_modal_name("Prod".into());
+    app.set_asset_ssh_modal_host("10.0.0.12".into());
+    app.set_asset_ssh_modal_user("ops".into());
+    app.set_asset_ssh_modal_port("22".into());
+    app.set_asset_ssh_modal_auth_source("keychain-identity".into());
+    app.set_asset_ssh_modal_keychain_identity_selected_label("Shared Identity".into());
+    app.set_asset_ssh_modal_keychain_identity_options(ModelRc::new(VecModel::from(vec![
+        "Shared Identity".into(),
+    ])));
+
+    let auth_source_select = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSshConnectionModal::auth-source-select",
+    )
+    .next()
+    .expect("find auth source select");
+    let scroll_position = slint::LogicalPosition::new(
+        auth_source_select.absolute_position().x + 20.0,
+        auth_source_select.absolute_position().y + 20.0,
+    );
+
+    for _ in 0..3 {
+        app.window().dispatch_event(WindowEvent::PointerScrolled {
+            position: scroll_position,
+            delta_x: 0.0,
+            delta_y: -120.0,
+        });
+    }
+
+    let identity_group = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSshConnectionModal::keychain-identity-select-group",
+    )
+    .next()
+    .expect("find identity select group");
+    let identity_select = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSshConnectionModal::keychain-identity-select",
+    )
+    .next()
+    .expect("find keychain identity select");
+
+    let group_bottom = identity_group.absolute_position().y + identity_group.size().height;
+    let select_bottom = identity_select.absolute_position().y + identity_select.size().height;
+
+    assert!(
+        select_bottom <= group_bottom,
+        "keychain identity select should fit fully inside its own layout group, group_bottom={group_bottom}, select_bottom={select_bottom}"
+    );
+}
+
+#[test]
+fn snippet_package_select_fully_fits_inside_its_layout_group() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    app.show().expect("show app window");
+    bind_top_status_bar_with_store(&app, None);
+
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-snippet".into());
+    app.set_asset_snippet_modal_name("Deploy".into());
+    app.set_asset_snippet_modal_script("kubectl rollout restart deploy/api".into());
+    app.set_asset_snippet_modal_package_selected_label("Operations".into());
+    app.set_asset_snippet_modal_package_options(ModelRc::new(VecModel::from(vec![
+        "No Package".into(),
+        "Operations".into(),
+    ])));
+
+    let package_group = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSnippetModal::snippet-package-select-group",
+    )
+    .next()
+    .expect("find snippet package select group");
+    let package_select = ElementHandle::find_by_element_id(
+        &app,
+        "AssetsSnippetModal::package-select",
+    )
+    .next()
+    .expect("find snippet package select");
+
+    let group_bottom = package_group.absolute_position().y + package_group.size().height;
+    let select_bottom = package_select.absolute_position().y + package_select.size().height;
+
+    assert!(
+        select_bottom <= group_bottom,
+        "snippet package select should fit fully inside its own layout group, group_bottom={group_bottom}, select_bottom={select_bottom}"
     );
 }
 
