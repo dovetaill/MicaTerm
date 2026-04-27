@@ -9,6 +9,9 @@ Use this checklist when validating terminal regressions around:
 - `spinner` and progress line rewrites
 - `link` hover and Ctrl+click behavior
 - `glyph` rendering for repeated separators
+- `box drawing` continuity for `─│╭╮╰╯` seams and joints
+- `block elements` fill coverage for `█▀▄▌▐`
+- resize / `DPI` changes that could reintroduce blur, seams, or broken continuity
 
 ## Scenarios
 
@@ -41,6 +44,9 @@ Use this checklist when validating terminal regressions around:
 
 - Inspect `drwx-----`, `----------`, `___`, and `===`.
 - Confirm repeated separators do not collapse into an oversized continuous stroke.
+- Inspect `╭────╮ / │Codex│ / ╰────╯` and confirm `box drawing` continuity stays tight across cell seams.
+- Inspect `╭╮╰╯` joints and confirm corners connect cleanly without obvious halo or clipping.
+- Inspect `█▀▄▌▐` and confirm `block elements` stay crisp, full-bleed, and stable after resize / `DPI` changes.
 
 ### progress
 

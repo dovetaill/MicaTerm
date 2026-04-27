@@ -85,7 +85,12 @@ Inspect these samples in the terminal:
   ----------
   ___
   ===
-Observation focus: glyph spacing and repeated separator rendering.
+  ╭────╮
+  │Codex│
+  ╰────╯
+  ─│╭╮╰╯
+  █▀▄▌▐
+Observation focus: glyph spacing, box drawing continuity, block elements fill, and resize/DPI stability.
 EOF
 }
 
