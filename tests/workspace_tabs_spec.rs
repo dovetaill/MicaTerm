@@ -1367,6 +1367,76 @@ fn connection_progress_workspace_host_contract_exposes_inline_host_key_actions()
 }
 
 #[test]
+fn connection_progress_workspace_host_contract_exposes_presentation_semantics_props() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let workspace_pane =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        app_window.contains("in-out property <string> workspace-session-connection-page-mode: \"\";"),
+        "AppWindow should expose a projected connection page-mode property"
+    );
+    assert!(
+        app_window.contains("in-out property <string> workspace-session-connection-task-title: \"\";"),
+        "AppWindow should expose a projected connection task-title property"
+    );
+    assert!(
+        app_window.contains("in-out property <string> workspace-session-connection-task-detail: \"\";"),
+        "AppWindow should expose a projected connection task-detail property"
+    );
+    assert!(
+        app_window.contains("workspace-session-connection-page-mode: root.workspace-session-connection-page-mode;"),
+        "AppWindow should forward the connection page-mode property into WorkspacePane"
+    );
+    assert!(
+        app_window.contains("workspace-session-connection-task-title: root.workspace-session-connection-task-title;"),
+        "AppWindow should forward the connection task-title property into WorkspacePane"
+    );
+    assert!(
+        app_window.contains("workspace-session-connection-task-detail: root.workspace-session-connection-task-detail;"),
+        "AppWindow should forward the connection task-detail property into WorkspacePane"
+    );
+    assert!(
+        workspace_pane.contains("in property <string> workspace-session-connection-page-mode: \"\";"),
+        "WorkspacePane should accept the projected connection page-mode property"
+    );
+    assert!(
+        workspace_pane.contains("in property <string> workspace-session-connection-task-title: \"\";"),
+        "WorkspacePane should accept the projected connection task-title property"
+    );
+    assert!(
+        workspace_pane.contains("in property <string> workspace-session-connection-task-detail: \"\";"),
+        "WorkspacePane should accept the projected connection task-detail property"
+    );
+    assert!(
+        workspace_pane.contains("connection-progress-page-mode: root.workspace-session-connection-page-mode;"),
+        "WorkspacePane should forward the connection page-mode property into TerminalSessionHost"
+    );
+    assert!(
+        workspace_pane.contains("connection-progress-task-title: root.workspace-session-connection-task-title;"),
+        "WorkspacePane should forward the connection task-title property into TerminalSessionHost"
+    );
+    assert!(
+        workspace_pane.contains("connection-progress-task-detail: root.workspace-session-connection-task-detail;"),
+        "WorkspacePane should forward the connection task-detail property into TerminalSessionHost"
+    );
+    assert!(
+        terminal_host.contains("in property <string> connection-progress-page-mode: \"\";"),
+        "TerminalSessionHost should accept the projected connection page-mode property"
+    );
+    assert!(
+        terminal_host.contains("in property <string> connection-progress-task-title: \"\";"),
+        "TerminalSessionHost should accept the projected connection task-title property"
+    );
+    assert!(
+        terminal_host.contains("in property <string> connection-progress-task-detail: \"\";"),
+        "TerminalSessionHost should accept the projected connection task-detail property"
+    );
+}
+
+#[test]
 fn single_click_only_selects_saved_asset_without_opening_session() {
     i_slint_backend_testing::init_no_event_loop();
 

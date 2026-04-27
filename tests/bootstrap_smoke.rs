@@ -8325,6 +8325,59 @@ fn unknown_host_key_blocks_connection_in_workspace_timeline() {
 }
 
 #[test]
+fn workspace_host_key_inline_prompt_projects_decision_page_semantics() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let _env_lock = lock_known_hosts_env();
+    let known_hosts_path = sample_known_hosts_path("workspace-host-key-page-mode-decision");
+    let host_key = sample_public_key();
+    let _ = fs::remove_file(&known_hosts_path);
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TofuAwareLauncher::new(host_key.clone())),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+
+    assert_eq!(
+        app.get_workspace_session_host_mode().as_str(),
+        "connection-progress"
+    );
+    assert_eq!(
+        app.get_workspace_session_connection_headline().as_str(),
+        "waiting-user"
+    );
+    assert_eq!(
+        app.get_workspace_session_connection_page_mode().as_str(),
+        "decision"
+    );
+    assert_eq!(
+        app.get_workspace_session_connection_task_title().as_str(),
+        "Verify host key"
+    );
+    assert!(
+        app.get_workspace_session_connection_task_detail()
+            .as_str()
+            .contains("Host key verification required for 10.0.0.12:22"),
+        "decision-mode task detail should summarize the blocking host-key verification step"
+    );
+
+    let _ = fs::remove_file(known_hosts_path);
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+}
+
+#[test]
 fn trusting_unknown_host_key_retries_connection_in_same_workspace_tab() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -8368,6 +8421,57 @@ fn trusting_unknown_host_key_retries_connection_in_same_workspace_tab() {
             .check("10.0.0.12", 22, &host_key)
             .expect("check trusted host after inline confirmation"),
         KnownHostCheck::Trusted
+    );
+
+    let _ = fs::remove_file(known_hosts_path);
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+}
+
+#[test]
+fn workspace_host_key_rejection_projects_troubleshooting_page_semantics() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let _env_lock = lock_known_hosts_env();
+    let known_hosts_path = sample_known_hosts_path("workspace-host-key-page-mode-reject");
+    let host_key = sample_public_key();
+    let _ = fs::remove_file(&known_hosts_path);
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TofuAwareLauncher::new(host_key.clone())),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_workspace_session_local_action_requested("reject-host-key".into());
+    flush_runtime_projection();
+
+    assert_eq!(
+        app.get_workspace_session_host_mode().as_str(),
+        "connection-progress"
+    );
+    assert_eq!(
+        app.get_workspace_session_connection_page_mode().as_str(),
+        "troubleshooting"
+    );
+    assert_eq!(
+        app.get_workspace_session_connection_task_title().as_str(),
+        "Verify host key"
+    );
+    assert!(
+        app.get_workspace_session_connection_task_detail()
+            .as_str()
+            .contains("Rejected unknown SSH host key"),
+        "troubleshooting-mode task detail should preserve the rejection summary"
     );
 
     let _ = fs::remove_file(known_hosts_path);

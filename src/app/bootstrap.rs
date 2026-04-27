@@ -3048,10 +3048,73 @@ fn default_connection_progress_detail(headline: ConnectionHeadlineState) -> &'st
     }
 }
 
+fn default_connection_progress_task_title(headline: ConnectionHeadlineState) -> &'static str {
+    match headline {
+        ConnectionHeadlineState::Connecting => "Connecting",
+        ConnectionHeadlineState::WaitingUser => "Waiting for confirmation",
+        ConnectionHeadlineState::Connected => "Connected",
+        ConnectionHeadlineState::Cancelled => "Connection cancelled",
+        ConnectionHeadlineState::Error => "Connection failed",
+    }
+}
+
+fn connection_progress_page_mode(
+    attempt: &ConnectionAttemptState,
+    current_step: Option<&ConnectionStepStateItem>,
+) -> &'static str {
+    if attempt.prompt.is_some()
+        || current_step.is_some_and(|step| step.state == ConnectionStepState::Blocked)
+    {
+        return "decision";
+    }
+
+    if matches!(
+        attempt.headline,
+        ConnectionHeadlineState::Cancelled | ConnectionHeadlineState::Error
+    ) || current_step.is_some_and(|step| {
+        matches!(
+            step.state,
+            ConnectionStepState::Failed | ConnectionStepState::Cancelled
+        )
+    }) {
+        return "troubleshooting";
+    }
+
+    "progressing"
+}
+
+fn connection_progress_task_title(
+    attempt: &ConnectionAttemptState,
+    current_step: Option<&ConnectionStepStateItem>,
+) -> String {
+    if attempt.prompt.is_some()
+        || current_step.is_some_and(|step| step.step_kind == "verify-host-key")
+    {
+        return "Verify host key".into();
+    }
+
+    current_step
+        .map(|step| step.title.clone())
+        .unwrap_or_else(|| default_connection_progress_task_title(attempt.headline).into())
+}
+
+fn connection_progress_task_detail(
+    attempt: &ConnectionAttemptState,
+    current_step: Option<&ConnectionStepStateItem>,
+) -> String {
+    current_step
+        .map(|step| step.detail.clone())
+        .or_else(|| attempt.diagnostics.last().map(|line| line.message.clone()))
+        .unwrap_or_else(|| default_connection_progress_detail(attempt.headline).into())
+}
+
 fn clear_workspace_connection_progress_state(window: &AppWindow) {
     window.set_workspace_session_connection_headline("".into());
     window.set_workspace_session_connection_current_hop("".into());
     window.set_workspace_session_connection_current_detail("".into());
+    window.set_workspace_session_connection_page_mode("".into());
+    window.set_workspace_session_connection_task_title("".into());
+    window.set_workspace_session_connection_task_detail("".into());
     window.set_workspace_session_host_key_prompt_host("".into());
     window.set_workspace_session_host_key_prompt_fingerprint("".into());
     sync_vec_model(
@@ -3090,6 +3153,9 @@ fn sync_workspace_connection_progress_state(
     };
 
     let current_step = active_connection_progress_step(&attempt);
+    let page_mode = connection_progress_page_mode(&attempt, current_step);
+    let task_title = connection_progress_task_title(&attempt, current_step);
+    let task_detail = connection_progress_task_detail(&attempt, current_step);
     let steps = attempt
         .steps
         .iter()
@@ -3111,19 +3177,16 @@ fn sync_workspace_connection_progress_state(
     window.set_workspace_session_connection_headline(
         connection_progress_headline_token(attempt.headline).into(),
     );
+    window.set_workspace_session_connection_page_mode(page_mode.into());
     window.set_workspace_session_connection_current_hop(
         current_step
             .map(|step| step.hop_label.clone())
             .unwrap_or_default()
             .into(),
     );
-    window.set_workspace_session_connection_current_detail(
-        current_step
-            .map(|step| step.detail.clone())
-            .or_else(|| attempt.diagnostics.last().map(|line| line.message.clone()))
-            .unwrap_or_else(|| default_connection_progress_detail(attempt.headline).into())
-            .into(),
-    );
+    window.set_workspace_session_connection_current_detail(task_detail.clone().into());
+    window.set_workspace_session_connection_task_title(task_title.into());
+    window.set_workspace_session_connection_task_detail(task_detail.into());
     window.set_workspace_session_host_key_prompt_host(
         attempt
             .prompt
