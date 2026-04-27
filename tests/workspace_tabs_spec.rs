@@ -1289,6 +1289,38 @@ fn connection_progress_workspace_host_contract_exposes_timeline_models_and_foote
         "TerminalSessionHost should render a dedicated connection-progress branch"
     );
     assert!(
+        terminal_host.contains("summary-header := Rectangle {"),
+        "connection-progress host should expose a summary header inside the redesigned single-sheet skeleton"
+    );
+    assert!(
+        terminal_host.contains("workflow-rail := Rectangle {"),
+        "connection-progress host should expose a compact workflow rail inside the redesigned single-sheet skeleton"
+    );
+    assert!(
+        terminal_host.contains("current-task-panel := Rectangle {"),
+        "connection-progress host should expose a unified current-task panel inside the redesigned single-sheet skeleton"
+    );
+    assert!(
+        terminal_host.contains("diagnostics-section := Rectangle {"),
+        "connection-progress host should expose a dedicated diagnostics disclosure section inside the redesigned single-sheet skeleton"
+    );
+    assert!(
+        !terminal_host.contains("header-card := Rectangle {"),
+        "connection-progress host should drop the old stacked header card"
+    );
+    assert!(
+        !terminal_host.contains("timeline-card := Rectangle {"),
+        "connection-progress host should drop the old stacked timeline card"
+    );
+    assert!(
+        !terminal_host.contains("current-detail-card := Rectangle {"),
+        "connection-progress host should drop the old split current-detail card"
+    );
+    assert!(
+        !terminal_host.contains("diagnostics-card := Rectangle {"),
+        "connection-progress host should drop the old standalone diagnostics card"
+    );
+    assert!(
         terminal_host.contains("Diagnostics"),
         "connection-progress host should expose a diagnostics disclosure label"
     );
@@ -1360,9 +1392,26 @@ fn connection_progress_workspace_host_contract_exposes_inline_host_key_actions()
         terminal_host.contains("trust-host-key"),
         "host-key trust should route back through the workspace local-action callback"
     );
+    let reject_action_index = terminal_host
+        .find("reject-host-key")
+        .expect("reject host key callback should remain routed");
+    let reject_action_window = &terminal_host[reject_action_index.saturating_sub(220)
+        ..(reject_action_index + 120).min(terminal_host.len())];
+    assert!(
+        reject_action_window.contains("Cancel"),
+        "connection-progress host should expose an inline cancel action for unknown host keys"
+    );
+    assert!(
+        !reject_action_window.contains("Reject"),
+        "connection-progress host should stop exposing the old inline reject copy for unknown host keys"
+    );
     assert!(
         terminal_host.contains("reject-host-key"),
         "host-key rejection should route back through the workspace local-action callback"
+    );
+    assert!(
+        !terminal_host.contains("host-key-card := Rectangle {"),
+        "connection-progress host should fold host-key verification into the unified current-task panel"
     );
 }
 
