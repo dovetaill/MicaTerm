@@ -3,7 +3,6 @@
 use crate::app::terminal_model::TerminalModelFrame;
 use crate::app::terminal_semantic::SemanticSpan;
 use crate::app::terminal_semantic::input_line::prompt_input_start;
-use crate::theme::SemanticStyleRole;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandBlockStatus {
@@ -38,6 +37,11 @@ pub fn detect_command_blocks(
     frame: &TerminalModelFrame,
     spans: &[SemanticSpan],
 ) -> Vec<CommandBlock> {
+    let _ = spans;
+    if !frame.shell_integration.has_markers {
+        return Vec::new();
+    }
+
     let mut prompt_rows = Vec::new();
     for (index, row) in frame.rows.iter().enumerate() {
         let Some(input_start_col) = prompt_input_start(row) else {
@@ -63,10 +67,8 @@ pub fn detect_command_blocks(
             .get(end_index)
             .map(|row| row.row_index)
             .unwrap_or(*prompt_row);
-        let status = if next_prompt_index.is_none() && frame.viewport_at_bottom {
+        let status = if next_prompt_index.is_none() && frame.shell_integration.input_active {
             CommandBlockStatus::Running
-        } else if block_has_failure_signal(*prompt_row, end_row, spans) {
-            CommandBlockStatus::Failure
         } else {
             CommandBlockStatus::Success
         };
@@ -94,18 +96,6 @@ pub fn overview_markers_for(blocks: &[CommandBlock]) -> Vec<OverviewMarker> {
             },
         })
         .collect()
-}
-
-fn block_has_failure_signal(start_row: u32, end_row: u32, spans: &[SemanticSpan]) -> bool {
-    spans.iter().any(|span| {
-        (start_row..=end_row).contains(&span.row)
-            && matches!(
-                span.role,
-                SemanticStyleRole::OutputSeverityError
-                    | SemanticStyleRole::OutputFailureKeyword
-                    | SemanticStyleRole::CommandStatusFailure
-            )
-    })
 }
 
 fn substring_by_cols(text: &str, start_col: u32) -> String {

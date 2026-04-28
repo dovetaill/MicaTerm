@@ -23,7 +23,9 @@ pub struct TerminalSurfaceState {
     pub cursor: TerminalCursorState,
     pub alternate_screen_active: bool,
     pub mouse_grabbed: bool,
+    pub application_cursor_keys: bool,
     pub bracketed_paste_enabled: bool,
+    pub shell_integration: TerminalShellIntegrationState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,7 +50,16 @@ pub struct TerminalSurfaceSignature {
     pub cursor_bg_rgba: u32,
     pub alternate_screen_active: bool,
     pub mouse_grabbed: bool,
+    pub application_cursor_keys: bool,
     pub bracketed_paste_enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TerminalShellIntegrationState {
+    pub has_markers: bool,
+    pub input_active: bool,
+    pub command_running: bool,
+    pub last_command_exit_code: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -181,7 +192,9 @@ impl TerminalSurfaceState {
             cursor: frame.cursor,
             alternate_screen_active: frame.alternate_screen_active,
             mouse_grabbed: frame.mouse_grabbed,
+            application_cursor_keys: frame.application_cursor_keys,
             bracketed_paste_enabled: frame.bracketed_paste_enabled,
+            shell_integration: TerminalShellIntegrationState::default(),
         }
     }
 
@@ -207,6 +220,7 @@ impl TerminalSurfaceState {
             cursor_bg_rgba: self.cursor.bg_rgba,
             alternate_screen_active: self.alternate_screen_active,
             mouse_grabbed: self.mouse_grabbed,
+            application_cursor_keys: self.application_cursor_keys,
             bracketed_paste_enabled: self.bracketed_paste_enabled,
         }
     }
@@ -252,7 +266,9 @@ impl TerminalSurfaceState {
             },
             alternate_screen_active: false,
             mouse_grabbed: false,
+            application_cursor_keys: false,
             bracketed_paste_enabled: false,
+            shell_integration: TerminalShellIntegrationState::default(),
         }
     }
 

@@ -5,8 +5,7 @@ use mica_term::app::ssh::runtime::{
 use mica_term::app::terminal_core::TerminalCoreKind;
 use mica_term::app::terminal_model::TerminalModelFrame;
 use mica_term::app::terminal_semantic::{
-    SemanticInputSpanKind, SemanticOutputBlockKind, detect_input_line_overlays,
-    detect_output_block_overlays,
+    SemanticInputSpanKind, detect_input_line_overlays, detect_output_block_overlays,
 };
 use std::fs;
 #[path = "support/retired_windows_subsystem.rs"]
@@ -123,34 +122,32 @@ fn remote_output_keeps_following_when_viewport_is_at_bottom() {
 }
 
 #[test]
-fn semantic_overlay_detects_json_blocks_over_normal_shell_output() {
+fn semantic_overlay_does_not_paint_json_blocks_over_normal_shell_output() {
     let frame = semantic_model_frame(&["{", "  \"name\": \"mica-term\"", "}"]);
 
     let overlays = detect_output_block_overlays(&frame);
 
-    assert_eq!(overlays.len(), 1);
-    assert_eq!(overlays[0].kind, SemanticOutputBlockKind::Json);
-    assert_eq!(overlays[0].start_row, 0);
-    assert_eq!(overlays[0].end_row, 2);
-    assert_eq!(overlays[0].row_ranges.len(), 3);
+    assert!(
+        overlays.is_empty(),
+        "generic JSON output should stay visually neutral instead of receiving a block tint overlay"
+    );
     assert_eq!(frame.rows[1].text, "  \"name\": \"mica-term\"");
 }
 
 #[test]
-fn semantic_overlay_detects_xml_blocks_over_normal_shell_output() {
+fn semantic_overlay_does_not_paint_xml_blocks_over_normal_shell_output() {
     let frame = semantic_model_frame(&["<root>", "  <item>mica-term</item>", "</root>"]);
 
     let overlays = detect_output_block_overlays(&frame);
 
-    assert_eq!(overlays.len(), 1);
-    assert_eq!(overlays[0].kind, SemanticOutputBlockKind::Xml);
-    assert_eq!(overlays[0].start_row, 0);
-    assert_eq!(overlays[0].end_row, 2);
-    assert_eq!(overlays[0].row_ranges.len(), 3);
+    assert!(
+        overlays.is_empty(),
+        "generic XML output should stay visually neutral instead of receiving a block tint overlay"
+    );
 }
 
 #[test]
-fn semantic_overlay_detects_log_blocks_over_normal_shell_output() {
+fn semantic_overlay_does_not_paint_log_blocks_over_normal_shell_output() {
     let frame = semantic_model_frame(&[
         "[INFO] booting mica-term",
         "[WARN] startup fallback disabled",
@@ -159,11 +156,10 @@ fn semantic_overlay_detects_log_blocks_over_normal_shell_output() {
 
     let overlays = detect_output_block_overlays(&frame);
 
-    assert_eq!(overlays.len(), 1);
-    assert_eq!(overlays[0].kind, SemanticOutputBlockKind::Log);
-    assert_eq!(overlays[0].start_row, 0);
-    assert_eq!(overlays[0].end_row, 2);
-    assert_eq!(overlays[0].row_ranges.len(), 3);
+    assert!(
+        overlays.is_empty(),
+        "generic log blocks should not be tinted because they are too easy to confuse with ordinary prose and TUI text"
+    );
 }
 
 #[test]

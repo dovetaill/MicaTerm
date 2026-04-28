@@ -1,9 +1,8 @@
 use mica_term::app::ssh::runtime::TerminalSurfaceState;
 use mica_term::app::terminal_model::{TerminalModelCell, TerminalModelFrame};
 use mica_term::app::terminal_semantic::{
-    CommandBlockStatus, OutputRuleProfile, OverviewMarkerKind, SemanticAnnotationSet,
-    TerminalSemanticSettings, analyze_semantic_annotations,
-    analyze_semantic_annotations_with_settings,
+    OutputRuleProfile, SemanticAnnotationSet, TerminalSemanticSettings,
+    analyze_semantic_annotations, analyze_semantic_annotations_with_settings,
 };
 use mica_term::theme::{
     SearchMatchHighlightStrength, SemanticStyleRole, ThemeMode, ThemeVariant, app_theme_spec,
@@ -39,7 +38,7 @@ fn has_role(
 }
 
 #[test]
-fn semantic_pipeline_classifies_input_roles_and_command_status_markers() {
+fn semantic_pipeline_keeps_input_tokens_but_stops_guessing_output_status_from_prose() {
     let frame = semantic_model_frame(&[
         "[dev@mica ~]$ cargo test",
         "src/app/bootstrap.rs:2476:9: ERROR Permission denied while reaching 10.0.0.8:22",
@@ -107,18 +106,6 @@ fn semantic_pipeline_classifies_input_roles_and_command_status_markers() {
     assert!(has_role(
         &annotations,
         1,
-        "ERROR",
-        SemanticStyleRole::OutputSeverityError,
-    ));
-    assert!(has_role(
-        &annotations,
-        1,
-        "Permission denied",
-        SemanticStyleRole::OutputFailureKeyword,
-    ));
-    assert!(has_role(
-        &annotations,
-        1,
         "10.0.0.8:22",
         SemanticStyleRole::OutputNetworkEndpoint,
     ));
@@ -140,38 +127,32 @@ fn semantic_pipeline_classifies_input_roles_and_command_status_markers() {
         "C:\\Temp\\mica-term\\log.txt",
         SemanticStyleRole::OutputWindowsPath,
     ));
-    assert!(has_role(
-        &annotations,
-        2,
-        "2026-04-22T18:32:10Z",
-        SemanticStyleRole::OutputTimestamp,
-    ));
-
-    assert_eq!(annotations.command_blocks.len(), 2);
-    assert_eq!(
-        annotations.command_blocks[0].status,
-        CommandBlockStatus::Failure
-    );
-    assert_eq!(
-        annotations.command_blocks[1].status,
-        CommandBlockStatus::Running
+    assert!(
+        !annotations
+            .spans
+            .iter()
+            .any(|span| {
+                matches!(
+                    span.role,
+                    SemanticStyleRole::OutputSeverityError
+                        | SemanticStyleRole::OutputFailureKeyword
+                        | SemanticStyleRole::OutputTimestamp
+                )
+            }),
+        "ordinary output prose should keep stable link/path detection but should not be recolored from guessed severity/failure/timestamp keywords"
     );
     assert!(
-        annotations
-            .overview_markers
-            .iter()
-            .any(|marker| { marker.row == 0 && marker.kind == OverviewMarkerKind::CommandFailure })
+        annotations.command_blocks.is_empty(),
+        "without explicit shell-integration truth, command status decorations should stay off instead of guessing success/failure from transcript prose"
     );
     assert!(
-        annotations
-            .overview_markers
-            .iter()
-            .any(|marker| { marker.row == 3 && marker.kind == OverviewMarkerKind::CommandRunning })
+        annotations.overview_markers.is_empty(),
+        "overview markers should stay empty when command status is not trustworthy"
     );
 }
 
 #[test]
-fn semantic_pipeline_detects_diff_and_obvious_json_roles() {
+fn semantic_pipeline_does_not_semantically_recolor_diff_or_json_output() {
     let frame = semantic_model_frame(&[
         "@@ -1,3 +1,3 @@",
         "- old_value",
@@ -185,48 +166,21 @@ fn semantic_pipeline_detects_diff_and_obvious_json_roles() {
 
     let annotations = analyze_semantic_annotations(&frame);
 
-    assert!(has_role(
-        &annotations,
-        0,
-        "@@ -1,3 +1,3 @@",
-        SemanticStyleRole::OutputDiffHunk
-    ));
-    assert!(has_role(
-        &annotations,
-        1,
-        "- old_value",
-        SemanticStyleRole::OutputDiffRemoved
-    ));
-    assert!(has_role(
-        &annotations,
-        2,
-        "+ new_value",
-        SemanticStyleRole::OutputDiffAdded
-    ));
-    assert!(has_role(
-        &annotations,
-        4,
-        "\"name\"",
-        SemanticStyleRole::OutputJsonKey
-    ));
-    assert!(has_role(
-        &annotations,
-        4,
-        "\"mica-term\"",
-        SemanticStyleRole::OutputJsonString,
-    ));
-    assert!(has_role(
-        &annotations,
-        5,
-        "2",
-        SemanticStyleRole::OutputJsonNumber
-    ));
-    assert!(has_role(
-        &annotations,
-        6,
-        "true",
-        SemanticStyleRole::OutputJsonBoolean
-    ));
+    assert!(
+        !annotations.spans.iter().any(|span| {
+            matches!(
+                span.role,
+                SemanticStyleRole::OutputDiffHunk
+                    | SemanticStyleRole::OutputDiffAdded
+                    | SemanticStyleRole::OutputDiffRemoved
+                    | SemanticStyleRole::OutputJsonKey
+                    | SemanticStyleRole::OutputJsonString
+                    | SemanticStyleRole::OutputJsonNumber
+                    | SemanticStyleRole::OutputJsonBoolean
+            )
+        }),
+        "diff hunks and JSON tokens should no longer be semantically recolored across arbitrary terminal output"
+    );
 }
 
 #[test]
@@ -289,7 +243,7 @@ fn premium_default_theme_maps_roles_to_product_grade_semantic_styles() {
 #[test]
 fn semantic_style_projection_recolors_default_cells_but_preserves_explicit_ansi_foreground() {
     let theme = app_theme_spec(ThemeMode::Dark, ThemeVariant::PremiumDefault);
-    let mut frame = semantic_model_frame(&["https://example.com ERROR"]);
+    let mut frame = semantic_model_frame(&["https://example.com src/app/bootstrap.rs:2476:9"]);
     let default_fg = frame.palette.default_fg_rgba;
     let default_bg = frame.palette.default_bg_rgba;
     frame.rows[0].cells = frame.rows[0]
@@ -315,11 +269,11 @@ fn semantic_style_projection_recolors_default_cells_but_preserves_explicit_ansi_
         .find(|span| span.role == SemanticStyleRole::OutputUrl)
         .expect("url span")
         .clone();
-    let error_span = annotations
+    let line_reference_span = annotations
         .spans
         .iter()
-        .find(|span| span.role == SemanticStyleRole::OutputSeverityError)
-        .expect("error span")
+        .find(|span| span.role == SemanticStyleRole::OutputLineReference)
+        .expect("line reference span")
         .clone();
 
     let ansi_fg = 0xff44_5566;
@@ -352,21 +306,21 @@ fn semantic_style_projection_recolors_default_cells_but_preserves_explicit_ansi_
         "semantic styling should keep browser-safe URLs free of permanent underlines and rely on Ctrl+click activation instead"
     );
 
-    let error_cell = frame.rows[0]
+    let line_reference_cell = frame.rows[0]
         .cells
         .iter()
-        .find(|cell| cell.col == error_span.start_col)
-        .expect("styled error cell");
+        .find(|cell| cell.col == line_reference_span.start_col)
+        .expect("styled line reference cell");
     assert_eq!(
-        error_cell.fg_rgba,
+        line_reference_cell.fg_rgba,
         0xff00_0000
             | theme
-                .semantic_style(SemanticStyleRole::OutputSeverityError)
+                .semantic_style(SemanticStyleRole::OutputLineReference)
                 .foreground
     );
     assert!(
-        error_cell.bold,
-        "default-colored cells should adopt semantic emphasis for fast scanning"
+        !line_reference_cell.bold,
+        "stable link/path recoloring should change the foreground without fabricating extra emphasis"
     );
     assert!(
         frame.dirty_rows.contains(&0),
@@ -411,7 +365,7 @@ fn semantic_pipeline_respects_feature_toggles_for_spans_and_command_decorations(
 fn semantic_pipeline_supports_focused_output_rules_and_separate_overview_marker_toggle() {
     let frame = semantic_model_frame(&[
         "[dev@mica ~]$ cargo test",
-        "INFO 2026-04-22T18:32:10Z ERROR Permission denied https://example.com/docs",
+        "INFO 2026-04-22T18:32:10Z src/app/bootstrap.rs:2476:9 https://example.com/docs ./relative/path 10.0.0.8:22",
     ]);
 
     let annotations = analyze_semantic_annotations_with_settings(
@@ -430,19 +384,37 @@ fn semantic_pipeline_supports_focused_output_rules_and_separate_overview_marker_
         has_role(
             &annotations,
             1,
-            "ERROR",
-            SemanticStyleRole::OutputSeverityError
+            "https://example.com/docs",
+            SemanticStyleRole::OutputUrl
         ),
-        "focused output rules should still keep high-signal failure cues"
+        "focused output rules should keep navigable links"
     );
     assert!(
         has_role(
             &annotations,
             1,
-            "https://example.com/docs",
-            SemanticStyleRole::OutputUrl
+            "./relative/path",
+            SemanticStyleRole::OutputUnixPath
         ),
-        "focused output rules should keep navigable links"
+        "focused output rules should keep navigable file-system paths"
+    );
+    assert!(
+        has_role(
+            &annotations,
+            1,
+            "src/app/bootstrap.rs:2476:9",
+            SemanticStyleRole::OutputLineReference
+        ),
+        "focused output rules should keep actionable file locations"
+    );
+    assert!(
+        has_role(
+            &annotations,
+            1,
+            "10.0.0.8:22",
+            SemanticStyleRole::OutputNetworkEndpoint
+        ),
+        "focused output rules should keep actionable host:port endpoints"
     );
     assert!(
         !annotations
@@ -455,17 +427,24 @@ fn semantic_pipeline_supports_focused_output_rules_and_separate_overview_marker_
         !annotations
             .spans
             .iter()
-            .any(|span| span.role == SemanticStyleRole::OutputTimestamp),
-        "focused output rules should drop timestamps that add scan noise without actionable value"
+            .any(|span| {
+                matches!(
+                    span.role,
+                    SemanticStyleRole::OutputSeverityError
+                        | SemanticStyleRole::OutputFailureKeyword
+                        | SemanticStyleRole::OutputTimestamp
+                )
+            }),
+        "focused output rules should stay limited to stable navigational affordances instead of recoloring prose severity or timestamp text"
     );
     assert_eq!(
         annotations.command_blocks.len(),
-        1,
-        "turning overview markers off should not suppress command block decorations"
+        0,
+        "focused output rules should not manufacture command-status decorations from prompt-shaped text alone"
     );
     assert!(
         annotations.overview_markers.is_empty(),
-        "overview markers should be independently suppressible while gutter decorations stay active"
+        "overview markers should stay empty when command status remains untrusted"
     );
 }
 
@@ -666,5 +645,110 @@ fn alternate_screen_short_circuits_semantic_projection_layers() {
     assert!(
         annotations.overview_markers.is_empty(),
         "alt-screen should suppress overview markers so shell summaries do not leak into full-screen TUIs"
+    );
+}
+
+#[test]
+fn mouse_grabbed_shell_semantics_do_not_leak_into_inline_interactive_apps() {
+    let mut surface = semantic_surface(&[
+        "# Codex",
+        "> 计划摘要",
+        "普通说明文本 success INFO https://example.com/docs",
+    ]);
+    surface.mouse_grabbed = true;
+    let frame = TerminalModelFrame::from_surface(&surface, None);
+
+    let annotations = analyze_semantic_annotations_with_settings(
+        &frame,
+        TerminalSemanticSettings {
+            input_highlighting_enabled: true,
+            output_rule_highlighting_enabled: true,
+            output_rule_profile: OutputRuleProfile::Default,
+            command_decorations_enabled: true,
+            overview_markers_enabled: true,
+            search_query: None,
+        },
+    );
+
+    assert!(
+        annotations.spans.is_empty(),
+        "mouse-grabbed inline apps should keep their own text presentation instead of inheriting shell transcript recoloring"
+    );
+    assert!(annotations.command_blocks.is_empty());
+    assert!(annotations.overview_markers.is_empty());
+}
+
+#[test]
+fn prompt_fallback_does_not_treat_headings_quotes_or_earlier_scrollback_as_live_input() {
+    let frame = semantic_model_frame(&["# Release notes", "> 引用段落", "普通说明文本"]);
+
+    let annotations = analyze_semantic_annotations(&frame);
+
+    assert!(
+        !annotations.spans.iter().any(|span| {
+            matches!(
+                span.role,
+                SemanticStyleRole::InputPrompt
+                    | SemanticStyleRole::InputCommand
+                    | SemanticStyleRole::InputArgument
+                    | SemanticStyleRole::InputOption
+            )
+        }),
+        "prompt fallback should stay on the live shell input row only and must not reinterpret headings or quoted prose as a command line"
+    );
+}
+
+#[test]
+fn conservative_output_highlighting_keeps_links_and_paths_but_not_prose_keywords() {
+    let frame = semantic_model_frame(&[
+        "Build completed successfully; done reading docs and release notes.",
+        "INFO DEBUG ordinary explanation text should stay plain.",
+        "https://example.com/docs ./relative/path src/app/bootstrap.rs:2476:9",
+    ]);
+
+    let annotations = analyze_semantic_annotations(&frame);
+
+    assert!(
+        has_role(
+            &annotations,
+            2,
+            "https://example.com/docs",
+            SemanticStyleRole::OutputUrl
+        ) && has_role(
+            &annotations,
+            2,
+            "./relative/path",
+            SemanticStyleRole::OutputUnixPath
+        ) && has_role(
+            &annotations,
+            2,
+            "src/app/bootstrap.rs:2476:9",
+            SemanticStyleRole::OutputLineReference
+        ),
+        "conservative output highlighting should keep stable actionable detectors"
+    );
+    assert!(
+        !annotations.spans.iter().any(|span| {
+            span.row <= 1
+                && matches!(
+                    span.role,
+                    SemanticStyleRole::OutputSuccessKeyword
+                        | SemanticStyleRole::OutputSeverityInfo
+                        | SemanticStyleRole::OutputSeverityDebug
+                        | SemanticStyleRole::OutputFailureKeyword
+                )
+        }),
+        "ordinary prose should not be recolored just because it happens to contain generic success or log-level words"
+    );
+}
+
+#[test]
+fn presenter_tracks_raw_and_styled_frames_separately_for_terminal_semantics() {
+    let presenter = fs::read_to_string("src/app/terminal_presenter.rs").expect("read presenter");
+
+    assert!(
+        presenter.contains("previous_source_frame")
+            && presenter.contains("previous_styled_frame"),
+        "terminal presenter should retain raw source frames separately from styled frames so semantic recoloring does not feed back into later raw diffing"
     );
 }

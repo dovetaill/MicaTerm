@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use crate::app::ssh::runtime::{TerminalCellState, TerminalCursorShape, TerminalSurfaceState};
+use crate::app::ssh::runtime::{
+    TerminalCellState, TerminalCursorShape, TerminalShellIntegrationState, TerminalSurfaceState,
+};
 use crate::app::terminal_semantic::SemanticSpan;
 use crate::theme::{AppThemeSpec, SearchMatchHighlightStrength, SemanticStyleRole};
 use uuid::Uuid;
@@ -24,8 +26,33 @@ pub struct TerminalModelFrame {
     pub viewport_at_bottom: bool,
     pub alternate_screen_active: bool,
     pub mouse_grabbed: bool,
+    pub application_cursor_keys: bool,
     pub bracketed_paste_enabled: bool,
+    pub presentation_mode: TerminalPresentationMode,
+    pub shell_integration: TerminalShellIntegrationState,
     pub dirty_rows: Vec<u32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerminalPresentationMode {
+    ShellLive,
+    ShellScrollback,
+    InlineInteractiveApp,
+    AlternateScreenTui,
+}
+
+impl TerminalPresentationMode {
+    fn from_surface(surface: &TerminalSurfaceState) -> Self {
+        if surface.alternate_screen_active {
+            Self::AlternateScreenTui
+        } else if surface.mouse_grabbed || surface.application_cursor_keys {
+            Self::InlineInteractiveApp
+        } else if surface.viewport_at_bottom {
+            Self::ShellLive
+        } else {
+            Self::ShellScrollback
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -101,6 +128,7 @@ impl TerminalModelFrame {
             row_bg_even_rgba: surface.row_bg_even_rgba,
             row_bg_odd_rgba: surface.row_bg_odd_rgba,
         };
+        let presentation_mode = TerminalPresentationMode::from_surface(surface);
 
         let mut rows = Vec::with_capacity(surface.rows as usize);
         for row_index in 0..surface.rows {
@@ -164,7 +192,10 @@ impl TerminalModelFrame {
             viewport_at_bottom: surface.viewport_at_bottom,
             alternate_screen_active: surface.alternate_screen_active,
             mouse_grabbed: surface.mouse_grabbed,
+            application_cursor_keys: surface.application_cursor_keys,
             bracketed_paste_enabled: surface.bracketed_paste_enabled,
+            presentation_mode,
+            shell_integration: surface.shell_integration,
             dirty_rows,
         }
     }

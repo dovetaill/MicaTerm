@@ -279,7 +279,7 @@ pub(super) fn link_affordance_at_surface(
 }
 
 fn surface_allows_link_affordance(surface: &TerminalSurfaceState) -> bool {
-    !surface.alternate_screen_active && !surface.mouse_grabbed
+    !surface.alternate_screen_active && !surface.mouse_grabbed && !surface.application_cursor_keys
 }
 
 fn url_token_hit_at_surface(

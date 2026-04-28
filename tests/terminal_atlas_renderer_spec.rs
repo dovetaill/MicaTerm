@@ -63,7 +63,9 @@ fn manual_surface(rows: u32, cols: u32, cells: Vec<TerminalCellState>) -> Termin
         },
         alternate_screen_active: false,
         mouse_grabbed: false,
+        application_cursor_keys: false,
         bracketed_paste_enabled: false,
+        shell_integration: Default::default(),
     }
 }
 

@@ -46,6 +46,7 @@ pub struct TerminalFrameSnapshot {
     pub selection: SelectionState,
     pub alternate_screen_active: bool,
     pub mouse_grabbed: bool,
+    pub application_cursor_keys: bool,
     pub bracketed_paste_enabled: bool,
 }
 

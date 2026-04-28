@@ -2227,7 +2227,10 @@ fn workspace_terminal_link_mouse_decision(
         return WorkspaceTerminalLinkMouseDecision::Forward;
     };
 
-    if surface.alternate_screen_active || surface.mouse_grabbed {
+    if surface.alternate_screen_active
+        || surface.mouse_grabbed
+        || surface.application_cursor_keys
+    {
         candidate.take();
         return WorkspaceTerminalLinkMouseDecision::Forward;
     }

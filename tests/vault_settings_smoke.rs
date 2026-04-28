@@ -2,7 +2,7 @@
 
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::bind_top_status_bar_with_store;
-use mica_term::app::ui_preferences::UiPreferencesStore;
+use mica_term::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use std::fs;
 
 #[test]
@@ -103,28 +103,47 @@ fn settings_modal_exposes_default_terminal_preferences() {
 
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
+    let defaults = UiPreferences::default();
 
     app.invoke_open_settings_panel_requested();
 
-    assert_eq!(app.get_settings_modal_terminal_scrollback_limit(), 1500);
-    assert!(app.get_settings_modal_terminal_active_idle_shrink_enabled());
-    assert!(app.get_settings_modal_terminal_input_highlighting_enabled());
-    assert!(app.get_settings_modal_terminal_output_rule_highlighting_enabled());
-    assert!(app.get_settings_modal_terminal_command_decorations_enabled());
-    assert!(app.get_settings_modal_terminal_overview_markers_enabled());
+    assert_eq!(
+        app.get_settings_modal_terminal_scrollback_limit(),
+        defaults.terminal_scrollback_limit as i32
+    );
+    assert_eq!(
+        app.get_settings_modal_terminal_active_idle_shrink_enabled(),
+        defaults.terminal_active_idle_shrink_enabled
+    );
+    assert_eq!(
+        app.get_settings_modal_terminal_input_highlighting_enabled(),
+        defaults.terminal_input_highlighting_enabled
+    );
+    assert_eq!(
+        app.get_settings_modal_terminal_output_rule_highlighting_enabled(),
+        defaults.terminal_output_rule_highlighting_enabled
+    );
+    assert_eq!(
+        app.get_settings_modal_terminal_command_decorations_enabled(),
+        defaults.terminal_command_decorations_enabled
+    );
+    assert_eq!(
+        app.get_settings_modal_terminal_overview_markers_enabled(),
+        defaults.terminal_overview_markers_enabled
+    );
     assert_eq!(
         app.get_settings_modal_terminal_output_rule_profile()
             .as_str(),
-        "default"
+        defaults.terminal_output_rule_profile.id()
     );
     assert_eq!(
         app.get_settings_modal_terminal_search_match_highlight()
             .as_str(),
-        "balanced"
+        defaults.terminal_search_match_highlight.id()
     );
     assert_eq!(
         app.get_settings_modal_theme_variant().as_str(),
-        "premium_default"
+        defaults.theme_variant.id()
     );
 }
 

@@ -25,10 +25,14 @@ fn ui_preferences_default_terminal_settings_match_memory_plan() {
     assert!(prefs.terminal_input_highlighting_enabled);
     assert!(prefs.terminal_output_rule_highlighting_enabled);
     assert!(prefs.terminal_command_decorations_enabled);
-    assert!(prefs.terminal_overview_markers_enabled);
+    assert!(
+        !prefs.terminal_overview_markers_enabled,
+        "overview markers should default off so transcript guesses do not add extra terminal chrome until the user opts in"
+    );
     assert_eq!(
         prefs.terminal_output_rule_profile,
-        OutputRuleProfile::Default
+        OutputRuleProfile::Focused,
+        "terminal output highlighting should default to the focused low-risk profile"
     );
     assert_eq!(
         prefs.terminal_search_match_highlight,

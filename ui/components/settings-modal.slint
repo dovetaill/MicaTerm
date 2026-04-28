@@ -20,8 +20,8 @@ export component SettingsModal inherits Rectangle {
     in property <bool> terminal-input-highlighting-enabled: true;
     in property <bool> terminal-output-rule-highlighting-enabled: true;
     in property <bool> terminal-command-decorations-enabled: true;
-    in property <bool> terminal-overview-markers-enabled: true;
-    in property <string> terminal-output-rule-profile: "default";
+    in property <bool> terminal-overview-markers-enabled: false;
+    in property <string> terminal-output-rule-profile: "focused";
     in property <string> terminal-search-match-highlight: "balanced";
     in property <string> download-conflict-default: "ask";
     callback terminal-scrollback-limit-changed(int);

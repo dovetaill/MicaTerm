@@ -35,6 +35,7 @@ pub(super) async fn run_channel_pump(
     let mut dirty_timer_interval: Option<std::time::Duration> = None;
     let mut working_set_trim_scheduler = WorkingSetTrimScheduler::default();
     let mut working_set_trim_timer: Option<std::pin::Pin<Box<Sleep>>> = None;
+    let mut shell_integration = super::TerminalShellIntegrationState::default();
 
     loop {
         tokio::select! {
@@ -192,8 +193,13 @@ pub(super) async fn run_channel_pump(
                 match maybe_message {
                     Some(ChannelMsg::Data { data }) | Some(ChannelMsg::ExtendedData { data, .. }) => {
                         let parsed = runtime_shell_events(data.as_ref());
-                        if let Some(cwd) = parsed.cwd {
-                            let _ = event_tx.send(SessionRuntimeEvent::CurrentDirectoryChanged(cwd));
+                        if let Some(cwd) = parsed.cwd.as_ref() {
+                            let _ = event_tx.send(SessionRuntimeEvent::CurrentDirectoryChanged(cwd.clone()));
+                        }
+                        if apply_shell_integration_events(&mut shell_integration, &parsed) {
+                            let _ = event_tx.send(SessionRuntimeEvent::ShellIntegrationChanged(
+                                shell_integration,
+                            ));
                         }
                         if !parsed.sanitized_bytes.is_empty() {
                             apply_remote_output(&terminal, &parsed.sanitized_bytes);
@@ -244,6 +250,37 @@ pub(super) async fn run_channel_pump(
             }
         }
     }
+}
+
+fn apply_shell_integration_events(
+    state: &mut super::TerminalShellIntegrationState,
+    parsed: &crate::app::ssh::shell_integration::RuntimeShellEvents,
+) -> bool {
+    let before = *state;
+
+    if parsed.prompt_started {
+        state.has_markers = true;
+        state.input_active = false;
+        state.command_running = false;
+    }
+    if parsed.prompt_ended {
+        state.has_markers = true;
+        state.input_active = true;
+        state.command_running = false;
+    }
+    if parsed.command_started {
+        state.has_markers = true;
+        state.input_active = false;
+        state.command_running = true;
+    }
+    if parsed.command_finished {
+        state.has_markers = true;
+        state.input_active = false;
+        state.command_running = false;
+        state.last_command_exit_code = parsed.command_finish_exit_code;
+    }
+
+    *state != before
 }
 
 #[derive(Debug, Default)]

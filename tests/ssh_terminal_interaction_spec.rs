@@ -265,6 +265,21 @@ fn surface_state_tracks_alternate_screen_activity_for_semantic_guards() {
 }
 
 #[test]
+fn surface_state_tracks_application_cursor_key_mode_for_inline_app_guards() {
+    let mut session = TerminalSession::new(24, 80);
+
+    let initial = session.surface_state(Uuid::new_v4());
+    session.apply_remote_bytes(b"\x1b[?1h");
+    let app_cursor = session.surface_state(Uuid::new_v4());
+    session.apply_remote_bytes(b"\x1b[?1l");
+    let restored = session.surface_state(Uuid::new_v4());
+
+    assert!(!initial.application_cursor_keys);
+    assert!(app_cursor.application_cursor_keys);
+    assert!(!restored.application_cursor_keys);
+}
+
+#[test]
 fn workspace_terminal_trims_trailing_punctuation_from_http_tokens() {
     let mut session = TerminalSession::new(4, 80);
     session.apply_remote_bytes(b"see https://example.com).\r\n");
@@ -313,6 +328,14 @@ fn workspace_terminal_link_affordance_requires_safe_surface_state_and_ctrl_for_a
         workspace_terminal_link_affordance_for_test(&surface, 0, 8, true),
         WorkspaceTerminalLinkAffordance::default(),
         "mouse-grabbed TUI sessions should suppress host link affordances so applications keep control of the pointer"
+    );
+
+    surface.mouse_grabbed = false;
+    surface.application_cursor_keys = true;
+    assert_eq!(
+        workspace_terminal_link_affordance_for_test(&surface, 0, 8, true),
+        WorkspaceTerminalLinkAffordance::default(),
+        "application-cursor inline apps should also suppress host link affordances so app-mode terminal UIs keep ownership of navigation"
     );
 }
 

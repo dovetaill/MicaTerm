@@ -55,7 +55,7 @@ use mica_term::app::ssh::profile::{ConnectionProfile, ConnectionProxyProfile, Ss
 use mica_term::app::ssh::runtime::{
     SessionRuntimeEvent, TerminalKeyEvent, TerminalKeyKind, TerminalMouseButton,
     TerminalMouseEventKind, TerminalMouseInput, TerminalRuntimeDefaults, TerminalSession,
-    TerminalSurfaceState, UnknownHostKeyError,
+    TerminalShellIntegrationState, TerminalSurfaceState, UnknownHostKeyError,
 };
 use mica_term::app::ssh::session_manager::{
     EnhancementPolicy, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher,
@@ -2104,6 +2104,14 @@ impl SessionRuntimeLauncher for InteractiveProjectionLauncher {
     {
         Box::pin(async move {
             let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::ShellIntegrationChanged(
+                TerminalShellIntegrationState {
+                    has_markers: true,
+                    input_active: true,
+                    command_running: false,
+                    last_command_exit_code: Some(0),
+                },
+            ));
             let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(
                 terminal_surface_with_cells(
                     session_id,
@@ -2399,6 +2407,14 @@ impl SessionRuntimeControl for InteractiveProjectionRuntimeControl {
     }
 
     fn send_text_input(&self, text: String) -> Result<()> {
+        let _ = self.event_tx.send(SessionRuntimeEvent::ShellIntegrationChanged(
+            TerminalShellIntegrationState {
+                has_markers: true,
+                input_active: true,
+                command_running: false,
+                last_command_exit_code: Some(0),
+            },
+        ));
         let _ = self.event_tx.send(SessionRuntimeEvent::SurfaceChanged(
             terminal_surface_with_cells(
                 self.session_id,
@@ -2417,6 +2433,14 @@ impl SessionRuntimeControl for InteractiveProjectionRuntimeControl {
             TerminalKeyKind::Function(number) => format!("f{number}"),
             TerminalKeyKind::Char(ch) => ch.to_string(),
         };
+        let _ = self.event_tx.send(SessionRuntimeEvent::ShellIntegrationChanged(
+            TerminalShellIntegrationState {
+                has_markers: true,
+                input_active: true,
+                command_running: false,
+                last_command_exit_code: Some(0),
+            },
+        ));
         let _ = self.event_tx.send(SessionRuntimeEvent::SurfaceChanged(
             terminal_surface_with_cells(
                 self.session_id,
@@ -8640,9 +8664,10 @@ fn workspace_terminal_command_decorations_toggle_reprojects_existing_surface() {
         app.get_workspace_session_command_blocks().row_count() > 0,
         "an interactive prompt line should project at least one running command block while decorations stay enabled"
     );
-    assert!(
-        app.get_workspace_session_overview_markers().row_count() > 0,
-        "command decorations should surface overview markers for the same projected command state"
+    assert_eq!(
+        app.get_workspace_session_overview_markers().row_count(),
+        0,
+        "overview markers should now default off until the user explicitly opts into extra transcript chrome"
     );
 
     app.invoke_settings_modal_terminal_command_decorations_enabled_changed(false);
@@ -8656,9 +8681,10 @@ fn workspace_terminal_command_decorations_toggle_reprojects_existing_surface() {
         app.get_workspace_session_command_blocks().row_count() > 0,
         "re-enabling decorations should re-project the existing workspace surface without waiting for new terminal output"
     );
-    assert!(
-        app.get_workspace_session_overview_markers().row_count() > 0,
-        "overview markers should return together with command block decorations"
+    assert_eq!(
+        app.get_workspace_session_overview_markers().row_count(),
+        0,
+        "re-enabling decorations alone should not force overview markers back on"
     );
 }
 
@@ -8686,9 +8712,17 @@ fn workspace_terminal_overview_markers_toggle_reprojects_existing_surface() {
         app.get_workspace_session_command_blocks().row_count() > 0,
         "command gutter decorations should be present before toggling overview markers"
     );
+    assert_eq!(
+        app.get_workspace_session_overview_markers().row_count(),
+        0,
+        "overview markers should start off by default until the user explicitly enables them"
+    );
+
+    app.invoke_settings_modal_terminal_overview_markers_enabled_changed(true);
+
     assert!(
         app.get_workspace_session_overview_markers().row_count() > 0,
-        "overview markers should be present before the dedicated toggle turns them off"
+        "enabling overview markers should project them from the current workspace surface immediately"
     );
 
     app.invoke_settings_modal_terminal_overview_markers_enabled_changed(false);

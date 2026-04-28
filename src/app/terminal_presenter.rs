@@ -408,7 +408,8 @@ pub trait TerminalPresenter {
 
 pub struct BitmapAtlasPresenter {
     renderer: TerminalAtlasRenderer,
-    previous_frame: Option<TerminalModelFrame>,
+    previous_source_frame: Option<TerminalModelFrame>,
+    previous_styled_frame: Option<TerminalModelFrame>,
 }
 
 impl BitmapAtlasPresenter {
@@ -417,7 +418,8 @@ impl BitmapAtlasPresenter {
         log_terminal_font_diagnostics("bitmap-atlas", DEFAULT_TERMINAL_FONT_SIZE_PX, &snapshot);
         Ok(Self {
             renderer: TerminalAtlasRenderer::new()?,
-            previous_frame: None,
+            previous_source_frame: None,
+            previous_styled_frame: None,
         })
     }
 }
@@ -432,8 +434,9 @@ impl TerminalPresenter for BitmapAtlasPresenter {
         surface: &SurfaceState,
         options: TerminalPresentationOptions,
     ) -> Result<PresentedTerminalFrame> {
-        let mut frame_model =
-            TerminalModelFrame::from_surface(surface, self.previous_frame.as_ref());
+        let source_frame =
+            TerminalModelFrame::from_surface(surface, self.previous_source_frame.as_ref());
+        let mut frame_model = source_frame.clone();
         let semantic_annotations = analyze_semantic_annotations_with_settings(
             &frame_model,
             TerminalSemanticSettings {
@@ -446,7 +449,7 @@ impl TerminalPresenter for BitmapAtlasPresenter {
             },
         );
         frame_model.apply_semantic_style_overlays(
-            self.previous_frame.as_ref(),
+            self.previous_styled_frame.as_ref(),
             app_theme_spec(options.theme_mode, options.theme_variant),
             &semantic_annotations.spans,
             options.search_match_highlight,
@@ -459,7 +462,8 @@ impl TerminalPresenter for BitmapAtlasPresenter {
             options.selection,
             options.selection_overlay_rgba,
         )?;
-        self.previous_frame = Some(frame_model);
+        self.previous_source_frame = Some(source_frame);
+        self.previous_styled_frame = Some(frame_model);
 
         Ok(PresentedTerminalFrame::Bitmap(BitmapTerminalFrame {
             image: frame.image,
@@ -478,7 +482,7 @@ impl TerminalPresenter for BitmapAtlasPresenter {
     fn cache_stats(&self) -> TerminalPresenterCacheStats {
         TerminalPresenterCacheStats {
             previous_frame_rows: self
-                .previous_frame
+                .previous_styled_frame
                 .as_ref()
                 .map(|frame| frame.rows.len())
                 .unwrap_or_default(),
@@ -487,7 +491,8 @@ impl TerminalPresenter for BitmapAtlasPresenter {
     }
 
     fn clear_transient_caches(&mut self) {
-        self.previous_frame = None;
+        self.previous_source_frame = None;
+        self.previous_styled_frame = None;
     }
 }
 
@@ -506,7 +511,8 @@ pub struct WindowsNativePresenter {
     base_font_request: FontRequest,
     loaded_font: LoadedFont,
     raster_scale: f32,
-    previous_frame: Option<TerminalModelFrame>,
+    previous_source_frame: Option<TerminalModelFrame>,
+    previous_styled_frame: Option<TerminalModelFrame>,
     previous_shaped_rows: Option<Vec<crate::app::terminal_layout::ShapedRow>>,
     shaped_row_cache: PresenterShapedRowCache,
 }
@@ -527,7 +533,8 @@ impl WindowsNativePresenter {
             base_font_request: request,
             loaded_font,
             raster_scale: 1.0,
-            previous_frame: None,
+            previous_source_frame: None,
+            previous_styled_frame: None,
             previous_shaped_rows: None,
             shaped_row_cache: PresenterShapedRowCache::default(),
         })
@@ -538,7 +545,8 @@ impl WindowsNativePresenter {
         self.loaded_font = self.font_system.load_font(&request)?;
         let snapshot = self.font_system.resolution_snapshot(&self.loaded_font)?;
         log_terminal_font_diagnostics("directwrite-d2d", request.px_size, &snapshot);
-        self.previous_frame = None;
+        self.previous_source_frame = None;
+        self.previous_styled_frame = None;
         self.previous_shaped_rows = None;
         self.shaped_row_cache.clear();
         Ok(())
@@ -547,7 +555,8 @@ impl WindowsNativePresenter {
     #[doc(hidden)]
     pub fn set_emoji_renderer_for_tests(&mut self, renderer: TerminalEmojiRenderer) {
         self.font_system.set_emoji_renderer_for_tests(renderer);
-        self.previous_frame = None;
+        self.previous_source_frame = None;
+        self.previous_styled_frame = None;
         self.previous_shaped_rows = None;
         self.shaped_row_cache.clear();
     }
@@ -584,7 +593,8 @@ impl TerminalPresenter for WindowsNativePresenter {
             &mut self.shaper,
             &mut self.renderer,
             &self.loaded_font,
-            &mut self.previous_frame,
+            &mut self.previous_source_frame,
+            &mut self.previous_styled_frame,
             &mut self.previous_shaped_rows,
             &mut self.shaped_row_cache,
         );
@@ -602,7 +612,7 @@ impl TerminalPresenter for WindowsNativePresenter {
         let renderer_stats: WgpuRendererCacheStats = self.renderer.cache_stats();
         TerminalPresenterCacheStats {
             previous_frame_rows: self
-                .previous_frame
+                .previous_styled_frame
                 .as_ref()
                 .map(|frame| frame.rows.len())
                 .unwrap_or_default(),
@@ -621,7 +631,8 @@ impl TerminalPresenter for WindowsNativePresenter {
     }
 
     fn clear_transient_caches(&mut self) {
-        self.previous_frame = None;
+        self.previous_source_frame = None;
+        self.previous_styled_frame = None;
         self.previous_shaped_rows = None;
         self.shaped_row_cache.clear();
         self.renderer.clear_transient_caches();
@@ -638,7 +649,8 @@ struct NativeFramePreparationContext<'a> {
     shaper: &'a mut TerminalTextShaper,
     renderer: &'a mut WgpuTerminalRenderer,
     loaded_font: &'a LoadedFont,
-    previous_frame: &'a mut Option<TerminalModelFrame>,
+    previous_source_frame: &'a mut Option<TerminalModelFrame>,
+    previous_styled_frame: &'a mut Option<TerminalModelFrame>,
     previous_shaped_rows: &'a mut Option<Vec<crate::app::terminal_layout::ShapedRow>>,
     shaped_row_cache: &'a mut PresenterShapedRowCache,
 }
@@ -650,7 +662,8 @@ impl<'a> NativeFramePreparationContext<'a> {
         shaper: &'a mut TerminalTextShaper,
         renderer: &'a mut WgpuTerminalRenderer,
         loaded_font: &'a LoadedFont,
-        previous_frame: &'a mut Option<TerminalModelFrame>,
+        previous_source_frame: &'a mut Option<TerminalModelFrame>,
+        previous_styled_frame: &'a mut Option<TerminalModelFrame>,
         previous_shaped_rows: &'a mut Option<Vec<crate::app::terminal_layout::ShapedRow>>,
         shaped_row_cache: &'a mut PresenterShapedRowCache,
     ) -> Self {
@@ -659,7 +672,8 @@ impl<'a> NativeFramePreparationContext<'a> {
             shaper,
             renderer,
             loaded_font,
-            previous_frame,
+            previous_source_frame,
+            previous_styled_frame,
             previous_shaped_rows,
             shaped_row_cache,
         }
@@ -684,8 +698,9 @@ fn prepare_native_terminal_frame_with_diagnostics(
 ) -> Result<(NativeTerminalFrame, TerminalPrepareDiagnostics)> {
     let prepare_started = Instant::now();
     let model_started = Instant::now();
-    let mut frame_model =
-        TerminalModelFrame::from_surface(surface, context.previous_frame.as_ref());
+    let source_frame =
+        TerminalModelFrame::from_surface(surface, context.previous_source_frame.as_ref());
+    let mut frame_model = source_frame.clone();
     let model_frame_us = model_started.elapsed().as_micros() as u64;
     let semantic_overlays = if frame_model.alternate_screen_active {
         Vec::new()
@@ -709,7 +724,7 @@ fn prepare_native_terminal_frame_with_diagnostics(
         },
     );
     frame_model.apply_semantic_style_overlays(
-        context.previous_frame.as_ref(),
+        context.previous_styled_frame.as_ref(),
         app_theme_spec(options.theme_mode, options.theme_variant),
         &semantic_annotations.spans,
         options.search_match_highlight,
@@ -717,7 +732,7 @@ fn prepare_native_terminal_frame_with_diagnostics(
     let shape_started = Instant::now();
     let (rows, reused_shaped_row_count) = shape_rows_with_previous_cache(
         &frame_model,
-        context.previous_frame.as_ref(),
+        context.previous_styled_frame.as_ref(),
         context.previous_shaped_rows.as_ref(),
         context.shaped_row_cache,
         context.shaper,
@@ -838,7 +853,8 @@ fn prepare_native_terminal_frame_with_diagnostics(
         },
     };
     *context.previous_shaped_rows = Some(rows);
-    *context.previous_frame = Some(frame_model);
+    *context.previous_source_frame = Some(source_frame);
+    *context.previous_styled_frame = Some(frame_model);
 
     let shaped_row_count = presentable_frame.shaped_row_count;
     let dirty_row_count = presentable_frame.dirty_row_count;
@@ -1099,7 +1115,8 @@ mod tests {
         let loaded_font = font_system.load_font(&FontRequest::default())?;
         let mut shaper = TerminalTextShaper;
         let mut renderer = WgpuTerminalRenderer::new_for_test()?;
-        let mut previous_frame = None;
+        let mut previous_source_frame = None;
+        let mut previous_styled_frame = None;
         let mut previous_shaped_rows = None;
         let mut shaped_row_cache = PresenterShapedRowCache::default();
 
@@ -1109,7 +1126,8 @@ mod tests {
                 &mut shaper,
                 &mut renderer,
                 &loaded_font,
-                &mut previous_frame,
+                &mut previous_source_frame,
+                &mut previous_styled_frame,
                 &mut previous_shaped_rows,
                 &mut shaped_row_cache,
             );
@@ -1131,7 +1149,8 @@ mod tests {
                 &mut shaper,
                 &mut renderer,
                 &loaded_font,
-                &mut previous_frame,
+                &mut previous_source_frame,
+                &mut previous_styled_frame,
                 &mut previous_shaped_rows,
                 &mut shaped_row_cache,
             );
@@ -1159,7 +1178,8 @@ mod tests {
         let loaded_font = font_system.load_font(&FontRequest::default())?;
         let mut shaper = TerminalTextShaper;
         let mut renderer = WgpuTerminalRenderer::new_for_test()?;
-        let mut previous_frame = None;
+        let mut previous_source_frame = None;
+        let mut previous_styled_frame = None;
         let mut previous_shaped_rows = None;
         let mut shaped_row_cache = PresenterShapedRowCache::default();
 
@@ -1168,7 +1188,8 @@ mod tests {
             &mut shaper,
             &mut renderer,
             &loaded_font,
-            &mut previous_frame,
+            &mut previous_source_frame,
+                &mut previous_styled_frame,
             &mut previous_shaped_rows,
             &mut shaped_row_cache,
         );
@@ -1205,7 +1226,8 @@ mod tests {
         let loaded_font = font_system.load_font(&FontRequest::default())?;
         let mut shaper = TerminalTextShaper;
         let mut renderer = WgpuTerminalRenderer::new_for_test()?;
-        let mut previous_frame = None;
+        let mut previous_source_frame = None;
+        let mut previous_styled_frame = None;
         let mut previous_shaped_rows = None;
         let mut shaped_row_cache = PresenterShapedRowCache::default();
 
@@ -1215,7 +1237,8 @@ mod tests {
                 &mut shaper,
                 &mut renderer,
                 &loaded_font,
-                &mut previous_frame,
+                &mut previous_source_frame,
+                &mut previous_styled_frame,
                 &mut previous_shaped_rows,
                 &mut shaped_row_cache,
             );
@@ -1233,7 +1256,8 @@ mod tests {
                 &mut shaper,
                 &mut renderer,
                 &loaded_font,
-                &mut previous_frame,
+                &mut previous_source_frame,
+                &mut previous_styled_frame,
                 &mut previous_shaped_rows,
                 &mut shaped_row_cache,
             );
@@ -1251,7 +1275,8 @@ mod tests {
                 &mut shaper,
                 &mut renderer,
                 &loaded_font,
-                &mut previous_frame,
+                &mut previous_source_frame,
+                &mut previous_styled_frame,
                 &mut previous_shaped_rows,
                 &mut shaped_row_cache,
             );
@@ -1280,7 +1305,8 @@ mod tests {
         let loaded_font = font_system.load_font(&FontRequest::default())?;
         let mut shaper = TerminalTextShaper;
         let mut renderer = WgpuTerminalRenderer::new_for_test()?;
-        let mut previous_frame = None;
+        let mut previous_source_frame = None;
+        let mut previous_styled_frame = None;
         let mut previous_shaped_rows = None;
         let mut shaped_row_cache = PresenterShapedRowCache::default();
 
@@ -1290,7 +1316,8 @@ mod tests {
                 &mut shaper,
                 &mut renderer,
                 &loaded_font,
-                &mut previous_frame,
+                &mut previous_source_frame,
+                &mut previous_styled_frame,
                 &mut previous_shaped_rows,
                 &mut shaped_row_cache,
             );
@@ -1313,7 +1340,8 @@ mod tests {
                 &mut shaper,
                 &mut renderer,
                 &loaded_font,
-                &mut previous_frame,
+                &mut previous_source_frame,
+                &mut previous_styled_frame,
                 &mut previous_shaped_rows,
                 &mut shaped_row_cache,
             );
@@ -1343,7 +1371,8 @@ mod tests {
         let loaded_font = font_system.load_font(&FontRequest::default())?;
         let mut shaper = TerminalTextShaper;
         let mut renderer = WgpuTerminalRenderer::new_for_test()?;
-        let mut previous_frame = None;
+        let mut previous_source_frame = None;
+        let mut previous_styled_frame = None;
         let mut previous_shaped_rows = None;
         let mut shaped_row_cache = PresenterShapedRowCache::default();
 
@@ -1352,7 +1381,8 @@ mod tests {
             &mut shaper,
             &mut renderer,
             &loaded_font,
-            &mut previous_frame,
+            &mut previous_source_frame,
+                &mut previous_styled_frame,
             &mut previous_shaped_rows,
             &mut shaped_row_cache,
         );
@@ -1418,7 +1448,8 @@ mod tests {
         let loaded_font = font_system.load_font(&FontRequest::default())?;
         let mut shaper = TerminalTextShaper;
         let mut renderer = WgpuTerminalRenderer::new_for_test()?;
-        let mut previous_frame = None;
+        let mut previous_source_frame = None;
+        let mut previous_styled_frame = None;
         let mut previous_shaped_rows = None;
         let mut shaped_row_cache = PresenterShapedRowCache::default();
 
@@ -1427,7 +1458,8 @@ mod tests {
             &mut shaper,
             &mut renderer,
             &loaded_font,
-            &mut previous_frame,
+            &mut previous_source_frame,
+                &mut previous_styled_frame,
             &mut previous_shaped_rows,
             &mut shaped_row_cache,
         );
@@ -1502,7 +1534,8 @@ mod tests {
         let loaded_font = font_system.load_font(&FontRequest::default())?;
         let mut shaper = TerminalTextShaper;
         let mut renderer = WgpuTerminalRenderer::new_for_test()?;
-        let mut previous_frame = None;
+        let mut previous_source_frame = None;
+        let mut previous_styled_frame = None;
         let mut previous_shaped_rows = None;
         let mut shaped_row_cache = PresenterShapedRowCache::default();
 
@@ -1511,7 +1544,8 @@ mod tests {
             &mut shaper,
             &mut renderer,
             &loaded_font,
-            &mut previous_frame,
+            &mut previous_source_frame,
+                &mut previous_styled_frame,
             &mut previous_shaped_rows,
             &mut shaped_row_cache,
         );
@@ -1575,7 +1609,8 @@ mod tests {
         let loaded_font = font_system.load_font(&FontRequest::default())?;
         let mut shaper = TerminalTextShaper;
         let mut renderer = WgpuTerminalRenderer::new_for_test()?;
-        let mut previous_frame = None;
+        let mut previous_source_frame = None;
+        let mut previous_styled_frame = None;
         let mut previous_shaped_rows = None;
         let mut shaped_row_cache = PresenterShapedRowCache::default();
 
@@ -1584,7 +1619,8 @@ mod tests {
             &mut shaper,
             &mut renderer,
             &loaded_font,
-            &mut previous_frame,
+            &mut previous_source_frame,
+                &mut previous_styled_frame,
             &mut previous_shaped_rows,
             &mut shaped_row_cache,
         );
@@ -1672,6 +1708,8 @@ fn model_frame_to_surface(model: &TerminalModelFrame) -> SurfaceState {
         },
         alternate_screen_active: model.alternate_screen_active,
         mouse_grabbed: model.mouse_grabbed,
+        application_cursor_keys: model.application_cursor_keys,
         bracketed_paste_enabled: model.bracketed_paste_enabled,
+        shell_integration: model.shell_integration,
     }
 }

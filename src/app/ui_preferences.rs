@@ -110,11 +110,11 @@ fn default_terminal_command_decorations_enabled() -> bool {
 }
 
 fn default_terminal_overview_markers_enabled() -> bool {
-    true
+    false
 }
 
 fn default_terminal_output_rule_profile() -> OutputRuleProfile {
-    OutputRuleProfile::Default
+    OutputRuleProfile::Focused
 }
 
 fn default_terminal_search_match_highlight() -> SearchMatchHighlightStrength {

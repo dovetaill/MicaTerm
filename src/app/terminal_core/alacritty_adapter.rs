@@ -252,6 +252,7 @@ impl TerminalCoreAdapter for AlacrittyTerminalCoreAdapter {
             selection: self.selection_state_internal(),
             alternate_screen_active,
             mouse_grabbed: self.mouse_grabbed(),
+            application_cursor_keys: self.term.mode().contains(TermMode::APP_CURSOR),
             bracketed_paste_enabled: self.term.mode().contains(TermMode::BRACKETED_PASTE),
         }
     }

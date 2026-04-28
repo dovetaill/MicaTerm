@@ -213,6 +213,7 @@ impl ReleasedTerminalCoreAdapter {
             selection: SelectionState::default(),
             alternate_screen_active: false,
             mouse_grabbed: false,
+            application_cursor_keys: false,
             bracketed_paste_enabled: false,
         }
     }

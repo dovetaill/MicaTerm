@@ -5,7 +5,7 @@ mod input_line;
 mod output_blocks;
 mod output_rules;
 
-use crate::app::terminal_model::TerminalModelFrame;
+use crate::app::terminal_model::{TerminalModelFrame, TerminalPresentationMode};
 use crate::theme::SemanticStyleRole;
 
 pub use command_blocks::{CommandBlock, CommandBlockStatus, OverviewMarker, OverviewMarkerKind};
@@ -24,8 +24,8 @@ pub use output_rules::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum OutputRuleProfile {
-    #[default]
     Default,
+    #[default]
     Focused,
 }
 
@@ -76,9 +76,9 @@ impl Default for TerminalSemanticSettings {
         Self {
             input_highlighting_enabled: true,
             output_rule_highlighting_enabled: true,
-            output_rule_profile: OutputRuleProfile::Default,
+            output_rule_profile: OutputRuleProfile::Focused,
             command_decorations_enabled: true,
-            overview_markers_enabled: true,
+            overview_markers_enabled: false,
             search_query: None,
         }
     }
@@ -92,7 +92,11 @@ pub fn analyze_semantic_annotations_with_settings(
     frame: &TerminalModelFrame,
     settings: TerminalSemanticSettings,
 ) -> SemanticAnnotationSet {
-    if frame.alternate_screen_active {
+    if matches!(
+        frame.presentation_mode,
+        TerminalPresentationMode::InlineInteractiveApp
+            | TerminalPresentationMode::AlternateScreenTui
+    ) {
         return SemanticAnnotationSet::default();
     }
 

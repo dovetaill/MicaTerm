@@ -274,8 +274,8 @@ impl Default for SettingsModalViewState {
             terminal_input_highlighting_enabled: true,
             terminal_output_rule_highlighting_enabled: true,
             terminal_command_decorations_enabled: true,
-            terminal_overview_markers_enabled: true,
-            terminal_output_rule_profile: OutputRuleProfile::Default,
+            terminal_overview_markers_enabled: false,
+            terminal_output_rule_profile: OutputRuleProfile::Focused,
             terminal_search_match_highlight: SearchMatchHighlightStrength::Balanced,
             download_conflict_default: DownloadConflictDefault::Ask,
         }

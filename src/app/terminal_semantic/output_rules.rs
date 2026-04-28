@@ -6,36 +6,7 @@ use crate::app::terminal_model::{TerminalModelFrame, TerminalModelRow};
 use crate::app::terminal_semantic::{SemanticSpan, push_unique_span};
 use crate::theme::SemanticStyleRole;
 
-use super::{OutputRuleProfile, SemanticOutputBlockKind, detect_output_block_overlays};
-
-const FAILURE_PHRASES: &[(&str, SemanticStyleRole)] = &[
-    ("Permission denied", SemanticStyleRole::OutputFailureKeyword),
-    (
-        "Host key verification failed",
-        SemanticStyleRole::OutputFailureKeyword,
-    ),
-    (
-        "No such file or directory",
-        SemanticStyleRole::OutputFailureKeyword,
-    ),
-    (
-        "connection refused",
-        SemanticStyleRole::OutputFailureKeyword,
-    ),
-    ("timed out", SemanticStyleRole::OutputFailureKeyword),
-    ("failed", SemanticStyleRole::OutputFailureKeyword),
-    ("failure", SemanticStyleRole::OutputFailureKeyword),
-    ("fatal", SemanticStyleRole::OutputFailureKeyword),
-    ("ErrImagePull", SemanticStyleRole::OutputFailureKeyword),
-    ("CrashLoopBackOff", SemanticStyleRole::OutputFailureKeyword),
-];
-const SUCCESS_PHRASES: &[&str] = &["success", "succeeded", "completed", "done", "ok"];
-const SEVERITY_KEYWORDS: &[(&str, SemanticStyleRole)] = &[
-    ("ERROR", SemanticStyleRole::OutputSeverityError),
-    ("WARN", SemanticStyleRole::OutputSeverityWarning),
-    ("INFO", SemanticStyleRole::OutputSeverityInfo),
-    ("DEBUG", SemanticStyleRole::OutputSeverityDebug),
-];
+use super::OutputRuleProfile;
 
 pub fn detect_output_rule_spans(
     frame: &TerminalModelFrame,
@@ -43,22 +14,12 @@ pub fn detect_output_rule_spans(
 ) -> Vec<SemanticSpan> {
     let mut spans = Vec::new();
     let candidate_rows = expanded_dirty_rows(frame, 2);
-    let json_rows = detect_output_block_overlays(frame)
-        .into_iter()
-        .filter(|overlay| overlay.kind == SemanticOutputBlockKind::Json)
-        .flat_map(|overlay| overlay.row_ranges.into_iter().map(|range| range.row))
-        .collect::<BTreeSet<_>>();
 
     for row in &frame.rows {
         if !candidate_rows.contains(&row.row_index) {
             continue;
         }
-        detect_diff_spans(row, &mut spans);
-        detect_phrase_spans(row, &mut spans);
         detect_token_spans(row, &mut spans);
-        if json_rows.contains(&row.row_index) {
-            detect_json_spans(row, &mut spans);
-        }
     }
 
     spans.retain(|span| profile_allows_role(profile, span.role));
@@ -108,16 +69,6 @@ fn profile_allows_role(profile: OutputRuleProfile, role: SemanticStyleRole) -> b
                 | SemanticStyleRole::OutputWindowsPath
                 | SemanticStyleRole::OutputLineReference
                 | SemanticStyleRole::OutputNetworkEndpoint
-                | SemanticStyleRole::OutputSeverityError
-                | SemanticStyleRole::OutputSeverityWarning
-                | SemanticStyleRole::OutputFailureKeyword
-                | SemanticStyleRole::OutputDiffAdded
-                | SemanticStyleRole::OutputDiffRemoved
-                | SemanticStyleRole::OutputDiffHunk
-                | SemanticStyleRole::OutputJsonKey
-                | SemanticStyleRole::OutputJsonString
-                | SemanticStyleRole::OutputJsonNumber
-                | SemanticStyleRole::OutputJsonBoolean
         ),
     }
 }
@@ -139,60 +90,6 @@ fn expanded_dirty_rows(frame: &TerminalModelFrame, lookaround: usize) -> BTreeSe
     rows
 }
 
-fn detect_diff_spans(row: &TerminalModelRow, spans: &mut Vec<SemanticSpan>) {
-    let trimmed = row.text.trim_start();
-    let role = if trimmed.starts_with("@@") {
-        Some(SemanticStyleRole::OutputDiffHunk)
-    } else if trimmed.starts_with('+') && !trimmed.starts_with("+++") {
-        Some(SemanticStyleRole::OutputDiffAdded)
-    } else if trimmed.starts_with('-') && !trimmed.starts_with("---") {
-        Some(SemanticStyleRole::OutputDiffRemoved)
-    } else {
-        None
-    };
-
-    if let Some(role) = role {
-        push_unique_span(
-            spans,
-            SemanticSpan {
-                row: row.row_index,
-                start_col: 0,
-                end_col: row.text.chars().count().saturating_sub(1) as u32,
-                role,
-                text: row.text.clone(),
-            },
-        );
-    }
-}
-
-fn detect_phrase_spans(row: &TerminalModelRow, spans: &mut Vec<SemanticSpan>) {
-    for (keyword, role) in SEVERITY_KEYWORDS {
-        for (start_byte, end_byte) in find_ascii_occurrences(&row.text, keyword) {
-            push_unique_span(spans, slice_span(row, start_byte, end_byte, *role));
-        }
-    }
-
-    for (phrase, role) in FAILURE_PHRASES {
-        for (start_byte, end_byte) in find_case_insensitive_occurrences(&row.text, phrase) {
-            push_unique_span(spans, slice_span(row, start_byte, end_byte, *role));
-        }
-    }
-
-    for phrase in SUCCESS_PHRASES {
-        for (start_byte, end_byte) in find_case_insensitive_occurrences(&row.text, phrase) {
-            push_unique_span(
-                spans,
-                slice_span(
-                    row,
-                    start_byte,
-                    end_byte,
-                    SemanticStyleRole::OutputSuccessKeyword,
-                ),
-            );
-        }
-    }
-}
-
 fn detect_token_spans(row: &TerminalModelRow, spans: &mut Vec<SemanticSpan>) {
     for token in whitespace_tokens(&row.text) {
         let Some((start_byte, end_byte, cleaned)) = trim_token(&row.text, token.0, token.1) else {
@@ -208,8 +105,6 @@ fn detect_token_spans(row: &TerminalModelRow, spans: &mut Vec<SemanticSpan>) {
             Some(SemanticStyleRole::OutputUnixPath)
         } else if is_network_endpoint(cleaned) {
             Some(SemanticStyleRole::OutputNetworkEndpoint)
-        } else if is_timestamp(cleaned) {
-            Some(SemanticStyleRole::OutputTimestamp)
         } else {
             None
         };
@@ -217,86 +112,6 @@ fn detect_token_spans(row: &TerminalModelRow, spans: &mut Vec<SemanticSpan>) {
         if let Some(role) = role {
             push_unique_span(spans, slice_span(row, start_byte, end_byte, role));
         }
-    }
-}
-
-fn detect_json_spans(row: &TerminalModelRow, spans: &mut Vec<SemanticSpan>) {
-    let bytes = row.text.as_bytes();
-    let mut index = 0usize;
-    let mut in_string = false;
-    let mut string_start = 0usize;
-    let mut escaped = false;
-
-    while index < bytes.len() {
-        let ch = bytes[index] as char;
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else if ch == '"' {
-                let end = index + 1;
-                let role = if row.text[end..].trim_start().starts_with(':') {
-                    SemanticStyleRole::OutputJsonKey
-                } else {
-                    SemanticStyleRole::OutputJsonString
-                };
-                push_unique_span(spans, slice_span(row, string_start, end, role));
-                in_string = false;
-            }
-            index += 1;
-            continue;
-        }
-
-        if ch == '"' {
-            in_string = true;
-            string_start = index;
-            index += 1;
-            continue;
-        }
-
-        if ch.is_ascii_digit() || ch == '-' {
-            let start = index;
-            index += 1;
-            while index < bytes.len()
-                && ((bytes[index] as char).is_ascii_digit() || bytes[index] == b'.')
-            {
-                index += 1;
-            }
-            if row.text[start..index]
-                .chars()
-                .any(|value| value.is_ascii_digit())
-            {
-                push_unique_span(
-                    spans,
-                    slice_span(row, start, index, SemanticStyleRole::OutputJsonNumber),
-                );
-            }
-            continue;
-        }
-
-        let mut matched_literal = false;
-        for literal in ["true", "false", "null"] {
-            if row.text[index..].starts_with(literal) {
-                push_unique_span(
-                    spans,
-                    slice_span(
-                        row,
-                        index,
-                        index + literal.len(),
-                        SemanticStyleRole::OutputJsonBoolean,
-                    ),
-                );
-                index += literal.len();
-                matched_literal = true;
-                break;
-            }
-        }
-        if matched_literal {
-            continue;
-        }
-
-        index += 1;
     }
 }
 
@@ -445,12 +260,4 @@ fn is_network_endpoint(token: &str) -> bool {
         && host
             .split('.')
             .all(|segment| !segment.is_empty() && segment.chars().all(|ch| ch.is_ascii_digit()))
-}
-
-fn is_timestamp(token: &str) -> bool {
-    let bytes = token.as_bytes();
-    token.len() >= 10
-        && bytes.get(4) == Some(&b'-')
-        && bytes.get(7) == Some(&b'-')
-        && (token.contains('T') || token.contains(':'))
 }

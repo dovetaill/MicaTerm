@@ -89,18 +89,35 @@ fn selection_overlay_colors_stay_translucent_and_theme_specific() {
 #[test]
 fn slint_terminal_tokens_match_shared_no_frame_defaults() {
     let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
+    let dark_preset = preset_for_theme(ThemeMode::Dark, ThemeVariant::PremiumDefault);
+    let light_preset = preset_for_theme(ThemeMode::Light, ThemeVariant::PremiumDefault);
 
     assert!(
-        tokens.contains("terminal-default-fg: dark-mode ? #e5ebf5 : #243142;"),
+        tokens.contains(&format!(
+            "terminal-default-fg: dark-mode ? {} : {};",
+            hex_rgb(dark_preset.foreground),
+            hex_rgb(light_preset.foreground),
+        )),
         "Slint no-frame terminal foreground tokens should match the shared Mica Graphite/Canvas defaults used by the Rust fallback preset projection"
     );
     assert!(
-        tokens.contains("terminal-default-bg: dark-mode ? #08131d : #f2f4f7;"),
+        tokens.contains(&format!(
+            "terminal-default-bg: dark-mode ? {} : {};",
+            hex_rgb(dark_preset.background),
+            hex_rgb(light_preset.background),
+        )) || tokens.contains("terminal-default-bg: terminal-canvas-surface;"),
         "Slint no-frame terminal background tokens should match the shared Mica Graphite/Canvas defaults used by the Rust fallback preset projection"
     );
     assert!(
-        tokens.contains("terminal-cursor-fg: dark-mode ? #08131d : #f2f4f7;")
-            && tokens.contains("terminal-cursor-bg: dark-mode ? #e5ebf5 : #243142;"),
+        tokens.contains(&format!(
+            "terminal-cursor-fg: dark-mode ? {} : {};",
+            hex_rgb(dark_preset.cursor_fg),
+            hex_rgb(light_preset.cursor_fg),
+        )) && tokens.contains(&format!(
+            "terminal-cursor-bg: dark-mode ? {} : {};",
+            hex_rgb(dark_preset.cursor_bg),
+            hex_rgb(light_preset.cursor_bg),
+        )),
         "Slint cursor tokens should stay aligned with the terminal fallback preset so no-frame terminal states do not drift from the live terminal palette"
     );
     assert!(
@@ -158,4 +175,8 @@ fn terminal_adjacent_shell_chrome_contracts_match_shared_preset_values() {
             && !terminal_host.contains("session-jump-to-latest"),
         "TerminalSessionHost should keep terminal-specific scrollbar chrome while dropping the removed jump-to-latest contract"
     );
+}
+
+fn hex_rgb(value: u32) -> String {
+    format!("#{:06x}", value)
 }

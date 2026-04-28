@@ -22,7 +22,7 @@ use crate::app::ssh::connection_progress::{
 use crate::app::ssh::profile::ConnectionProfile;
 use crate::app::ssh::runtime::{
     SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput, TerminalSurfaceSignature,
-    TerminalSurfaceState, UnknownHostKeyError,
+    TerminalShellIntegrationState, TerminalSurfaceState, UnknownHostKeyError,
 };
 use crate::theme::{ThemeMode, ThemeVariant};
 
@@ -1015,6 +1015,7 @@ struct SessionRegistry {
     connection_attempts: HashMap<Uuid, ConnectionAttemptState>,
     terminal_surfaces: HashMap<Uuid, TerminalSurfaceState>,
     current_working_directories: HashMap<Uuid, String>,
+    terminal_shell_integration: HashMap<Uuid, TerminalShellIntegrationState>,
     terminal_surface_revisions: HashMap<Uuid, usize>,
     runtime_controls: HashMap<Uuid, Box<dyn SessionRuntimeControl>>,
     sftp_bindings: HashMap<Uuid, SftpSessionBinding>,
@@ -1036,6 +1037,7 @@ impl Default for SessionRegistry {
             connection_attempts: HashMap::new(),
             terminal_surfaces: HashMap::new(),
             current_working_directories: HashMap::new(),
+            terminal_shell_integration: HashMap::new(),
             terminal_surface_revisions: HashMap::new(),
             runtime_controls: HashMap::new(),
             sftp_bindings: HashMap::new(),
@@ -1103,6 +1105,15 @@ fn apply_runtime_event(
                 .expect("lock session registry")
                 .current_working_directories
                 .insert(session_id, path);
+        }
+        SessionRuntimeEvent::ShellIntegrationChanged(shell_state) => {
+            let mut registry = registry.lock().expect("lock session registry");
+            registry
+                .terminal_shell_integration
+                .insert(session_id, shell_state);
+            if let Some(surface) = registry.terminal_surfaces.get_mut(&session_id) {
+                surface.shell_integration = shell_state;
+            }
         }
         SessionRuntimeEvent::SurfaceChanged(surface) => {
             update_terminal_surface(registry, session_id, surface);
@@ -1235,10 +1246,13 @@ fn upsert_connection_step(steps: &mut Vec<ConnectionStepStateItem>, step: Connec
 fn update_terminal_surface(
     registry: &Arc<Mutex<SessionRegistry>>,
     session_id: Uuid,
-    surface: TerminalSurfaceState,
+    mut surface: TerminalSurfaceState,
 ) {
     let mut registry = registry.lock().expect("lock session registry");
     if registry.sessions.contains_key(&session_id) {
+        if let Some(shell_state) = registry.terminal_shell_integration.get(&session_id).copied() {
+            surface.shell_integration = shell_state;
+        }
         registry
             .terminal_surface_revisions
             .insert(session_id, surface.seqno);

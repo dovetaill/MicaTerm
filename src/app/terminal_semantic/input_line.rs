@@ -1,6 +1,8 @@
 //! Semantic input-line highlighting for normal shell prompts.
 
-use crate::app::terminal_model::{TerminalModelFrame, TerminalModelRow};
+use crate::app::terminal_model::{
+    TerminalModelFrame, TerminalModelRow, TerminalPresentationMode,
+};
 use crate::app::terminal_semantic::{SemanticSpan, push_unique_span};
 use crate::theme::SemanticStyleRole;
 
@@ -9,7 +11,7 @@ const COMMAND_OVERLAY_RGBA: u32 = 0x334f_c3f7;
 const ARGUMENT_OVERLAY_RGBA: u32 = 0x3334_d399;
 const OPTION_OVERLAY_RGBA: u32 = 0x33f5_a524;
 const OPERATOR_OVERLAY_RGBA: u32 = 0x33ef_6c00;
-pub(crate) const PROMPT_MARKERS: &[&str] = &["$ ", "# ", "% ", "> "];
+pub(crate) const PROMPT_MARKERS: &[&str] = &["$ ", "% ", "]# "];
 const SHELL_OPERATORS: &[&str] = &["||", "&&", ">>", "2>>", "2>", "|", ";", ">", "<"];
 const COMMAND_SEPARATORS: &[&str] = &["||", "&&", "|", ";"];
 const COMPOUND_COMMANDS: &[&str] = &[
@@ -47,12 +49,15 @@ pub fn detect_input_semantic_spans(frame: &TerminalModelFrame) -> Vec<SemanticSp
         return Vec::new();
     }
 
-    let Some((row, input_start_col)) = frame
-        .rows
-        .iter()
-        .rev()
-        .find_map(|row| prompt_input_start(row).map(|input_start_col| (row, input_start_col)))
+    if frame.shell_integration.has_markers && !frame.shell_integration.input_active {
+        return Vec::new();
+    }
+
+    let Some(row) = frame.rows.last()
     else {
+        return Vec::new();
+    };
+    let Some(input_start_col) = prompt_input_start(row) else {
         return Vec::new();
     };
 
@@ -150,7 +155,7 @@ pub fn detect_input_line_overlays(frame: &TerminalModelFrame) -> Vec<SemanticInp
 }
 
 fn input_highlighting_is_safe(frame: &TerminalModelFrame) -> bool {
-    !frame.alternate_screen_active && !frame.mouse_grabbed && frame.viewport_at_bottom
+    matches!(frame.presentation_mode, TerminalPresentationMode::ShellLive)
 }
 
 pub(crate) fn prompt_input_start(row: &TerminalModelRow) -> Option<u32> {

@@ -13,7 +13,7 @@ pub use contracts::TerminalSurfaceState as SurfaceState;
 pub use contracts::{
     TerminalCellState, TerminalCursorShape, TerminalCursorState, TerminalKeyEvent, TerminalKeyKind,
     TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput, TerminalRowState,
-    TerminalSurfaceSignature, TerminalSurfaceState,
+    TerminalShellIntegrationState, TerminalSurfaceSignature, TerminalSurfaceState,
 };
 pub use terminal::{
     DEFAULT_TERMINAL_SCROLLBACK_LINES, TerminalSession, encode_named_key_input,
@@ -171,6 +171,7 @@ pub enum SessionRuntimeEvent {
     ConnectionProgress(ConnectionProgressEvent),
     EnhancedSessionStateChanged(EnhancedSessionState),
     CurrentDirectoryChanged(String),
+    ShellIntegrationChanged(TerminalShellIntegrationState),
     SurfaceChanged(TerminalSurfaceState),
     SurfaceDirty,
     Disconnected,

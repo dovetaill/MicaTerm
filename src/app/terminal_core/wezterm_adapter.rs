@@ -181,7 +181,9 @@ impl WeztermTerminalCoreAdapter {
             cursor,
             alternate_screen_active: self.terminal.is_alt_screen_active(),
             mouse_grabbed: self.terminal.is_mouse_grabbed(),
+            application_cursor_keys: self.keyboard_modes.application_cursor_keys,
             bracketed_paste_enabled: self.terminal.bracketed_paste_enabled(),
+            shell_integration: crate::app::ssh::runtime::TerminalShellIntegrationState::default(),
         }
     }
 
@@ -1043,6 +1045,7 @@ impl TerminalCoreAdapter for WeztermTerminalCoreAdapter {
             selection: SelectionState::default(),
             alternate_screen_active: surface.alternate_screen_active,
             mouse_grabbed: surface.mouse_grabbed,
+            application_cursor_keys: surface.application_cursor_keys,
             bracketed_paste_enabled: surface.bracketed_paste_enabled,
         }
     }
