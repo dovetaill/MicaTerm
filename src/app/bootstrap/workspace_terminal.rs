@@ -8,6 +8,14 @@ pub struct WorkspaceTerminalLinkAffordance {
     pub armed: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkspaceTerminalPointerState {
+    pub session_id: Uuid,
+    pub row: u32,
+    pub col: u32,
+    pub ctrl: bool,
+}
+
 pub(super) fn projected_active_workspace_tab_id(
     state: &ShellViewModel,
     next_tabs: &[WorkspaceTab],
@@ -246,6 +254,23 @@ pub(super) fn link_affordance_at_active_workspace_surface(
         .unwrap_or_default()
 }
 
+pub(super) fn link_affordance_for_pointer(
+    surface: Option<&TerminalSurfaceState>,
+    pointer: Option<WorkspaceTerminalPointerState>,
+) -> WorkspaceTerminalLinkAffordance {
+    let Some(surface) = surface else {
+        return WorkspaceTerminalLinkAffordance::default();
+    };
+    let Some(pointer) = pointer else {
+        return WorkspaceTerminalLinkAffordance::default();
+    };
+    if pointer.session_id != surface.session_id {
+        return WorkspaceTerminalLinkAffordance::default();
+    }
+
+    link_affordance_at_surface(surface, pointer.row, pointer.col, pointer.ctrl)
+}
+
 pub(super) fn openable_url_at_surface(
     surface: &TerminalSurfaceState,
     row: u32,
@@ -300,8 +325,7 @@ fn url_token_hit_at_surface(
     }
 
     let mut end_col = safe_col;
-    while end_col + 1 < surface.cols && token_char_at_surface(surface, row, end_col + 1).is_some()
-    {
+    while end_col + 1 < surface.cols && token_char_at_surface(surface, row, end_col + 1).is_some() {
         end_col += 1;
     }
 

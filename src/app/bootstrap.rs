@@ -232,6 +232,9 @@ thread_local! {
     static WORKSPACE_NATIVE_TERMINAL_SURFACE: RefCell<Option<NativeTerminalSurface>> = const {
         RefCell::new(None)
     };
+    static WORKSPACE_TERMINAL_POINTER_STATE: RefCell<Option<workspace_terminal::WorkspaceTerminalPointerState>> = const {
+        RefCell::new(None)
+    };
     static WORKSPACE_NATIVE_CURSOR_BLINK_STATE: RefCell<Option<WorkspaceNativeCursorBlinkState>> = const {
         RefCell::new(None)
     };
@@ -461,9 +464,9 @@ pub struct ImportedPrivateKey {
 }
 
 #[doc(hidden)]
-pub use workspace_terminal::WorkspaceTerminalLinkAffordance;
-#[doc(hidden)]
 pub use crate::app::url_open::UrlOpenHandlerGuard;
+#[doc(hidden)]
+pub use workspace_terminal::WorkspaceTerminalLinkAffordance;
 
 #[doc(hidden)]
 pub fn workspace_terminal_openable_url_at_surface_for_test(
@@ -2227,10 +2230,7 @@ fn workspace_terminal_link_mouse_decision(
         return WorkspaceTerminalLinkMouseDecision::Forward;
     };
 
-    if surface.alternate_screen_active
-        || surface.mouse_grabbed
-        || surface.application_cursor_keys
-    {
+    if surface.alternate_screen_active || surface.mouse_grabbed || surface.application_cursor_keys {
         candidate.take();
         return WorkspaceTerminalLinkMouseDecision::Forward;
     }
@@ -2242,14 +2242,18 @@ fn workspace_terminal_link_mouse_decision(
         }
         (TerminalMouseEventKind::Down, TerminalMouseButton::Left) => {
             *candidate = ctrl
-                .then(|| workspace_terminal::openable_url_at_active_workspace_surface(state, row, col))
+                .then(|| {
+                    workspace_terminal::openable_url_at_active_workspace_surface(state, row, col)
+                })
                 .flatten()
                 .map(|url| WorkspaceTerminalLinkClickCandidate { url });
             WorkspaceTerminalLinkMouseDecision::LocalOnly
         }
         (TerminalMouseEventKind::Up, TerminalMouseButton::Left) => {
             let current_url = ctrl
-                .then(|| workspace_terminal::openable_url_at_active_workspace_surface(state, row, col))
+                .then(|| {
+                    workspace_terminal::openable_url_at_active_workspace_surface(state, row, col)
+                })
                 .flatten();
             let decision = if candidate
                 .as_ref()
@@ -3261,7 +3265,9 @@ fn sync_workspace_session_state_with_manager(
 ) {
     window
         .set_active_workspace_session_id(state.active_workspace_session_id().unwrap_or("").into());
-    window.set_workspace_session_host_mode(projected_workspace_session_host_mode(state, manager).into());
+    window.set_workspace_session_host_mode(
+        projected_workspace_session_host_mode(state, manager).into(),
+    );
     window.set_workspace_session_search_open(state.workspace_terminal_search_open());
     window.set_workspace_session_search_query(state.workspace_terminal_search_query().into());
     window.set_workspace_session_search_match_count(
@@ -3350,7 +3356,10 @@ pub(super) fn schedule_workspace_terminal_runtime_defaults_sync(
     let handle = window.as_weak();
     let _ = slint::invoke_from_event_loop(move || {
         if let Some(window) = handle.upgrade() {
-            sync_workspace_terminal_runtime_defaults_with_defaults(&window, Some(&terminal_defaults));
+            sync_workspace_terminal_runtime_defaults_with_defaults(
+                &window,
+                Some(&terminal_defaults),
+            );
         }
     });
 }
@@ -3545,8 +3554,11 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
         window.set_workspace_session_default_fg(slint_color_from_rgba(surface.default_fg_rgba));
         window.set_workspace_session_default_bg(slint_color_from_rgba(surface.default_bg_rgba));
         window.set_workspace_session_mouse_grabbed(surface.mouse_grabbed);
-        window.set_workspace_session_link_hovered(false);
-        window.set_workspace_session_link_armed(false);
+        let link_affordance = WORKSPACE_TERMINAL_POINTER_STATE.with(|pointer_state| {
+            workspace_terminal::link_affordance_for_pointer(Some(surface), *pointer_state.borrow())
+        });
+        window.set_workspace_session_link_hovered(link_affordance.hovered);
+        window.set_workspace_session_link_armed(link_affordance.armed);
         window.set_workspace_session_viewport_offset_lines(
             i32::try_from(surface.viewport_offset_lines).unwrap_or(i32::MAX),
         );
@@ -3583,6 +3595,9 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
         clear_workspace_native_terminal_frame(window);
         clear_workspace_terminal_semantic_projection(window);
         release_workspace_terminal_renderer_resources();
+        WORKSPACE_TERMINAL_POINTER_STATE.with(|pointer_state| {
+            pointer_state.borrow_mut().take();
+        });
         window.set_workspace_session_mouse_grabbed(false);
         window.set_workspace_session_link_hovered(false);
         window.set_workspace_session_link_armed(false);
@@ -7175,6 +7190,17 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         };
         let row = row.max(0) as u32;
         let col = col.max(0) as u32;
+        WORKSPACE_TERMINAL_POINTER_STATE.with(|pointer_state| {
+            *pointer_state.borrow_mut() =
+                state.active_workspace_terminal_surface().map(|surface| {
+                    workspace_terminal::WorkspaceTerminalPointerState {
+                        session_id: surface.session_id,
+                        row,
+                        col,
+                        ctrl,
+                    }
+                });
+        });
         let link_affordance =
             workspace_terminal::link_affordance_at_active_workspace_surface(&state, row, col, ctrl);
         if let Some(window) = window_handle.upgrade() {
@@ -9008,6 +9034,77 @@ mod tests {
             workspace_terminal::openable_url_at_surface(&surface, 0, 34),
             None
         );
+    }
+
+    #[test]
+    fn workspace_session_state_preserves_link_affordance_during_surface_refresh() {
+        with_bitmap_workspace_presenter_for_test(|| {
+            i_slint_backend_testing::init_no_event_loop();
+
+            let window = AppWindow::new().expect("create app window");
+            let session_id = Uuid::new_v4();
+            let row_text = "open https://example.com/docs";
+            let mut state = ShellViewModel::default();
+            let mut tab = WorkspaceTab::from_session(&SessionHandle {
+                session_id,
+                asset_id: "asset-prod".into(),
+                title: "Prod Bastion".into(),
+                subtitle: "ops@10.0.0.12:22".into(),
+                state: SessionState::Connected,
+                can_reconnect: false,
+                enhanced_session_state: EnhancedSessionState::Plain,
+            });
+            tab.active = true;
+            state.set_workspace_tabs(vec![tab]);
+
+            let mut initial_surface = TerminalSurfaceState::from_visible_lines(
+                session_id,
+                1,
+                24,
+                80,
+                vec![row_text.into()],
+            );
+            initial_surface.cells = ascii_cells_for_row(0, row_text);
+            state.set_active_workspace_terminal_surface(Some(initial_surface));
+            let mut follow_tracker = WorkspaceFollowTracker::default();
+
+            sync_workspace_session_state(&window, &state, &mut follow_tracker);
+            WORKSPACE_TERMINAL_POINTER_STATE.with(|pointer_state| {
+                *pointer_state.borrow_mut() =
+                    Some(workspace_terminal::WorkspaceTerminalPointerState {
+                        session_id,
+                        row: 0,
+                        col: 8,
+                        ctrl: true,
+                    });
+            });
+            window.set_workspace_session_link_hovered(true);
+            window.set_workspace_session_link_armed(true);
+
+            let mut refreshed_surface = TerminalSurfaceState::from_visible_lines(
+                session_id,
+                2,
+                24,
+                80,
+                vec![row_text.into()],
+            );
+            refreshed_surface.cells = ascii_cells_for_row(0, row_text);
+            state.set_active_workspace_terminal_surface(Some(refreshed_surface));
+
+            sync_workspace_session_state(&window, &state, &mut follow_tracker);
+
+            assert!(
+                window.get_workspace_session_link_hovered(),
+                "surface refreshes should not drop the active terminal link hover state while the cursor is still over the same browser-openable URL"
+            );
+            assert!(
+                window.get_workspace_session_link_armed(),
+                "surface refreshes should not drop the active terminal link armed state while the cursor is still over the same browser-openable URL"
+            );
+            WORKSPACE_TERMINAL_POINTER_STATE.with(|pointer_state| {
+                pointer_state.borrow_mut().take();
+            });
+        });
     }
 
     fn ascii_cells_for_row(row: u32, text: &str) -> Vec<TerminalCellState> {

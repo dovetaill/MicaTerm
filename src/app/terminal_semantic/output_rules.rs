@@ -62,14 +62,7 @@ pub fn count_search_query_matches_in_lines(lines: &[String], query: &str) -> usi
 fn profile_allows_role(profile: OutputRuleProfile, role: SemanticStyleRole) -> bool {
     match profile {
         OutputRuleProfile::Default => true,
-        OutputRuleProfile::Focused => matches!(
-            role,
-            SemanticStyleRole::OutputUrl
-                | SemanticStyleRole::OutputUnixPath
-                | SemanticStyleRole::OutputWindowsPath
-                | SemanticStyleRole::OutputLineReference
-                | SemanticStyleRole::OutputNetworkEndpoint
-        ),
+        OutputRuleProfile::Focused => matches!(role, SemanticStyleRole::OutputUrl),
     }
 }
 
@@ -260,4 +253,55 @@ fn is_network_endpoint(token: &str) -> bool {
         && host
             .split('.')
             .all(|segment| !segment.is_empty() && segment.chars().all(|ch| ch.is_ascii_digit()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::app::ssh::runtime::{TerminalCellState, TerminalSurfaceState};
+    use crate::app::terminal_model::TerminalModelFrame;
+    use crate::theme::SemanticStyleRole;
+    use uuid::Uuid;
+
+    #[test]
+    fn focused_profile_only_marks_http_urls() {
+        let line = "src/app/ui_preferences.rs:112 https://example.com 127.0.0.1:8080";
+        let mut surface =
+            TerminalSurfaceState::from_visible_lines(Uuid::new_v4(), 1, 1, 96, vec![line.into()]);
+        surface.cells = ascii_cells_for_row(0, line);
+
+        let spans = detect_output_rule_spans(
+            &TerminalModelFrame::from_surface(&surface, None),
+            OutputRuleProfile::Focused,
+        );
+
+        assert_eq!(
+            spans,
+            vec![SemanticSpan {
+                row: 0,
+                start_col: 30,
+                end_col: 48,
+                role: SemanticStyleRole::OutputUrl,
+                text: "https://example.com".into(),
+            }],
+            "focused output highlighting should only keep browser-openable http/https links"
+        );
+    }
+
+    fn ascii_cells_for_row(row: u32, text: &str) -> Vec<TerminalCellState> {
+        text.chars()
+            .enumerate()
+            .map(|(col, ch)| TerminalCellState {
+                row,
+                col: col as u32,
+                width: 1,
+                text: ch.to_string(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffff_ffff,
+                bg_rgba: 0xff0d_1117,
+            })
+            .collect()
+    }
 }
