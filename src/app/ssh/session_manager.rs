@@ -942,10 +942,10 @@ impl SessionManager {
                     if !current_attempt_matches(&registry_for_launch, session_id, attempt_id) {
                         return;
                     }
-                    update_connection_attempt_headline(
+                    project_connection_attempt_error(
                         &registry_for_launch,
                         session_id,
-                        ConnectionHeadlineState::Error,
+                        error.to_string(),
                     );
                     update_session(
                         &registry_for_launch,
@@ -1086,11 +1086,7 @@ fn apply_runtime_event(
                 "session manager received runtime error event"
             );
             clear_runtime_control(registry, session_id);
-            update_connection_attempt_headline(
-                registry,
-                session_id,
-                ConnectionHeadlineState::Error,
-            );
+            project_connection_attempt_error(registry, session_id, message.clone());
             update_session(registry, session_id, SessionState::Error(message), true);
         }
         SessionRuntimeEvent::ConnectionProgress(progress_event) => {
@@ -1500,6 +1496,35 @@ fn finalize_connection_attempt(
         attempt_id: final_attempt_id,
         message,
     });
+}
+
+fn project_connection_attempt_error(
+    registry: &Arc<Mutex<SessionRegistry>>,
+    session_id: Uuid,
+    message: impl Into<String>,
+) {
+    let message = message.into();
+    let mut registry = registry.lock().expect("lock session registry");
+    let Some(attempt) = registry.connection_attempts.get_mut(&session_id) else {
+        return;
+    };
+    attempt.headline = ConnectionHeadlineState::Error;
+    attempt.prompt = None;
+    if let Some(step) = attempt.steps.iter_mut().rfind(|step| {
+        matches!(
+            step.state,
+            ConnectionStepState::Running | ConnectionStepState::Blocked
+        )
+    }) {
+        step.state = ConnectionStepState::Failed;
+        step.detail = message.clone();
+    }
+    if attempt.diagnostics.last().map(|line| line.message.as_str()) != Some(message.as_str()) {
+        attempt.diagnostics.push(ConnectionDiagnosticLine {
+            attempt_id: attempt.attempt_id,
+            message,
+        });
+    }
 }
 
 fn apply_unknown_host_key_prompt(

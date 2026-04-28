@@ -283,6 +283,9 @@ export component AppWindow inherits Window {
     in-out property <string> workspace-session-connection-headline: "";
     in-out property <string> workspace-session-connection-current-hop: "";
     in-out property <string> workspace-session-connection-current-detail: "";
+    in-out property <string> workspace-session-connection-page-mode: "";
+    in-out property <string> workspace-session-connection-task-title: "";
+    in-out property <string> workspace-session-connection-task-detail: "";
     in-out property <string> workspace-session-host-key-prompt-host: "";
     in-out property <string> workspace-session-host-key-prompt-fingerprint: "";
     in-out property <[ConnectionProgressStepRow]> workspace-session-connection-steps: [];
@@ -933,6 +936,9 @@ export component AppWindow inherits Window {
                         workspace-session-connection-headline: root.workspace-session-connection-headline;
                         workspace-session-connection-current-hop: root.workspace-session-connection-current-hop;
                         workspace-session-connection-current-detail: root.workspace-session-connection-current-detail;
+                        workspace-session-connection-page-mode: root.workspace-session-connection-page-mode;
+                        workspace-session-connection-task-title: root.workspace-session-connection-task-title;
+                        workspace-session-connection-task-detail: root.workspace-session-connection-task-detail;
                         workspace-session-host-key-prompt-host: root.workspace-session-host-key-prompt-host;
                         workspace-session-host-key-prompt-fingerprint: root.workspace-session-host-key-prompt-fingerprint;
                         workspace-session-connection-steps: root.workspace-session-connection-steps;
