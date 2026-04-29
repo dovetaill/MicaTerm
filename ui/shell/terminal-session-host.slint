@@ -223,6 +223,7 @@ export component TerminalSessionHost inherits Rectangle {
     in property <int> session-viewport-offset-lines: 0;
     in property <int> session-viewport-max-offset-lines: 0;
     in property <bool> session-viewport-at-bottom: true;
+    in property <bool> session-alternate-screen-active: false;
     in property <float> session-device-scale-factor: 1.0;
     in-out property <bool> selection-active: false;
     in-out property <int> selection-start-row: -1;
@@ -489,11 +490,52 @@ export component TerminalSessionHost inherits Rectangle {
         return root.snap-length-to-device-pixel(row * root.terminal-cell-height);
     }
 
+    function visible-top-buffer-row() -> int {
+        return max(0, root.session-viewport-max-offset-lines - root.session-viewport-offset-lines);
+    }
+
+    function visible-bottom-buffer-row-exclusive() -> int {
+        return root.visible-top-buffer-row() + max(1, root.session-rows);
+    }
+
+    function viewport-row-to-buffer-row(row: int) -> int {
+        return root.visible-top-buffer-row() + max(0, row);
+    }
+
+    function buffer-row-to-viewport-row(row: int) -> int {
+        return row - root.visible-top-buffer-row();
+    }
+
+    function selection-visible-start-row() -> int {
+        return max(0, root.buffer-row-to-viewport-row(root.selection-start-row));
+    }
+
+    function selection-visible-end-row() -> int {
+        return min(
+            max(0, root.session-rows - 1),
+            root.buffer-row-to-viewport-row(root.selection-end-row),
+        );
+    }
+
+    function selection-visible-start-col() -> int {
+        return root.selection-start-row < root.visible-top-buffer-row()
+            ? 0
+            : root.selection-start-col;
+    }
+
+    function selection-visible-end-col() -> int {
+        return root.selection-end-row >= root.visible-bottom-buffer-row-exclusive()
+            ? root.session-cols
+            : root.selection-end-col;
+    }
+
     function selection-overlay-active() -> bool {
         return root.session-render-mode == "bitmap" && root.selection-active
             && root.selection-start-row >= 0 && root.selection-start-col >= 0
             && root.selection-end-row >= root.selection-start-row
-            && root.selection-end-col >= 0;
+            && root.selection-end-col >= 0
+            && root.selection-end-row >= root.visible-top-buffer-row()
+            && root.selection-start-row < root.visible-bottom-buffer-row-exclusive();
     }
 
     function selection-span-x(start-col: int) -> length {
@@ -774,11 +816,14 @@ export component TerminalSessionHost inherits Rectangle {
         }
         let start-row = root.normalized-selection-start-row();
         let end-row = root.normalized-selection-end-row();
-        if row < start-row || row > end-row {
+        let buffer-row = root.viewport-row-to-buffer-row(row);
+        if buffer-row < start-row || buffer-row > end-row {
             return false;
         }
-        let row-start-col = row == start-row ? root.normalized-selection-start-col() : 0;
-        let row-end-col = row == end-row ? root.normalized-selection-end-col() : root.session-cols;
+        let row-start-col = buffer-row == start-row ? root.normalized-selection-start-col() : 0;
+        let row-end-col = buffer-row == end-row
+            ? root.normalized-selection-end-col()
+            : root.session-cols;
         let cell-end-col = col + width;
         return cell-end-col > row-start-col && col < row-end-col;
     }
@@ -977,6 +1022,24 @@ export component TerminalSessionHost inherits Rectangle {
         cursor-blink-timer.stop();
         if root.mode == "terminal" && root.session-render-mode == "bitmap" && root.session-cursor-visible && root.session-cursor-blinking {
             cursor-blink-timer.start();
+        }
+    }
+
+    changed session-rows => {
+        if root.has-selection() {
+            root.clear-selection();
+        }
+    }
+
+    changed session-cols => {
+        if root.has-selection() {
+            root.clear-selection();
+        }
+    }
+
+    changed session-alternate-screen-active => {
+        if root.has-selection() {
+            root.clear-selection();
         }
     }
 
@@ -1415,38 +1478,53 @@ export component TerminalSessionHost inherits Rectangle {
                     visible: root.session-render-mode == "bitmap" || root.session-render-mode == "native";
                 }
 
-                if root.selection-overlay-active() && root.selection-start-row == root.selection-end-row : selection-overlay-single-row := Rectangle {
-                    x: root.selection-local-span-x(root.selection-start-col);
-                    y: root.terminal-local-cell-y(root.selection-start-row);
-                    width: root.selection-local-span-width(root.selection-start-col, root.selection-end-col);
-                    height: root.selection-local-span-height(root.selection-start-row, root.selection-start-row);
-                    background: ThemeTokens.terminal-selection-surface;
-                }
-
-                if root.selection-overlay-active() && root.selection-start-row < root.selection-end-row : selection-overlay-first-row := Rectangle {
-                    x: root.selection-local-span-x(root.selection-start-col);
-                    y: root.terminal-local-cell-y(root.selection-start-row);
-                    width: root.selection-local-span-width(root.selection-start-col, root.session-cols);
-                    height: root.selection-local-span-height(root.selection-start-row, root.selection-start-row);
-                    background: ThemeTokens.terminal-selection-surface;
-                }
-
-                if root.selection-overlay-active() && root.selection-start-row + 1 < root.selection-end-row : selection-overlay-middle-rows := Rectangle {
-                    x: root.selection-local-span-x(0);
-                    y: root.terminal-local-cell-y(root.selection-start-row + 1);
-                    width: root.selection-local-span-width(0, root.session-cols);
+                if root.selection-overlay-active() && root.selection-visible-start-row() == root.selection-visible-end-row() : selection-overlay-single-row := Rectangle {
+                    x: root.selection-local-span-x(root.selection-visible-start-col());
+                    y: root.terminal-local-cell-y(root.selection-visible-start-row());
+                    width: root.selection-local-span-width(
+                        root.selection-visible-start-col(),
+                        root.selection-visible-end-col(),
+                    );
                     height: root.selection-local-span-height(
-                        root.selection-start-row + 1,
-                        root.selection-end-row - 1,
+                        root.selection-visible-start-row(),
+                        root.selection-visible-start-row(),
                     );
                     background: ThemeTokens.terminal-selection-surface;
                 }
 
-                if root.selection-overlay-active() && root.selection-start-row < root.selection-end-row : selection-overlay-last-row := Rectangle {
+                if root.selection-overlay-active() && root.selection-visible-start-row() < root.selection-visible-end-row() : selection-overlay-first-row := Rectangle {
+                    x: root.selection-local-span-x(root.selection-visible-start-col());
+                    y: root.terminal-local-cell-y(root.selection-visible-start-row());
+                    width: root.selection-local-span-width(
+                        root.selection-visible-start-col(),
+                        root.session-cols,
+                    );
+                    height: root.selection-local-span-height(
+                        root.selection-visible-start-row(),
+                        root.selection-visible-start-row(),
+                    );
+                    background: ThemeTokens.terminal-selection-surface;
+                }
+
+                if root.selection-overlay-active() && root.selection-visible-start-row() + 1 < root.selection-visible-end-row() : selection-overlay-middle-rows := Rectangle {
                     x: root.selection-local-span-x(0);
-                    y: root.terminal-local-cell-y(root.selection-end-row);
-                    width: root.selection-local-span-width(0, root.selection-end-col);
-                    height: root.selection-local-span-height(root.selection-end-row, root.selection-end-row);
+                    y: root.terminal-local-cell-y(root.selection-visible-start-row() + 1);
+                    width: root.selection-local-span-width(0, root.session-cols);
+                    height: root.selection-local-span-height(
+                        root.selection-visible-start-row() + 1,
+                        root.selection-visible-end-row() - 1,
+                    );
+                    background: ThemeTokens.terminal-selection-surface;
+                }
+
+                if root.selection-overlay-active() && root.selection-visible-start-row() < root.selection-visible-end-row() : selection-overlay-last-row := Rectangle {
+                    x: root.selection-local-span-x(0);
+                    y: root.terminal-local-cell-y(root.selection-visible-end-row());
+                    width: root.selection-local-span-width(0, root.selection-visible-end-col());
+                    height: root.selection-local-span-height(
+                        root.selection-visible-end-row(),
+                        root.selection-visible-end-row(),
+                    );
                     background: ThemeTokens.terminal-selection-surface;
                 }
 
@@ -1528,9 +1606,9 @@ export component TerminalSessionHost inherits Rectangle {
                                     event.modifiers.alt,
                                 );
                             } else {
-                                root.selection-anchor-row = row;
+                                root.selection-anchor-row = root.viewport-row-to-buffer-row(row);
                                 root.selection-anchor-col = col;
-                                root.selection-focus-row = row;
+                                root.selection-focus-row = root.viewport-row-to-buffer-row(row);
                                 root.selection-focus-col = col;
                                 root.selection-drag-active = true;
                                 root.sync-selection-state();
@@ -1562,7 +1640,7 @@ export component TerminalSessionHost inherits Rectangle {
                                 }
                                 if root.selection-drag-active {
                                     terminal-input.focus();
-                                    root.selection-focus-row = row;
+                                    root.selection-focus-row = root.viewport-row-to-buffer-row(row);
                                     root.selection-focus-col = selection-col;
                                     root.sync-selection-state();
                                 }
@@ -1827,9 +1905,9 @@ export component TerminalSessionHost inherits Rectangle {
 
                         invoked => {
                             root.close-context-menu();
-                            root.selection-anchor-row = 0;
+                            root.selection-anchor-row = root.visible-top-buffer-row();
                             root.selection-anchor-col = 0;
-                            root.selection-focus-row = max(0, root.session-rows - 1);
+                            root.selection-focus-row = root.visible-bottom-buffer-row-exclusive() - 1;
                             root.selection-focus-col = max(0, root.session-cols);
                             root.sync-selection-state();
                             terminal-input.focus();

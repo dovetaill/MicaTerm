@@ -74,6 +74,7 @@ pub(super) fn bind_windows_window_state_tracking(
                                 let state = state.borrow();
                                 workspace_terminal::forward_active_workspace_copy_selection(
                                     &state,
+                                    session_bridge.as_deref(),
                                     window.get_workspace_session_selection_start_row(),
                                     window.get_workspace_session_selection_start_col(),
                                     window.get_workspace_session_selection_end_row(),

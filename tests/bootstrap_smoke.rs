@@ -522,6 +522,20 @@ struct FollowProjectionLauncher {
     state: FollowProjectionState,
 }
 
+#[derive(Clone, Default)]
+struct SelectionBoundaryState {
+    surface: Arc<Mutex<Option<TerminalSurfaceState>>>,
+    event_tx: Arc<Mutex<Option<mpsc::UnboundedSender<SessionRuntimeEvent>>>>,
+}
+
+#[derive(Clone)]
+struct SelectionBoundaryLauncher {
+    state: SelectionBoundaryState,
+}
+
+#[derive(Clone, Default)]
+struct ScrollbackCopyLauncher;
+
 #[derive(Clone)]
 struct FailingProbeLauncher {
     message: &'static str,
@@ -1058,6 +1072,46 @@ impl FollowProjectionState {
     }
 }
 
+impl SelectionBoundaryState {
+    fn set_event_tx(&self, event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>) {
+        *self
+            .event_tx
+            .lock()
+            .expect("lock selection boundary event tx") = Some(event_tx);
+    }
+
+    fn set_surface(&self, surface: TerminalSurfaceState) {
+        *self
+            .surface
+            .lock()
+            .expect("lock selection boundary surface") = Some(surface.clone());
+
+        if let Some(event_tx) = self
+            .event_tx
+            .lock()
+            .expect("lock selection boundary event tx")
+            .as_ref()
+        {
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
+        }
+    }
+
+    fn emit_alt_screen_surface(&self) {
+        let mut next_surface = self
+            .surface
+            .lock()
+            .expect("lock selection boundary surface")
+            .clone()
+            .expect("current selection boundary surface");
+        next_surface.seqno = next_surface.seqno.saturating_add(1);
+        next_surface.alternate_screen_active = true;
+        next_surface.viewport_offset_lines = 0;
+        next_surface.viewport_max_offset_lines = 0;
+        next_surface.viewport_at_bottom = true;
+        self.set_surface(next_surface);
+    }
+}
+
 impl ScrollProjectionState {
     fn record_scroll_call(&self) {
         let mut count = self
@@ -1081,6 +1135,15 @@ struct ScrollProjectionRuntimeControl {
 
 struct FollowProjectionRuntimeControl {
     state: FollowProjectionState,
+}
+
+struct SelectionBoundaryRuntimeControl {
+    state: SelectionBoundaryState,
+}
+
+struct ScrollbackCopyRuntimeControl {
+    session_id: uuid::Uuid,
+    terminal: Arc<Mutex<TerminalSession>>,
 }
 
 struct KeyboardMatrixRuntimeControl {
@@ -2393,6 +2456,76 @@ impl SessionRuntimeLauncher for FollowProjectionLauncher {
     }
 }
 
+impl SessionRuntimeLauncher for SelectionBoundaryLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let state = self.state.clone();
+        Box::pin(async move {
+            state.set_event_tx(event_tx.clone());
+            let surface = terminal_surface_with_cells(
+                session_id,
+                1,
+                24,
+                80,
+                vec!["welcome to mica-term".into()],
+            );
+            *state
+                .surface
+                .lock()
+                .expect("lock selection boundary surface") = Some(surface.clone());
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
+            Ok(Box::new(SelectionBoundaryRuntimeControl { state })
+                as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SessionRuntimeLauncher for ScrollbackCopyLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        Box::pin(async move {
+            let mut session = TerminalSession::new(4, 20);
+            session.apply_remote_bytes(b"zero\r\none\r\ntwo\r\nthree\r\nfour\r\nfive\r\n");
+            session.scroll_viewport_lines(2);
+            let surface = session.surface_state(session_id);
+            let terminal = Arc::new(Mutex::new(session));
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
+            Ok(Box::new(ScrollbackCopyRuntimeControl {
+                session_id,
+                terminal,
+            }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
 impl SessionRuntimeLauncher for FailingProbeLauncher {
     fn launch(
         &self,
@@ -2421,14 +2554,16 @@ impl SessionRuntimeControl for InteractiveProjectionRuntimeControl {
     }
 
     fn send_text_input(&self, text: String) -> Result<()> {
-        let _ = self.event_tx.send(SessionRuntimeEvent::ShellIntegrationChanged(
-            TerminalShellIntegrationState {
-                has_markers: true,
-                input_active: true,
-                command_running: false,
-                last_command_exit_code: Some(0),
-            },
-        ));
+        let _ = self
+            .event_tx
+            .send(SessionRuntimeEvent::ShellIntegrationChanged(
+                TerminalShellIntegrationState {
+                    has_markers: true,
+                    input_active: true,
+                    command_running: false,
+                    last_command_exit_code: Some(0),
+                },
+            ));
         let _ = self.event_tx.send(SessionRuntimeEvent::SurfaceChanged(
             terminal_surface_with_cells(
                 self.session_id,
@@ -2447,14 +2582,16 @@ impl SessionRuntimeControl for InteractiveProjectionRuntimeControl {
             TerminalKeyKind::Function(number) => format!("f{number}"),
             TerminalKeyKind::Char(ch) => ch.to_string(),
         };
-        let _ = self.event_tx.send(SessionRuntimeEvent::ShellIntegrationChanged(
-            TerminalShellIntegrationState {
-                has_markers: true,
-                input_active: true,
-                command_running: false,
-                last_command_exit_code: Some(0),
-            },
-        ));
+        let _ = self
+            .event_tx
+            .send(SessionRuntimeEvent::ShellIntegrationChanged(
+                TerminalShellIntegrationState {
+                    has_markers: true,
+                    input_active: true,
+                    command_running: false,
+                    last_command_exit_code: Some(0),
+                },
+            ));
         let _ = self.event_tx.send(SessionRuntimeEvent::SurfaceChanged(
             terminal_surface_with_cells(
                 self.session_id,
@@ -2724,6 +2861,102 @@ impl SessionRuntimeControl for FollowProjectionRuntimeControl {
             .lock()
             .expect("lock follow projection surface") = Some(surface.clone());
         Ok(surface)
+    }
+}
+
+impl SessionRuntimeControl for SelectionBoundaryRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_text_input(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_key_input(&self, _event: TerminalKeyEvent) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_paste(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn resize(&self, rows: u32, cols: u32) -> Result<()> {
+        let mut next_surface = self
+            .state
+            .surface
+            .lock()
+            .expect("lock selection boundary surface")
+            .clone()
+            .expect("current selection boundary surface");
+        next_surface.seqno = next_surface.seqno.saturating_add(1);
+        next_surface.rows = rows.max(1);
+        next_surface.cols = cols.max(1);
+        self.state.set_surface(next_surface);
+        Ok(())
+    }
+
+    fn terminal_surface(&self) -> Result<TerminalSurfaceState> {
+        self.state
+            .surface
+            .lock()
+            .expect("lock selection boundary surface")
+            .clone()
+            .ok_or_else(|| anyhow!("selection boundary surface is unavailable"))
+    }
+}
+
+impl SessionRuntimeControl for ScrollbackCopyRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_text_input(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_key_input(&self, _event: TerminalKeyEvent) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_paste(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+
+    fn selection_text_from_buffer_rows(
+        &self,
+        start_row: u32,
+        start_col: u32,
+        end_row: u32,
+        end_col: u32,
+    ) -> Result<Option<String>> {
+        let terminal = self
+            .terminal
+            .lock()
+            .map_err(|_| anyhow!("lock scrollback copy terminal"))?;
+        Ok(Some(terminal.selection_text_from_buffer_rows(
+            start_row, start_col, end_row, end_col,
+        )))
+    }
+
+    fn terminal_surface(&self) -> Result<TerminalSurfaceState> {
+        let terminal = self
+            .terminal
+            .lock()
+            .map_err(|_| anyhow!("lock scrollback copy terminal"))?;
+        Ok(terminal.surface_state(self.session_id))
     }
 }
 
@@ -7772,10 +8005,10 @@ fn workspace_terminal_launch_captures_live_viewport_defaults_before_runtime_conn
 
     let expected_rows = (app.get_layout_workspace_session_preferred_surface_height()
         / app.get_workspace_session_cell_height())
-        .floor() as usize;
+    .floor() as usize;
     let expected_cols = (app.get_layout_workspace_session_preferred_surface_width()
         / app.get_workspace_session_cell_width())
-        .floor() as usize;
+    .floor() as usize;
 
     wait_for_condition(Duration::from_millis(250), || {
         launcher_state
@@ -9311,6 +9544,180 @@ fn workspace_terminal_half_cell_drag_selects_a_single_ascii_cell() {
 }
 
 #[test]
+fn workspace_terminal_selection_rows_stay_bound_to_buffer_when_scrolling() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(ScrollProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    select_terminal_welcome_span(&app);
+    settle_terminal_projection();
+
+    assert!(app.get_workspace_session_selection_active());
+    assert_eq!(
+        app.get_workspace_session_viewport_offset_lines(),
+        3,
+        "test fixture should start scrolled away from the bottom so selection rows must account for the current scrollback origin"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_row(),
+        5,
+        "selection rows should be stored against the scrollback buffer instead of raw viewport-local rows"
+    );
+    assert_eq!(app.get_workspace_session_selection_end_row(), 5);
+
+    let position = terminal_interaction_position(&app);
+    app.window().dispatch_event(WindowEvent::PointerScrolled {
+        position,
+        delta_x: 0.0,
+        delta_y: 60.0,
+    });
+    settle_terminal_projection();
+
+    assert_eq!(app.get_workspace_session_viewport_offset_lines(), 6);
+    assert!(app.get_workspace_session_selection_active());
+    assert_eq!(
+        app.get_workspace_session_selection_start_row(),
+        5,
+        "scrolling the viewport should not rewrite the selected buffer row to a new viewport-local coordinate"
+    );
+    assert_eq!(app.get_workspace_session_selection_end_row(), 5);
+}
+
+#[test]
+fn workspace_terminal_copy_selection_reads_full_scrollback_buffer_text() {
+    run_on_large_stack(
+        "workspace_terminal_copy_selection_reads_full_scrollback_buffer_text",
+        workspace_terminal_copy_selection_reads_full_scrollback_buffer_text_body,
+    );
+}
+
+fn workspace_terminal_copy_selection_reads_full_scrollback_buffer_text_body() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text("", slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("clear clipboard");
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(ScrollbackCopyLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    app.invoke_workspace_session_copy_selection_requested(0, 0, 3, 20);
+
+    let copied = i_slint_backend_selector::with_platform(|platform| {
+        Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
+    })
+    .expect("read clipboard");
+
+    assert_eq!(
+        copied.as_deref(),
+        Some("zero\none\ntwo\nthree"),
+        "copy should read the selected scrollback buffer rows even when the selection starts above the visible viewport"
+    );
+}
+
+#[test]
+fn workspace_terminal_entering_alt_screen_clears_existing_selection() {
+    run_on_large_stack(
+        "workspace_terminal_entering_alt_screen_clears_existing_selection",
+        workspace_terminal_entering_alt_screen_clears_existing_selection_body,
+    );
+}
+
+fn workspace_terminal_entering_alt_screen_clears_existing_selection_body() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let state = SelectionBoundaryState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(SelectionBoundaryLauncher {
+            state: state.clone(),
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+    select_terminal_welcome_span(&app);
+    settle_terminal_projection();
+
+    assert!(app.get_workspace_session_selection_active());
+
+    state.emit_alt_screen_surface();
+    settle_terminal_projection();
+
+    assert!(
+        !app.get_workspace_session_selection_active(),
+        "switching into alternate-screen content should invalidate any host-side shell selection so stale primary-buffer ranges do not paint over TUI frames"
+    );
+    assert_eq!(app.get_workspace_session_selection_start_row(), -1);
+    assert_eq!(app.get_workspace_session_selection_start_col(), -1);
+    assert_eq!(app.get_workspace_session_selection_end_row(), -1);
+    assert_eq!(app.get_workspace_session_selection_end_col(), -1);
+}
+
+#[test]
+fn workspace_terminal_surface_resize_clears_existing_selection() {
+    run_on_large_stack(
+        "workspace_terminal_surface_resize_clears_existing_selection",
+        workspace_terminal_surface_resize_clears_existing_selection_body,
+    );
+}
+
+fn workspace_terminal_surface_resize_clears_existing_selection_body() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let state = SelectionBoundaryState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(SelectionBoundaryLauncher {
+            state: state.clone(),
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+    select_terminal_welcome_span(&app);
+    settle_terminal_projection();
+
+    assert!(app.get_workspace_session_selection_active());
+
+    app.invoke_workspace_session_resize_requested(12, 8);
+    settle_terminal_projection();
+
+    assert!(
+        !app.get_workspace_session_selection_active(),
+        "changing the terminal grid geometry should clear the existing host-side selection because the old buffer row/column span is no longer guaranteed to map safely after reflow"
+    );
+    assert_eq!(app.get_workspace_session_selection_start_row(), -1);
+    assert_eq!(app.get_workspace_session_selection_start_col(), -1);
+    assert_eq!(app.get_workspace_session_selection_end_row(), -1);
+    assert_eq!(app.get_workspace_session_selection_end_col(), -1);
+}
+
+#[test]
 fn opening_right_panel_clamps_terminal_surface_width_before_pty_resize_roundtrip() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -9382,7 +9789,8 @@ fn opening_right_panel_updates_live_terminal_viewport_defaults_immediately() {
     let expected_after = (
         app.get_layout_workspace_session_preferred_rows() as usize,
         app.get_layout_workspace_session_preferred_cols() as usize,
-        app.get_layout_workspace_session_preferred_surface_width().round() as u32,
+        app.get_layout_workspace_session_preferred_surface_width()
+            .round() as u32,
     );
     assert_eq!(
         after.0, expected_after.0,
@@ -9401,8 +9809,7 @@ fn opening_right_panel_updates_live_terminal_viewport_defaults_immediately() {
         "opening the right panel should immediately shrink the pixel viewport width stored for future PTY requests"
     );
     assert_eq!(
-        after.2,
-        expected_after.2,
+        after.2, expected_after.2,
         "opening the right panel should update the stored pixel viewport width to the preferred host width"
     );
 }
@@ -10082,7 +10489,15 @@ fn workspace_terminal_ctrl_click_opens_trimmed_url_without_forwarding_mouse_inpu
         Ok(())
     });
 
-    app.invoke_workspace_session_mouse_input("down".into(), "left".into(), 0, 8, false, true, false);
+    app.invoke_workspace_session_mouse_input(
+        "down".into(),
+        "left".into(),
+        0,
+        8,
+        false,
+        true,
+        false,
+    );
     app.invoke_workspace_session_mouse_input("up".into(), "left".into(), 0, 8, false, true, false);
 
     assert_eq!(
@@ -10132,8 +10547,24 @@ fn workspace_terminal_ctrl_drag_does_not_open_link_or_forward_mouse_input() {
         Ok(())
     });
 
-    app.invoke_workspace_session_mouse_input("down".into(), "left".into(), 0, 8, false, true, false);
-    app.invoke_workspace_session_mouse_input("move".into(), "none".into(), 0, 12, false, true, false);
+    app.invoke_workspace_session_mouse_input(
+        "down".into(),
+        "left".into(),
+        0,
+        8,
+        false,
+        true,
+        false,
+    );
+    app.invoke_workspace_session_mouse_input(
+        "move".into(),
+        "none".into(),
+        0,
+        12,
+        false,
+        true,
+        false,
+    );
     app.invoke_workspace_session_mouse_input("up".into(), "left".into(), 0, 12, false, true, false);
 
     assert!(
@@ -10182,7 +10613,15 @@ fn workspace_terminal_alt_screen_ctrl_click_does_not_open_link_and_still_forward
         Ok(())
     });
 
-    app.invoke_workspace_session_mouse_input("down".into(), "left".into(), 0, 8, false, true, false);
+    app.invoke_workspace_session_mouse_input(
+        "down".into(),
+        "left".into(),
+        0,
+        8,
+        false,
+        true,
+        false,
+    );
     app.invoke_workspace_session_mouse_input("up".into(), "left".into(), 0, 8, false, true, false);
 
     assert!(

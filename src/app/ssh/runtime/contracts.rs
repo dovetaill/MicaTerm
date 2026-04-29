@@ -129,6 +129,14 @@ pub struct TerminalMouseInput {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalViewportSelectionRange {
+    pub start_row: u32,
+    pub start_col: u32,
+    pub end_row: u32,
+    pub end_col: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalKeyKind {
     Named(&'static str),
     Function(u8),
@@ -173,6 +181,52 @@ impl TerminalKeyEvent {
 }
 
 impl TerminalSurfaceState {
+    pub fn visible_top_row(&self) -> u32 {
+        self.viewport_max_offset_lines
+            .saturating_sub(self.viewport_offset_lines)
+    }
+
+    pub fn visible_bottom_row_exclusive(&self) -> u32 {
+        self.visible_top_row().saturating_add(self.rows.max(1))
+    }
+
+    pub fn viewport_row_to_buffer_row(&self, row: u32) -> u32 {
+        self.visible_top_row().saturating_add(row)
+    }
+
+    pub fn project_buffer_selection_to_viewport(
+        &self,
+        start_row: u32,
+        start_col: u32,
+        end_row: u32,
+        end_col: u32,
+    ) -> Option<TerminalViewportSelectionRange> {
+        let ((start_row, start_col), (end_row, end_col)) =
+            normalized_selection((start_row, start_col), (end_row, end_col));
+        let visible_top = self.visible_top_row();
+        let visible_bottom = self.visible_bottom_row_exclusive();
+        if end_row < visible_top || start_row >= visible_bottom {
+            return None;
+        }
+
+        Some(TerminalViewportSelectionRange {
+            start_row: start_row.max(visible_top).saturating_sub(visible_top),
+            start_col: if start_row < visible_top {
+                0
+            } else {
+                start_col
+            },
+            end_row: end_row
+                .min(visible_bottom.saturating_sub(1))
+                .saturating_sub(visible_top),
+            end_col: if end_row >= visible_bottom {
+                self.cols
+            } else {
+                end_col
+            },
+        })
+    }
+
     pub fn from_frame_snapshot(session_id: Uuid, frame: TerminalFrameSnapshot) -> Self {
         Self {
             session_id,
@@ -322,6 +376,25 @@ impl TerminalSurfaceState {
         text
     }
 
+    pub fn selection_text_from_buffer_rows(
+        &self,
+        start_row: u32,
+        start_col: u32,
+        end_row: u32,
+        end_col: u32,
+    ) -> String {
+        self.project_buffer_selection_to_viewport(start_row, start_col, end_row, end_col)
+            .map(|range| {
+                self.selection_text(
+                    range.start_row,
+                    range.start_col,
+                    range.end_row,
+                    range.end_col,
+                )
+            })
+            .unwrap_or_default()
+    }
+
     pub fn normalize_hit_col(&self, row: u32, col: u32) -> u32 {
         let clamped_col = col.min(self.cols.saturating_sub(1));
         self.cells
@@ -426,5 +499,57 @@ mod tests {
         assert_eq!(surface.normalize_selection_hit_col(0, 2), 3);
         assert_eq!(surface.normalize_selection_hit_col(0, 1), 1);
         assert_eq!(surface.normalize_selection_hit_col(0, 4), 4);
+    }
+
+    #[test]
+    fn buffer_selection_projects_into_viewport_coordinates() {
+        let mut surface = sample_surface();
+        surface.rows = 4;
+        surface.cols = 8;
+        surface.viewport_offset_lines = 3;
+        surface.viewport_max_offset_lines = 8;
+        surface.viewport_at_bottom = false;
+
+        let projected = surface
+            .project_buffer_selection_to_viewport(5, 1, 5, 3)
+            .expect("visible selection");
+        assert_eq!(
+            projected,
+            TerminalViewportSelectionRange {
+                start_row: 0,
+                start_col: 1,
+                end_row: 0,
+                end_col: 3,
+            }
+        );
+
+        let shifted = surface
+            .project_buffer_selection_to_viewport(7, 0, 7, 2)
+            .expect("selection shifted down within viewport");
+        assert_eq!(shifted.start_row, 2);
+        assert_eq!(shifted.end_row, 2);
+    }
+
+    #[test]
+    fn buffer_selection_clips_to_visible_rows() {
+        let mut surface = sample_surface();
+        surface.rows = 4;
+        surface.cols = 8;
+        surface.viewport_offset_lines = 3;
+        surface.viewport_max_offset_lines = 8;
+        surface.viewport_at_bottom = false;
+
+        let clipped = surface
+            .project_buffer_selection_to_viewport(4, 2, 6, 4)
+            .expect("partially visible selection");
+        assert_eq!(
+            clipped,
+            TerminalViewportSelectionRange {
+                start_row: 0,
+                start_col: 0,
+                end_row: 1,
+                end_col: 4,
+            }
+        );
     }
 }

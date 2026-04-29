@@ -56,6 +56,15 @@ pub trait TerminalCoreAdapter: Send {
     fn screen_text(&self) -> String;
     fn visible_rows(&self) -> Vec<TerminalRowState>;
     fn visible_lines(&self) -> Vec<String>;
+    fn selection_text_from_buffer_rows(
+        &self,
+        _start_row: u32,
+        _start_col: u32,
+        _end_row: u32,
+        _end_col: u32,
+    ) -> String {
+        String::new()
+    }
     fn frame_snapshot(&self) -> TerminalFrameSnapshot;
     fn resize(&mut self, rows: usize, cols: usize);
     fn set_theme(&mut self, mode: ThemeMode, variant: ThemeVariant);

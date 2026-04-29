@@ -80,6 +80,7 @@ export component WorkspacePane inherits Rectangle {
     in property <int> workspace-session-viewport-offset-lines: 0;
     in property <int> workspace-session-viewport-max-offset-lines: 0;
     in property <bool> workspace-session-viewport-at-bottom: true;
+    in property <bool> workspace-session-alternate-screen-active: false;
     in-out property <bool> workspace-session-selection-active: false;
     in-out property <int> workspace-session-selection-start-row: -1;
     in-out property <int> workspace-session-selection-start-col: -1;
@@ -246,6 +247,7 @@ export component WorkspacePane inherits Rectangle {
                 session-viewport-offset-lines: root.workspace-session-viewport-offset-lines;
                 session-viewport-max-offset-lines: root.workspace-session-viewport-max-offset-lines;
                 session-viewport-at-bottom: root.workspace-session-viewport-at-bottom;
+                session-alternate-screen-active: root.workspace-session-alternate-screen-active;
                 selection-active <=> root.workspace-session-selection-active;
                 selection-start-row <=> root.workspace-session-selection-start-row;
                 selection-start-col <=> root.workspace-session-selection-start-col;

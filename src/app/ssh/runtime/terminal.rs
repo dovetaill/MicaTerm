@@ -344,6 +344,17 @@ impl TerminalSession {
         self.core.visible_lines()
     }
 
+    pub fn selection_text_from_buffer_rows(
+        &self,
+        start_row: u32,
+        start_col: u32,
+        end_row: u32,
+        end_col: u32,
+    ) -> String {
+        self.core
+            .selection_text_from_buffer_rows(start_row, start_col, end_row, end_col)
+    }
+
     pub fn resize(&mut self, rows: usize, cols: usize) {
         self.core.resize(rows, cols);
     }

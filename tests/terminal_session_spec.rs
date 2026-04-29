@@ -3,6 +3,7 @@ use std::fs;
 use mica_term::app::ssh::runtime::{
     TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput, TerminalSession,
 };
+use mica_term::app::terminal_core::TerminalCoreKind;
 use mica_term::app::terminal_theme::{preset_for_theme, preset_for_theme_mode};
 use mica_term::theme::{ThemeMode, ThemeVariant};
 use termwiz::input::{KeyCode, Modifiers};
@@ -126,6 +127,38 @@ fn surface_projection_exposes_scrollback_metadata() {
 
     assert!(snapshot.viewport_offset_lines > 0);
     assert!(snapshot.viewport_max_offset_lines >= snapshot.viewport_offset_lines);
+}
+
+fn assert_scrollback_selection_text_uses_buffer_coordinates(kind: TerminalCoreKind) {
+    let mut session = TerminalSession::new_with_core_kind(4, 20, kind);
+
+    session.apply_remote_bytes(b"zero\r\none\r\ntwo\r\nthree\r\nfour\r\nfive\r\n");
+    session.scroll_viewport_lines(2);
+
+    let snapshot = session.surface_state(Uuid::new_v4());
+    assert!(
+        snapshot.visible_top_row() > 0,
+        "test fixture should scroll far enough that buffer row 0 is offscreen"
+    );
+
+    let text = session.selection_text_from_buffer_rows(0, 0, 3, 20);
+
+    assert_eq!(
+        text, "zero\none\ntwo\nthree",
+        "copy should read from stable scrollback buffer rows instead of clipping to the currently visible viewport"
+    );
+}
+
+#[test]
+fn wezterm_session_selection_text_reads_scrollback_above_viewport() {
+    assert_scrollback_selection_text_uses_buffer_coordinates(TerminalCoreKind::Wezterm);
+}
+
+#[test]
+fn experimental_alacritty_session_selection_text_reads_scrollback_above_viewport() {
+    assert_scrollback_selection_text_uses_buffer_coordinates(
+        TerminalCoreKind::AlacrittyExperimental,
+    );
 }
 
 #[test]

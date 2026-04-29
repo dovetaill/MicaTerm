@@ -109,6 +109,15 @@ pub trait SessionRuntimeControl: Send {
     fn send_key_input(&self, event: TerminalKeyEvent) -> Result<()>;
     fn send_mouse_input(&self, event: TerminalMouseInput) -> Result<()>;
     fn send_paste(&self, text: String) -> Result<()>;
+    fn selection_text_from_buffer_rows(
+        &self,
+        _start_row: u32,
+        _start_col: u32,
+        _end_row: u32,
+        _end_col: u32,
+    ) -> Result<Option<String>> {
+        Ok(None)
+    }
     fn resize(&self, rows: u32, cols: u32) -> Result<()>;
     fn terminal_surface(&self) -> Result<TerminalSurfaceState> {
         Err(anyhow!(
@@ -728,6 +737,46 @@ impl SessionManager {
             .get(&session_id)
             .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
         runtime_control.send_paste(text)
+    }
+
+    pub fn selection_text_from_buffer_rows(
+        &self,
+        session_id: Uuid,
+        start_row: u32,
+        start_col: u32,
+        end_row: u32,
+        end_col: u32,
+    ) -> Result<String> {
+        let runtime_result = {
+            let registry = self.registry.lock().expect("lock session registry");
+            let runtime_control = registry
+                .runtime_controls
+                .get(&session_id)
+                .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
+            runtime_control.selection_text_from_buffer_rows(start_row, start_col, end_row, end_col)
+        };
+
+        match runtime_result {
+            Ok(Some(text)) => return Ok(text),
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(
+                    target: "app.terminal",
+                    session_id = session_id.to_string(),
+                    start_row,
+                    start_col,
+                    end_row,
+                    end_col,
+                    error = %error,
+                    "failed to read selection text from terminal runtime buffer; falling back to projected surface"
+                );
+            }
+        }
+
+        let surface = self
+            .terminal_surface(session_id)
+            .ok_or_else(|| anyhow!("session terminal surface is not ready for `{session_id}`"))?;
+        Ok(surface.selection_text_from_buffer_rows(start_row, start_col, end_row, end_col))
     }
 
     pub fn scroll_session_viewport(&self, session_id: Uuid, delta: i32) -> Result<()> {

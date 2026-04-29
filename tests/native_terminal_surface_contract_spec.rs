@@ -201,7 +201,9 @@ fn terminal_session_host_source_exposes_terminal_link_affordance_contract() {
         "terminal session host should advertise hovered URLs with a pointer cursor before Ctrl is pressed so terminal links feel discoverable like hyperlinks"
     );
     assert!(
-        host_source.contains("root.link-armed ? \"Ctrl+click to open link\" : \"Hold Ctrl and click to open link\""),
+        host_source.contains(
+            "root.link-armed ? \"Ctrl+click to open link\" : \"Hold Ctrl and click to open link\""
+        ),
         "terminal session host should distinguish tooltip copy between plain hover and the armed Ctrl state"
     );
     assert!(
@@ -341,12 +343,15 @@ fn workspace_and_window_sources_thread_terminal_link_affordance_contract() {
     );
     assert!(
         app_window_source.contains("in-out property <bool> workspace-session-link-hovered: false;")
-            && app_window_source.contains("in-out property <bool> workspace-session-link-armed: false;"),
+            && app_window_source
+                .contains("in-out property <bool> workspace-session-link-armed: false;"),
         "app window should store the workspace terminal link-affordance props so bootstrap can update them from Rust"
     );
     assert!(
-        app_window_source.contains("workspace-session-link-hovered: root.workspace-session-link-hovered;")
-            && app_window_source.contains("workspace-session-link-armed: root.workspace-session-link-armed;"),
+        app_window_source
+            .contains("workspace-session-link-hovered: root.workspace-session-link-hovered;")
+            && app_window_source
+                .contains("workspace-session-link-armed: root.workspace-session-link-armed;"),
         "app window should thread the terminal-link affordance props down into the workspace pane"
     );
 }
@@ -1272,7 +1277,8 @@ fn windows_backend_source_keeps_mixed_generated_mask_frames_off_the_full_fallbac
         );
     }
     assert!(
-        !windows_backend_source.contains("if self.last_directwrite_text_drawn {\n            return;\n        }"),
+        !windows_backend_source
+            .contains("if self.last_directwrite_text_drawn {\n            return;\n        }"),
         "mixed DirectWrite + generated-mask frames should no longer short-circuit the monochrome bitmap stage after the text pass"
     );
 }

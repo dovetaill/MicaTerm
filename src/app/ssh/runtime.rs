@@ -136,13 +136,7 @@ impl TerminalRuntimeDefaults {
         self.viewport_pixel_height.load(Ordering::Relaxed).max(1) as u32
     }
 
-    pub fn set_viewport_size(
-        &self,
-        rows: usize,
-        cols: usize,
-        pixel_width: u32,
-        pixel_height: u32,
-    ) {
+    pub fn set_viewport_size(&self, rows: usize, cols: usize, pixel_width: u32, pixel_height: u32) {
         let rows = rows.max(1);
         let cols = cols.max(1);
         let pixel_width = if pixel_width == 0 {
@@ -392,6 +386,20 @@ impl SshSessionRuntime {
             .map_err(|_| anyhow!("ssh runtime paste channel is closed"))
     }
 
+    pub fn selection_text_from_buffer_rows(
+        &self,
+        start_row: u32,
+        start_col: u32,
+        end_row: u32,
+        end_col: u32,
+    ) -> Result<String> {
+        let terminal = self
+            .terminal
+            .lock()
+            .map_err(|_| anyhow!("failed to lock terminal for selection copy"))?;
+        Ok(terminal.selection_text_from_buffer_rows(start_row, start_col, end_row, end_col))
+    }
+
     pub fn update_theme(
         &self,
         mode: ThemeMode,
@@ -469,6 +477,19 @@ impl SessionRuntimeControl for SshSessionRuntime {
 
     fn send_paste(&self, text: String) -> Result<()> {
         SshSessionRuntime::send_paste(self, text)
+    }
+
+    fn selection_text_from_buffer_rows(
+        &self,
+        start_row: u32,
+        start_col: u32,
+        end_row: u32,
+        end_col: u32,
+    ) -> Result<Option<String>> {
+        SshSessionRuntime::selection_text_from_buffer_rows(
+            self, start_row, start_col, end_row, end_col,
+        )
+        .map(Some)
     }
 
     fn terminal_surface(&self) -> Result<TerminalSurfaceState> {
@@ -577,7 +598,10 @@ mod tests {
 
         assert_eq!(defaults.viewport_rows(), DEFAULT_TERMINAL_ROWS);
         assert_eq!(defaults.viewport_cols(), DEFAULT_TERMINAL_COLS);
-        assert_eq!(defaults.viewport_pixel_width(), (DEFAULT_TERMINAL_COLS * 8) as u32);
+        assert_eq!(
+            defaults.viewport_pixel_width(),
+            (DEFAULT_TERMINAL_COLS * 8) as u32
+        );
         assert_eq!(
             defaults.viewport_pixel_height(),
             (DEFAULT_TERMINAL_ROWS * 16) as u32

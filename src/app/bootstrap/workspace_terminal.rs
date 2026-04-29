@@ -728,6 +728,7 @@ pub(super) fn system_clipboard_text() -> Option<String> {
 
 pub(super) fn forward_active_workspace_copy_selection(
     state: &ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
     start_row: i32,
     start_col: i32,
     end_row: i32,
@@ -737,12 +738,21 @@ pub(super) fn forward_active_workspace_copy_selection(
         return;
     };
 
-    let text = surface.selection_text(
-        start_row.max(0) as u32,
-        start_col.max(0) as u32,
-        end_row.max(0) as u32,
-        end_col.max(0) as u32,
-    );
+    let start_row = start_row.max(0) as u32;
+    let start_col = start_col.max(0) as u32;
+    let end_row = end_row.max(0) as u32;
+    let end_col = end_col.max(0) as u32;
+    let text = active_workspace_session_uuid(state)
+        .zip(bridge)
+        .and_then(|(session_id, bridge)| {
+            bridge
+                .manager
+                .selection_text_from_buffer_rows(session_id, start_row, start_col, end_row, end_col)
+                .ok()
+        })
+        .unwrap_or_else(|| {
+            surface.selection_text_from_buffer_rows(start_row, start_col, end_row, end_col)
+        });
     if text.is_empty() {
         return;
     }

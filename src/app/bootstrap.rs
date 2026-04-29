@@ -2195,8 +2195,23 @@ fn workspace_session_uses_host_selection_overlay(window: &AppWindow) -> bool {
     window.get_workspace_session_render_mode().as_str() == TerminalRenderMode::Bitmap.as_str()
 }
 
-fn active_workspace_terminal_selection(window: &AppWindow) -> Option<TerminalAtlasSelection> {
+fn workspace_terminal_selection_boundary_changed(
+    window: &AppWindow,
+    surface: &TerminalSurfaceState,
+) -> bool {
+    window.get_workspace_session_alternate_screen_active() != surface.alternate_screen_active
+        || window.get_workspace_session_rows().max(0) as u32 != surface.rows
+        || window.get_workspace_session_cols().max(0) as u32 != surface.cols
+}
+
+fn active_workspace_terminal_selection(
+    window: &AppWindow,
+    surface: &TerminalSurfaceState,
+) -> Option<TerminalAtlasSelection> {
     if !window.get_workspace_session_selection_active() {
+        return None;
+    }
+    if workspace_terminal_selection_boundary_changed(window, surface) {
         return None;
     }
 
@@ -2208,11 +2223,18 @@ fn active_workspace_terminal_selection(window: &AppWindow) -> Option<TerminalAtl
         return None;
     }
 
-    Some(TerminalAtlasSelection::new(
+    let range = surface.project_buffer_selection_to_viewport(
         start_row as u32,
         start_col as u32,
         end_row as u32,
         end_col as u32,
+    )?;
+
+    Some(TerminalAtlasSelection::new(
+        range.start_row,
+        range.start_col,
+        range.end_row,
+        range.end_col,
     ))
 }
 
@@ -3991,10 +4013,11 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
     };
 
     if let Some(surface) = state.active_workspace_terminal_surface() {
+        window.set_workspace_session_alternate_screen_active(surface.alternate_screen_active);
         let selection = if workspace_session_uses_host_selection_overlay(window) {
             None
         } else {
-            active_workspace_terminal_selection(window)
+            active_workspace_terminal_selection(window, surface)
         };
         let selection_overlay_rgba =
             terminal_selection_overlay_rgba(state.theme_mode, state.theme_variant);
@@ -4169,6 +4192,7 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
     } else {
         let preset = terminal_theme_preset;
         clear_workspace_native_cursor_blink_state();
+        window.set_workspace_session_alternate_screen_active(false);
         window.set_workspace_session_rows(24);
         window.set_workspace_session_cols(80);
         window.set_workspace_session_cursor_row(0);
@@ -7749,11 +7773,17 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     });
 
     let state = Rc::clone(&view_model);
+    let session_bridge_copy_ref = session_bridge.clone();
     window.on_workspace_session_copy_selection_requested(
         move |start_row, start_col, end_row, end_col| {
             let state = state.borrow();
             workspace_terminal::forward_active_workspace_copy_selection(
-                &state, start_row, start_col, end_row, end_col,
+                &state,
+                session_bridge_copy_ref.as_deref(),
+                start_row,
+                start_col,
+                end_row,
+                end_col,
             );
         },
     );

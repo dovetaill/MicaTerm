@@ -142,6 +142,58 @@ impl WeztermTerminalCoreAdapter {
         visible_lines_from_rows(&self.visible_rows())
     }
 
+    pub fn selection_text_from_buffer_rows(
+        &self,
+        start_row: u32,
+        start_col: u32,
+        end_row: u32,
+        end_col: u32,
+    ) -> String {
+        let total_rows = self.terminal.screen().scrollback_rows();
+        if total_rows == 0 {
+            return String::new();
+        }
+
+        let cols = self.terminal.get_size().cols.max(1) as u32;
+        let ((mut start_row, start_col), (mut end_row, end_col)) =
+            normalized_selection_bounds((start_row, start_col), (end_row, end_col));
+        let last_row = total_rows.saturating_sub(1) as u32;
+        if start_row > last_row {
+            return String::new();
+        }
+        end_row = end_row.min(last_row);
+        start_row = start_row.min(end_row);
+
+        let mut text = String::new();
+        let lines = self
+            .terminal
+            .screen()
+            .lines_in_phys_range(start_row as usize..(end_row as usize).saturating_add(1));
+        for (offset, line) in lines.iter().enumerate() {
+            let row = start_row.saturating_add(offset as u32);
+            let row_start = if row == start_row {
+                start_col.min(cols)
+            } else {
+                0
+            };
+            let row_end = if row == end_row {
+                end_col.min(cols)
+            } else {
+                cols
+            };
+            text.push_str(&line_text_in_column_range(
+                line,
+                row_start as usize,
+                row_end as usize,
+            ));
+            if row < end_row && !line.last_cell_was_wrapped() {
+                text.push('\n');
+            }
+        }
+
+        text
+    }
+
     pub fn resize(&mut self, rows: usize, cols: usize) {
         self.terminal.resize(TerminalSize {
             rows: rows.max(1),
@@ -813,6 +865,24 @@ fn project_terminal_row(line: &Line, index: u32, cols: usize) -> TerminalRowStat
     }
 }
 
+fn line_text_in_column_range(line: &Line, start_col: usize, end_col: usize) -> String {
+    if end_col <= start_col {
+        return String::new();
+    }
+
+    line.columns_as_str(start_col..end_col)
+        .trim_end_matches(' ')
+        .to_string()
+}
+
+fn normalized_selection_bounds(start: (u32, u32), end: (u32, u32)) -> ((u32, u32), (u32, u32)) {
+    if start.0 < end.0 || (start.0 == end.0 && start.1 <= end.1) {
+        (start, end)
+    } else {
+        (end, start)
+    }
+}
+
 pub(super) fn visible_lines_from_rows(rows: &[TerminalRowState]) -> Vec<String> {
     let mut lines = rows.iter().map(|row| row.text.clone()).collect::<Vec<_>>();
     while lines.first().is_some_and(String::is_empty) {
@@ -1021,6 +1091,18 @@ impl TerminalCoreAdapter for WeztermTerminalCoreAdapter {
 
     fn visible_lines(&self) -> Vec<String> {
         WeztermTerminalCoreAdapter::visible_lines(self)
+    }
+
+    fn selection_text_from_buffer_rows(
+        &self,
+        start_row: u32,
+        start_col: u32,
+        end_row: u32,
+        end_col: u32,
+    ) -> String {
+        WeztermTerminalCoreAdapter::selection_text_from_buffer_rows(
+            self, start_row, start_col, end_row, end_col,
+        )
     }
 
     fn frame_snapshot(&self) -> TerminalFrameSnapshot {

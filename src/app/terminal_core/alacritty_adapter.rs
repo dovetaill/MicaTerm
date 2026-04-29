@@ -214,6 +214,60 @@ impl TerminalCoreAdapter for AlacrittyTerminalCoreAdapter {
         visible_lines_from_rows(&self.visible_rows_internal())
     }
 
+    fn selection_text_from_buffer_rows(
+        &self,
+        start_row: u32,
+        start_col: u32,
+        end_row: u32,
+        end_col: u32,
+    ) -> String {
+        let grid = self.term.grid();
+        let total_rows = grid.history_size().saturating_add(grid.screen_lines());
+        if total_rows == 0 {
+            return String::new();
+        }
+
+        let cols = grid.columns().max(1) as u32;
+        let history_size = grid.history_size();
+        let ((mut start_row, start_col), (mut end_row, end_col)) =
+            normalized_selection_bounds((start_row, start_col), (end_row, end_col));
+        let last_row = total_rows.saturating_sub(1) as u32;
+        if start_row > last_row {
+            return String::new();
+        }
+        end_row = end_row.min(last_row);
+        start_row = start_row.min(end_row);
+
+        let mut text = String::new();
+        for row in start_row..=end_row {
+            let row_start = if row == start_row {
+                start_col.min(cols)
+            } else {
+                0
+            };
+            let row_end = if row == end_row {
+                end_col.min(cols)
+            } else {
+                cols
+            };
+            let line = buffer_row_to_grid_line(row, history_size);
+            let grid_row = &grid[line];
+            text.push_str(&row_text_in_column_range(
+                grid_row,
+                row_start as usize,
+                row_end as usize,
+            ));
+            let wrapped = grid_row
+                .last()
+                .is_some_and(|cell| cell.flags.contains(Flags::WRAPLINE));
+            if row < end_row && !wrapped {
+                text.push('\n');
+            }
+        }
+
+        text
+    }
+
     fn frame_snapshot(&self) -> TerminalFrameSnapshot {
         let rows = self.visible_rows_internal();
         let lines = visible_lines_from_rows(&rows);
@@ -381,6 +435,37 @@ fn row_text(row: &alacritty_terminal::grid::Row<Cell>, cols: usize) -> String {
     text.trim_end().to_string()
 }
 
+fn row_text_in_column_range(
+    row: &alacritty_terminal::grid::Row<Cell>,
+    start_col: usize,
+    end_col: usize,
+) -> String {
+    if end_col <= start_col {
+        return String::new();
+    }
+
+    let line_length = row.line_length().0.min(end_col);
+    let mut text = String::new();
+
+    for index in start_col..line_length {
+        let cell = &row[Column(index)];
+        if cell.flags.contains(Flags::WIDE_CHAR_SPACER)
+            || cell.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER)
+        {
+            continue;
+        }
+
+        text.push(cell.c);
+        if let Some(zerowidth) = cell.zerowidth() {
+            for ch in zerowidth {
+                text.push(*ch);
+            }
+        }
+    }
+
+    text.trim_end_matches(' ').to_string()
+}
+
 fn visible_lines_from_rows(rows: &[TerminalRowState]) -> Vec<String> {
     let mut lines = rows.iter().map(|row| row.text.clone()).collect::<Vec<_>>();
     while lines.first().is_some_and(String::is_empty) {
@@ -404,6 +489,18 @@ fn cell_text(cell: &Cell) -> String {
 
 fn viewport_row(line: Line, display_offset: usize) -> u32 {
     line.0.saturating_add(display_offset as i32).max(0) as u32
+}
+
+fn buffer_row_to_grid_line(buffer_row: u32, history_size: usize) -> Line {
+    Line(buffer_row as i32 - history_size as i32)
+}
+
+fn normalized_selection_bounds(start: (u32, u32), end: (u32, u32)) -> ((u32, u32), (u32, u32)) {
+    if start.0 < end.0 || (start.0 == end.0 && start.1 <= end.1) {
+        (start, end)
+    } else {
+        (end, start)
+    }
 }
 
 fn named_key_code(key_name: &str) -> Option<KeyCode> {

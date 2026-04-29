@@ -463,10 +463,11 @@ fn terminal_host_bitmap_selection_overlay_stays_in_blank_surface_local_coordinat
         "bitmap selection overlay should have dedicated local cell helpers so blank-surface overlays stay in the same coordinate space as the bitmap grid"
     );
     assert!(
-        blank_surface_block.contains("x: root.selection-local-span-x(root.selection-start-col);")
+        blank_surface_block
+            .contains("x: root.selection-local-span-x(root.selection-visible-start-col());")
             && blank_surface_block
-                .contains("y: root.terminal-local-cell-y(root.selection-start-row);"),
-        "bitmap selection rectangles should be positioned from blank-surface local cell helpers instead of the root terminal origin"
+                .contains("y: root.terminal-local-cell-y(root.selection-visible-start-row());"),
+        "bitmap selection rectangles should stay in blank-surface local coordinates even when the stored selection rows are rebased against scrollback instead of the current viewport"
     );
     assert!(
         !blank_surface_block.contains("x: root.selection-span-x(")
