@@ -62,7 +62,14 @@ pub fn count_search_query_matches_in_lines(lines: &[String], query: &str) -> usi
 fn profile_allows_role(profile: OutputRuleProfile, role: SemanticStyleRole) -> bool {
     match profile {
         OutputRuleProfile::Default => true,
-        OutputRuleProfile::Focused => matches!(role, SemanticStyleRole::OutputUrl),
+        OutputRuleProfile::Focused => matches!(
+            role,
+            SemanticStyleRole::OutputUrl
+                | SemanticStyleRole::OutputUnixPath
+                | SemanticStyleRole::OutputWindowsPath
+                | SemanticStyleRole::OutputLineReference
+                | SemanticStyleRole::OutputNetworkEndpoint
+        ),
     }
 }
 
@@ -265,8 +272,9 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
-    fn focused_profile_only_marks_http_urls() {
-        let line = "src/app/ui_preferences.rs:112 https://example.com 127.0.0.1:8080";
+    fn focused_profile_keeps_navigable_output_affordances() {
+        let line =
+            "src/app/ui_preferences.rs:112 https://example.com ./relative/path 127.0.0.1:8080";
         let mut surface =
             TerminalSurfaceState::from_visible_lines(Uuid::new_v4(), 1, 1, 96, vec![line.into()]);
         surface.cells = ascii_cells_for_row(0, line);
@@ -278,14 +286,37 @@ mod tests {
 
         assert_eq!(
             spans,
-            vec![SemanticSpan {
-                row: 0,
-                start_col: 30,
-                end_col: 48,
-                role: SemanticStyleRole::OutputUrl,
-                text: "https://example.com".into(),
-            }],
-            "focused output highlighting should only keep browser-openable http/https links"
+            vec![
+                SemanticSpan {
+                    row: 0,
+                    start_col: 0,
+                    end_col: 28,
+                    role: SemanticStyleRole::OutputLineReference,
+                    text: "src/app/ui_preferences.rs:112".into(),
+                },
+                SemanticSpan {
+                    row: 0,
+                    start_col: 30,
+                    end_col: 48,
+                    role: SemanticStyleRole::OutputUrl,
+                    text: "https://example.com".into(),
+                },
+                SemanticSpan {
+                    row: 0,
+                    start_col: 50,
+                    end_col: 64,
+                    role: SemanticStyleRole::OutputUnixPath,
+                    text: "./relative/path".into(),
+                },
+                SemanticSpan {
+                    row: 0,
+                    start_col: 66,
+                    end_col: 79,
+                    role: SemanticStyleRole::OutputNetworkEndpoint,
+                    text: "127.0.0.1:8080".into(),
+                },
+            ],
+            "focused output highlighting should keep stable, actionable navigation targets while still dropping noisy prose heuristics"
         );
     }
 
