@@ -4,7 +4,7 @@ import { ThemeTokens } from "../theme/tokens.slint";
 import { QuickLaunchCardRow, QuickLaunchDetailRow, QuickLaunchGroupRow } from "../welcome/quick-launch-types.slint";
 import { SftpWorkspaceHost } from "./sftp-workspace-host.slint";
 import { TabBar, WorkspaceTabItem } from "./tabbar.slint";
-import { ConnectionProgressDiagnosticRow, ConnectionProgressStepRow, TerminalCommandBlockRow, TerminalOverviewMarkerRow, TerminalSessionHost } from "./terminal-session-host.slint";
+import { ConnectionProgressDiagnosticRow, ConnectionProgressFieldRow, ConnectionProgressHopRow, ConnectionProgressStepRow, TerminalCommandBlockRow, TerminalOverviewMarkerRow, TerminalSessionHost } from "./terminal-session-host.slint";
 
 export component WorkspacePane inherits Rectangle {
     in property <[WorkspaceTabItem]> workspace-tab-items: [];
@@ -17,6 +17,7 @@ export component WorkspacePane inherits Rectangle {
     in property <bool> workspace-session-can-reconnect: false;
     in property <string> workspace-session-render-mode: "bitmap";
     in property <string> workspace-session-connection-headline: "";
+    in property <string> workspace-session-connection-visual-state: "";
     in property <string> workspace-session-connection-current-hop: "";
     in property <string> workspace-session-connection-current-detail: "";
     in property <string> workspace-session-connection-page-mode: "";
@@ -24,7 +25,13 @@ export component WorkspacePane inherits Rectangle {
     in property <string> workspace-session-connection-task-detail: "";
     in property <string> workspace-session-host-key-prompt-host: "";
     in property <string> workspace-session-host-key-prompt-fingerprint: "";
+    in property <string> workspace-session-host-key-warning-host: "";
+    in property <string> workspace-session-host-key-warning-expected: "";
+    in property <string> workspace-session-host-key-warning-current: "";
+    in property <[ConnectionProgressHopRow]> workspace-session-connection-hops: [];
     in property <[ConnectionProgressStepRow]> workspace-session-connection-steps: [];
+    in property <[ConnectionProgressFieldRow]> workspace-session-connection-main-fields: [];
+    in property <[ConnectionProgressFieldRow]> workspace-session-connection-detail-fields: [];
     in property <[ConnectionProgressDiagnosticRow]> workspace-session-connection-diagnostics: [];
     in property <[QuickLaunchCardRow]> welcome-quick-launch-recent-items: [];
     in property <[QuickLaunchCardRow]> welcome-quick-launch-favorite-items: [];
@@ -185,6 +192,7 @@ export component WorkspacePane inherits Rectangle {
                 can-reconnect: root.workspace-session-can-reconnect;
                 session-render-mode: root.workspace-session-render-mode;
                 connection-progress-headline: root.workspace-session-connection-headline;
+                connection-progress-visual-state: root.workspace-session-connection-visual-state;
                 connection-progress-current-hop: root.workspace-session-connection-current-hop;
                 connection-progress-current-detail: root.workspace-session-connection-current-detail;
                 connection-progress-page-mode: root.workspace-session-connection-page-mode;
@@ -192,7 +200,13 @@ export component WorkspacePane inherits Rectangle {
                 connection-progress-task-detail: root.workspace-session-connection-task-detail;
                 connection-progress-host-key-prompt-host: root.workspace-session-host-key-prompt-host;
                 connection-progress-host-key-prompt-fingerprint: root.workspace-session-host-key-prompt-fingerprint;
+                connection-progress-host-key-warning-host: root.workspace-session-host-key-warning-host;
+                connection-progress-host-key-warning-expected: root.workspace-session-host-key-warning-expected;
+                connection-progress-host-key-warning-current: root.workspace-session-host-key-warning-current;
+                connection-progress-hops: root.workspace-session-connection-hops;
                 connection-progress-steps: root.workspace-session-connection-steps;
+                connection-progress-main-fields: root.workspace-session-connection-main-fields;
+                connection-progress-detail-fields: root.workspace-session-connection-detail-fields;
                 connection-progress-diagnostics: root.workspace-session-connection-diagnostics;
                 welcome-quick-launch-recent-items: root.welcome-quick-launch-recent-items;
                 welcome-quick-launch-favorite-items: root.welcome-quick-launch-favorite-items;

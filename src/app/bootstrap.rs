@@ -29,6 +29,8 @@ use uuid::Uuid;
 use crate::AppWindow;
 use crate::AssetsContextMenuItem;
 use crate::ConnectionProgressDiagnosticRow;
+use crate::ConnectionProgressFieldRow;
+use crate::ConnectionProgressHopRow;
 use crate::ConnectionProgressStepRow;
 use crate::ConsoleAssetItem;
 use crate::QuickLaunchCardRow;
@@ -61,7 +63,9 @@ use crate::app::sftp::{
     SftpDirectoryEntryKind, SftpFollowMode, SftpPanelMode, restore_tasks_for_bootstrap,
 };
 use crate::app::ssh::connection_progress::{
-    ConnectionAttemptState, ConnectionHeadlineState, ConnectionStepState, ConnectionStepStateItem,
+    ConnectionAttemptState, ConnectionHeadlineState, ConnectionHopKind, ConnectionHopStateItem,
+    ConnectionHopVisualState, ConnectionInfoField, ConnectionPreviewFixture,
+    ConnectionPreviewState, ConnectionStepState, ConnectionStepStateItem, ConnectionVisualState,
 };
 use crate::app::ssh::credentials::{
     CachedCredentialStore, CredentialStore, EncryptedFileCredentialStore, FallbackCredentialStore,
@@ -74,7 +78,9 @@ use crate::app::ssh::credentials::{
     restore_snapshot_secret_bundle,
 };
 use crate::app::ssh::known_hosts::{KnownHostsService, default_known_hosts_path};
-use crate::app::ssh::profile::{ConnectionProfile, ConnectionProxyProfile, SshAuthMethod};
+use crate::app::ssh::profile::{
+    ConnectionProfile, ConnectionProxyProfile, ResolvedProxyHop, SshAuthMethod,
+};
 use crate::app::ssh::proxy::resolve_proxy_chain;
 use crate::app::ssh::runtime::{
     SessionRuntimeEvent, SshSessionRuntime, TerminalKeyEvent, TerminalMouseButton,
@@ -3007,6 +3013,35 @@ fn sync_workspace_session_state(
     sync_workspace_session_state_with_manager(window, state, follow_tracker, None);
 }
 
+const SSH_STATUS_PREVIEW_ENV: &str = "MICA_TERM_SSH_STATUS_PREVIEW";
+
+#[derive(Debug, Clone)]
+struct WorkspaceConnectionProgressView {
+    headline: ConnectionHeadlineState,
+    visual_state: ConnectionVisualState,
+    current_hop: String,
+    current_detail: String,
+    page_mode: String,
+    task_title: String,
+    task_detail: String,
+    prompt_host: String,
+    prompt_fingerprint: String,
+    warning_host: String,
+    warning_expected: String,
+    warning_current: String,
+    hops: Vec<ConnectionProgressHopRow>,
+    steps: Vec<ConnectionProgressStepRow>,
+    main_fields: Vec<ConnectionProgressFieldRow>,
+    detail_fields: Vec<ConnectionProgressFieldRow>,
+    diagnostics: Vec<ConnectionProgressDiagnosticRow>,
+}
+
+fn ssh_status_preview_state() -> Option<ConnectionPreviewState> {
+    std::env::var(SSH_STATUS_PREVIEW_ENV)
+        .ok()
+        .and_then(|value| ConnectionPreviewState::parse(&value))
+}
+
 fn connection_progress_headline_token(headline: ConnectionHeadlineState) -> &'static str {
     match headline {
         ConnectionHeadlineState::Connecting => "connecting",
@@ -3025,6 +3060,57 @@ fn connection_progress_step_state_token(state: ConnectionStepState) -> &'static 
         ConnectionStepState::Blocked => "blocked",
         ConnectionStepState::Failed => "failed",
         ConnectionStepState::Cancelled => "cancelled",
+    }
+}
+
+fn connection_progress_visual_state_token(state: ConnectionVisualState) -> &'static str {
+    match state {
+        ConnectionVisualState::VerifyingHostKey => "verifying_host_key",
+        ConnectionVisualState::Connecting => "connecting",
+        ConnectionVisualState::HostKeyWarning => "host_key_warning",
+        ConnectionVisualState::Failed => "failed",
+        ConnectionVisualState::Connected => "connected",
+    }
+}
+
+fn connection_hop_kind_token(kind: ConnectionHopKind) -> &'static str {
+    match kind {
+        ConnectionHopKind::Local => "local",
+        ConnectionHopKind::JumpHost => "jump_host",
+        ConnectionHopKind::Target => "target",
+    }
+}
+
+fn connection_hop_state_token(state: ConnectionHopVisualState) -> &'static str {
+    match state {
+        ConnectionHopVisualState::Completed => "completed",
+        ConnectionHopVisualState::Current => "current",
+        ConnectionHopVisualState::Pending => "pending",
+        ConnectionHopVisualState::Failed => "failed",
+    }
+}
+
+fn connection_field_row(field: &ConnectionInfoField) -> ConnectionProgressFieldRow {
+    ConnectionProgressFieldRow {
+        label: field.label.clone().into(),
+        value: field.value.clone().into(),
+        copy_value: field.copy_value.clone().unwrap_or_default().into(),
+        monospace: field.monospace,
+    }
+}
+
+fn connection_hop_row(hop: &ConnectionHopStateItem) -> ConnectionProgressHopRow {
+    ConnectionProgressHopRow {
+        kind: connection_hop_kind_token(hop.kind).into(),
+        state: connection_hop_state_token(hop.state).into(),
+        label: hop.label.clone().into(),
+        subtitle: hop.subtitle.clone().into(),
+        host: hop.host.clone().into(),
+        port: if hop.port == 0 {
+            "".into()
+        } else {
+            hop.port.to_string().into()
+        },
     }
 }
 
@@ -3066,19 +3152,26 @@ fn default_connection_progress_task_title(headline: ConnectionHeadlineState) -> 
 }
 
 fn host_key_decision_task_detail() -> &'static str {
-    "Confirm the server identity to continue this connection."
+    "The authenticity of the target host cannot be established. Please verify the host key fingerprint below before continuing."
 }
 
-fn connection_progress_page_mode(
+fn connection_progress_visual_state(
     attempt: &ConnectionAttemptState,
     current_step: Option<&ConnectionStepStateItem>,
-) -> &'static str {
+) -> ConnectionVisualState {
+    let has_changed_warning = attempt
+        .diagnostics
+        .iter()
+        .any(|line| line.message.contains("host key changed"))
+        || current_step.is_some_and(|step| step.detail.contains("host key changed"));
+    if has_changed_warning {
+        return ConnectionVisualState::HostKeyWarning;
+    }
     if attempt.prompt.is_some()
         || current_step.is_some_and(|step| step.state == ConnectionStepState::Blocked)
     {
-        return "decision";
+        return ConnectionVisualState::VerifyingHostKey;
     }
-
     if matches!(
         attempt.headline,
         ConnectionHeadlineState::Cancelled | ConnectionHeadlineState::Error
@@ -3088,16 +3181,24 @@ fn connection_progress_page_mode(
             ConnectionStepState::Failed | ConnectionStepState::Cancelled
         )
     }) {
-        return "troubleshooting";
+        return ConnectionVisualState::Failed;
     }
-
-    "progressing"
+    if attempt.headline == ConnectionHeadlineState::Connected {
+        return ConnectionVisualState::Connected;
+    }
+    ConnectionVisualState::Connecting
 }
 
 fn connection_progress_task_title(
     attempt: &ConnectionAttemptState,
     current_step: Option<&ConnectionStepStateItem>,
 ) -> String {
+    if connection_progress_visual_state(attempt, current_step)
+        == ConnectionVisualState::HostKeyWarning
+    {
+        return "Host key changed".into();
+    }
+
     if attempt.prompt.is_some()
         || current_step.is_some_and(|step| step.step_kind == "verify-host-key")
     {
@@ -3113,6 +3214,21 @@ fn connection_progress_task_detail(
     attempt: &ConnectionAttemptState,
     current_step: Option<&ConnectionStepStateItem>,
 ) -> String {
+    if connection_progress_visual_state(attempt, current_step)
+        == ConnectionVisualState::HostKeyWarning
+    {
+        return attempt
+            .diagnostics
+            .iter()
+            .rev()
+            .find(|line| line.message.contains("host key changed"))
+            .map(|line| line.message.clone())
+            .unwrap_or_else(|| {
+                "The previously trusted host key no longer matches the key presented by the server."
+                    .into()
+            });
+    }
+
     if attempt.prompt.is_some()
         || current_step.is_some_and(|step| {
             step.step_kind == "verify-host-key" && step.state == ConnectionStepState::Blocked
@@ -3127,54 +3243,404 @@ fn connection_progress_task_detail(
         .unwrap_or_else(|| default_connection_progress_detail(attempt.headline).into())
 }
 
-fn clear_workspace_connection_progress_state(window: &AppWindow) {
-    window.set_workspace_session_connection_headline("".into());
-    window.set_workspace_session_connection_current_hop("".into());
-    window.set_workspace_session_connection_current_detail("".into());
-    window.set_workspace_session_connection_page_mode("".into());
-    window.set_workspace_session_connection_task_title("".into());
-    window.set_workspace_session_connection_task_detail("".into());
-    window.set_workspace_session_host_key_prompt_host("".into());
-    window.set_workspace_session_host_key_prompt_fingerprint("".into());
-    sync_vec_model(
-        window.get_workspace_session_connection_steps(),
-        Vec::<ConnectionProgressStepRow>::new(),
-        |model| window.set_workspace_session_connection_steps(model),
-    );
-    sync_vec_model(
-        window.get_workspace_session_connection_diagnostics(),
-        Vec::<ConnectionProgressDiagnosticRow>::new(),
-        |model| window.set_workspace_session_connection_diagnostics(model),
-    );
+fn connection_auth_label(profile: &ConnectionProfile) -> &'static str {
+    match profile.auth_method {
+        SshAuthMethod::Password => "Password",
+        SshAuthMethod::PrivateKeyPath | SshAuthMethod::PrivateKeyContent => "Private key",
+    }
 }
 
-fn sync_workspace_connection_progress_state(
-    window: &AppWindow,
-    state: &ShellViewModel,
-    manager: Option<&SessionManager>,
-) {
-    if projected_workspace_session_host_mode(state, manager) != "connection-progress" {
-        clear_workspace_connection_progress_state(window);
-        return;
+fn connection_jump_host_summary(profile: &ConnectionProfile) -> String {
+    let hosts = profile
+        .resolved_proxy_hops
+        .iter()
+        .filter_map(|hop| match hop {
+            ResolvedProxyHop::Ssh(upstream) => Some(format!("{}:{}", upstream.host, upstream.port)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if hosts.is_empty() {
+        "Direct connection".into()
+    } else if hosts.len() == 1 {
+        hosts[0].clone()
+    } else {
+        hosts.join(" -> ")
+    }
+}
+
+fn connection_profile_hops(
+    profile: &ConnectionProfile,
+    current_hop_label: &str,
+    visual_state: ConnectionVisualState,
+) -> Vec<ConnectionHopStateItem> {
+    let mut hops = Vec::new();
+    hops.push(ConnectionHopStateItem {
+        kind: ConnectionHopKind::Local,
+        label: "Local".into(),
+        subtitle: "You".into(),
+        host: "local".into(),
+        port: 0,
+        state: ConnectionHopVisualState::Completed,
+    });
+    let mut ssh_hops = profile
+        .resolved_proxy_hops
+        .iter()
+        .filter_map(|hop| match hop {
+            ResolvedProxyHop::Ssh(upstream) => Some(upstream.as_ref()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for (index, upstream) in ssh_hops.iter_mut().enumerate() {
+        hops.push(ConnectionHopStateItem {
+            kind: ConnectionHopKind::JumpHost,
+            label: format!("Jump Host {}", index + 1),
+            subtitle: upstream.host.clone(),
+            host: upstream.host.clone(),
+            port: upstream.port,
+            state: ConnectionHopVisualState::Pending,
+        });
+    }
+    hops.push(ConnectionHopStateItem {
+        kind: ConnectionHopKind::Target,
+        label: "Target".into(),
+        subtitle: profile.host.clone(),
+        host: profile.host.clone(),
+        port: profile.port,
+        state: ConnectionHopVisualState::Pending,
+    });
+
+    let current_index = hops
+        .iter()
+        .position(|hop| hop.label == current_hop_label)
+        .unwrap_or_else(|| hops.len().saturating_sub(1));
+    let failed_state = matches!(
+        visual_state,
+        ConnectionVisualState::Failed | ConnectionVisualState::HostKeyWarning
+    );
+    for (index, hop) in hops.iter_mut().enumerate() {
+        hop.state = if index < current_index {
+            ConnectionHopVisualState::Completed
+        } else if index == current_index {
+            if failed_state {
+                ConnectionHopVisualState::Failed
+            } else {
+                ConnectionHopVisualState::Current
+            }
+        } else {
+            ConnectionHopVisualState::Pending
+        };
+    }
+    if current_hop_label.is_empty() {
+        if let Some(target) = hops.last_mut() {
+            target.state = match visual_state {
+                ConnectionVisualState::Failed | ConnectionVisualState::HostKeyWarning => {
+                    ConnectionHopVisualState::Failed
+                }
+                _ => ConnectionHopVisualState::Current,
+            };
+        }
+    }
+    hops
+}
+
+fn parse_host_key_changed_message(message: &str) -> Option<(String, String, String)> {
+    let prefix = "SSH host key changed for ";
+    let remainder = message.strip_prefix(prefix)?;
+    let (host, fingerprints) = remainder.split_once(" (expected ")?;
+    let (expected, current) = fingerprints.split_once(", got ")?;
+    let current = current.strip_suffix(')')?;
+    Some((
+        host.trim_matches('`').to_string(),
+        expected.to_string(),
+        current.to_string(),
+    ))
+}
+
+fn current_hop_label_for_prompt(
+    profile: Option<&ConnectionProfile>,
+    prompt: Option<&crate::app::ssh::connection_progress::ConnectionHostKeyPrompt>,
+    current_step: Option<&ConnectionStepStateItem>,
+) -> String {
+    if let Some(step) = current_step {
+        if !step.hop_label.is_empty() {
+            return step.hop_label.clone();
+        }
+    }
+    let Some(prompt) = prompt else {
+        return String::new();
+    };
+    let Some(profile) = profile else {
+        return "Target".into();
+    };
+    for (index, hop) in profile.resolved_proxy_hops.iter().enumerate() {
+        if let ResolvedProxyHop::Ssh(upstream) = hop {
+            if upstream.host == prompt.host && upstream.port == prompt.port {
+                return format!("Jump Host {}", index + 1);
+            }
+        }
+    }
+    "Target".into()
+}
+
+fn preview_connection_progress_view(
+    preview: ConnectionPreviewState,
+) -> WorkspaceConnectionProgressView {
+    let fixture = preview.fixture();
+    connection_progress_view_from_fixture(fixture)
+}
+
+fn connection_progress_view_from_fixture(
+    fixture: ConnectionPreviewFixture,
+) -> WorkspaceConnectionProgressView {
+    WorkspaceConnectionProgressView {
+        headline: fixture.headline,
+        visual_state: fixture.visual_state,
+        current_hop: fixture.current_hop_label,
+        current_detail: fixture.current_detail,
+        page_mode: match fixture.visual_state {
+            ConnectionVisualState::VerifyingHostKey => "decision",
+            ConnectionVisualState::HostKeyWarning => "warning",
+            ConnectionVisualState::Failed => "troubleshooting",
+            ConnectionVisualState::Connected => "connected",
+            ConnectionVisualState::Connecting => "progressing",
+        }
+        .into(),
+        task_title: fixture.task_title,
+        task_detail: fixture.task_detail,
+        prompt_host: fixture
+            .prompt
+            .as_ref()
+            .map(|prompt| format!("{}:{}", prompt.host, prompt.port))
+            .unwrap_or_default(),
+        prompt_fingerprint: fixture
+            .prompt
+            .as_ref()
+            .map(|prompt| prompt.fingerprint.clone())
+            .unwrap_or_default(),
+        warning_host: fixture.warning_host,
+        warning_expected: fixture.warning_expected,
+        warning_current: fixture.warning_current,
+        hops: fixture.hops.iter().map(connection_hop_row).collect(),
+        steps: fixture
+            .progress_steps
+            .iter()
+            .map(|step| ConnectionProgressStepRow {
+                state: connection_progress_step_state_token(step.state).into(),
+                hop_label: step.hop_label.clone().into(),
+                title: step.title.clone().into(),
+                detail: step.detail.clone().into(),
+            })
+            .collect(),
+        main_fields: fixture
+            .main_fields
+            .iter()
+            .map(connection_field_row)
+            .collect(),
+        detail_fields: fixture
+            .detail_fields
+            .iter()
+            .map(connection_field_row)
+            .collect(),
+        diagnostics: fixture
+            .diagnostics
+            .into_iter()
+            .map(|text| ConnectionProgressDiagnosticRow { text: text.into() })
+            .collect(),
+    }
+}
+
+fn connection_progress_view_for_attempt(
+    attempt: &ConnectionAttemptState,
+    profile: Option<&ConnectionProfile>,
+) -> WorkspaceConnectionProgressView {
+    let current_step = active_connection_progress_step(attempt);
+    let visual_state = connection_progress_visual_state(attempt, current_step);
+    let task_title = connection_progress_task_title(attempt, current_step);
+    let task_detail = connection_progress_task_detail(attempt, current_step);
+    let current_hop = current_hop_label_for_prompt(profile, attempt.prompt.as_ref(), current_step);
+
+    let mut warning_host = String::new();
+    let mut warning_expected = String::new();
+    let mut warning_current = String::new();
+    if visual_state == ConnectionVisualState::HostKeyWarning {
+        for message in attempt
+            .diagnostics
+            .iter()
+            .map(|line| line.message.as_str())
+            .rev()
+        {
+            if let Some((host, expected, current)) = parse_host_key_changed_message(message) {
+                warning_host = host;
+                warning_expected = expected;
+                warning_current = current;
+                break;
+            }
+        }
     }
 
-    let Some(manager) = manager else {
-        clear_workspace_connection_progress_state(window);
-        return;
-    };
-    let Some(session_id) = active_workspace_session_uuid(state) else {
-        clear_workspace_connection_progress_state(window);
-        return;
-    };
-    let Some(attempt) = manager.connection_attempt(session_id) else {
-        clear_workspace_connection_progress_state(window);
-        return;
-    };
+    let mut main_fields = Vec::new();
+    match visual_state {
+        ConnectionVisualState::VerifyingHostKey => {
+            let host = attempt
+                .prompt
+                .as_ref()
+                .map(|prompt| prompt.host.clone())
+                .or_else(|| profile.map(|profile| profile.host.clone()))
+                .unwrap_or_default();
+            let port = attempt
+                .prompt
+                .as_ref()
+                .map(|prompt| prompt.port)
+                .or_else(|| profile.map(|profile| profile.port))
+                .unwrap_or(22);
+            let fingerprint = attempt
+                .prompt
+                .as_ref()
+                .map(|prompt| prompt.fingerprint.clone())
+                .unwrap_or_default();
+            main_fields.push(ConnectionProgressFieldRow {
+                label: "Host".into(),
+                value: host.clone().into(),
+                copy_value: host.into(),
+                monospace: false,
+            });
+            main_fields.push(ConnectionProgressFieldRow {
+                label: "Port".into(),
+                value: format!("{port} (SSH)").into(),
+                copy_value: port.to_string().into(),
+                monospace: false,
+            });
+            if !fingerprint.is_empty() {
+                main_fields.push(ConnectionProgressFieldRow {
+                    label: "Fingerprint".into(),
+                    value: fingerprint.clone().into(),
+                    copy_value: fingerprint.into(),
+                    monospace: true,
+                });
+            }
+            if let Some(profile) = profile {
+                let jump_summary = connection_jump_host_summary(profile);
+                if jump_summary != "Direct connection" {
+                    main_fields.push(ConnectionProgressFieldRow {
+                        label: "Jump Host".into(),
+                        value: jump_summary.clone().into(),
+                        copy_value: jump_summary.into(),
+                        monospace: false,
+                    });
+                }
+            }
+        }
+        ConnectionVisualState::HostKeyWarning => {
+            if let Some(profile) = profile {
+                main_fields.push(ConnectionProgressFieldRow {
+                    label: "Host".into(),
+                    value: profile.host.clone().into(),
+                    copy_value: profile.host.clone().into(),
+                    monospace: false,
+                });
+                main_fields.push(ConnectionProgressFieldRow {
+                    label: "Port".into(),
+                    value: format!("{} (SSH)", profile.port).into(),
+                    copy_value: profile.port.to_string().into(),
+                    monospace: false,
+                });
+            }
+            if !warning_expected.is_empty() {
+                main_fields.push(ConnectionProgressFieldRow {
+                    label: "Previously trusted".into(),
+                    value: warning_expected.clone().into(),
+                    copy_value: warning_expected.clone().into(),
+                    monospace: true,
+                });
+            }
+            if !warning_current.is_empty() {
+                main_fields.push(ConnectionProgressFieldRow {
+                    label: "Presented now".into(),
+                    value: warning_current.clone().into(),
+                    copy_value: warning_current.clone().into(),
+                    monospace: true,
+                });
+            }
+        }
+        ConnectionVisualState::Failed => {
+            if !current_hop.is_empty() {
+                main_fields.push(ConnectionProgressFieldRow {
+                    label: "Failed at".into(),
+                    value: current_hop.clone().into(),
+                    copy_value: "".into(),
+                    monospace: false,
+                });
+            }
+            if let Some(profile) = profile {
+                let (host, port) = if current_hop.starts_with("Jump Host") {
+                    profile
+                        .resolved_proxy_hops
+                        .iter()
+                        .filter_map(|hop| match hop {
+                            ResolvedProxyHop::Ssh(upstream) => {
+                                Some((upstream.host.clone(), upstream.port))
+                            }
+                            _ => None,
+                        })
+                        .next()
+                        .unwrap_or_else(|| (profile.host.clone(), profile.port))
+                } else {
+                    (profile.host.clone(), profile.port)
+                };
+                main_fields.push(ConnectionProgressFieldRow {
+                    label: "Host".into(),
+                    value: host.clone().into(),
+                    copy_value: host.into(),
+                    monospace: false,
+                });
+                main_fields.push(ConnectionProgressFieldRow {
+                    label: "Port".into(),
+                    value: format!("{port} (SSH)").into(),
+                    copy_value: port.to_string().into(),
+                    monospace: false,
+                });
+            }
+        }
+        ConnectionVisualState::Connecting | ConnectionVisualState::Connected => {}
+    }
 
-    let current_step = active_connection_progress_step(&attempt);
-    let page_mode = connection_progress_page_mode(&attempt, current_step);
-    let task_title = connection_progress_task_title(&attempt, current_step);
-    let task_detail = connection_progress_task_detail(&attempt, current_step);
+    let detail_fields = profile
+        .map(|profile| {
+            vec![
+                ConnectionProgressFieldRow {
+                    label: "User".into(),
+                    value: profile.user.clone().into(),
+                    copy_value: "".into(),
+                    monospace: false,
+                },
+                ConnectionProgressFieldRow {
+                    label: "Authentication".into(),
+                    value: connection_auth_label(profile).into(),
+                    copy_value: "".into(),
+                    monospace: false,
+                },
+                ConnectionProgressFieldRow {
+                    label: "Port".into(),
+                    value: profile.port.to_string().into(),
+                    copy_value: "".into(),
+                    monospace: false,
+                },
+                ConnectionProgressFieldRow {
+                    label: "Strict host key checking".into(),
+                    value: "On".into(),
+                    copy_value: "".into(),
+                    monospace: false,
+                },
+                ConnectionProgressFieldRow {
+                    label: "Jump chain".into(),
+                    value: connection_jump_host_summary(profile).into(),
+                    copy_value: "".into(),
+                    monospace: false,
+                },
+            ]
+        })
+        .unwrap_or_default();
+
     let steps = attempt
         .steps
         .iter()
@@ -3193,43 +3659,158 @@ fn sync_workspace_connection_progress_state(
         })
         .collect::<Vec<_>>();
 
-    window.set_workspace_session_connection_headline(
-        connection_progress_headline_token(attempt.headline).into(),
-    );
-    window.set_workspace_session_connection_page_mode(page_mode.into());
-    window.set_workspace_session_connection_current_hop(
-        current_step
-            .map(|step| step.hop_label.clone())
-            .unwrap_or_default()
-            .into(),
-    );
-    window.set_workspace_session_connection_current_detail(task_detail.clone().into());
-    window.set_workspace_session_connection_task_title(task_title.into());
-    window.set_workspace_session_connection_task_detail(task_detail.into());
-    window.set_workspace_session_host_key_prompt_host(
-        attempt
+    WorkspaceConnectionProgressView {
+        headline: attempt.headline,
+        visual_state,
+        current_hop: current_hop.clone(),
+        current_detail: task_detail.clone(),
+        page_mode: match visual_state {
+            ConnectionVisualState::VerifyingHostKey => "decision",
+            ConnectionVisualState::HostKeyWarning => "warning",
+            ConnectionVisualState::Failed => "troubleshooting",
+            ConnectionVisualState::Connected => "connected",
+            ConnectionVisualState::Connecting => "progressing",
+        }
+        .into(),
+        task_title,
+        task_detail,
+        prompt_host: attempt
             .prompt
             .as_ref()
             .map(|prompt| format!("{}:{}", prompt.host, prompt.port))
-            .unwrap_or_default()
-            .into(),
-    );
-    window.set_workspace_session_host_key_prompt_fingerprint(
-        attempt
+            .unwrap_or_default(),
+        prompt_fingerprint: attempt
             .prompt
             .as_ref()
             .map(|prompt| prompt.fingerprint.clone())
-            .unwrap_or_default()
-            .into(),
+            .unwrap_or_default(),
+        warning_host,
+        warning_expected,
+        warning_current,
+        hops: profile
+            .map(|profile| {
+                connection_profile_hops(profile, current_hop.as_str(), visual_state)
+                    .iter()
+                    .map(connection_hop_row)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        steps,
+        main_fields,
+        detail_fields,
+        diagnostics,
+    }
+}
+
+fn clear_workspace_connection_progress_state(window: &AppWindow) {
+    window.set_workspace_session_connection_headline("".into());
+    window.set_workspace_session_connection_visual_state("".into());
+    window.set_workspace_session_connection_current_hop("".into());
+    window.set_workspace_session_connection_current_detail("".into());
+    window.set_workspace_session_connection_page_mode("".into());
+    window.set_workspace_session_connection_task_title("".into());
+    window.set_workspace_session_connection_task_detail("".into());
+    window.set_workspace_session_host_key_prompt_host("".into());
+    window.set_workspace_session_host_key_prompt_fingerprint("".into());
+    window.set_workspace_session_host_key_warning_host("".into());
+    window.set_workspace_session_host_key_warning_expected("".into());
+    window.set_workspace_session_host_key_warning_current("".into());
+    sync_vec_model(
+        window.get_workspace_session_connection_hops(),
+        Vec::<ConnectionProgressHopRow>::new(),
+        |model| window.set_workspace_session_connection_hops(model),
     );
     sync_vec_model(
         window.get_workspace_session_connection_steps(),
-        steps,
+        Vec::<ConnectionProgressStepRow>::new(),
         |model| window.set_workspace_session_connection_steps(model),
     );
     sync_vec_model(
+        window.get_workspace_session_connection_main_fields(),
+        Vec::<ConnectionProgressFieldRow>::new(),
+        |model| window.set_workspace_session_connection_main_fields(model),
+    );
+    sync_vec_model(
+        window.get_workspace_session_connection_detail_fields(),
+        Vec::<ConnectionProgressFieldRow>::new(),
+        |model| window.set_workspace_session_connection_detail_fields(model),
+    );
+    sync_vec_model(
         window.get_workspace_session_connection_diagnostics(),
-        diagnostics,
+        Vec::<ConnectionProgressDiagnosticRow>::new(),
+        |model| window.set_workspace_session_connection_diagnostics(model),
+    );
+}
+
+fn sync_workspace_connection_progress_state(
+    window: &AppWindow,
+    state: &ShellViewModel,
+    manager: Option<&SessionManager>,
+) {
+    if projected_workspace_session_host_mode(state, manager) != "connection-progress" {
+        clear_workspace_connection_progress_state(window);
+        return;
+    }
+
+    let view = if let Some(preview) = ssh_status_preview_state() {
+        preview_connection_progress_view(preview)
+    } else {
+        let Some(manager) = manager else {
+            clear_workspace_connection_progress_state(window);
+            return;
+        };
+        let Some(session_id) = active_workspace_session_uuid(state) else {
+            clear_workspace_connection_progress_state(window);
+            return;
+        };
+        let Some(attempt) = manager.connection_attempt(session_id) else {
+            clear_workspace_connection_progress_state(window);
+            return;
+        };
+        let profile = manager.session_profile(session_id);
+        connection_progress_view_for_attempt(&attempt, profile.as_ref())
+    };
+
+    window.set_workspace_session_connection_headline(
+        connection_progress_headline_token(view.headline).into(),
+    );
+    window.set_workspace_session_connection_visual_state(
+        connection_progress_visual_state_token(view.visual_state).into(),
+    );
+    window.set_workspace_session_connection_page_mode(view.page_mode.clone().into());
+    window.set_workspace_session_connection_current_hop(view.current_hop.clone().into());
+    window.set_workspace_session_connection_current_detail(view.current_detail.clone().into());
+    window.set_workspace_session_connection_task_title(view.task_title.clone().into());
+    window.set_workspace_session_connection_task_detail(view.task_detail.clone().into());
+    window.set_workspace_session_host_key_prompt_host(view.prompt_host.clone().into());
+    window
+        .set_workspace_session_host_key_prompt_fingerprint(view.prompt_fingerprint.clone().into());
+    window.set_workspace_session_host_key_warning_host(view.warning_host.clone().into());
+    window.set_workspace_session_host_key_warning_expected(view.warning_expected.clone().into());
+    window.set_workspace_session_host_key_warning_current(view.warning_current.clone().into());
+    sync_vec_model(
+        window.get_workspace_session_connection_hops(),
+        view.hops,
+        |model| window.set_workspace_session_connection_hops(model),
+    );
+    sync_vec_model(
+        window.get_workspace_session_connection_steps(),
+        view.steps,
+        |model| window.set_workspace_session_connection_steps(model),
+    );
+    sync_vec_model(
+        window.get_workspace_session_connection_main_fields(),
+        view.main_fields,
+        |model| window.set_workspace_session_connection_main_fields(model),
+    );
+    sync_vec_model(
+        window.get_workspace_session_connection_detail_fields(),
+        view.detail_fields,
+        |model| window.set_workspace_session_connection_detail_fields(model),
+    );
+    sync_vec_model(
+        window.get_workspace_session_connection_diagnostics(),
+        view.diagnostics,
         |model| window.set_workspace_session_connection_diagnostics(model),
     );
 }
@@ -3238,6 +3819,10 @@ fn projected_workspace_session_host_mode(
     state: &ShellViewModel,
     manager: Option<&SessionManager>,
 ) -> &'static str {
+    if ssh_status_preview_state().is_some() {
+        return "connection-progress";
+    }
+
     let host_mode = state.workspace_session_host_mode();
     if host_mode != "session-error" {
         return host_mode;
@@ -3307,6 +3892,15 @@ fn sync_workspace_session_state_with_manager(
         window.set_workspace_session_title("".into());
         window.set_workspace_session_subtitle("".into());
         window.set_workspace_session_state("".into());
+        window.set_workspace_session_error_detail("".into());
+        window.set_workspace_session_can_reconnect(false);
+    }
+
+    if let Some(preview) = ssh_status_preview_state() {
+        let fixture = preview.fixture();
+        window.set_workspace_session_title(fixture.session_title.into());
+        window.set_workspace_session_subtitle("SSH preview".into());
+        window.set_workspace_session_state("connecting".into());
         window.set_workspace_session_error_detail("".into());
         window.set_workspace_session_can_reconnect(false);
     }
@@ -6759,6 +7353,43 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     effects_ref.as_ref(),
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+                );
+            }
+            action_id if action_id.starts_with("copy-connection-field:") => {
+                let value = action_id
+                    .split_once(':')
+                    .map(|(_, value)| value)
+                    .unwrap_or_default();
+                if !value.is_empty() {
+                    let _ = workspace_terminal::set_system_clipboard_text(value);
+                }
+            }
+            "copy-connection-diagnostics" => {
+                let preview_payload = ssh_status_preview_state().map(|preview| {
+                    let fixture = preview.fixture();
+                    fixture.diagnostics.join("\n")
+                });
+                let runtime_payload = || {
+                    let session_bridge = session_bridge_ref.as_ref()?;
+                    let session_id = active_workspace_session_uuid(&state)?;
+                    let attempt = session_bridge.manager.connection_attempt(session_id)?;
+                    Some(
+                        attempt
+                            .diagnostics
+                            .iter()
+                            .map(|line| line.message.as_str())
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    )
+                };
+                if let Some(payload) = preview_payload.or_else(runtime_payload) {
+                    let _ = workspace_terminal::set_system_clipboard_text(payload.as_str());
+                }
+            }
+            "update-trusted-host-key" => {
+                tracing::warn!(
+                    target: "app.ssh",
+                    "host-key replacement flow is not implemented yet; showing preview-only action"
                 );
             }
             "cancel-connection-attempt" => {

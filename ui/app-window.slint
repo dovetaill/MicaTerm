@@ -28,7 +28,7 @@ import { QuickLaunchCardRow, QuickLaunchDetailRow, QuickLaunchGroupRow } from "w
 import { ConsoleAssetItem } from "shell/assets-sidebar.slint";
 import { RightPanel, SftpPanelItem } from "shell/right-panel.slint";
 import { Sidebar, SidebarNavItem } from "shell/sidebar.slint";
-import { ConnectionProgressDiagnosticRow, ConnectionProgressStepRow, TerminalCommandBlockRow, TerminalOverviewMarkerRow } from "shell/terminal-session-host.slint";
+import { ConnectionProgressDiagnosticRow, ConnectionProgressFieldRow, ConnectionProgressHopRow, ConnectionProgressStepRow, TerminalCommandBlockRow, TerminalOverviewMarkerRow } from "shell/terminal-session-host.slint";
 import { WorkspaceTabItem } from "shell/tabbar.slint";
 import { Titlebar } from "shell/titlebar.slint";
 import { TransferCenter, TransferCenterItem } from "shell/transfer-center.slint";
@@ -281,6 +281,7 @@ export component AppWindow inherits Window {
     in-out property <bool> workspace-session-can-reconnect: false;
     in-out property <string> workspace-session-render-mode: "bitmap";
     in-out property <string> workspace-session-connection-headline: "";
+    in-out property <string> workspace-session-connection-visual-state: "";
     in-out property <string> workspace-session-connection-current-hop: "";
     in-out property <string> workspace-session-connection-current-detail: "";
     in-out property <string> workspace-session-connection-page-mode: "";
@@ -288,7 +289,13 @@ export component AppWindow inherits Window {
     in-out property <string> workspace-session-connection-task-detail: "";
     in-out property <string> workspace-session-host-key-prompt-host: "";
     in-out property <string> workspace-session-host-key-prompt-fingerprint: "";
+    in-out property <string> workspace-session-host-key-warning-host: "";
+    in-out property <string> workspace-session-host-key-warning-expected: "";
+    in-out property <string> workspace-session-host-key-warning-current: "";
+    in-out property <[ConnectionProgressHopRow]> workspace-session-connection-hops: [];
     in-out property <[ConnectionProgressStepRow]> workspace-session-connection-steps: [];
+    in-out property <[ConnectionProgressFieldRow]> workspace-session-connection-main-fields: [];
+    in-out property <[ConnectionProgressFieldRow]> workspace-session-connection-detail-fields: [];
     in-out property <[ConnectionProgressDiagnosticRow]> workspace-session-connection-diagnostics: [];
     in-out property <[QuickLaunchCardRow]> welcome-quick-launch-recent-items: [];
     in-out property <[QuickLaunchCardRow]> welcome-quick-launch-favorite-items: [];
@@ -934,6 +941,7 @@ export component AppWindow inherits Window {
                         workspace-session-can-reconnect: root.workspace-session-can-reconnect;
                         workspace-session-render-mode: root.workspace-session-render-mode;
                         workspace-session-connection-headline: root.workspace-session-connection-headline;
+                        workspace-session-connection-visual-state: root.workspace-session-connection-visual-state;
                         workspace-session-connection-current-hop: root.workspace-session-connection-current-hop;
                         workspace-session-connection-current-detail: root.workspace-session-connection-current-detail;
                         workspace-session-connection-page-mode: root.workspace-session-connection-page-mode;
@@ -941,7 +949,13 @@ export component AppWindow inherits Window {
                         workspace-session-connection-task-detail: root.workspace-session-connection-task-detail;
                         workspace-session-host-key-prompt-host: root.workspace-session-host-key-prompt-host;
                         workspace-session-host-key-prompt-fingerprint: root.workspace-session-host-key-prompt-fingerprint;
+                        workspace-session-host-key-warning-host: root.workspace-session-host-key-warning-host;
+                        workspace-session-host-key-warning-expected: root.workspace-session-host-key-warning-expected;
+                        workspace-session-host-key-warning-current: root.workspace-session-host-key-warning-current;
+                        workspace-session-connection-hops: root.workspace-session-connection-hops;
                         workspace-session-connection-steps: root.workspace-session-connection-steps;
+                        workspace-session-connection-main-fields: root.workspace-session-connection-main-fields;
+                        workspace-session-connection-detail-fields: root.workspace-session-connection-detail-fields;
                         workspace-session-connection-diagnostics: root.workspace-session-connection-diagnostics;
                         welcome-quick-launch-recent-items: root.welcome-quick-launch-recent-items;
                         welcome-quick-launch-favorite-items: root.welcome-quick-launch-favorite-items;

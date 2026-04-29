@@ -21,8 +21,8 @@ use crate::app::ssh::connection_progress::{
 };
 use crate::app::ssh::profile::ConnectionProfile;
 use crate::app::ssh::runtime::{
-    SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput, TerminalSurfaceSignature,
-    TerminalShellIntegrationState, TerminalSurfaceState, UnknownHostKeyError,
+    SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput, TerminalShellIntegrationState,
+    TerminalSurfaceSignature, TerminalSurfaceState, UnknownHostKeyError,
 };
 use crate::theme::{ThemeMode, ThemeVariant};
 
@@ -249,6 +249,15 @@ impl SessionManager {
             .lock()
             .expect("lock session registry")
             .connection_attempts
+            .get(&session_id)
+            .cloned()
+    }
+
+    pub fn session_profile(&self, session_id: Uuid) -> Option<ConnectionProfile> {
+        self.registry
+            .lock()
+            .expect("lock session registry")
+            .session_profiles
             .get(&session_id)
             .cloned()
     }
@@ -1246,7 +1255,11 @@ fn update_terminal_surface(
 ) {
     let mut registry = registry.lock().expect("lock session registry");
     if registry.sessions.contains_key(&session_id) {
-        if let Some(shell_state) = registry.terminal_shell_integration.get(&session_id).copied() {
+        if let Some(shell_state) = registry
+            .terminal_shell_integration
+            .get(&session_id)
+            .copied()
+        {
             surface.shell_integration = shell_state;
         }
         registry
