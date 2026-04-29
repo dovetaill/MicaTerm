@@ -97,6 +97,20 @@ use uuid::Uuid;
 static KNOWN_HOSTS_ENV_LOCK: Mutex<()> = Mutex::new(());
 static URL_OPEN_HOOK_LOCK: Mutex<()> = Mutex::new(());
 
+fn run_on_large_stack(test_name: &str, test: fn()) {
+    let handle = std::thread::Builder::new()
+        .name(test_name.to_string())
+        // AppWindow-heavy smoke tests can exceed the default Rust test-thread stack once the
+        // generated Slint tree grows; keep them on an explicit larger stack like build.rs does.
+        .stack_size(32 * 1024 * 1024)
+        .spawn(test)
+        .expect("spawn large-stack test thread");
+
+    if let Err(payload) = handle.join() {
+        std::panic::resume_unwind(payload);
+    }
+}
+
 fn rgb_tuple_to_hex((red, green, blue): (u8, u8, u8)) -> u32 {
     (u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)
 }
@@ -3968,6 +3982,13 @@ fn missing_local_vault_state_recovers_from_primary_remote_without_uploading_empt
 
 #[test]
 fn missing_local_vault_state_with_preexisting_assets_merges_and_pushes_on_attach() {
+    run_on_large_stack(
+        "missing_local_vault_state_with_preexisting_assets_merges_and_pushes_on_attach",
+        missing_local_vault_state_with_preexisting_assets_merges_and_pushes_on_attach_body,
+    );
+}
+
+fn missing_local_vault_state_with_preexisting_assets_merges_and_pushes_on_attach_body() {
     i_slint_backend_testing::init_no_event_loop();
 
     let temp_root = sample_vault_runtime_root("recover-remote-attach-merge");
@@ -4327,6 +4348,13 @@ fn restart_recovers_vault_session_without_prompting_for_unlock() {
 
 #[test]
 fn manual_sync_merges_divergent_local_and_remote_additions_before_push() {
+    run_on_large_stack(
+        "manual_sync_merges_divergent_local_and_remote_additions_before_push",
+        manual_sync_merges_divergent_local_and_remote_additions_before_push_body,
+    );
+}
+
+fn manual_sync_merges_divergent_local_and_remote_additions_before_push_body() {
     i_slint_backend_testing::init_no_event_loop();
 
     let temp_root = sample_vault_runtime_root("recovery-pull-before-replace");
@@ -4909,6 +4937,13 @@ fn periodic_sync_returns_before_slow_primary_refresh_completes() {
 
 #[test]
 fn periodic_sync_conflicts_use_merge_engine_and_persist_conflict_copies() {
+    run_on_large_stack(
+        "periodic_sync_conflicts_use_merge_engine_and_persist_conflict_copies",
+        periodic_sync_conflicts_use_merge_engine_and_persist_conflict_copies_body,
+    );
+}
+
+fn periodic_sync_conflicts_use_merge_engine_and_persist_conflict_copies_body() {
     i_slint_backend_testing::init_no_event_loop();
 
     let temp_root = sample_vault_runtime_root("periodic-pull-recovery");
@@ -8390,8 +8425,8 @@ fn workspace_host_key_inline_prompt_projects_decision_page_semantics() {
     );
     assert_eq!(
         app.get_workspace_session_connection_task_detail().as_str(),
-        "Confirm the server identity to continue this connection.",
-        "decision-mode task detail should become a short task-focused explanation instead of repeating host and fingerprint details"
+        "The authenticity of the target host cannot be established. Please verify the host key fingerprint below before continuing.",
+        "decision-mode task detail should use the more explicit reference-style host key guidance while still keeping host and fingerprint details out of the body copy"
     );
     assert!(
         !app.get_workspace_session_connection_task_detail()

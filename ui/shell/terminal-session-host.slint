@@ -1,7 +1,6 @@
 // Workspace content host that switches between welcome, terminal, and error states.
 
 import { ThemeTokens } from "../theme/tokens.slint";
-import { AppTypography } from "../theme/typography.slint";
 import { QuickLaunchCardRow, QuickLaunchDetailRow, QuickLaunchGroupRow } from "../welcome/quick-launch-types.slint";
 import { WelcomeView } from "../welcome/welcome-view.slint";
 
@@ -82,6 +81,10 @@ export struct TerminalOverviewMarkerRow {
     kind: string,
 }
 
+component SshStatusText inherits Text {
+    font-family: "Segoe UI, Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, sans-serif";
+}
+
 component ConnectionProgressActionButton inherits Rectangle {
     in property <string> label;
     in property <bool> enabled: true;
@@ -118,7 +121,7 @@ component ConnectionProgressActionButton inherits Rectangle {
                             ? transparent
                             : ThemeTokens.control-active-surface;
 
-    Text {
+    SshStatusText {
         x: root.tone == "tertiary" ? 0px : 0px;
         width: parent.width;
         height: parent.height;
@@ -1875,7 +1878,7 @@ export component TerminalSessionHost inherits Rectangle {
                         height: parent.height;
                         spacing: 8px;
 
-                        Text {
+                        SshStatusText {
                             height: 34px;
                             text: root.session-title != "" ? root.session-title : "Interserver";
                             color: ThemeTokens.text-primary;
@@ -1920,7 +1923,7 @@ export component TerminalSessionHost inherits Rectangle {
                                         height: 16px;
                                         source: root.ssh-status-failed-icon;
                                     }
-                                    if root.connection-progress-visual-state != "verifying_host_key" && root.connection-progress-visual-state != "host_key_warning" && root.connection-progress-visual-state != "failed" : Text {
+                                    if root.connection-progress-visual-state != "verifying_host_key" && root.connection-progress-visual-state != "host_key_warning" && root.connection-progress-visual-state != "failed" : SshStatusText {
                                         width: parent.width;
                                         height: parent.height;
                                         text: "•";
@@ -1930,7 +1933,7 @@ export component TerminalSessionHost inherits Rectangle {
                                     }
                                 }
 
-                                Text {
+                                SshStatusText {
                                     text: root.connection-progress-headline-label();
                                     color: root.connection-progress-status-foreground();
                                     vertical-alignment: center;
@@ -2090,7 +2093,7 @@ export component TerminalSessionHost inherits Rectangle {
                                             horizontal-stretch: 1;
                                             spacing: 1px;
 
-                                            Text {
+                                            SshStatusText {
                                                 height: 22px;
                                                 text: hop.label;
                                                 color: hop.state == "failed"
@@ -2104,7 +2107,7 @@ export component TerminalSessionHost inherits Rectangle {
                                                 overflow: elide;
                                             }
 
-                                            Text {
+                                            SshStatusText {
                                                 height: 18px;
                                                 text: hop.subtitle;
                                                 color: hop.state == "failed"
@@ -2183,7 +2186,7 @@ export component TerminalSessionHost inherits Rectangle {
                             }
                         }
 
-                        Text {
+                        SshStatusText {
                             x: 210px;
                             y: 24px;
                             width: parent.width - 238px;
@@ -2195,7 +2198,7 @@ export component TerminalSessionHost inherits Rectangle {
                             vertical-alignment: center;
                         }
 
-                        Text {
+                        SshStatusText {
                             x: 210px;
                             y: 62px;
                             width: parent.width - 238px;
@@ -2221,7 +2224,7 @@ export component TerminalSessionHost inherits Rectangle {
                             height: 40px;
                             background: transparent;
 
-                            Text {
+                            SshStatusText {
                                 x: 0px;
                                 y: 0px;
                                 width: 122px;
@@ -2242,7 +2245,7 @@ export component TerminalSessionHost inherits Rectangle {
                                 border-color: ThemeTokens.ssh-status-card-border;
                                 background: ThemeTokens.ssh-status-card-elevated-surface;
 
-                                Text {
+                                SshStatusText {
                                     x: 14px;
                                     y: 0px;
                                     width: parent.width - 28px;
@@ -2256,7 +2259,7 @@ export component TerminalSessionHost inherits Rectangle {
                                 }
                             }
 
-                            if !field.monospace : Text {
+                            if !field.monospace : SshStatusText {
                                 x: 122px;
                                 y: 0px;
                                 width: parent.width - 156px;
@@ -2313,7 +2316,7 @@ export component TerminalSessionHost inherits Rectangle {
                             }
                         }
 
-                        Text {
+                        SshStatusText {
                             x: 136px;
                             y: 24px;
                             width: parent.width - 160px;
@@ -2325,7 +2328,7 @@ export component TerminalSessionHost inherits Rectangle {
                             vertical-alignment: center;
                         }
 
-                        Text {
+                        SshStatusText {
                             x: 136px;
                             y: 60px;
                             width: parent.width - 160px;
@@ -2346,7 +2349,7 @@ export component TerminalSessionHost inherits Rectangle {
                             border-color: ThemeTokens.ssh-status-card-border;
                             background: ThemeTokens.ssh-status-card-elevated-surface;
 
-                            Text {
+                            SshStatusText {
                                 x: 14px;
                                 y: 12px;
                                 width: parent.width - 28px;
@@ -2357,7 +2360,7 @@ export component TerminalSessionHost inherits Rectangle {
                                 font-weight: 600;
                             }
 
-                            Text {
+                            SshStatusText {
                                 x: 14px;
                                 y: 38px;
                                 width: parent.width - 28px;
@@ -2380,7 +2383,7 @@ export component TerminalSessionHost inherits Rectangle {
                             border-color: ThemeTokens.ssh-status-warning-border;
                             background: ThemeTokens.ssh-status-warning-surface;
 
-                            Text {
+                            SshStatusText {
                                 x: 14px;
                                 y: 12px;
                                 width: parent.width - 28px;
@@ -2391,7 +2394,7 @@ export component TerminalSessionHost inherits Rectangle {
                                 font-weight: 600;
                             }
 
-                            Text {
+                            SshStatusText {
                                 x: 14px;
                                 y: 38px;
                                 width: parent.width - 28px;
@@ -2411,7 +2414,7 @@ export component TerminalSessionHost inherits Rectangle {
                             height: 26px;
                             background: transparent;
 
-                            if index < 2 : Text {
+                            if index < 2 : SshStatusText {
                                 x: 0px;
                                 y: 0px;
                                 width: 122px;
@@ -2422,7 +2425,7 @@ export component TerminalSessionHost inherits Rectangle {
                                 vertical-alignment: center;
                             }
 
-                            if index < 2 : Text {
+                            if index < 2 : SshStatusText {
                                 x: 122px;
                                 y: 0px;
                                 width: parent.width - 122px;
@@ -2450,7 +2453,7 @@ export component TerminalSessionHost inherits Rectangle {
                             padding-bottom: 22px;
                             spacing: 10px;
 
-                            Text {
+                            SshStatusText {
                                 height: 32px;
                                 text: "Connecting";
                                 color: ThemeTokens.text-primary;
@@ -2459,7 +2462,7 @@ export component TerminalSessionHost inherits Rectangle {
                                 vertical-alignment: center;
                             }
 
-                            Text {
+                            SshStatusText {
                                 height: 36px;
                                 text: root.connection-progress-task-detail;
                                 color: ThemeTokens.text-secondary;
@@ -2501,7 +2504,7 @@ export component TerminalSessionHost inherits Rectangle {
                                                         : ThemeTokens.divider-strong;
                                         }
 
-                                        Text {
+                                        SshStatusText {
                                             width: 176px;
                                             height: parent.height;
                                             text: step.title;
@@ -2512,7 +2515,7 @@ export component TerminalSessionHost inherits Rectangle {
                                             overflow: elide;
                                         }
 
-                                        Text {
+                                        SshStatusText {
                                             horizontal-stretch: 1;
                                             height: parent.height;
                                             text: step.detail;
@@ -2551,7 +2554,7 @@ export component TerminalSessionHost inherits Rectangle {
                             }
                         }
 
-                        Text {
+                        SshStatusText {
                             x: 136px;
                             y: 24px;
                             width: parent.width - 160px;
@@ -2563,7 +2566,7 @@ export component TerminalSessionHost inherits Rectangle {
                             vertical-alignment: center;
                         }
 
-                        Text {
+                        SshStatusText {
                             x: 136px;
                             y: 60px;
                             width: parent.width - 160px;
@@ -2589,7 +2592,7 @@ export component TerminalSessionHost inherits Rectangle {
                             height: 30px;
                             background: transparent;
 
-                            Text {
+                            SshStatusText {
                                 x: 0px;
                                 y: 0px;
                                 width: 122px;
@@ -2600,7 +2603,7 @@ export component TerminalSessionHost inherits Rectangle {
                                 vertical-alignment: center;
                             }
 
-                            Text {
+                            SshStatusText {
                                 x: 122px;
                                 y: 0px;
                                 width: parent.width - 122px;
@@ -2665,7 +2668,7 @@ export component TerminalSessionHost inherits Rectangle {
                                     horizontal-stretch: 1;
                                     spacing: 1px;
 
-                                    Text {
+                                    SshStatusText {
                                         height: 22px;
                                         text: "Connection details";
                                         color: ThemeTokens.text-primary;
@@ -2674,7 +2677,7 @@ export component TerminalSessionHost inherits Rectangle {
                                         vertical-alignment: center;
                                     }
 
-                                    Text {
+                                    SshStatusText {
                                         height: 18px;
                                         text: "User, authentication, and advanced SSH options";
                                         color: ThemeTokens.text-secondary;
@@ -2683,7 +2686,7 @@ export component TerminalSessionHost inherits Rectangle {
                                     }
                                 }
 
-                                Text {
+                                SshStatusText {
                                     width: 24px;
                                     height: parent.height;
                                     text: root.connection-progress-diagnostics-expanded ? "▾" : "▸";
@@ -2729,7 +2732,7 @@ export component TerminalSessionHost inherits Rectangle {
                                         height: parent.height;
                                         spacing: 14px;
 
-                                        Text {
+                                        SshStatusText {
                                             width: 168px;
                                             height: parent.height;
                                             text: field.label;
@@ -2738,13 +2741,13 @@ export component TerminalSessionHost inherits Rectangle {
                                             vertical-alignment: center;
                                         }
 
-                                        Text {
+                                        SshStatusText {
                                             horizontal-stretch: 1;
                                             height: parent.height;
                                             text: field.value;
                                             color: field.monospace ? ThemeTokens.text-secondary : ThemeTokens.text-primary;
                                             font-size: 12px;
-                                            font-family: field.monospace ? "JetBrains Maple Mono" : AppTypography.ui-font-family;
+                                            font-family: field.monospace ? "JetBrains Maple Mono" : "Segoe UI, Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, sans-serif";
                                             vertical-alignment: center;
                                             overflow: elide;
                                         }
@@ -2757,7 +2760,7 @@ export component TerminalSessionHost inherits Rectangle {
                                     background: ThemeTokens.divider-subtle;
                                 }
 
-                                if root.connection-progress-diagnostics.length > 0 : Text {
+                                if root.connection-progress-diagnostics.length > 0 : SshStatusText {
                                     height: 18px;
                                     text: "Diagnostics";
                                     color: ThemeTokens.text-secondary;
@@ -2765,7 +2768,7 @@ export component TerminalSessionHost inherits Rectangle {
                                     font-weight: 600;
                                 }
 
-                                for line in root.connection-progress-diagnostics : Text {
+                                for line in root.connection-progress-diagnostics : SshStatusText {
                                     width: parent.width;
                                     text: line.text;
                                     color: ThemeTokens.text-muted;
