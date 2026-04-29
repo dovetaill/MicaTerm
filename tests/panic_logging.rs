@@ -23,15 +23,24 @@ fn panic_hook_writes_crash_file_for_child_process() {
     let _ = fs::remove_dir_all(&temp_root);
     fs::create_dir_all(temp_root.join("crash")).unwrap();
 
-    let status = Command::new(std::env::current_exe().unwrap())
+    let output = Command::new(std::env::current_exe().unwrap())
         .arg("--exact")
         .arg("panic_hook_writes_crash_file_for_child_process")
         .env("MICA_TERM_PANIC_CHILD", "1")
         .env("MICA_TERM_CRASH_DIR", temp_root.join("crash"))
-        .status()
+        .output()
         .unwrap();
 
-    assert!(!status.success());
+    assert!(!output.status.success());
+    let combined_output = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined_output.contains("panic hook smoke"),
+        "child panic run should still crash for real while the parent test keeps that noise out of the main suite output"
+    );
 
     let crash_file = fs::read_dir(temp_root.join("crash"))
         .unwrap()

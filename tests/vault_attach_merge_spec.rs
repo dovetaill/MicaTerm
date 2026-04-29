@@ -44,6 +44,20 @@ use slint::Model;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+fn run_on_large_stack(test_name: &str, test: fn()) {
+    let handle = std::thread::Builder::new()
+        .name(test_name.to_string())
+        // These attach-merge tests instantiate the full AppWindow + vault projection path, which
+        // can exceed the default Rust test-thread stack after Slint codegen grows.
+        .stack_size(32 * 1024 * 1024)
+        .spawn(test)
+        .expect("spawn large-stack test thread");
+
+    if let Err(payload) = handle.join() {
+        std::panic::resume_unwind(payload);
+    }
+}
+
 struct NoopRuntimeControl;
 
 impl SessionRuntimeControl for NoopRuntimeControl {
@@ -520,6 +534,13 @@ fn setup_attach_merge_case() -> AttachMergeCase {
 
 #[test]
 fn attach_time_merge_keeps_local_and_remote_assets_when_bootstrap_state_is_missing() {
+    run_on_large_stack(
+        "attach_time_merge_keeps_local_and_remote_assets_when_bootstrap_state_is_missing",
+        attach_time_merge_keeps_local_and_remote_assets_when_bootstrap_state_is_missing_body,
+    );
+}
+
+fn attach_time_merge_keeps_local_and_remote_assets_when_bootstrap_state_is_missing_body() {
     let case = setup_attach_merge_case();
 
     case.complete_attach();
@@ -554,6 +575,13 @@ fn attach_time_merge_keeps_local_and_remote_assets_when_bootstrap_state_is_missi
 
 #[test]
 fn attach_time_merge_pushes_a_new_merged_revision_back_to_primary() {
+    run_on_large_stack(
+        "attach_time_merge_pushes_a_new_merged_revision_back_to_primary",
+        attach_time_merge_pushes_a_new_merged_revision_back_to_primary_body,
+    );
+}
+
+fn attach_time_merge_pushes_a_new_merged_revision_back_to_primary_body() {
     let case = setup_attach_merge_case();
 
     case.complete_attach();
@@ -574,6 +602,13 @@ fn attach_time_merge_pushes_a_new_merged_revision_back_to_primary() {
 
 #[test]
 fn attach_time_merge_remaps_remote_keychain_ids_and_keeps_secret_ownership() {
+    run_on_large_stack(
+        "attach_time_merge_remaps_remote_keychain_ids_and_keeps_secret_ownership",
+        attach_time_merge_remaps_remote_keychain_ids_and_keeps_secret_ownership_body,
+    );
+}
+
+fn attach_time_merge_remaps_remote_keychain_ids_and_keeps_secret_ownership_body() {
     let case = setup_attach_merge_case();
     let password = SecretString::new("vault-pass".into());
     let local_key_id = create_local_keychain_ssh_key(&case.app, "Local Key");

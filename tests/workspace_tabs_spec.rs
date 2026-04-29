@@ -1191,12 +1191,12 @@ fn terminal_session_host_uses_compact_terminal_layout_contract() {
         "terminal host should tighten the prototype cell height to a denser IDE-like default"
     );
     assert!(
-        !terminal_host.contains("padding-left: 24px;"),
-        "terminal host should not keep the oversized left padding"
+        !terminal_host.contains("private property <length> terminal-padding-left: 24px;"),
+        "terminal host should not keep the oversized terminal-surface left padding"
     );
     assert!(
-        !terminal_host.contains("padding-top: 24px;"),
-        "terminal host should not keep the oversized top padding"
+        !terminal_host.contains("private property <length> terminal-padding-top: 24px;"),
+        "terminal host should not keep the oversized terminal-surface top padding"
     );
     assert!(
         !terminal_host.contains("font-size: 20px;"),
@@ -1289,24 +1289,24 @@ fn connection_progress_workspace_host_contract_exposes_timeline_models_and_foote
         "TerminalSessionHost should render a dedicated connection-progress branch"
     );
     assert!(
-        terminal_host.contains("summary-header := Rectangle {"),
-        "connection-progress host should expose a summary header inside the redesigned single-sheet skeleton"
+        terminal_host.contains("header-block := Rectangle {"),
+        "connection-progress host should expose a compact page header inside the redesigned single-sheet skeleton"
     );
     assert!(
-        terminal_host.contains("workflow-rail := Rectangle {"),
-        "connection-progress host should expose a compact workflow rail inside the redesigned single-sheet skeleton"
+        terminal_host.contains("hop-card := Rectangle {"),
+        "connection-progress host should expose a compact hop chain card inside the redesigned single-sheet skeleton"
     );
     assert!(
         terminal_host.contains("for step in root.connection-progress-steps"),
-        "connection-progress host should keep iterating over connection progress steps inside the workflow rail"
+        "connection-progress host should keep iterating over connection progress steps inside the connecting state"
     );
     assert!(
-        terminal_host.contains("current-task-panel := Rectangle {"),
-        "connection-progress host should expose a unified current-task panel inside the redesigned single-sheet skeleton"
+        terminal_host.contains("main-card := Rectangle {"),
+        "connection-progress host should expose a unified main task card inside the redesigned single-sheet skeleton"
     );
     assert!(
-        terminal_host.contains("diagnostics-section := Rectangle {"),
-        "connection-progress host should expose a dedicated diagnostics disclosure section inside the redesigned single-sheet skeleton"
+        terminal_host.contains("details-card := Rectangle {"),
+        "connection-progress host should expose a dedicated connection details disclosure section inside the redesigned single-sheet skeleton"
     );
     assert!(
         !terminal_host.contains("header-card := Rectangle {"),
@@ -1345,8 +1345,8 @@ fn connection_progress_workspace_host_contract_exposes_timeline_models_and_foote
         "connection-progress host should stop exposing the old copy diagnostics action"
     );
     assert!(
-        !terminal_host.contains("ThemeTokens.status-success-surface"),
-        "connection-progress workflow rail should stop painting completed steps with the old success surface"
+        terminal_host.contains("ThemeTokens.ssh-status-card-elevated-surface"),
+        "connection-progress hop chain should use the quieter elevated SSH status surfaces instead of the old bright workflow treatment"
     );
     assert!(
         terminal_host.contains("Cancel"),
@@ -1389,12 +1389,8 @@ fn connection_progress_workspace_host_contract_exposes_inline_host_key_actions()
     let trust_action_window = &terminal_host[trust_action_index.saturating_sub(220)
         ..(trust_action_index + 120).min(terminal_host.len())];
     assert!(
-        trust_action_window.contains("Trust key"),
-        "connection-progress host should expose an inline trust action for unknown host keys"
-    );
-    assert!(
-        !trust_action_window.contains("Trust and Continue"),
-        "connection-progress host should stop exposing the old inline trust copy for unknown host keys"
+        trust_action_window.contains("Trust & Continue"),
+        "connection-progress host should expose the reference-style trust action for unknown host keys"
     );
     assert!(
         terminal_host.contains("trust-host-key"),
@@ -1406,12 +1402,8 @@ fn connection_progress_workspace_host_contract_exposes_inline_host_key_actions()
     let reject_action_window = &terminal_host[reject_action_index.saturating_sub(220)
         ..(reject_action_index + 120).min(terminal_host.len())];
     assert!(
-        reject_action_window.contains("Cancel"),
-        "connection-progress host should expose an inline cancel action for unknown host keys"
-    );
-    assert!(
-        !reject_action_window.contains("Reject"),
-        "connection-progress host should stop exposing the old inline reject copy for unknown host keys"
+        reject_action_window.contains("Reject"),
+        "connection-progress host should expose the reference-style reject action for unknown host keys"
     );
     assert!(
         terminal_host.contains("reject-host-key"),
@@ -1423,25 +1415,21 @@ fn connection_progress_workspace_host_contract_exposes_inline_host_key_actions()
     let footer_cancel_guard_window = &terminal_host[footer_cancel_guard_index
         ..(footer_cancel_guard_index + 240).min(terminal_host.len())];
     assert!(
-        footer_cancel_guard_window.contains("root.connection-progress-page-mode == \"progressing\""),
-        "page-level cancel actions should stay out of decision mode so host-key prompts remain focused inside the unified task panel"
+        footer_cancel_guard_window.contains("root.connection-progress-visual-state == \"verifying_host_key\""),
+        "page-level cancel actions should stay available during verification and connecting states in the reference flow"
     );
     let action_bar_index = terminal_host
-        .find("if root.connection-progress-shows-cancel() : action-bar := HorizontalLayout {")
+        .find("action-bar := Rectangle {")
         .expect("connection-progress host should still expose a dedicated page-level action bar");
     let action_bar_window =
-        &terminal_host[action_bar_index..(action_bar_index + 320).min(terminal_host.len())];
+        &terminal_host[action_bar_index..(action_bar_index + 1400).min(terminal_host.len())];
     assert!(
-        !action_bar_window.contains("trust-host-key"),
-        "page-level action bar should not duplicate host-key trust actions once the task panel owns the decision state"
-    );
-    assert!(
-        !action_bar_window.contains("reject-host-key"),
-        "page-level action bar should not duplicate host-key reject actions once the task panel owns the decision state"
+        action_bar_window.contains("Cancel connection"),
+        "page-level action bar should keep the low-emphasis cancel affordance aligned with the reference layout"
     );
     assert!(
         !terminal_host.contains("host-key-card := Rectangle {"),
-        "connection-progress host should fold host-key verification into the unified current-task panel"
+        "connection-progress host should avoid reviving the old standalone host-key card shell"
     );
 }
 
@@ -1514,8 +1502,8 @@ fn connection_progress_workspace_host_contract_exposes_presentation_semantics_pr
         "TerminalSessionHost should accept the projected connection task-detail property"
     );
     assert!(
-        terminal_host.contains("if root.connection-progress-page-mode == \"troubleshooting\" : VerticalLayout {"),
-        "TerminalSessionHost should keep a dedicated troubleshooting block inside the unified connection task panel"
+        terminal_host.contains("if root.connection-progress-visual-state == \"failed\" : Rectangle {"),
+        "TerminalSessionHost should keep a dedicated failed-state block inside the unified connection sheet"
     );
     let session_error_index = terminal_host
         .find("if root.mode == \"session-error\" : Rectangle {")

@@ -8906,23 +8906,20 @@ fn workspace_terminal_search_query_reprojects_visible_match_count() {
 
     let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
     app.invoke_asset_activated(ssh_id.into());
-
-    std::thread::sleep(Duration::from_millis(20));
-    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
-    slint::platform::update_timers_and_animations();
+    settle_terminal_projection();
 
     app.invoke_workspace_session_text_input("https://example.com/docs".into());
-
-    std::thread::sleep(Duration::from_millis(20));
-    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
-    slint::platform::update_timers_and_animations();
+    wait_for_condition(Duration::from_millis(250), || {
+        app.get_workspace_session_visible_lines()
+            .iter()
+            .any(|line| line.contains("https://example.com/docs"))
+    });
 
     app.invoke_workspace_session_search_open_requested();
     app.invoke_workspace_session_search_query_changed("example".into());
-
-    std::thread::sleep(Duration::from_millis(20));
-    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
-    slint::platform::update_timers_and_animations();
+    wait_for_condition(Duration::from_millis(250), || {
+        app.get_workspace_session_search_match_count() > 0
+    });
 
     assert!(app.get_workspace_session_search_open());
     assert_eq!(app.get_workspace_session_search_query().as_str(), "example");
@@ -8932,10 +8929,9 @@ fn workspace_terminal_search_query_reprojects_visible_match_count() {
     );
 
     app.invoke_workspace_session_search_query_changed("no-match-token".into());
-
-    std::thread::sleep(Duration::from_millis(20));
-    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
-    slint::platform::update_timers_and_animations();
+    wait_for_condition(Duration::from_millis(250), || {
+        app.get_workspace_session_search_match_count() == 0
+    });
 
     assert_eq!(app.get_workspace_session_search_match_count(), 0);
 
