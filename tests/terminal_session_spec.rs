@@ -155,13 +155,6 @@ fn wezterm_session_selection_text_reads_scrollback_above_viewport() {
 }
 
 #[test]
-fn experimental_alacritty_session_selection_text_reads_scrollback_above_viewport() {
-    assert_scrollback_selection_text_uses_buffer_coordinates(
-        TerminalCoreKind::AlacrittyExperimental,
-    );
-}
-
-#[test]
 fn terminal_session_preserves_deeper_scrollback_history_for_large_bursts() {
     let mut session = TerminalSession::new(4, 20);
     let configured_scrollback_lines = 1_500usize;

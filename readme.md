@@ -64,7 +64,6 @@ Notes:
 
 - Current terminal core status:
   - WezTerm-backed terminal core remains the shipped default today
-  - Alacritty adapter path is experimental and not the default runtime core; real `alacritty_terminal` core now exists behind the experimental adapter boundary, so the experimental Alacritty path now binds to the real upstream core rather than staying a WezTerm wrapper seam
   - Rio remains an architectural reference rather than migrated runtime code
 - Windows-first native renderer:
   - packaged `windows-mainline` builds ship the retained-native child HWND presenter as the live Windows terminal path

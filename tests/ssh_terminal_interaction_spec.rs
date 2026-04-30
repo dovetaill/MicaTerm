@@ -8,7 +8,6 @@ use mica_term::app::ssh::runtime::{
     TerminalCellState, TerminalKeyEvent, TerminalSession, TerminalSurfaceState,
     extract_current_working_directory_from_osc7,
 };
-use mica_term::app::terminal_core::TerminalCoreKind;
 use mica_term::app::terminal_theme::preset_for_theme_mode;
 use mica_term::theme::ThemeMode;
 use uuid::Uuid;
@@ -134,42 +133,6 @@ fn terminal_host_forwards_backtab_into_terminal_tab_input() {
         ),
         "TerminalSessionHost should forward Backtab as a shifted terminal Tab sequence instead of leaving Shift+Tab to local focus navigation"
     );
-}
-
-#[test]
-fn experimental_alacritty_core_preserves_light_theme_palette_and_shift_tab_writeback() {
-    let mut wezterm = TerminalSession::new_with_core_kind(24, 80, TerminalCoreKind::Wezterm);
-    let mut alacritty =
-        TerminalSession::new_with_core_kind(24, 80, TerminalCoreKind::AlacrittyExperimental);
-    let preset = preset_for_theme_mode(ThemeMode::Light);
-
-    wezterm.set_theme_mode(ThemeMode::Light);
-    alacritty.set_theme_mode(ThemeMode::Light);
-    wezterm.apply_remote_bytes(b"[root@host ~]# ");
-    alacritty.apply_remote_bytes(b"[root@host ~]# ");
-
-    let wezterm_snapshot = wezterm.surface_state(Uuid::new_v4());
-    let alacritty_snapshot = alacritty.surface_state(Uuid::new_v4());
-    let wezterm_backtab = wezterm
-        .send_key_event(TerminalKeyEvent::named("tab", false, false, true))
-        .expect("wezterm backtab");
-    let alacritty_backtab = alacritty
-        .send_key_event(TerminalKeyEvent::named("tab", false, false, true))
-        .expect("alacritty backtab");
-
-    assert_eq!(
-        alacritty_snapshot.default_bg_rgba,
-        wezterm_snapshot.default_bg_rgba
-    );
-    assert_eq!(
-        alacritty_snapshot.default_bg_rgba,
-        0xff00_0000 | preset.background
-    );
-    assert_eq!(
-        alacritty_snapshot.cursor.bg_rgba,
-        wezterm_snapshot.cursor.bg_rgba
-    );
-    assert_eq!(alacritty_backtab, wezterm_backtab);
 }
 
 #[test]

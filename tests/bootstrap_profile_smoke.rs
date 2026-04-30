@@ -162,18 +162,18 @@ fn readme_states_current_terminal_core_and_reference_boundaries_honestly() {
         "readme should state that the shipped default core is still WezTerm-backed so the repo does not overclaim the migration status"
     );
     assert!(
-        readme.contains("Alacritty adapter path is experimental"),
-        "readme should state that the Alacritty path is still experimental"
+        !readme.contains("Alacritty adapter path is experimental"),
+        "readme should stop describing an Alacritty experimental path after the repository collapses to the shipped WezTerm core"
     );
     assert!(
         readme.contains("Rio remains an architectural reference"),
         "readme should state that Rio is a reference rather than migrated runtime code"
     );
     assert!(
-        readme.contains(
+        !readme.contains(
             "real `alacritty_terminal` core now exists behind the experimental adapter boundary"
         ),
-        "readme should state that the experimental Alacritty path now binds to the real upstream core rather than staying a WezTerm wrapper seam"
+        "readme should not keep the old Alacritty experimental migration wording once the code path is deleted"
     );
 }
 

@@ -311,10 +311,6 @@ impl TerminalSession {
         ))
     }
 
-    pub fn new_with_experimental_alacritty_core(rows: usize, cols: usize) -> Self {
-        Self::new_with_core_kind(rows, cols, TerminalCoreKind::AlacrittyExperimental)
-    }
-
     pub fn with_core(core: Box<dyn TerminalCoreAdapter>) -> Self {
         Self { core }
     }

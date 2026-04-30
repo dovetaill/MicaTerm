@@ -10,7 +10,6 @@ use crate::theme::{ThemeMode, ThemeVariant};
 pub enum TerminalCoreKind {
     #[default]
     Wezterm,
-    AlacrittyExperimental,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
