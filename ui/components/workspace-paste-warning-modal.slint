@@ -1,18 +1,43 @@
+import { ScrollView } from "std-widgets.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 import { AppTypography } from "../theme/typography.slint";
 
-component DialogButton inherits Rectangle {
+component ModalActionButton inherits Rectangle {
     in property <string> label: "";
-    in property <bool> primary: false;
+    in property <bool> emphasized: false;
+    in property <bool> enabled: true;
+    out property <bool> has-focus: button-focus.has-focus;
     callback clicked();
 
-    height: 34px;
-    border-radius: 0px;
+    width: emphasized ? 116px : 98px;
+    height: 38px;
+    border-radius: ThemeTokens.modal-control-radius;
     border-width: 1px;
-    border-color: root.primary ? ThemeTokens.accent : ThemeTokens.divider-subtle;
-    background: button-touch.pressed ? ThemeTokens.control-pressed-surface
-        : button-touch.has-hover ? ThemeTokens.control-hover-surface
-        : root.primary ? ThemeTokens.accent : ThemeTokens.control-active-surface;
+    border-color: !root.enabled ? ThemeTokens.modal-inner-border
+        : root.has-focus ? ThemeTokens.focus-ring
+        : root.emphasized ? (ThemeTokens.dark-mode ? #7d9a87 : #a1b8a6)
+        : ThemeTokens.modal-inner-border;
+    background: !root.enabled ? ThemeTokens.control-disabled-surface
+        : button-touch.pressed
+            ? root.emphasized
+                ? (ThemeTokens.dark-mode ? #2b3b31 : #d5e1d7)
+                : ThemeTokens.modal-button-secondary-pressed-surface
+            : button-touch.has-hover || root.has-focus
+                ? root.emphasized
+                    ? (ThemeTokens.dark-mode ? #33463a : #dde8df)
+                    : ThemeTokens.modal-button-secondary-hover-surface
+                : root.emphasized
+                    ? (ThemeTokens.dark-mode ? #2e4035 : #e6eee7)
+                    : ThemeTokens.modal-button-secondary-surface;
+    opacity: root.enabled ? 1 : 0.54;
+    accessible-role: AccessibleRole.button;
+    accessible-label: root.label;
+    accessible-action-default => { button-touch.clicked(); }
+    forward-focus: button-focus;
+
+    public function focus-button() {
+        button-focus.focus();
+    }
 
     Text {
         width: parent.width;
@@ -21,14 +46,35 @@ component DialogButton inherits Rectangle {
         color: ThemeTokens.text-primary;
         horizontal-alignment: center;
         vertical-alignment: center;
+        font-family: AppTypography.ui-font-family;
+        font-size: 12px;
+        font-weight: root.emphasized ? 700 : AppTypography.ui-font-weight-regular;
     }
 
     button-touch := TouchArea {
         width: parent.width;
         height: parent.height;
+        enabled: root.enabled;
+        mouse-cursor: MouseCursor.pointer;
 
         clicked => {
             root.clicked();
+        }
+    }
+
+    button-focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        enabled: root.visible && root.enabled;
+        focus-on-tab-navigation: root.enabled;
+
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n" || event.text == Key.Return) {
+                button-touch.clicked();
+                accept
+            } else {
+                reject
+            }
         }
     }
 }
@@ -39,36 +85,61 @@ export component WorkspacePasteWarningModal inherits Rectangle {
     in property <bool> editor-mode: false;
     in-out property <string> paste-text: "";
     in property <int> focus-sequence: 0;
+    in-out property <bool> editor-focused: false;
     callback confirm-requested();
     callback cancel-requested();
     callback drag-requested(length, length);
     callback drag-moved(length, length);
     callback drag-ended();
     callback focus-restore-requested();
-    private property <length> footer-height: 66px;
+    private property <length> header-height: 92px;
+    private property <length> footer-height: 74px;
+    private property <length> body-padding-horizontal: 22px;
+    private property <length> body-padding-top: 18px;
+    private property <length> editor-padding-horizontal: 16px;
+    private property <length> editor-padding-vertical: 14px;
+    private property <image> document-icon: @image-url("../../assets/icons/fluent/document-20-regular.svg");
+    private property <image> close-icon: @image-url("../../assets/icons/fluent/dismiss-20-regular.svg");
+    private property <string> review-shortcuts: root.editor-mode
+        ? "Enter to paste  •  Esc to cancel  •  Click editor to edit"
+        : "Enter to paste  •  Esc to cancel";
 
     background: transparent;
-
-    public function focus-input() {
-        if (root.editor-mode) {
-            paste-input.focus();
-        }
-    }
 
     modal-focus := FocusScope {
         width: parent.width;
         height: parent.height;
 
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.focus-restore-requested();
-                root.cancel-requested();
-                accept
-            } else if (event.text == Key.Return) {
-                root.confirm-requested();
-                accept
-            } else {
-                reject
+        review-key-anchor := TextInput {
+            x: 0px;
+            y: 0px;
+            width: 1px;
+            height: 1px;
+            text: "";
+            color: transparent;
+            selection-background-color: transparent;
+            selection-foreground-color: transparent;
+
+            edited => {
+                if self.text != "" {
+                    self.text = "";
+                }
+            }
+
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    root.cancel-requested();
+                    root.focus-restore-requested();
+                    accept
+                } else if !root.editor-focused
+                    && (event.text == Key.Return || event.text == "\n")
+                {
+                    root.confirm-requested();
+                    root.focus-restore-requested();
+                    accept
+                } else {
+                    reject
+                }
             }
         }
 
@@ -76,23 +147,13 @@ export component WorkspacePasteWarningModal inherits Rectangle {
             x: 0px;
             y: 0px;
             width: parent.width;
-            height: 56px;
-            background: ThemeTokens.assets-surface;
-
-            Text {
-                x: 20px;
-                y: 0px;
-                width: parent.width - 72px;
-                height: parent.height;
-                text: root.dialog-title;
-                color: ThemeTokens.text-primary;
-                font-size: 18px;
-                font-weight: AppTypography.ui-font-weight-regular;
-                vertical-alignment: center;
-            }
+            height: root.header-height;
+            background: ThemeTokens.modal-header-surface;
 
             drag-touch := TouchArea {
-                width: parent.width - 48px;
+                x: 0px;
+                y: 0px;
+                width: parent.width - 72px;
                 height: parent.height;
 
                 pointer-event(event) => {
@@ -114,135 +175,218 @@ export component WorkspacePasteWarningModal inherits Rectangle {
                 }
             }
 
-            close-button := Rectangle {
-                x: parent.width - 40px;
-                y: 12px;
-                width: 28px;
-                height: 28px;
-                border-radius: 0px;
+            icon-tile := Rectangle {
+                x: 22px;
+                y: 20px;
+                width: 46px;
+                height: 46px;
+                border-radius: 14px;
                 border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
+                border-color: ThemeTokens.modal-inner-border;
+                background: ThemeTokens.dark-mode ? #293650 : #dbe6f4;
+
+                Image {
+                    x: 13px;
+                    y: 13px;
+                    width: 20px;
+                    height: 20px;
+                    source: root.document-icon;
+                    image-fit: contain;
+                    colorize: ThemeTokens.link-accent;
+                }
+
+                Rectangle {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: 1px;
+                    border-radius: 14px;
+                    background: ThemeTokens.dark-mode ? #ffffff16 : #ffffff98;
+                }
+            }
+
+            Text {
+                x: 82px;
+                y: 18px;
+                width: parent.width - 166px;
+                height: 28px;
+                text: root.dialog-title;
+                color: ThemeTokens.text-primary;
+                font-family: AppTypography.ui-font-family;
+                font-size: 17px;
+                font-weight: 700;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            Text {
+                x: 82px;
+                y: 46px;
+                width: parent.width - 166px;
+                height: 20px;
+                text: root.editor-mode
+                    ? "Review pasted content before sending."
+                    : "Confirm this paste before it reaches the terminal.";
+                color: ThemeTokens.text-secondary;
+                font-family: AppTypography.ui-font-family;
+                font-size: 12px;
+                font-weight: AppTypography.ui-font-weight-regular;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            close-button := Rectangle {
+                x: parent.width - 58px;
+                y: 20px;
+                width: 36px;
+                height: 36px;
+                border-radius: 11px;
+                border-width: 1px;
+                border-color: close-touch.has-hover ? ThemeTokens.modal-field-border : ThemeTokens.modal-inner-border;
                 background: close-touch.pressed ? ThemeTokens.control-pressed-surface
                     : close-touch.has-hover ? ThemeTokens.control-hover-surface
-                    : ThemeTokens.control-active-surface;
+                    : ThemeTokens.dark-mode ? #202937 : ThemeTokens.modal-section-surface;
 
-                Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: "×";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                Image {
+                    x: 8px;
+                    y: 8px;
+                    width: 20px;
+                    height: 20px;
+                    source: root.close-icon;
+                    image-fit: contain;
+                    colorize: ThemeTokens.text-primary;
                 }
 
                 close-touch := TouchArea {
                     width: parent.width;
                     height: parent.height;
+                    mouse-cursor: MouseCursor.pointer;
 
                     clicked => {
-                        root.focus-restore-requested();
                         root.cancel-requested();
+                        root.focus-restore-requested();
                     }
                 }
             }
 
-            divider := Rectangle {
+            Rectangle {
+                x: 0px;
                 y: parent.height - 1px;
                 width: parent.width;
                 height: 1px;
-                background: ThemeTokens.divider-subtle;
+                background: ThemeTokens.modal-inner-border;
             }
         }
 
         body := Rectangle {
             x: 0px;
-            y: header.height;
+            y: root.header-height;
             width: parent.width;
-            height: parent.height - header.height - root.footer-height;
-            background: transparent;
+            height: parent.height - root.header-height - root.footer-height;
+            background: ThemeTokens.modal-body-surface;
 
-            summary-copy := Text {
-                x: 20px;
-                y: 18px;
-                width: parent.width - 40px;
-                visible: !root.editor-mode;
-                text: "Paste " + root.line-count + " lines into this terminal?";
-                color: ThemeTokens.text-primary;
-                font-size: 16px;
+            Text {
+                x: root.body-padding-horizontal;
+                y: root.body-padding-top;
+                width: parent.width - (root.body-padding-horizontal * 2);
+                text: root.editor-mode
+                    ? "Press Enter to paste while the action button is focused. Click the editor to make changes; Enter inserts a newline while editing."
+                    : "This shell has not advertised bracketed paste protection, so pasted lines may execute immediately.";
+                color: ThemeTokens.text-secondary;
+                font-family: AppTypography.ui-font-family;
+                font-size: root.editor-mode ? 11px : 12px;
                 font-weight: AppTypography.ui-font-weight-regular;
                 wrap: word-wrap;
             }
 
-            summary-detail := Text {
-                x: 20px;
-                y: 62px;
-                width: parent.width - 40px;
-                visible: !root.editor-mode;
-                text: "This shell has not advertised bracketed paste protection, so pasted lines may execute immediately.";
-                color: ThemeTokens.text-primary;
-                opacity: 0.72;
-                wrap: word-wrap;
-            }
-
-            editor-copy := Text {
-                x: 20px;
-                y: 18px;
-                width: parent.width - 40px;
-                visible: root.editor-mode;
-                text: "Review and edit this paste before sending it to the terminal.";
-                color: ThemeTokens.text-primary;
-                font-size: 16px;
+            Text {
+                x: root.body-padding-horizontal;
+                y: root.body-padding-top + (root.editor-mode ? 38px : 48px);
+                width: parent.width - (root.body-padding-horizontal * 2);
+                text: root.review-shortcuts;
+                color: ThemeTokens.text-muted;
+                font-family: AppTypography.ui-font-family;
+                font-size: 11px;
                 font-weight: AppTypography.ui-font-weight-regular;
                 wrap: word-wrap;
             }
 
-            editor-hint := Text {
-                x: 20px;
-                y: 48px;
-                width: parent.width - 40px;
-                visible: root.editor-mode;
-                text: "Press Enter to paste, or Esc to cancel.";
-                color: ThemeTokens.text-primary;
-                opacity: 0.72;
-                wrap: word-wrap;
-            }
-
-            editor-frame := Rectangle {
-                x: 20px;
-                y: 80px;
-                width: parent.width - 40px;
-                height: parent.height - 100px;
-                visible: root.editor-mode;
-                border-radius: 0px;
+            if root.editor-mode : editor-frame := Rectangle {
+                x: root.body-padding-horizontal;
+                y: 76px;
+                width: parent.width - (root.body-padding-horizontal * 2);
+                height: max(180px, parent.height - 92px);
+                border-radius: 14px;
                 border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.inspector-surface;
+                border-color: paste-input.has-focus
+                    ? ThemeTokens.input-focus-ring
+                    : ThemeTokens.dark-mode ? #ffffff16 : #9eb2c82e;
+                background: ThemeTokens.dark-mode ? #111923 : #fbfdff;
+                clip: true;
 
-                paste-input := TextInput {
-                    x: 12px;
-                    y: 10px;
-                    width: parent.width - 24px;
-                    height: parent.height - 20px;
-                    text: root.paste-text;
-                    color: ThemeTokens.text-primary;
-                    single-line: false;
-                    selection-background-color: ThemeTokens.accent;
-                    selection-foreground-color: ThemeTokens.text-primary;
+                Rectangle {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: 1px;
+                    background: ThemeTokens.dark-mode ? #ffffff10 : #ffffff9a;
+                }
 
-                    edited => {
-                        root.paste-text = self.text;
-                    }
+                editor-scroll := ScrollView {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    viewport-width: editor-viewport.width;
+                    viewport-height: editor-viewport.height;
+                    vertical-scrollbar-policy: as-needed;
+                    horizontal-scrollbar-policy: always-off;
+                    mouse-drag-pan-enabled: false;
 
-                    key-pressed(event) => {
-                        if (event.text == Key.Escape) {
-                            root.focus-restore-requested();
-                            root.cancel-requested();
-                            accept
-                        } else if (event.text == Key.Return) {
-                            root.confirm-requested();
-                            accept
-                        } else {
-                            reject
+                    editor-viewport := Rectangle {
+                        width: editor-scroll.visible-width;
+                        height: max(
+                            editor-scroll.visible-height,
+                            paste-input.y + paste-input.height + root.editor-padding-vertical
+                        );
+                        background: transparent;
+
+                        paste-input := TextInput {
+                            x: root.editor-padding-horizontal;
+                            y: root.editor-padding-vertical;
+                            width: max(0px, editor-viewport.width - (root.editor-padding-horizontal * 2));
+                            height: max(
+                                editor-scroll.visible-height - (root.editor-padding-vertical * 2),
+                                self.preferred-height
+                            );
+                            text: root.paste-text;
+                            color: ThemeTokens.text-primary;
+                            single-line: false;
+                            wrap: word-wrap;
+                            vertical-alignment: top;
+                            selection-background-color: ThemeTokens.focus-ring;
+                            selection-foreground-color: ThemeTokens.text-primary;
+                            font-family: AppTypography.ui-font-family;
+                            font-size: AppTypography.ui-font-size-body;
+                            font-weight: AppTypography.ui-font-weight-regular;
+
+                            edited => {
+                                root.paste-text = self.text;
+                            }
+
+                            changed has-focus => {
+                                root.editor-focused = self.has-focus;
+                            }
+
+                            key-pressed(event) => {
+                                if (event.text == Key.Escape) {
+                                    root.cancel-requested();
+                                    root.focus-restore-requested();
+                                    accept
+                                } else {
+                                    reject
+                                }
+                            }
                         }
                     }
                 }
@@ -254,41 +398,42 @@ export component WorkspacePasteWarningModal inherits Rectangle {
             y: parent.height - root.footer-height;
             width: parent.width;
             height: root.footer-height;
-            background: ThemeTokens.assets-surface;
+            background: ThemeTokens.modal-footer-surface;
 
-            footer-divider := Rectangle {
+            Rectangle {
+                x: 0px;
+                y: 0px;
                 width: parent.width;
                 height: 1px;
-                background: ThemeTokens.divider-subtle;
+                background: ThemeTokens.modal-inner-border;
             }
 
-            cancel-button := DialogButton {
-                x: parent.width - 204px;
-                y: 16px;
-                width: 88px;
+            cancel-button := ModalActionButton {
+                x: parent.width - 248px;
+                y: 18px;
                 label: "Cancel";
 
                 clicked => {
-                    root.focus-restore-requested();
                     root.cancel-requested();
+                    root.focus-restore-requested();
                 }
             }
 
-            confirm-button := DialogButton {
-                x: parent.width - 104px;
-                y: 16px;
-                width: 84px;
+            confirm-button := ModalActionButton {
+                x: parent.width - 138px;
+                y: 18px;
                 label: "Paste";
-                primary: true;
+                emphasized: true;
 
                 clicked => {
                     root.confirm-requested();
+                    root.focus-restore-requested();
                 }
             }
         }
     }
 
     changed focus-sequence => {
-        root.focus-input();
+        review-key-anchor.focus();
     }
 }

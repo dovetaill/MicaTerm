@@ -784,7 +784,11 @@ pub(super) fn workspace_paste_prompt_mode(
     state: &ShellViewModel,
     text: &str,
 ) -> Option<WorkspacePastePromptMode> {
+    let normalized = normalized_paste_newlines(text);
     let logical_line_count = workspace_paste_logical_line_count(text);
+    if normalized.chars().count() >= WORKSPACE_PASTE_EDITOR_CHAR_THRESHOLD {
+        return Some(WorkspacePastePromptMode::Editor);
+    }
     if logical_line_count < 2 {
         return None;
     }
@@ -837,13 +841,30 @@ pub(super) fn forward_active_workspace_paste(
     pending_warning: &RefCell<Option<PendingWorkspacePasteWarning>>,
 ) -> WorkspacePasteRequestOutcome {
     let Some(session_id) = active_workspace_session_uuid(state) else {
+        tracing::warn!(
+            target: "app.ssh",
+            "ignored workspace paste request because no active terminal session is selected"
+        );
         return WorkspacePasteRequestOutcome::Ignored;
     };
     let Some(text) = system_clipboard_text() else {
+        tracing::warn!(
+            target: "app.ssh",
+            session_id = session_id.to_string(),
+            "ignored workspace paste request because clipboard text could not be read"
+        );
         return WorkspacePasteRequestOutcome::Ignored;
     };
 
     if let Some(prompt_mode) = workspace_paste_prompt_mode(state, &text) {
+        tracing::info!(
+            target: "app.ssh",
+            session_id = session_id.to_string(),
+            logical_line_count = workspace_paste_logical_line_count(&text),
+            character_count = text.chars().count(),
+            prompt_mode = ?prompt_mode,
+            "workspace paste requires confirmation before sending to the terminal"
+        );
         *pending_warning.borrow_mut() = Some(PendingWorkspacePasteWarning {
             session_id,
             logical_line_count: workspace_paste_logical_line_count(&text),

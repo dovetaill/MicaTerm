@@ -206,6 +206,7 @@ struct WorkspaceTerminalLinkClickCandidate {
 
 const MAX_SSH_PROXY_CHAIN_DEPTH: usize = 8;
 const WORKSPACE_PASTE_EDITOR_LINE_THRESHOLD: usize = 4;
+const WORKSPACE_PASTE_EDITOR_CHAR_THRESHOLD: usize = 5 * 1024;
 const FALLBACK_WORKSPACE_TERMINAL_CELL_WIDTH_PX: u32 = 10;
 #[cfg(target_os = "windows")]
 const FALLBACK_WORKSPACE_TERMINAL_CELL_HEIGHT_PX: u32 = 23;
@@ -5601,7 +5602,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         Rc::clone(&effects),
         store.clone(),
         session_bridge.clone(),
-        Rc::clone(&pending_workspace_paste_warning),
     );
     sync_shell_state(
         window,
@@ -7569,6 +7569,17 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let input_projection_refresh_timer_ref = Rc::clone(&input_projection_refresh_timer);
     let input_projection_refresh_gate_ref = Rc::clone(&input_projection_refresh_gate);
     window.on_workspace_session_text_input(move |text| {
+        if let Some(window) = window_handle.upgrade()
+            && window.get_workspace_paste_warning_modal_open()
+        {
+            tracing::debug!(
+                target: "app.ssh",
+                text_len = text.len(),
+                "ignored workspace terminal text input because the paste review modal is open"
+            );
+            return;
+        }
+
         let mut state = view_model_ref.borrow_mut();
         workspace_terminal::forward_active_workspace_text_input(
             &state,
@@ -7603,6 +7614,32 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let input_projection_refresh_gate_ref = Rc::clone(&input_projection_refresh_gate);
     let effects_ref = Rc::clone(&effects);
     window.on_workspace_session_key_input(move |key, alt, ctrl, shift| {
+        if let Some(window) = window_handle.upgrade()
+            && window.get_workspace_paste_warning_modal_open()
+        {
+            if !window.get_workspace_paste_warning_editor_focused() && !alt && !ctrl && !shift {
+                if key == "enter" {
+                    window.invoke_workspace_paste_warning_confirm_requested();
+                    return;
+                }
+                if key == "escape" {
+                    window.invoke_workspace_paste_warning_cancel_requested();
+                    return;
+                }
+            }
+
+            tracing::debug!(
+                target: "app.ssh",
+                %key,
+                alt,
+                ctrl,
+                shift,
+                editor_focused = window.get_workspace_paste_warning_editor_focused(),
+                "ignored workspace terminal key input because the paste review modal is open"
+            );
+            return;
+        }
+
         let mut state = view_model_ref.borrow_mut();
         if key == "escape"
             && !alt
@@ -7796,6 +7833,16 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let input_projection_refresh_timer_ref = Rc::clone(&input_projection_refresh_timer);
     let input_projection_refresh_gate_ref = Rc::clone(&input_projection_refresh_gate);
     window.on_workspace_session_paste_requested(move || {
+        if let Some(window) = window_handle.upgrade()
+            && window.get_workspace_paste_warning_modal_open()
+        {
+            tracing::warn!(
+                target: "app.ssh",
+                "ignored workspace paste request because the paste review modal is already open"
+            );
+            return;
+        }
+
         let mut state = view_model_ref.borrow_mut();
         let outcome = workspace_terminal::forward_active_workspace_paste(
             &state,
@@ -9558,6 +9605,19 @@ mod tests {
 
         assert_eq!(
             workspace_terminal::workspace_paste_prompt_mode(&state, "one\ntwo\nthree\nfour"),
+            Some(WorkspacePastePromptMode::Editor)
+        );
+    }
+
+    #[test]
+    fn workspace_large_single_line_paste_uses_editor_prompt() {
+        let long_paste = "x".repeat(WORKSPACE_PASTE_EDITOR_CHAR_THRESHOLD);
+
+        assert_eq!(
+            workspace_terminal::workspace_paste_prompt_mode(
+                &ShellViewModel::default(),
+                long_paste.as_str()
+            ),
             Some(WorkspacePastePromptMode::Editor)
         );
     }

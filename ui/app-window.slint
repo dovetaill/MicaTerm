@@ -198,6 +198,7 @@ export component AppWindow inherits Window {
     in-out property <int> workspace-paste-warning-line-count: 0;
     in-out property <bool> workspace-paste-warning-editor-mode: false;
     in-out property <string> workspace-paste-warning-text: "";
+    in-out property <bool> workspace-paste-warning-editor-focused: false;
     in-out property <int> workspace-paste-warning-focus-sequence: 0;
     in-out property <bool> sftp-conflict-modal-open: false;
     in-out property <string> sftp-conflict-modal-kind: "remote";
@@ -672,6 +673,8 @@ export component AppWindow inherits Window {
             root.blocking-modal-offset-y = 0px;
             root.blocking-modal-focus-sequence = root.blocking-modal-focus-sequence + 1;
             root.workspace-paste-warning-focus-sequence = root.workspace-paste-warning-focus-sequence + 1;
+        } else {
+            root.workspace-paste-warning-editor-focused = false;
         }
     }
 
@@ -2437,11 +2440,16 @@ export component AppWindow inherits Window {
 
     if root.workspace-paste-warning-modal-open : workspace-paste-warning-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
-        modal-width: root.workspace-paste-warning-editor-mode ? 760px : 440px;
-        modal-height: root.workspace-paste-warning-editor-mode ? 432px : 248px;
+        modal-width: root.workspace-paste-warning-editor-mode
+            ? min(860px, root.width * 0.76)
+            : min(460px, root.width * 0.54);
+        modal-height: root.workspace-paste-warning-editor-mode
+            ? min(620px, (root.height - titlebar.height) * 0.78)
+            : min(296px, (root.height - titlebar.height) * 0.44);
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
         focus-sequence: root.blocking-modal-focus-sequence;
+        enter-enabled: !root.workspace-paste-warning-editor-focused;
 
         focus-restore-requested => {
             main-workspace.restore-primary-focus();
@@ -2453,6 +2461,14 @@ export component AppWindow inherits Window {
 
         escape-requested => {
             root.workspace-paste-warning-cancel-requested();
+            main-workspace.restore-primary-focus();
+            root.blocking-modal-focus-restore-requested();
+        }
+
+        enter-requested => {
+            root.workspace-paste-warning-confirm-requested();
+            main-workspace.restore-primary-focus();
+            root.blocking-modal-focus-restore-requested();
         }
 
         workspace-paste-warning-modal-overlay := WorkspacePasteWarningModal {
@@ -2463,6 +2479,7 @@ export component AppWindow inherits Window {
             line-count: root.workspace-paste-warning-line-count;
             editor-mode: root.workspace-paste-warning-editor-mode;
             paste-text <=> root.workspace-paste-warning-text;
+            editor-focused <=> root.workspace-paste-warning-editor-focused;
             focus-sequence: root.workspace-paste-warning-focus-sequence;
 
             confirm-requested => {

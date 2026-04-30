@@ -962,11 +962,28 @@ struct InteractiveProjectionRuntimeControl {
 
 #[derive(Clone, Default)]
 struct KeyboardMatrixState {
+    text_inputs: Arc<Mutex<Vec<String>>>,
     key_inputs: Arc<Mutex<Vec<TerminalKeyEvent>>>,
     paste_inputs: Arc<Mutex<Vec<String>>>,
 }
 
 impl KeyboardMatrixState {
+    fn key_input_count(&self) -> usize {
+        self.key_inputs
+            .lock()
+            .expect("lock keyboard matrix key inputs")
+            .len()
+    }
+
+    fn take_text_inputs(&self) -> Vec<String> {
+        std::mem::take(
+            &mut *self
+                .text_inputs
+                .lock()
+                .expect("lock keyboard matrix text inputs"),
+        )
+    }
+
     fn take_key_inputs(&self) -> Vec<TerminalKeyEvent> {
         std::mem::take(
             &mut *self
@@ -989,11 +1006,20 @@ impl KeyboardMatrixState {
 #[derive(Clone)]
 struct KeyboardMatrixLauncher {
     state: KeyboardMatrixState,
+    bracketed_paste_enabled: bool,
 }
 
 impl KeyboardMatrixLauncher {
     fn new(state: KeyboardMatrixState) -> Self {
-        Self { state }
+        Self {
+            state,
+            bracketed_paste_enabled: false,
+        }
+    }
+
+    fn with_bracketed_paste_enabled(mut self, enabled: bool) -> Self {
+        self.bracketed_paste_enabled = enabled;
+        self
     }
 }
 
@@ -2259,17 +2285,18 @@ impl SessionRuntimeLauncher for KeyboardMatrixLauncher {
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
         let state = self.state.clone();
+        let bracketed_paste_enabled = self.bracketed_paste_enabled;
         Box::pin(async move {
             let _ = event_tx.send(SessionRuntimeEvent::Connected);
-            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(
-                terminal_surface_with_cells(
-                    session_id,
-                    1,
-                    24,
-                    80,
-                    vec!["welcome to mica-term".into()],
-                ),
-            ));
+            let mut surface = terminal_surface_with_cells(
+                session_id,
+                1,
+                24,
+                80,
+                vec!["welcome to mica-term".into()],
+            );
+            surface.bracketed_paste_enabled = bracketed_paste_enabled;
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
             Ok(Box::new(KeyboardMatrixRuntimeControl { state }) as Box<dyn SessionRuntimeControl>)
         })
     }
@@ -2665,7 +2692,12 @@ impl SessionRuntimeControl for KeyboardMatrixRuntimeControl {
         Ok(())
     }
 
-    fn send_text_input(&self, _text: String) -> Result<()> {
+    fn send_text_input(&self, text: String) -> Result<()> {
+        self.state
+            .text_inputs
+            .lock()
+            .expect("lock keyboard matrix text inputs")
+            .push(text);
         Ok(())
     }
 
@@ -3779,6 +3811,15 @@ fn wait_for_condition(timeout: Duration, mut predicate: impl FnMut() -> bool) {
         i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
         slint::platform::update_timers_and_animations();
     }
+}
+
+fn run_with_large_test_stack(test: impl FnOnce() + Send + 'static) {
+    std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(test)
+        .expect("spawn large-stack test thread")
+        .join()
+        .expect("join large-stack test thread");
 }
 
 fn terminal_interaction_position(app: &AppWindow) -> LogicalPosition {
@@ -9206,155 +9247,338 @@ fn workspace_terminal_paste_callback_updates_active_session_surface() {
 
 #[test]
 fn workspace_terminal_multiline_paste_warning_defers_unprotected_paste_until_confirmed() {
-    i_slint_backend_testing::init_no_event_loop();
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
 
-    let app = AppWindow::new().unwrap();
-    bind_with_launcher(
-        &app,
-        None,
-        Arc::new(PasteWarningProjectionLauncher {
-            bracketed_paste_enabled: false,
-        }),
-    );
+        let app = AppWindow::new().unwrap();
+        bind_with_launcher(
+            &app,
+            None,
+            Arc::new(PasteWarningProjectionLauncher {
+                bracketed_paste_enabled: false,
+            }),
+        );
 
-    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
-    app.invoke_asset_activated(ssh_id.into());
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.into());
 
-    std::thread::sleep(Duration::from_millis(20));
-    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
-    slint::platform::update_timers_and_animations();
+        std::thread::sleep(Duration::from_millis(20));
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+        slint::platform::update_timers_and_animations();
 
-    i_slint_backend_selector::with_platform(|platform| {
-        platform.set_clipboard_text("pwd\necho hi", slint::platform::Clipboard::DefaultClipboard);
-        Ok(())
-    })
-    .expect("seed multiline clipboard");
+        i_slint_backend_selector::with_platform(|platform| {
+            platform
+                .set_clipboard_text("pwd\necho hi", slint::platform::Clipboard::DefaultClipboard);
+            Ok(())
+        })
+        .expect("seed multiline clipboard");
 
-    app.invoke_workspace_session_paste_requested();
+        app.invoke_workspace_session_paste_requested();
 
-    std::thread::sleep(Duration::from_millis(20));
-    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
-    slint::platform::update_timers_and_animations();
+        std::thread::sleep(Duration::from_millis(20));
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+        slint::platform::update_timers_and_animations();
 
-    assert!(app.get_workspace_paste_warning_modal_open());
-    assert_eq!(app.get_workspace_paste_warning_line_count(), 2);
-    assert_eq!(app.get_workspace_session_surface_seqno(), 1);
-    assert_eq!(app.get_workspace_session_visible_lines().row_count(), 1);
+        assert!(app.get_workspace_paste_warning_modal_open());
+        assert_eq!(app.get_workspace_paste_warning_line_count(), 2);
+        assert_eq!(app.get_workspace_session_surface_seqno(), 1);
+        assert_eq!(app.get_workspace_session_visible_lines().row_count(), 1);
 
-    app.invoke_workspace_paste_warning_confirm_requested();
+        app.invoke_workspace_paste_warning_confirm_requested();
 
-    std::thread::sleep(Duration::from_millis(20));
-    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
-    slint::platform::update_timers_and_animations();
+        std::thread::sleep(Duration::from_millis(20));
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+        slint::platform::update_timers_and_animations();
 
-    assert!(!app.get_workspace_paste_warning_modal_open());
-    assert_eq!(app.get_workspace_session_surface_seqno(), 2);
-    assert_eq!(app.get_workspace_session_visible_lines().row_count(), 2);
-    assert_eq!(
-        app.get_workspace_session_visible_lines()
-            .row_data(1)
-            .unwrap()
-            .as_str(),
-        "paste pwd\necho hi"
-    );
+        assert!(!app.get_workspace_paste_warning_modal_open());
+        assert_eq!(app.get_workspace_session_surface_seqno(), 2);
+        assert_eq!(app.get_workspace_session_visible_lines().row_count(), 2);
+        assert_eq!(
+            app.get_workspace_session_visible_lines()
+                .row_data(1)
+                .unwrap()
+                .as_str(),
+            "paste pwd\necho hi"
+        );
+    });
 }
 
 #[test]
 fn workspace_terminal_multiline_paste_warning_skips_bracketed_paste_sessions() {
-    i_slint_backend_testing::init_no_event_loop();
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
 
-    let app = AppWindow::new().unwrap();
-    bind_with_launcher(
-        &app,
-        None,
-        Arc::new(PasteWarningProjectionLauncher {
-            bracketed_paste_enabled: true,
-        }),
-    );
+        let app = AppWindow::new().unwrap();
+        bind_with_launcher(
+            &app,
+            None,
+            Arc::new(PasteWarningProjectionLauncher {
+                bracketed_paste_enabled: true,
+            }),
+        );
 
-    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
-    app.invoke_asset_activated(ssh_id.into());
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.into());
 
-    std::thread::sleep(Duration::from_millis(20));
-    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
-    slint::platform::update_timers_and_animations();
+        std::thread::sleep(Duration::from_millis(20));
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+        slint::platform::update_timers_and_animations();
 
-    i_slint_backend_selector::with_platform(|platform| {
-        platform.set_clipboard_text("pwd\necho hi", slint::platform::Clipboard::DefaultClipboard);
-        Ok(())
-    })
-    .expect("seed multiline clipboard");
+        i_slint_backend_selector::with_platform(|platform| {
+            platform
+                .set_clipboard_text("pwd\necho hi", slint::platform::Clipboard::DefaultClipboard);
+            Ok(())
+        })
+        .expect("seed multiline clipboard");
 
-    app.invoke_workspace_session_paste_requested();
+        app.invoke_workspace_session_paste_requested();
 
-    std::thread::sleep(Duration::from_millis(20));
-    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
-    slint::platform::update_timers_and_animations();
+        std::thread::sleep(Duration::from_millis(20));
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+        slint::platform::update_timers_and_animations();
 
-    assert!(!app.get_workspace_paste_warning_modal_open());
-    assert_eq!(app.get_workspace_session_surface_seqno(), 2);
-    assert_eq!(app.get_workspace_session_visible_lines().row_count(), 2);
+        assert!(!app.get_workspace_paste_warning_modal_open());
+        assert_eq!(app.get_workspace_session_surface_seqno(), 2);
+        assert_eq!(app.get_workspace_session_visible_lines().row_count(), 2);
+    });
 }
 
 #[test]
 fn workspace_terminal_long_multiline_paste_opens_editor_and_sends_edited_text() {
-    i_slint_backend_testing::init_no_event_loop();
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
 
-    let app = AppWindow::new().unwrap();
-    bind_with_launcher(
-        &app,
-        None,
-        Arc::new(PasteWarningProjectionLauncher {
-            bracketed_paste_enabled: true,
-        }),
-    );
-
-    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
-    app.invoke_asset_activated(ssh_id.into());
-
-    std::thread::sleep(Duration::from_millis(20));
-    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
-    slint::platform::update_timers_and_animations();
-
-    i_slint_backend_selector::with_platform(|platform| {
-        platform.set_clipboard_text(
-            "one\ntwo\nthree\nfour",
-            slint::platform::Clipboard::DefaultClipboard,
+        let app = AppWindow::new().unwrap();
+        bind_with_launcher(
+            &app,
+            None,
+            Arc::new(PasteWarningProjectionLauncher {
+                bracketed_paste_enabled: true,
+            }),
         );
-        Ok(())
-    })
-    .expect("seed long multiline clipboard");
 
-    app.invoke_workspace_session_paste_requested();
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.into());
 
-    std::thread::sleep(Duration::from_millis(20));
-    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
-    slint::platform::update_timers_and_animations();
+        std::thread::sleep(Duration::from_millis(20));
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+        slint::platform::update_timers_and_animations();
 
-    assert!(app.get_workspace_paste_warning_modal_open());
-    assert!(app.get_workspace_paste_warning_editor_mode());
-    assert_eq!(
-        app.get_workspace_paste_warning_text(),
-        "one\ntwo\nthree\nfour"
-    );
-    assert_eq!(app.get_workspace_session_surface_seqno(), 1);
+        i_slint_backend_selector::with_platform(|platform| {
+            platform.set_clipboard_text(
+                "one\ntwo\nthree\nfour",
+                slint::platform::Clipboard::DefaultClipboard,
+            );
+            Ok(())
+        })
+        .expect("seed long multiline clipboard");
 
-    app.set_workspace_paste_warning_text("one\ntwo\nfour".into());
-    app.invoke_workspace_paste_warning_confirm_requested();
+        app.invoke_workspace_session_paste_requested();
 
-    std::thread::sleep(Duration::from_millis(20));
-    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
-    slint::platform::update_timers_and_animations();
+        std::thread::sleep(Duration::from_millis(20));
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+        slint::platform::update_timers_and_animations();
 
-    assert!(!app.get_workspace_paste_warning_modal_open());
-    assert_eq!(app.get_workspace_session_surface_seqno(), 2);
-    assert_eq!(
-        app.get_workspace_session_visible_lines()
-            .row_data(1)
-            .unwrap()
-            .as_str(),
-        "paste one\ntwo\nfour"
-    );
+        assert!(app.get_workspace_paste_warning_modal_open());
+        assert!(app.get_workspace_paste_warning_editor_mode());
+        assert_eq!(
+            app.get_workspace_paste_warning_text(),
+            "one\ntwo\nthree\nfour"
+        );
+        assert_eq!(app.get_workspace_session_surface_seqno(), 1);
+
+        app.set_workspace_paste_warning_text("one\ntwo\nfour".into());
+        app.invoke_workspace_paste_warning_confirm_requested();
+
+        std::thread::sleep(Duration::from_millis(20));
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+        slint::platform::update_timers_and_animations();
+
+        assert!(!app.get_workspace_paste_warning_modal_open());
+        assert_eq!(app.get_workspace_session_surface_seqno(), 2);
+        assert_eq!(
+            app.get_workspace_session_visible_lines()
+                .row_data(1)
+                .unwrap()
+                .as_str(),
+            "paste one\ntwo\nfour"
+        );
+    });
+}
+
+#[test]
+fn workspace_terminal_right_click_paste_warning_restores_immediate_text_input_after_confirm() {
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
+
+        let state = KeyboardMatrixState::default();
+        let app = AppWindow::new().unwrap();
+        bind_with_launcher(
+            &app,
+            None,
+            Arc::new(
+                KeyboardMatrixLauncher::new(state.clone()).with_bracketed_paste_enabled(false),
+            ),
+        );
+
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.into());
+        app.window()
+            .dispatch_event(WindowEvent::WindowActiveChanged(true));
+
+        settle_terminal_projection();
+        focus_workspace_terminal(&app);
+        settle_terminal_projection();
+
+        i_slint_backend_selector::with_platform(|platform| {
+            platform.set_clipboard_text(
+                "line 1\nline 2\nline 3",
+                slint::platform::Clipboard::DefaultClipboard,
+            );
+            Ok(())
+        })
+        .expect("seed multiline clipboard");
+
+        let menu_origin = terminal_interaction_position(&app);
+        app.window().dispatch_event(WindowEvent::PointerMoved {
+            position: menu_origin,
+        });
+        app.window().dispatch_event(WindowEvent::PointerPressed {
+            position: menu_origin,
+            button: PointerEventButton::Right,
+        });
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+        app.window().dispatch_event(WindowEvent::PointerReleased {
+            position: menu_origin,
+            button: PointerEventButton::Right,
+        });
+        settle_terminal_projection();
+
+        let paste_row_position = LogicalPosition::new(menu_origin.x + 20.0, menu_origin.y + 60.0);
+        app.window().dispatch_event(WindowEvent::PointerMoved {
+            position: paste_row_position,
+        });
+        app.window().dispatch_event(WindowEvent::PointerPressed {
+            position: paste_row_position,
+            button: PointerEventButton::Left,
+        });
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+        app.window().dispatch_event(WindowEvent::PointerReleased {
+            position: paste_row_position,
+            button: PointerEventButton::Left,
+        });
+        settle_terminal_projection();
+
+        assert!(
+            app.get_workspace_paste_warning_modal_open(),
+            "right-click Paste should route multiline clipboard content through the shared review modal"
+        );
+
+        let window_size = app.window().size();
+        let titlebar_height = app.get_layout_titlebar_height();
+        let modal_width = 460.0;
+        let modal_height = 296.0;
+        let modal_origin = LogicalPosition::new(
+            (window_size.width as f32 - modal_width) / 2.0,
+            titlebar_height + ((window_size.height as f32 - titlebar_height - modal_height) / 2.0),
+        );
+        let confirm_position = LogicalPosition::new(modal_origin.x + 380.0, modal_origin.y + 259.0);
+        app.window().dispatch_event(WindowEvent::PointerMoved {
+            position: confirm_position,
+        });
+        app.window().dispatch_event(WindowEvent::PointerPressed {
+            position: confirm_position,
+            button: PointerEventButton::Left,
+        });
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+        app.window().dispatch_event(WindowEvent::PointerReleased {
+            position: confirm_position,
+            button: PointerEventButton::Left,
+        });
+        settle_terminal_projection();
+
+        assert!(
+            !app.get_workspace_paste_warning_modal_open(),
+            "clicking Paste in review mode should confirm the paste and close the modal"
+        );
+
+        dispatch_text_key_chord(&app, "z", false, false, false);
+        settle_terminal_projection();
+
+        assert_eq!(
+            state.take_text_inputs(),
+            vec!["z".to_string()],
+            "the terminal should accept immediate typing after a right-click long-paste confirm instead of dropping input until focus recovers later"
+        );
+    });
+}
+
+#[test]
+fn workspace_terminal_ctrl_shift_v_editor_warning_accepts_enter_to_confirm() {
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
+
+        let state = KeyboardMatrixState::default();
+        let app = AppWindow::new().unwrap();
+        bind_with_launcher(
+            &app,
+            None,
+            Arc::new(
+                KeyboardMatrixLauncher::new(state.clone()).with_bracketed_paste_enabled(false),
+            ),
+        );
+
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.into());
+
+        settle_terminal_projection();
+        focus_workspace_terminal(&app);
+        settle_terminal_projection();
+
+        i_slint_backend_selector::with_platform(|platform| {
+            platform.set_clipboard_text(
+                "line 1\nline 2\nline 3\nline 4",
+                slint::platform::Clipboard::DefaultClipboard,
+            );
+            Ok(())
+        })
+        .expect("seed multiline clipboard for editor warning");
+
+        dispatch_text_key_chord(&app, "V", true, true, false);
+        settle_terminal_projection();
+
+        assert!(
+            app.get_workspace_paste_warning_modal_open(),
+            "Ctrl+Shift+V should open the paste review modal for editor-mode multiline content"
+        );
+        assert!(
+            app.get_workspace_paste_warning_editor_mode(),
+            "four-line paste should open the editable long-paste review mode"
+        );
+        assert!(
+            state.take_paste_inputs().is_empty(),
+            "the modal should defer the terminal paste until the user confirms"
+        );
+
+        app.window()
+            .dispatch_event(WindowEvent::WindowActiveChanged(true));
+        app.window()
+            .dispatch_event(WindowEvent::KeyPressed { text: "\n".into() });
+        app.window()
+            .dispatch_event(WindowEvent::KeyReleased { text: "\n".into() });
+        settle_terminal_projection();
+
+        assert!(
+            !app.get_workspace_paste_warning_modal_open(),
+            "Enter in review mode should confirm the paste and close the modal (terminal key leaks observed: {})",
+            state.key_input_count()
+        );
+        assert_eq!(
+            state.take_paste_inputs(),
+            vec!["line 1\nline 2\nline 3\nline 4".to_string()],
+            "Enter should trigger the same terminal paste send path as clicking the Paste button"
+        );
+    });
 }
 
 #[test]

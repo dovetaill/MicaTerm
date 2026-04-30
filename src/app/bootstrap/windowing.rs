@@ -29,7 +29,6 @@ pub(super) fn bind_windows_window_state_tracking(
     _effects: Rc<dyn PlatformWindowEffects>,
     _ui_preferences_store: Option<Rc<UiPreferencesStore>>,
     session_bridge: Option<Rc<ShellSessionBridge>>,
-    pending_workspace_paste_warning: Rc<RefCell<Option<PendingWorkspacePasteWarning>>>,
 ) {
     use slint::ComponentHandle;
     use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
@@ -83,12 +82,10 @@ pub(super) fn bind_windows_window_state_tracking(
                                 return EventResult::PreventDefault;
                             }
                             NativeTerminalClipboardShortcut::Paste => {
-                                let state = state.borrow();
-                                let _ = workspace_terminal::forward_active_workspace_paste(
-                                    &state,
-                                    session_bridge.as_deref(),
-                                    pending_workspace_paste_warning.as_ref(),
-                                );
+                                if window.get_workspace_paste_warning_modal_open() {
+                                    return EventResult::PreventDefault;
+                                }
+                                window.invoke_workspace_session_paste_requested();
                                 return EventResult::PreventDefault;
                             }
                             _ => {}
