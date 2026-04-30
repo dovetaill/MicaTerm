@@ -298,12 +298,18 @@ fn keychain_identity_password_reveal_resets_when_switching_auth_kind() {
     bind_with_credential_store(&app, credential_store);
 
     open_new_identity_modal(&app);
-    app.invoke_keychain_identity_modal_draft_changed("password_visibility".into(), "visible".into());
+    app.invoke_keychain_identity_modal_draft_changed(
+        "password_visibility".into(),
+        "visible".into(),
+    );
     assert!(app.get_keychain_identity_modal_password_visible());
 
     app.invoke_keychain_identity_modal_draft_changed("auth_kind".into(), "ssh-key".into());
 
-    assert_eq!(app.get_keychain_identity_modal_auth_kind().as_str(), "ssh-key");
+    assert_eq!(
+        app.get_keychain_identity_modal_auth_kind().as_str(),
+        "ssh-key"
+    );
     assert!(!app.get_keychain_identity_modal_password_visible());
 }
 
@@ -329,7 +335,10 @@ fn keychain_identity_password_reveal_resets_when_reopening_edit_modal() {
         160.0,
     );
     app.invoke_assets_context_menu_action_invoked("edit-keychain-identity".into());
-    app.invoke_keychain_identity_modal_draft_changed("password_visibility".into(), "visible".into());
+    app.invoke_keychain_identity_modal_draft_changed(
+        "password_visibility".into(),
+        "visible".into(),
+    );
     assert!(app.get_keychain_identity_modal_password_visible());
 
     app.invoke_close_asset_modal_requested();
@@ -339,6 +348,9 @@ fn keychain_identity_password_reveal_resets_when_reopening_edit_modal() {
     app.invoke_assets_context_menu_action_invoked("edit-keychain-identity".into());
 
     assert!(app.get_asset_modal_open());
-    assert_eq!(app.get_keychain_identity_modal_password().as_str(), "secret");
+    assert_eq!(
+        app.get_keychain_identity_modal_password().as_str(),
+        "secret"
+    );
     assert!(!app.get_keychain_identity_modal_password_visible());
 }

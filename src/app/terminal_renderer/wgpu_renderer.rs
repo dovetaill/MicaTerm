@@ -544,8 +544,9 @@ impl WgpuTerminalRenderer {
                 let (glyph_start_col, glyph_end_col) =
                     glyph_cell_span(run, cluster_start).unwrap_or((run.start_col(), run.end_col()));
                 let cluster_text = glyph_cluster_text(run, cluster_start).unwrap_or_default();
-                let cluster_cell_span =
-                    glyph_end_col.saturating_sub(glyph_start_col).saturating_add(1);
+                let cluster_cell_span = glyph_end_col
+                    .saturating_sub(glyph_start_col)
+                    .saturating_add(1);
                 let visual_fit = glyph_cluster_visual_fit(run, cluster_start);
                 let glyph_span_rect = glyph_cell_span_rect(
                     row.row,
@@ -1072,7 +1073,11 @@ fn glyph_cluster_visual_fit(
     }
 }
 
-fn belongs_to_repeated_ascii_symbol_streak(run: &GlyphRun, cluster_start: u32, symbol: char) -> bool {
+fn belongs_to_repeated_ascii_symbol_streak(
+    run: &GlyphRun,
+    cluster_start: u32,
+    symbol: char,
+) -> bool {
     let cluster_start = (cluster_start as usize).min(run.text.len());
     let Some(cluster_index) = run
         .clusters
@@ -1090,10 +1095,9 @@ fn belongs_to_repeated_ascii_symbol_streak(run: &GlyphRun, cluster_start: u32, s
     run.clusters
         .get(cluster_index.wrapping_sub(1))
         .is_some_and(|neighbor| adjacent_single_ascii_symbol_clusters(neighbor, cluster, symbol))
-        || run
-            .clusters
-            .get(cluster_index + 1)
-            .is_some_and(|neighbor| adjacent_single_ascii_symbol_clusters(cluster, neighbor, symbol))
+        || run.clusters.get(cluster_index + 1).is_some_and(|neighbor| {
+            adjacent_single_ascii_symbol_clusters(cluster, neighbor, symbol)
+        })
 }
 
 fn adjacent_single_ascii_symbol_clusters(

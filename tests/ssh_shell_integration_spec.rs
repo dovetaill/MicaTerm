@@ -151,9 +151,8 @@ EOF",
             ShellIntegrationEvent::CommandFinished(Some(0)) => Some("D0"),
             ShellIntegrationEvent::CommandFinished(Some(1)) => Some("D1"),
             ShellIntegrationEvent::CommandFinished(_) => Some("D"),
-            ShellIntegrationEvent::CurrentDirectory(_) | ShellIntegrationEvent::PrivateAction(_) => {
-                None
-            }
+            ShellIntegrationEvent::CurrentDirectory(_)
+            | ShellIntegrationEvent::PrivateAction(_) => None,
         })
         .collect::<Vec<_>>();
 
@@ -166,8 +165,8 @@ EOF",
         starts_with_subsequence(
             &filtered,
             &[
-                "A", "B", "C", "D0", "A", "B", "C", "D0", "A", "B", "C", "D0", "A", "B",
-                "C", "D0", "A", "B", "C", "D1",
+                "A", "B", "C", "D0", "A", "B", "C", "D0", "A", "B", "C", "D0", "A", "B", "C", "D0",
+                "A", "B", "C", "D1",
             ]
         ),
         "live bash session should keep prompt/input/output boundaries in A/B/C/D order; got {filtered:?}"

@@ -1,8 +1,6 @@
 //! Semantic input-line highlighting for normal shell prompts.
 
-use crate::app::terminal_model::{
-    TerminalModelFrame, TerminalModelRow, TerminalPresentationMode,
-};
+use crate::app::terminal_model::{TerminalModelFrame, TerminalModelRow, TerminalPresentationMode};
 use crate::app::terminal_semantic::{SemanticSpan, push_unique_span};
 use crate::theme::SemanticStyleRole;
 
@@ -53,8 +51,7 @@ pub fn detect_input_semantic_spans(frame: &TerminalModelFrame) -> Vec<SemanticSp
         return Vec::new();
     }
 
-    let Some(row) = frame.rows.last()
-    else {
+    let Some(row) = frame.rows.last() else {
         return Vec::new();
     };
     let Some(input_start_col) = prompt_input_start(row) else {

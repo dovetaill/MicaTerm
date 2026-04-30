@@ -539,8 +539,8 @@ fn atlas_renderer_draws_bold_cells_with_more_ink_than_plain_cells() -> Result<()
 }
 
 #[test]
-fn atlas_renderer_generated_box_masks_eliminate_seam_gaps_and_preserve_body_text_sources() -> Result<()>
-{
+fn atlas_renderer_generated_box_masks_eliminate_seam_gaps_and_preserve_body_text_sources()
+-> Result<()> {
     let mut renderer = TerminalAtlasRenderer::new()?;
     let mut surface = manual_surface(
         3,
@@ -595,7 +595,12 @@ fn atlas_renderer_generated_box_masks_eliminate_seam_gaps_and_preserve_body_text
         "generated vertical box strokes should not leave background leaks on row seams"
     );
     assert_eq!(
-        seam_gap_count_for_horizontals(&frame.image, &frame.raster_metrics, &frame.rendered_clusters, &surface),
+        seam_gap_count_for_horizontals(
+            &frame.image,
+            &frame.raster_metrics,
+            &frame.rendered_clusters,
+            &surface
+        ),
         0,
         "generated horizontal box strokes should not leave background leaks on column seams"
     );
@@ -660,19 +665,19 @@ fn atlas_renderer_generated_block_masks_keep_expected_fill_ratios_across_scales(
         );
         assert_half_fill(
             rendered_fill_ratio(&frame, "▀"),
-            "upper half block should stay half filled at scale {scale}"
+            "upper half block should stay half filled at scale {scale}",
         );
         assert_half_fill(
             rendered_fill_ratio(&frame, "▄"),
-            "lower half block should stay half filled at scale {scale}"
+            "lower half block should stay half filled at scale {scale}",
         );
         assert_half_fill(
             rendered_fill_ratio(&frame, "▌"),
-            "left half block should stay half filled at scale {scale}"
+            "left half block should stay half filled at scale {scale}",
         );
         assert_half_fill(
             rendered_fill_ratio(&frame, "▐"),
-            "right half block should stay half filled at scale {scale}"
+            "right half block should stay half filled at scale {scale}",
         );
     }
 
@@ -742,7 +747,9 @@ fn seam_gap_count_for_horizontals(
 
     let seam_cols = rendered_clusters
         .iter()
-        .filter(|cluster| cluster.row == 0 && cluster.source_kind == RenderedClusterSourceKind::GeneratedMask)
+        .filter(|cluster| {
+            cluster.row == 0 && cluster.source_kind == RenderedClusterSourceKind::GeneratedMask
+        })
         .map(|cluster| cluster.col)
         .collect::<std::collections::BTreeSet<_>>();
 

@@ -174,15 +174,9 @@ fn sanitize_scale(scale: f32) -> f32 {
 fn paint_block_element(alpha: &mut [u8], width_px: u32, height_px: u32, block: BlockElementGlyph) {
     match block {
         BlockElementGlyph::Full => fill_rect(alpha, width_px, height_px, 0, 0, width_px, height_px),
-        BlockElementGlyph::UpperHalf => fill_rect(
-            alpha,
-            width_px,
-            height_px,
-            0,
-            0,
-            width_px,
-            height_px / 2,
-        ),
+        BlockElementGlyph::UpperHalf => {
+            fill_rect(alpha, width_px, height_px, 0, 0, width_px, height_px / 2)
+        }
         BlockElementGlyph::LowerHalf => fill_rect(
             alpha,
             width_px,
@@ -192,15 +186,9 @@ fn paint_block_element(alpha: &mut [u8], width_px: u32, height_px: u32, block: B
             width_px,
             height_px - height_px / 2,
         ),
-        BlockElementGlyph::LeftHalf => fill_rect(
-            alpha,
-            width_px,
-            height_px,
-            0,
-            0,
-            width_px / 2,
-            height_px,
-        ),
+        BlockElementGlyph::LeftHalf => {
+            fill_rect(alpha, width_px, height_px, 0, 0, width_px / 2, height_px)
+        }
         BlockElementGlyph::RightHalf => fill_rect(
             alpha,
             width_px,
@@ -219,47 +207,149 @@ fn paint_box_drawing(alpha: &mut [u8], width_px: u32, height_px: u32, glyph: Box
     let horizontal_y = centered_start(height_px, stroke_px);
 
     match glyph {
-        BoxDrawingGlyph::Horizontal => draw_horizontal(alpha, width_px, height_px, horizontal_y, stroke_px),
-        BoxDrawingGlyph::Vertical => draw_vertical(alpha, width_px, height_px, vertical_x, stroke_px),
+        BoxDrawingGlyph::Horizontal => {
+            draw_horizontal(alpha, width_px, height_px, horizontal_y, stroke_px)
+        }
+        BoxDrawingGlyph::Vertical => {
+            draw_vertical(alpha, width_px, height_px, vertical_x, stroke_px)
+        }
         BoxDrawingGlyph::CornerTopLeft => {
-            draw_right_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
-            draw_bottom_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
+            draw_right_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
+            draw_bottom_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
         }
         BoxDrawingGlyph::CornerTopRight => {
-            draw_left_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
-            draw_bottom_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
+            draw_left_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
+            draw_bottom_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
         }
         BoxDrawingGlyph::CornerBottomLeft => {
-            draw_right_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
-            draw_top_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
+            draw_right_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
+            draw_top_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
         }
         BoxDrawingGlyph::CornerBottomRight => {
-            draw_left_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
-            draw_top_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
+            draw_left_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
+            draw_top_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
         }
         BoxDrawingGlyph::TeeLeft => {
             draw_vertical(alpha, width_px, height_px, vertical_x, stroke_px);
-            draw_right_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
+            draw_right_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
         }
         BoxDrawingGlyph::TeeRight => {
             draw_vertical(alpha, width_px, height_px, vertical_x, stroke_px);
-            draw_left_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
+            draw_left_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
         }
         BoxDrawingGlyph::TeeTop => {
             draw_horizontal(alpha, width_px, height_px, horizontal_y, stroke_px);
-            draw_bottom_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
+            draw_bottom_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
         }
         BoxDrawingGlyph::TeeBottom => {
             draw_horizontal(alpha, width_px, height_px, horizontal_y, stroke_px);
-            draw_top_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
+            draw_top_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
         }
         BoxDrawingGlyph::Cross => {
             draw_horizontal(alpha, width_px, height_px, horizontal_y, stroke_px);
             draw_vertical(alpha, width_px, height_px, vertical_x, stroke_px);
         }
         BoxDrawingGlyph::RoundCornerTopLeft => {
-            draw_right_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
-            draw_bottom_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
+            draw_right_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
+            draw_bottom_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
             carve_round_joint(
                 alpha,
                 width_px,
@@ -271,8 +361,22 @@ fn paint_box_drawing(alpha: &mut [u8], width_px: u32, height_px: u32, glyph: Box
             );
         }
         BoxDrawingGlyph::RoundCornerTopRight => {
-            draw_left_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
-            draw_bottom_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
+            draw_left_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
+            draw_bottom_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
             carve_round_joint(
                 alpha,
                 width_px,
@@ -284,8 +388,22 @@ fn paint_box_drawing(alpha: &mut [u8], width_px: u32, height_px: u32, glyph: Box
             );
         }
         BoxDrawingGlyph::RoundCornerBottomLeft => {
-            draw_right_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
-            draw_top_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
+            draw_right_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
+            draw_top_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
             carve_round_joint(
                 alpha,
                 width_px,
@@ -297,8 +415,22 @@ fn paint_box_drawing(alpha: &mut [u8], width_px: u32, height_px: u32, glyph: Box
             );
         }
         BoxDrawingGlyph::RoundCornerBottomRight => {
-            draw_left_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
-            draw_top_arm(alpha, width_px, height_px, vertical_x, horizontal_y, stroke_px);
+            draw_left_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
+            draw_top_arm(
+                alpha,
+                width_px,
+                height_px,
+                vertical_x,
+                horizontal_y,
+                stroke_px,
+            );
             carve_round_joint(
                 alpha,
                 width_px,
@@ -368,11 +500,27 @@ fn centered_start(span_px: u32, stroke_px: u32) -> u32 {
 }
 
 fn draw_horizontal(alpha: &mut [u8], width_px: u32, height_px: u32, y_px: u32, stroke_px: u32) {
-    fill_rect(alpha, width_px, height_px, 0, y_px as i32, width_px, stroke_px);
+    fill_rect(
+        alpha,
+        width_px,
+        height_px,
+        0,
+        y_px as i32,
+        width_px,
+        stroke_px,
+    );
 }
 
 fn draw_vertical(alpha: &mut [u8], width_px: u32, height_px: u32, x_px: u32, stroke_px: u32) {
-    fill_rect(alpha, width_px, height_px, x_px as i32, 0, stroke_px, height_px);
+    fill_rect(
+        alpha,
+        width_px,
+        height_px,
+        x_px as i32,
+        0,
+        stroke_px,
+        height_px,
+    );
 }
 
 fn draw_left_arm(

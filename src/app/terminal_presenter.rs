@@ -1189,7 +1189,7 @@ mod tests {
             &mut renderer,
             &loaded_font,
             &mut previous_source_frame,
-                &mut previous_styled_frame,
+            &mut previous_styled_frame,
             &mut previous_shaped_rows,
             &mut shaped_row_cache,
         );
@@ -1382,7 +1382,7 @@ mod tests {
             &mut renderer,
             &loaded_font,
             &mut previous_source_frame,
-                &mut previous_styled_frame,
+            &mut previous_styled_frame,
             &mut previous_shaped_rows,
             &mut shaped_row_cache,
         );
@@ -1459,7 +1459,7 @@ mod tests {
             &mut renderer,
             &loaded_font,
             &mut previous_source_frame,
-                &mut previous_styled_frame,
+            &mut previous_styled_frame,
             &mut previous_shaped_rows,
             &mut shaped_row_cache,
         );
@@ -1545,7 +1545,7 @@ mod tests {
             &mut renderer,
             &loaded_font,
             &mut previous_source_frame,
-                &mut previous_styled_frame,
+            &mut previous_styled_frame,
             &mut previous_shaped_rows,
             &mut shaped_row_cache,
         );
@@ -1589,7 +1589,10 @@ mod tests {
             1,
             2,
             48,
-            vec!["[dev@mica ~]$ cargo test".into(), "ERROR https://example.com".into()],
+            vec![
+                "[dev@mica ~]$ cargo test".into(),
+                "ERROR https://example.com".into(),
+            ],
         );
         surface.alternate_screen_active = true;
         surface.visible_rows = vec![
@@ -1620,7 +1623,7 @@ mod tests {
             &mut renderer,
             &loaded_font,
             &mut previous_source_frame,
-                &mut previous_styled_frame,
+            &mut previous_styled_frame,
             &mut previous_shaped_rows,
             &mut shaped_row_cache,
         );

@@ -135,7 +135,10 @@ fn ascii_frame(text: &str) -> ShapedTerminalFrame {
 }
 
 #[cfg(feature = "terminal-native-renderer")]
-fn visual_fit_at_col(frame: &ShapedTerminalFrame, col: u32) -> Result<PreparedMonochromeGlyphVisualFit> {
+fn visual_fit_at_col(
+    frame: &ShapedTerminalFrame,
+    col: u32,
+) -> Result<PreparedMonochromeGlyphVisualFit> {
     let mut renderer = WgpuTerminalRenderer::new_for_test()?;
     let mut fonts = GlyphFitFontSystem;
     let prepared = renderer.prepare(frame, &mut fonts)?;
@@ -149,7 +152,10 @@ fn visual_fit_at_col(frame: &ShapedTerminalFrame, col: u32) -> Result<PreparedMo
 }
 
 #[cfg(feature = "terminal-native-renderer")]
-fn source_kind_at_col(frame: &ShapedTerminalFrame, col: u32) -> Result<PreparedMonochromeGlyphSourceKind> {
+fn source_kind_at_col(
+    frame: &ShapedTerminalFrame,
+    col: u32,
+) -> Result<PreparedMonochromeGlyphSourceKind> {
     let mut renderer = WgpuTerminalRenderer::new_for_test()?;
     let mut fonts = GlyphFitFontSystem;
     let prepared = renderer.prepare(frame, &mut fonts)?;
@@ -223,7 +229,8 @@ fn permission_suffix_only_marks_the_repeated_dash_tail_as_grid_symbols() -> Resu
 
 #[cfg(feature = "terminal-native-renderer")]
 #[test]
-fn native_renderer_prepare_defaults_existing_body_text_draws_to_font_outline_source_kind() -> Result<()> {
+fn native_renderer_prepare_defaults_existing_body_text_draws_to_font_outline_source_kind()
+-> Result<()> {
     let frame = ascii_frame("drwx-----");
 
     for col in 0..9 {

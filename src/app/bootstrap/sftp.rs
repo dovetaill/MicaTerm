@@ -2014,10 +2014,7 @@ pub(super) fn bind_sftp_callbacks(
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
-            super::sync_workspace_terminal_runtime_defaults(
-                &window,
-                session_bridge_ref.as_deref(),
-            );
+            super::sync_workspace_terminal_runtime_defaults(&window, session_bridge_ref.as_deref());
             super::schedule_workspace_terminal_runtime_defaults_sync(
                 &window,
                 session_bridge_ref

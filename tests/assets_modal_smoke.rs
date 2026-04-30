@@ -207,9 +207,7 @@ fn ssh_proxy_upstream_select_uses_narrower_inset_width_than_primary_proxy_type_f
     app.set_asset_ssh_modal_port("22".into());
     app.set_asset_ssh_modal_proxy_type("ssh-asset".into());
     app.set_asset_ssh_modal_proxy_ssh_selected_label("Mega".into());
-    app.set_asset_ssh_modal_proxy_ssh_options(ModelRc::new(VecModel::from(vec![
-        "Mega".into(),
-    ])));
+    app.set_asset_ssh_modal_proxy_ssh_options(ModelRc::new(VecModel::from(vec!["Mega".into()])));
 
     let scroll_position = slint::LogicalPosition::new(520.0, 260.0);
 
@@ -221,24 +219,18 @@ fn ssh_proxy_upstream_select_uses_narrower_inset_width_than_primary_proxy_type_f
         });
     }
 
-    let proxy_field_stack = ElementHandle::find_by_element_id(
-        &app,
-        "AssetsSshConnectionModal::proxy-ssh-field-stack",
-    )
-    .next()
-    .expect("find proxy ssh field stack");
-    let proxy_type_select = ElementHandle::find_by_element_id(
-        &app,
-        "AssetsSshConnectionModal::proxy-type-select",
-    )
-    .next()
-    .expect("find proxy type select");
-    let proxy_select = ElementHandle::find_by_element_id(
-        &app,
-        "AssetsSshConnectionModal::proxy-ssh-select",
-    )
-    .next()
-    .expect("find proxy ssh select");
+    let proxy_field_stack =
+        ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::proxy-ssh-field-stack")
+            .next()
+            .expect("find proxy ssh field stack");
+    let proxy_type_select =
+        ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::proxy-type-select")
+            .next()
+            .expect("find proxy type select");
+    let proxy_select =
+        ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::proxy-ssh-select")
+            .next()
+            .expect("find proxy ssh select");
 
     let group_bottom = proxy_field_stack.absolute_position().y + proxy_field_stack.size().height;
     let select_bottom = proxy_select.absolute_position().y + proxy_select.size().height;
@@ -302,12 +294,10 @@ fn ssh_keychain_identity_flow_uses_inset_select_and_keeps_summary_visible() {
     )
     .next()
     .expect("find keychain identity select");
-    let identity_summary_card = ElementHandle::find_by_element_id(
-        &app,
-        "AssetsSshConnectionModal::identity-summary-card",
-    )
-    .next()
-    .expect("find identity summary card");
+    let identity_summary_card =
+        ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::identity-summary-card")
+            .next()
+            .expect("find identity summary card");
     let identity_summary_value = ElementHandle::find_by_element_id(
         &app,
         "AssetsSshConnectionModal::identity-auth-summary-value",
@@ -360,18 +350,14 @@ fn snippet_package_select_fully_fits_inside_its_layout_group() {
         "Operations".into(),
     ])));
 
-    let package_group = ElementHandle::find_by_element_id(
-        &app,
-        "AssetsSnippetModal::snippet-package-select-group",
-    )
-    .next()
-    .expect("find snippet package select group");
-    let package_select = ElementHandle::find_by_element_id(
-        &app,
-        "AssetsSnippetModal::package-select",
-    )
-    .next()
-    .expect("find snippet package select");
+    let package_group =
+        ElementHandle::find_by_element_id(&app, "AssetsSnippetModal::snippet-package-select-group")
+            .next()
+            .expect("find snippet package select group");
+    let package_select =
+        ElementHandle::find_by_element_id(&app, "AssetsSnippetModal::package-select")
+            .next()
+            .expect("find snippet package select");
 
     let group_bottom = package_group.absolute_position().y + package_group.size().height;
     let select_bottom = package_select.absolute_position().y + package_select.size().height;

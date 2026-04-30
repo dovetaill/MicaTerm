@@ -53,7 +53,9 @@ fn premium_default_tokens_encode_the_new_calm_surface_ladder() {
         "titlebar should use a dedicated calm surface rather than sharing the app sheet"
     );
     assert!(
-        tokens.contains("out property <brush> terminal-frame-background: dark-mode ? #101824 : #edf2f6;"),
+        tokens.contains(
+            "out property <brush> terminal-frame-background: dark-mode ? #101824 : #edf2f6;"
+        ),
         "terminal frame should sit one step behind the terminal canvas so the work surface stays visually dominant"
     );
     assert!(
@@ -61,7 +63,9 @@ fn premium_default_tokens_encode_the_new_calm_surface_ladder() {
         "terminal defaults should move off pure white / pure black to stay comfortable over long sessions"
     );
     assert!(
-        tokens.contains("out property <brush> sidebar-item-selected-background: dark-mode ? #293846 : #dce6f2;"),
+        tokens.contains(
+            "out property <brush> sidebar-item-selected-background: dark-mode ? #293846 : #dce6f2;"
+        ),
         "selected sidebar items should use a low-saturation filled state instead of a hard control button fill"
     );
 }
@@ -73,8 +77,7 @@ fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
     let sidebar = fs::read_to_string("ui/shell/sidebar.slint").expect("read sidebar");
     let assets_sidebar =
         fs::read_to_string("ui/shell/assets-sidebar.slint").expect("read assets sidebar");
-    let right_panel =
-        fs::read_to_string("ui/shell/right-panel.slint").expect("read right panel");
+    let right_panel = fs::read_to_string("ui/shell/right-panel.slint").expect("read right panel");
     let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
     let workspace = fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace");
     let active_tab = fs::read_to_string("ui/components/active-tab.slint").expect("read active tab");

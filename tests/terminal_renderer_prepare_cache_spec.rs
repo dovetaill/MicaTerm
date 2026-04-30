@@ -10,17 +10,15 @@ use mica_term::app::terminal_font::{
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_layout::run_segmentation::RunCluster;
 #[cfg(feature = "terminal-native-renderer")]
-use mica_term::app::terminal_layout::{TerminalTextShaper, TextShaper};
-#[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_layout::{GlyphRun, PositionedGlyph, ShapedRow, TextStyleKey};
+#[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_layout::{TerminalTextShaper, TextShaper};
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_model::{TerminalModelCell, TerminalModelRow};
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_renderer::atlas::{GeneratedGlyphAtlasKey, GlyphAtlas, GlyphAtlasKey};
 #[cfg(feature = "terminal-native-renderer")]
-use mica_term::app::terminal_renderer::custom_grid_glyphs::{
-    BoxDrawingGlyph, CustomGridGlyphKind,
-};
+use mica_term::app::terminal_renderer::custom_grid_glyphs::{BoxDrawingGlyph, CustomGridGlyphKind};
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_renderer::wgpu_renderer::PreparedMonochromeGlyphSourceKind;
 #[cfg(feature = "terminal-native-renderer")]
@@ -457,7 +455,8 @@ fn glyph_atlas_generated_keys_keep_a_separate_zero_padding_contract() -> Result<
 
 #[cfg(feature = "terminal-native-renderer")]
 #[test]
-fn native_renderer_generated_box_masks_reuse_atlas_entries_without_font_rasterization() -> Result<()> {
+fn native_renderer_generated_box_masks_reuse_atlas_entries_without_font_rasterization() -> Result<()>
+{
     let mut font_system = CountingRasterFontSystem::new()?;
     let loaded_font = font_system.load_font(&FontRequest::default())?;
     let mut renderer = WgpuTerminalRenderer::new_for_test()?;

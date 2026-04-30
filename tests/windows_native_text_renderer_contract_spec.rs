@@ -275,7 +275,8 @@ fn windows_native_text_renderer_source_splits_font_outlines_from_generated_masks
     }
 
     assert!(
-        !windows_backend_source.contains("if self.last_directwrite_text_drawn {\n            return;\n        }"),
+        !windows_backend_source
+            .contains("if self.last_directwrite_text_drawn {\n            return;\n        }"),
         "Task 5 should stop bailing out of the monochrome bitmap stage wholesale after a DirectWrite text pass because mixed body-text + generated-mask frames still need their special glyph masks"
     );
 }

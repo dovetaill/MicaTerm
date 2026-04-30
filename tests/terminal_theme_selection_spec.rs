@@ -58,8 +58,7 @@ fn selection_overlay_colors_stay_translucent_and_theme_specific() {
     let dark_preset = preset_for_theme(ThemeMode::Dark, ThemeVariant::PremiumDefault);
     let light_preset = preset_for_theme(ThemeMode::Light, ThemeVariant::PremiumDefault);
     let dark_overlay = selection_overlay_rgba_for(ThemeMode::Dark, ThemeVariant::PremiumDefault);
-    let light_overlay =
-        selection_overlay_rgba_for(ThemeMode::Light, ThemeVariant::PremiumDefault);
+    let light_overlay = selection_overlay_rgba_for(ThemeMode::Light, ThemeVariant::PremiumDefault);
 
     assert!(
         dark_preset.selection_bg.3 > 0.0 && dark_preset.selection_bg.3 < 1.0,

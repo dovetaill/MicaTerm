@@ -1429,10 +1429,11 @@ fn connection_progress_workspace_host_contract_exposes_inline_host_key_actions()
     let footer_cancel_guard_index = terminal_host
         .find("function connection-progress-shows-cancel() -> bool {")
         .expect("page-level cancel guard should remain defined");
-    let footer_cancel_guard_window = &terminal_host[footer_cancel_guard_index
-        ..(footer_cancel_guard_index + 240).min(terminal_host.len())];
+    let footer_cancel_guard_window = &terminal_host
+        [footer_cancel_guard_index..(footer_cancel_guard_index + 240).min(terminal_host.len())];
     assert!(
-        footer_cancel_guard_window.contains("root.connection-progress-visual-state == \"verifying_host_key\""),
+        footer_cancel_guard_window
+            .contains("root.connection-progress-visual-state == \"verifying_host_key\""),
         "page-level cancel actions should stay available during verification and connecting states in the reference flow"
     );
     let action_bar_index = terminal_host
@@ -1459,23 +1460,30 @@ fn connection_progress_workspace_host_contract_exposes_presentation_semantics_pr
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
 
     assert!(
-        app_window.contains("in-out property <string> workspace-session-connection-page-mode: \"\";"),
+        app_window
+            .contains("in-out property <string> workspace-session-connection-page-mode: \"\";"),
         "AppWindow should expose a projected connection page-mode property"
     );
     assert!(
-        app_window.contains("in-out property <string> workspace-session-connection-task-title: \"\";"),
+        app_window
+            .contains("in-out property <string> workspace-session-connection-task-title: \"\";"),
         "AppWindow should expose a projected connection task-title property"
     );
     assert!(
-        app_window.contains("in-out property <string> workspace-session-connection-task-detail: \"\";"),
+        app_window
+            .contains("in-out property <string> workspace-session-connection-task-detail: \"\";"),
         "AppWindow should expose a projected connection task-detail property"
     );
     assert!(
-        app_window.contains("workspace-session-connection-page-mode: root.workspace-session-connection-page-mode;"),
+        app_window.contains(
+            "workspace-session-connection-page-mode: root.workspace-session-connection-page-mode;"
+        ),
         "AppWindow should forward the connection page-mode property into WorkspacePane"
     );
     assert!(
-        app_window.contains("workspace-session-connection-task-title: root.workspace-session-connection-task-title;"),
+        app_window.contains(
+            "workspace-session-connection-task-title: root.workspace-session-connection-task-title;"
+        ),
         "AppWindow should forward the connection task-title property into WorkspacePane"
     );
     assert!(
@@ -1483,27 +1491,36 @@ fn connection_progress_workspace_host_contract_exposes_presentation_semantics_pr
         "AppWindow should forward the connection task-detail property into WorkspacePane"
     );
     assert!(
-        workspace_pane.contains("in property <string> workspace-session-connection-page-mode: \"\";"),
+        workspace_pane
+            .contains("in property <string> workspace-session-connection-page-mode: \"\";"),
         "WorkspacePane should accept the projected connection page-mode property"
     );
     assert!(
-        workspace_pane.contains("in property <string> workspace-session-connection-task-title: \"\";"),
+        workspace_pane
+            .contains("in property <string> workspace-session-connection-task-title: \"\";"),
         "WorkspacePane should accept the projected connection task-title property"
     );
     assert!(
-        workspace_pane.contains("in property <string> workspace-session-connection-task-detail: \"\";"),
+        workspace_pane
+            .contains("in property <string> workspace-session-connection-task-detail: \"\";"),
         "WorkspacePane should accept the projected connection task-detail property"
     );
     assert!(
-        workspace_pane.contains("connection-progress-page-mode: root.workspace-session-connection-page-mode;"),
+        workspace_pane.contains(
+            "connection-progress-page-mode: root.workspace-session-connection-page-mode;"
+        ),
         "WorkspacePane should forward the connection page-mode property into TerminalSessionHost"
     );
     assert!(
-        workspace_pane.contains("connection-progress-task-title: root.workspace-session-connection-task-title;"),
+        workspace_pane.contains(
+            "connection-progress-task-title: root.workspace-session-connection-task-title;"
+        ),
         "WorkspacePane should forward the connection task-title property into TerminalSessionHost"
     );
     assert!(
-        workspace_pane.contains("connection-progress-task-detail: root.workspace-session-connection-task-detail;"),
+        workspace_pane.contains(
+            "connection-progress-task-detail: root.workspace-session-connection-task-detail;"
+        ),
         "WorkspacePane should forward the connection task-detail property into TerminalSessionHost"
     );
     assert!(
@@ -1519,7 +1536,8 @@ fn connection_progress_workspace_host_contract_exposes_presentation_semantics_pr
         "TerminalSessionHost should accept the projected connection task-detail property"
     );
     assert!(
-        terminal_host.contains("if root.connection-progress-visual-state == \"failed\" : Rectangle {"),
+        terminal_host
+            .contains("if root.connection-progress-visual-state == \"failed\" : Rectangle {"),
         "TerminalSessionHost should keep a dedicated failed-state block inside the unified connection sheet"
     );
     let session_error_index = terminal_host

@@ -14,14 +14,7 @@ fn terminal_tui_smoke_script_exists_and_lists_expected_scenarios() {
         fs::read_to_string(script_path).expect("read terminal TUI smoke script source contract");
 
     for scenario in [
-        "all",
-        "codex",
-        "vim",
-        "less",
-        "htop",
-        "links",
-        "glyphs",
-        "progress",
+        "all", "codex", "vim", "less", "htop", "links", "glyphs", "progress",
     ] {
         assert!(
             script.contains(scenario),

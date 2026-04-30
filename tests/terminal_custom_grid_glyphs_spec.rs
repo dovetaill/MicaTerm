@@ -145,26 +145,53 @@ fn box_drawing_topology_matches_the_v1_contract() {
     );
 
     assert!(!row_has_ink(&top_left, 0), "┌ should not connect upward");
-    assert!(!column_has_ink(&top_left, 0), "┌ should not connect leftward");
-    assert!(row_has_ink(&top_left, top_left.height_px - 1), "┌ should connect downward");
-    assert!(column_has_ink(&top_left, top_left.width_px - 1), "┌ should connect rightward");
+    assert!(
+        !column_has_ink(&top_left, 0),
+        "┌ should not connect leftward"
+    );
+    assert!(
+        row_has_ink(&top_left, top_left.height_px - 1),
+        "┌ should connect downward"
+    );
+    assert!(
+        column_has_ink(&top_left, top_left.width_px - 1),
+        "┌ should connect rightward"
+    );
 
     assert!(row_has_ink(&tee_left, 0), "├ should connect upward");
-    assert!(row_has_ink(&tee_left, tee_left.height_px - 1), "├ should connect downward");
-    assert!(!column_has_ink(&tee_left, 0), "├ should not connect leftward");
-    assert!(column_has_ink(&tee_left, tee_left.width_px - 1), "├ should connect rightward");
+    assert!(
+        row_has_ink(&tee_left, tee_left.height_px - 1),
+        "├ should connect downward"
+    );
+    assert!(
+        !column_has_ink(&tee_left, 0),
+        "├ should not connect leftward"
+    );
+    assert!(
+        column_has_ink(&tee_left, tee_left.width_px - 1),
+        "├ should connect rightward"
+    );
 
     assert!(row_has_ink(&cross, 0), "┼ should connect upward");
-    assert!(row_has_ink(&cross, cross.height_px - 1), "┼ should connect downward");
+    assert!(
+        row_has_ink(&cross, cross.height_px - 1),
+        "┼ should connect downward"
+    );
     assert!(column_has_ink(&cross, 0), "┼ should connect leftward");
-    assert!(column_has_ink(&cross, cross.width_px - 1), "┼ should connect rightward");
+    assert!(
+        column_has_ink(&cross, cross.width_px - 1),
+        "┼ should connect rightward"
+    );
 
     assert_eq!(filled_ratio(&rounded) < filled_ratio(&square_round), true);
     assert_eq!(row_has_ink(&rounded, rounded.height_px - 1), true);
     assert_eq!(column_has_ink(&rounded, rounded.width_px - 1), true);
 }
 
-fn row_has_ink(mask: &mica_term::app::terminal_renderer::custom_grid_glyphs::GeneratedMaskGlyph, row: u32) -> bool {
+fn row_has_ink(
+    mask: &mica_term::app::terminal_renderer::custom_grid_glyphs::GeneratedMaskGlyph,
+    row: u32,
+) -> bool {
     let start = row as usize * mask.width_px as usize;
     let end = start + mask.width_px as usize;
     mask.alpha[start..end].iter().any(|value| *value == 255)
@@ -180,7 +207,9 @@ fn column_has_ink(
     })
 }
 
-fn filled_ratio(mask: &mica_term::app::terminal_renderer::custom_grid_glyphs::GeneratedMaskGlyph) -> f32 {
+fn filled_ratio(
+    mask: &mica_term::app::terminal_renderer::custom_grid_glyphs::GeneratedMaskGlyph,
+) -> f32 {
     let filled = mask.alpha.iter().filter(|value| **value == 255).count();
     filled as f32 / mask.alpha.len() as f32
 }

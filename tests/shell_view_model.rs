@@ -349,12 +349,12 @@ fn new_ssh_modal_is_a_grouped_single_page_form() {
     assert!(ssh_modal.contains("title: \"Proxy chain\""));
     assert!(ssh_modal.contains("text: \"Proxy type\""));
     assert!(ssh_modal.contains("trailing-icon-visible: true;"));
-    assert!(
-        ssh_modal.contains("trailing-icon-source: root.password-visible ? root.eye-off-icon : root.eye-icon;")
-    );
-    assert!(
-        ssh_modal.contains("trailing-icon-label: root.password-visible ? \"Hide password\" : \"Show password\";")
-    );
+    assert!(ssh_modal.contains(
+        "trailing-icon-source: root.password-visible ? root.eye-off-icon : root.eye-icon;"
+    ));
+    assert!(ssh_modal.contains(
+        "trailing-icon-label: root.password-visible ? \"Hide password\" : \"Show password\";"
+    ));
 }
 
 #[test]

@@ -128,17 +128,14 @@ fn semantic_pipeline_keeps_input_tokens_but_stops_guessing_output_status_from_pr
         SemanticStyleRole::OutputWindowsPath,
     ));
     assert!(
-        !annotations
-            .spans
-            .iter()
-            .any(|span| {
-                matches!(
-                    span.role,
-                    SemanticStyleRole::OutputSeverityError
-                        | SemanticStyleRole::OutputFailureKeyword
-                        | SemanticStyleRole::OutputTimestamp
-                )
-            }),
+        !annotations.spans.iter().any(|span| {
+            matches!(
+                span.role,
+                SemanticStyleRole::OutputSeverityError
+                    | SemanticStyleRole::OutputFailureKeyword
+                    | SemanticStyleRole::OutputTimestamp
+            )
+        }),
         "ordinary output prose should keep stable link/path detection but should not be recolored from guessed severity/failure/timestamp keywords"
     );
     assert!(
@@ -332,7 +329,7 @@ fn semantic_style_projection_keeps_navigation_affordances_on_terminal_default_fo
     );
     assert!(
         !url_cell.underline,
-        "semantic styling should keep browser-safe URLs free of permanent underlines and rely on Ctrl+click activation instead"
+        "browser-safe URLs should stay free of fabricated underlines when the terminal did not ask for one"
     );
 
     let line_reference_cell = frame.rows[0]
@@ -462,17 +459,14 @@ fn semantic_pipeline_supports_focused_output_rules_and_separate_overview_marker_
         "focused output rules should drop lower-signal INFO emphasis to keep the terminal quieter"
     );
     assert!(
-        !annotations
-            .spans
-            .iter()
-            .any(|span| {
-                matches!(
-                    span.role,
-                    SemanticStyleRole::OutputSeverityError
-                        | SemanticStyleRole::OutputFailureKeyword
-                        | SemanticStyleRole::OutputTimestamp
-                )
-            }),
+        !annotations.spans.iter().any(|span| {
+            matches!(
+                span.role,
+                SemanticStyleRole::OutputSeverityError
+                    | SemanticStyleRole::OutputFailureKeyword
+                    | SemanticStyleRole::OutputTimestamp
+            )
+        }),
         "focused output rules should stay limited to stable navigational affordances instead of recoloring prose severity or timestamp text"
     );
     assert_eq!(
@@ -785,8 +779,7 @@ fn presenter_tracks_raw_and_styled_frames_separately_for_terminal_semantics() {
     let presenter = fs::read_to_string("src/app/terminal_presenter.rs").expect("read presenter");
 
     assert!(
-        presenter.contains("previous_source_frame")
-            && presenter.contains("previous_styled_frame"),
+        presenter.contains("previous_source_frame") && presenter.contains("previous_styled_frame"),
         "terminal presenter should retain raw source frames separately from styled frames so semantic recoloring does not feed back into later raw diffing"
     );
 }

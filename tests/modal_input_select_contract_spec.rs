@@ -5,8 +5,8 @@ use std::path::Path;
 
 #[test]
 fn dialog_text_field_contract_exposes_icon_action_for_modal_fields() {
-    let source = fs::read_to_string("ui/components/modal-chrome.slint")
-        .expect("read modal chrome source");
+    let source =
+        fs::read_to_string("ui/components/modal-chrome.slint").expect("read modal chrome source");
 
     assert!(
         source.contains("export component DialogFieldIconAction inherits Rectangle {"),
@@ -26,8 +26,8 @@ fn fluent_eye_assets_exist_for_modal_secret_toggle() {
 
 #[test]
 fn dialog_text_field_contract_only_uses_focus_helpers_outside_text_viewport() {
-    let source = fs::read_to_string("ui/components/modal-chrome.slint")
-        .expect("read modal chrome source");
+    let source =
+        fs::read_to_string("ui/components/modal-chrome.slint").expect("read modal chrome source");
 
     assert!(
         !source.contains(
@@ -43,8 +43,8 @@ fn dialog_text_field_contract_only_uses_focus_helpers_outside_text_viewport() {
 
 #[test]
 fn dialog_select_contract_exposes_modal_local_popup_primitives() {
-    let source = fs::read_to_string("ui/components/modal-chrome.slint")
-        .expect("read modal chrome source");
+    let source =
+        fs::read_to_string("ui/components/modal-chrome.slint").expect("read modal chrome source");
 
     assert!(
         source.contains("export component DialogSelectField inherits Rectangle {"),
