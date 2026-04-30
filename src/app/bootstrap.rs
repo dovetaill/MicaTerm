@@ -8354,6 +8354,69 @@ mod tests {
         result
     }
 
+    // Slint's generated `AppWindow::new()` setup runs close to libtest's default worker stack
+    // limit, so the bitmap workspace presenter tests execute on a larger stack to avoid false
+    // positive overflows from test-only setup locals.
+    fn run_with_large_test_stack(body: impl FnOnce() + Send + 'static) {
+        let handle = std::thread::Builder::new()
+            .name("bootstrap-large-stack-test".into())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(body)
+            .expect("spawn bootstrap large-stack test");
+        if let Err(panic) = handle.join() {
+            std::panic::resume_unwind(panic);
+        }
+    }
+
+    fn with_bitmap_workspace_presenter_on_large_stack_for_test(
+        body: impl FnOnce() + Send + 'static,
+    ) {
+        run_with_large_test_stack(move || {
+            with_bitmap_workspace_presenter_for_test(body);
+        });
+    }
+
+    fn bitmap_workspace_terminal_state_fixture_for_test(
+    ) -> (AppWindow, ShellViewModel, WorkspaceFollowTracker) {
+        i_slint_backend_testing::init_no_event_loop();
+
+        let window = AppWindow::new().expect("create app window");
+        let session_id = Uuid::new_v4();
+        let mut state = ShellViewModel::default();
+        let mut tab = WorkspaceTab::from_session(&SessionHandle {
+            session_id,
+            asset_id: "asset-prod".into(),
+            title: "Prod Bastion".into(),
+            subtitle: "ops@10.0.0.12:22".into(),
+            state: SessionState::Connected,
+            can_reconnect: false,
+            enhanced_session_state: EnhancedSessionState::Plain,
+        });
+        tab.active = true;
+        state.set_workspace_tabs(vec![tab]);
+        let mut initial_surface =
+            TerminalSurfaceState::from_visible_lines(session_id, 1, 24, 80, vec!["welcome".into()]);
+        initial_surface.cells = vec![TerminalCellState {
+            row: 0,
+            col: 0,
+            width: 1,
+            text: "w".into(),
+            bold: false,
+            underline: false,
+            fg_rgba: 0xffff_ffff,
+            bg_rgba: 0xff0d_1117,
+        }];
+        state.set_active_workspace_terminal_surface(Some(initial_surface));
+        (window, state, WorkspaceFollowTracker::default())
+    }
+
+    fn seeded_bitmap_workspace_terminal_state_for_test(
+    ) -> (AppWindow, ShellViewModel, WorkspaceFollowTracker) {
+        let (window, state, mut follow_tracker) = bitmap_workspace_terminal_state_fixture_for_test();
+        sync_workspace_session_state(&window, &state, &mut follow_tracker);
+        (window, state, follow_tracker)
+    }
+
     impl SessionRuntimeControl for NoopRuntimeControl {
         fn disconnect(&self) -> Result<()> {
             Ok(())
@@ -8655,7 +8718,7 @@ mod tests {
 
     #[test]
     fn workspace_session_state_refreshes_terminal_image_across_surface_updates() {
-        with_bitmap_workspace_presenter_for_test(|| {
+        with_bitmap_workspace_presenter_on_large_stack_for_test(|| {
             i_slint_backend_testing::init_no_event_loop();
 
             let window = AppWindow::new().expect("create app window");
@@ -8752,44 +8815,9 @@ mod tests {
 
     #[test]
     fn workspace_session_state_clears_native_terminal_frame_when_surface_clears() {
-        with_bitmap_workspace_presenter_for_test(|| {
-            i_slint_backend_testing::init_no_event_loop();
-
-            let window = AppWindow::new().expect("create app window");
-            let session_id = Uuid::new_v4();
-            let mut state = ShellViewModel::default();
-            let mut tab = WorkspaceTab::from_session(&SessionHandle {
-                session_id,
-                asset_id: "asset-prod".into(),
-                title: "Prod Bastion".into(),
-                subtitle: "ops@10.0.0.12:22".into(),
-                state: SessionState::Connected,
-                can_reconnect: false,
-                enhanced_session_state: EnhancedSessionState::Plain,
-            });
-            tab.active = true;
-            state.set_workspace_tabs(vec![tab]);
-            let mut initial_surface = TerminalSurfaceState::from_visible_lines(
-                session_id,
-                1,
-                24,
-                80,
-                vec!["welcome".into()],
-            );
-            initial_surface.cells = vec![TerminalCellState {
-                row: 0,
-                col: 0,
-                width: 1,
-                text: "w".into(),
-                bold: false,
-                underline: false,
-                fg_rgba: 0xffff_ffff,
-                bg_rgba: 0xff0d_1117,
-            }];
-            state.set_active_workspace_terminal_surface(Some(initial_surface));
-            let mut follow_tracker = WorkspaceFollowTracker::default();
-
-            sync_workspace_session_state(&window, &state, &mut follow_tracker);
+        with_bitmap_workspace_presenter_on_large_stack_for_test(|| {
+            let (window, mut state, mut follow_tracker) =
+                seeded_bitmap_workspace_terminal_state_for_test();
             let initial_lines_model = window.get_workspace_session_visible_lines();
             assert_eq!(
                 window.get_workspace_session_native_frame_token(),
@@ -9795,7 +9823,7 @@ mod tests {
 
     #[test]
     fn workspace_session_state_preserves_link_affordance_during_surface_refresh() {
-        with_bitmap_workspace_presenter_for_test(|| {
+        with_bitmap_workspace_presenter_on_large_stack_for_test(|| {
             i_slint_backend_testing::init_no_event_loop();
 
             let window = AppWindow::new().expect("create app window");
