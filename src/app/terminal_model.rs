@@ -241,6 +241,9 @@ impl TerminalModelFrame {
                         ));
                         continue;
                     }
+                    if semantic_role_preserves_terminal_cell_paint(span.role) {
+                        continue;
+                    }
 
                     let style = theme.semantic_style(span.role);
                     let priority = semantic_role_priority(span.role);
@@ -408,6 +411,18 @@ fn semantic_role_priority(role: SemanticStyleRole) -> u8 {
         | SemanticStyleRole::CommandStatusFailure => 30,
         SemanticStyleRole::OutputUrl | SemanticStyleRole::OutputLineReference => 40,
     }
+}
+
+fn semantic_role_preserves_terminal_cell_paint(role: SemanticStyleRole) -> bool {
+    matches!(
+        role,
+        SemanticStyleRole::InputPath
+            | SemanticStyleRole::OutputUrl
+            | SemanticStyleRole::OutputUnixPath
+            | SemanticStyleRole::OutputWindowsPath
+            | SemanticStyleRole::OutputLineReference
+            | SemanticStyleRole::OutputNetworkEndpoint
+    )
 }
 
 fn search_match_alpha(theme: AppThemeSpec, strength: SearchMatchHighlightStrength) -> f32 {

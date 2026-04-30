@@ -1480,10 +1480,11 @@ impl WindowsNativeSurfaceState {
             let Some(render_target) = self.render_target() else {
                 return;
             };
-            self.ensure_brush(cursor.bg_rgba);
+            let cursor_fill = cursor_overlay_fill_rgba(cursor.bg_rgba, cursor.shape);
+            self.ensure_brush(cursor_fill);
             if let (Some(cursor_rect), Some(brush)) = (
                 cursor_rect(frame.rect, cursor),
-                self.brush_for(cursor.bg_rgba),
+                self.brush_for(cursor_fill),
             ) {
                 unsafe {
                     render_target.FillRectangle(&cursor_rect, &brush);
@@ -2548,6 +2549,14 @@ fn cursor_rect(
                 (bar.left + (cursor.cell_width_px.max(1) / 8).max(1) as f32).min(base_rect.right);
             Some(bar)
         }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn cursor_overlay_fill_rgba(bg_rgba: u32, shape: TerminalCursorShape) -> u32 {
+    match shape {
+        TerminalCursorShape::Block => (0x99_u32 << 24) | (bg_rgba & 0x00ff_ffff),
+        TerminalCursorShape::Underline | TerminalCursorShape::Bar => bg_rgba,
     }
 }
 

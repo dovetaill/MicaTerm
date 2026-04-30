@@ -1085,6 +1085,23 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "terminal host should manage a visible cursor blink timer instead of rendering a cursorless text dump"
     );
     assert!(
+        terminal_host.contains("interval: 600ms;"),
+        "terminal cursor blink timing should stay near a 1.2s full cycle instead of the more urgent 520ms cadence"
+    );
+    assert!(
+        !terminal_host.contains("changed session-surface-seqno => {"),
+        "bitmap cursor blinking should not be reset from every incoming frame seqno because that turns terminal activity into a perpetual blink restart"
+    );
+    assert!(
+        terminal_host.contains("changed session-cursor-row => {")
+            && terminal_host.contains("changed session-cursor-col => {"),
+        "bitmap cursor blink resets should follow real cursor movement instead of generic surface churn"
+    );
+    assert!(
+        terminal_host.contains("opacity: root.session-cursor-shape == \"block\" ? 0.6 : 1.0;"),
+        "bitmap block cursor should use a softer fill so underlying text stays readable while bar and underline cursors remain fully crisp"
+    );
+    assert!(
         terminal_host.contains("scrollbar-track := Rectangle {"),
         "TerminalSessionHost should render a dedicated scrollbar track"
     );

@@ -216,7 +216,7 @@ const WORKSPACE_INPUT_PROJECTION_DEBOUNCE_MS: u64 = 12;
 const WORKSPACE_SCROLL_VIEWPORT_PROJECTION_DEBOUNCE_MS: u64 = 4;
 const WORKSPACE_SCROLL_THUMB_DRAG_PROJECTION_DEBOUNCE_MS: u64 = 8;
 const WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS: u64 = 1_000;
-const WORKSPACE_TERMINAL_CURSOR_BLINK_INTERVAL_MS: u64 = 520;
+const WORKSPACE_TERMINAL_CURSOR_BLINK_INTERVAL_MS: u64 = 600;
 const EDGE_DRAG_THRESHOLD_PX: f32 = 4.0;
 
 #[cfg(test)]
@@ -9732,6 +9732,42 @@ mod tests {
         assert_eq!(
             workspace_terminal::openable_url_at_surface(&surface, 0, 50),
             Some("http://example.org/docs".into())
+        );
+    }
+
+    #[test]
+    fn workspace_terminal_detects_supported_explicit_url_schemes_but_not_paths_or_colon_pairs() {
+        let session_id = Uuid::new_v4();
+        let row_text = "ssh://host.example:22 ftp://ftp.example.org/pub /home/wwwroot/project/file.go:123 C:\\Users\\Qi\\Downloads key: value";
+        let mut surface =
+            TerminalSurfaceState::from_visible_lines(session_id, 1, 4, 160, vec![row_text.into()]);
+        surface.cells = ascii_cells_for_row(0, row_text);
+
+        let ssh_col = row_text.find("ssh://").expect("ssh scheme") as u32;
+        let ftp_col = row_text.find("ftp://").expect("ftp scheme") as u32;
+        let unix_path_col = row_text.find("/home/").expect("unix path") as u32;
+        let windows_path_col = row_text.find("C:\\Users").expect("windows path") as u32;
+        let key_value_col = row_text.find("key:").expect("key/value") as u32;
+
+        assert_eq!(
+            workspace_terminal::openable_url_at_surface(&surface, 0, ssh_col),
+            Some("ssh://host.example:22".into())
+        );
+        assert_eq!(
+            workspace_terminal::openable_url_at_surface(&surface, 0, ftp_col),
+            Some("ftp://ftp.example.org/pub".into())
+        );
+        assert_eq!(
+            workspace_terminal::openable_url_at_surface(&surface, 0, unix_path_col),
+            None
+        );
+        assert_eq!(
+            workspace_terminal::openable_url_at_surface(&surface, 0, windows_path_col),
+            None
+        );
+        assert_eq!(
+            workspace_terminal::openable_url_at_surface(&surface, 0, key_value_col),
+            None
         );
     }
 

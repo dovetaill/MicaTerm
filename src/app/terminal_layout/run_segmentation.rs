@@ -46,6 +46,7 @@ pub fn segment_row(row: &TerminalModelRow) -> Vec<SegmentedRun> {
         bold: ordered_cells[0].bold,
         underline: ordered_cells[0].underline,
     };
+    let mut expected_next_col = ordered_cells[0].col;
     for cell in ordered_cells {
         let next_style = TextStyleKey {
             fg_rgba: cell.fg_rgba,
@@ -54,11 +55,13 @@ pub fn segment_row(row: &TerminalModelRow) -> Vec<SegmentedRun> {
             underline: cell.underline,
         };
         let style_changed = next_style != current_style;
-        if style_changed && !current_cells.is_empty() {
+        let gap_detected = !current_cells.is_empty() && cell.col != expected_next_col;
+        if (style_changed || gap_detected) && !current_cells.is_empty() {
             runs.push(build_run(row.row_index, current_style, &current_cells));
             current_cells.clear();
         }
         current_style = next_style;
+        expected_next_col = cell.col.saturating_add(cell.width);
         current_cells.push(cell);
     }
 

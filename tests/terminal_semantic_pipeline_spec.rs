@@ -241,40 +241,63 @@ fn premium_default_theme_maps_roles_to_product_grade_semantic_styles() {
 }
 
 #[test]
-fn semantic_style_projection_recolors_default_cells_but_preserves_explicit_ansi_foreground() {
+fn semantic_style_projection_keeps_navigation_affordances_on_terminal_default_foreground() {
     let theme = app_theme_spec(ThemeMode::Dark, ThemeVariant::PremiumDefault);
-    let mut frame = semantic_model_frame(&["https://example.com src/app/bootstrap.rs:2476:9"]);
-    let default_fg = frame.palette.default_fg_rgba;
-    let default_bg = frame.palette.default_bg_rgba;
-    frame.rows[0].cells = frame.rows[0]
-        .text
-        .chars()
-        .enumerate()
-        .map(|(index, ch)| TerminalModelCell {
-            row: 0,
-            col: index as u32,
-            width: 1,
-            text: ch.to_string(),
-            bold: false,
-            underline: false,
-            fg_rgba: default_fg,
-            bg_rgba: default_bg,
-        })
-        .collect();
-    let annotations = analyze_semantic_annotations(&frame);
+    let mut frame = semantic_model_frame(&[
+        "https://example.com src/app/bootstrap.rs:2476:9",
+        "[dev@mica ~]$ ./src",
+    ]);
+    for row in &mut frame.rows {
+        let default_fg = frame.palette.default_fg_rgba;
+        let default_bg = frame.palette.default_bg_rgba;
+        row.cells = row
+            .text
+            .chars()
+            .enumerate()
+            .map(|(index, ch)| TerminalModelCell {
+                row: row.row_index,
+                col: index as u32,
+                width: 1,
+                text: ch.to_string(),
+                bold: false,
+                underline: false,
+                fg_rgba: default_fg,
+                bg_rgba: default_bg,
+            })
+            .collect();
+    }
 
-    let url_span = annotations
-        .spans
-        .iter()
-        .find(|span| span.role == SemanticStyleRole::OutputUrl)
-        .expect("url span")
-        .clone();
-    let line_reference_span = annotations
-        .spans
-        .iter()
-        .find(|span| span.role == SemanticStyleRole::OutputLineReference)
-        .expect("line reference span")
-        .clone();
+    let url_span = mica_term::app::terminal_semantic::SemanticSpan {
+        row: 0,
+        start_col: 0,
+        end_col: "https://example.com".chars().count() as u32 - 1,
+        role: SemanticStyleRole::OutputUrl,
+        text: "https://example.com".into(),
+    };
+    let line_reference_text = "src/app/bootstrap.rs:2476:9";
+    let line_reference_start = frame.rows[0]
+        .text
+        .find(line_reference_text)
+        .expect("line reference start") as u32;
+    let line_reference_span = mica_term::app::terminal_semantic::SemanticSpan {
+        row: 0,
+        start_col: line_reference_start,
+        end_col: line_reference_start + line_reference_text.chars().count() as u32 - 1,
+        role: SemanticStyleRole::OutputLineReference,
+        text: line_reference_text.into(),
+    };
+    let input_path_text = "./src";
+    let input_path_start = frame.rows[1]
+        .text
+        .find(input_path_text)
+        .expect("input path start") as u32;
+    let input_path_span = mica_term::app::terminal_semantic::SemanticSpan {
+        row: 1,
+        start_col: input_path_start,
+        end_col: input_path_start + input_path_text.chars().count() as u32 - 1,
+        role: SemanticStyleRole::InputPath,
+        text: input_path_text.into(),
+    };
 
     let ansi_fg = 0xff44_5566;
     frame.rows[0]
@@ -284,11 +307,17 @@ fn semantic_style_projection_recolors_default_cells_but_preserves_explicit_ansi_
         .expect("url cell")
         .fg_rgba = ansi_fg;
 
+    frame.apply_semantic_style_overlays(
+        None,
+        theme,
+        &[],
+        SearchMatchHighlightStrength::Balanced,
+    );
     let previous = frame.clone();
     frame.apply_semantic_style_overlays(
         Some(&previous),
         theme,
-        &annotations.spans,
+        &[url_span.clone(), line_reference_span.clone(), input_path_span.clone()],
         SearchMatchHighlightStrength::Balanced,
     );
 
@@ -313,18 +342,27 @@ fn semantic_style_projection_recolors_default_cells_but_preserves_explicit_ansi_
         .expect("styled line reference cell");
     assert_eq!(
         line_reference_cell.fg_rgba,
-        0xff00_0000
-            | theme
-                .semantic_style(SemanticStyleRole::OutputLineReference)
-                .foreground
+        previous.palette.default_fg_rgba,
+        "file:line tokens should keep the terminal default foreground instead of flipping to semantic accent blue"
     );
     assert!(
-        !line_reference_cell.bold,
-        "stable link/path recoloring should change the foreground without fabricating extra emphasis"
+        !line_reference_cell.bold && !line_reference_cell.underline,
+        "navigation-looking output should not fabricate extra emphasis"
+    );
+
+    let input_path_cell = frame.rows[1]
+        .cells
+        .iter()
+        .find(|cell| cell.col == input_path_span.start_col)
+        .expect("styled input path cell");
+    assert_eq!(
+        input_path_cell.fg_rgba,
+        previous.palette.default_fg_rgba,
+        "prompt-side path tokens should stay on the terminal foreground instead of turning blue just because they contain path punctuation"
     );
     assert!(
-        frame.dirty_rows.contains(&0),
-        "semantic recoloring should mark the row dirty so bitmap/native presenters repaint it"
+        frame.dirty_rows.is_empty(),
+        "navigation affordance spans should not dirty rows when they no longer change visible cell styling"
     );
 }
 
@@ -473,7 +511,7 @@ fn semantic_pipeline_does_not_treat_non_browser_uri_schemes_as_underlined_line_r
 fn semantic_style_projection_stays_clean_on_same_theme_but_marks_rows_dirty_on_theme_switch() {
     let dark_theme = app_theme_spec(ThemeMode::Dark, ThemeVariant::PremiumDefault);
     let light_theme = app_theme_spec(ThemeMode::Light, ThemeVariant::PremiumDefault);
-    let base_text = "https://example.com ERROR";
+    let base_text = "[dev@mica ~]$ cargo test";
 
     let build_cells = |frame: &mut TerminalModelFrame| {
         let default_fg = frame.palette.default_fg_rgba;

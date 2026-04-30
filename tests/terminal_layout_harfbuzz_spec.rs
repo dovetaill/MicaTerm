@@ -401,6 +401,46 @@ fn harfbuzz_layout_splits_runs_when_bold_or_underline_changes() -> anyhow::Resul
     Ok(())
 }
 
+#[test]
+fn harfbuzz_layout_splits_runs_when_matching_styles_have_a_cell_gap() -> anyhow::Result<()> {
+    let row = build_row(
+        vec![
+            TerminalModelCell {
+                row: 0,
+                col: 0,
+                width: 1,
+                text: "a".into(),
+                bold: false,
+                underline: true,
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+            TerminalModelCell {
+                row: 0,
+                col: 3,
+                width: 1,
+                text: "b".into(),
+                bold: false,
+                underline: true,
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+        ],
+        "ab",
+    );
+
+    let shaped = shape_row_with_mock_font(&row)?;
+
+    assert_eq!(
+        shaped.runs.len(),
+        2,
+        "non-contiguous cells should not collapse into one shaped run, otherwise underline overlays stretch across omitted gap cells"
+    );
+    assert_eq!(shaped.runs[0].cell_range, 0..1);
+    assert_eq!(shaped.runs[1].cell_range, 3..4);
+    Ok(())
+}
+
 #[cfg(feature = "terminal-native-renderer")]
 #[test]
 fn dwrite_font_system_discovers_distinct_fallback_faces_for_mixed_text() -> anyhow::Result<()> {
