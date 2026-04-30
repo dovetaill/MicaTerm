@@ -10,7 +10,7 @@ use termwiz::input::{KeyCode, Modifiers as KeyModifiers};
 use uuid::Uuid;
 
 use crate::app::terminal_core::{
-    SelectionState, TerminalCoreAdapter, TerminalCoreKind, TerminalFrameSnapshot, ViewportState,
+    SelectionState, TerminalCoreAdapter, TerminalFrameSnapshot, ViewportState,
     create_terminal_core_adapter,
 };
 use crate::app::terminal_theme::preset_for_theme;
@@ -284,31 +284,8 @@ impl TerminalSession {
     }
 
     pub fn new_with_scrollback(rows: usize, cols: usize, scrollback_lines: usize) -> Self {
-        Self::new_with_core_kind_and_scrollback(
-            rows,
-            cols,
-            TerminalCoreKind::Wezterm,
-            scrollback_lines,
-        )
-    }
-
-    pub fn new_with_core_kind(rows: usize, cols: usize, kind: TerminalCoreKind) -> Self {
-        Self::new_with_core_kind_and_scrollback(rows, cols, kind, DEFAULT_TERMINAL_SCROLLBACK_LINES)
-    }
-
-    pub fn new_with_core_kind_and_scrollback(
-        rows: usize,
-        cols: usize,
-        kind: TerminalCoreKind,
-        scrollback_lines: usize,
-    ) -> Self {
         let scrollback_lines = scrollback_lines.max(1);
-        Self::with_core(create_terminal_core_adapter(
-            kind,
-            rows,
-            cols,
-            scrollback_lines,
-        ))
+        Self::with_core(create_terminal_core_adapter(rows, cols, scrollback_lines))
     }
 
     pub fn with_core(core: Box<dyn TerminalCoreAdapter>) -> Self {

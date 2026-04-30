@@ -58,3 +58,30 @@ fn repository_no_longer_exposes_an_experimental_alacritty_core_path() {
         "runtime terminal helpers should not expose an experimental Alacritty constructor after the candidate path is deleted"
     );
 }
+
+#[test]
+fn repository_no_longer_keeps_a_single_branch_terminal_core_selector_api() {
+    let terminal_core_mod =
+        fs::read_to_string("src/app/terminal_core/mod.rs").expect("read terminal_core mod");
+    let terminal_core_types =
+        fs::read_to_string("src/app/terminal_core/types.rs").expect("read terminal_core types");
+    let runtime_terminal =
+        fs::read_to_string("src/app/ssh/runtime/terminal.rs").expect("read runtime terminal");
+
+    assert!(
+        !terminal_core_types.contains("pub enum TerminalCoreKind"),
+        "terminal_core types should not keep a selector enum once the repository ships only a single runtime implementation"
+    );
+    assert!(
+        !terminal_core_mod.contains("TerminalCoreKind"),
+        "terminal_core mod should not re-export a dead selector enum once construction is hard-wired to the shipped core"
+    );
+    assert!(
+        !runtime_terminal.contains("new_with_core_kind("),
+        "runtime terminal helpers should not expose a core-selection constructor when there is only one runtime core"
+    );
+    assert!(
+        !runtime_terminal.contains("new_with_core_kind_and_scrollback("),
+        "runtime terminal helpers should not keep a scrollback constructor that still pretends to choose among multiple terminal cores"
+    );
+}

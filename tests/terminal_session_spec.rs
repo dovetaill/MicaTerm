@@ -3,7 +3,6 @@ use std::fs;
 use mica_term::app::ssh::runtime::{
     TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput, TerminalSession,
 };
-use mica_term::app::terminal_core::TerminalCoreKind;
 use mica_term::app::terminal_theme::{preset_for_theme, preset_for_theme_mode};
 use mica_term::theme::{ThemeMode, ThemeVariant};
 use termwiz::input::{KeyCode, Modifiers};
@@ -129,8 +128,8 @@ fn surface_projection_exposes_scrollback_metadata() {
     assert!(snapshot.viewport_max_offset_lines >= snapshot.viewport_offset_lines);
 }
 
-fn assert_scrollback_selection_text_uses_buffer_coordinates(kind: TerminalCoreKind) {
-    let mut session = TerminalSession::new_with_core_kind(4, 20, kind);
+fn assert_scrollback_selection_text_uses_buffer_coordinates() {
+    let mut session = TerminalSession::new_with_scrollback(4, 20, 1_500);
 
     session.apply_remote_bytes(b"zero\r\none\r\ntwo\r\nthree\r\nfour\r\nfive\r\n");
     session.scroll_viewport_lines(2);
@@ -151,7 +150,7 @@ fn assert_scrollback_selection_text_uses_buffer_coordinates(kind: TerminalCoreKi
 
 #[test]
 fn wezterm_session_selection_text_reads_scrollback_above_viewport() {
-    assert_scrollback_selection_text_uses_buffer_coordinates(TerminalCoreKind::Wezterm);
+    assert_scrollback_selection_text_uses_buffer_coordinates();
 }
 
 #[test]
