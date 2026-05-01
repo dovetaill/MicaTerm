@@ -3164,16 +3164,6 @@ fn default_connection_progress_detail(headline: ConnectionHeadlineState) -> &'st
     }
 }
 
-fn default_connection_progress_task_title(headline: ConnectionHeadlineState) -> &'static str {
-    match headline {
-        ConnectionHeadlineState::Connecting => "Connecting",
-        ConnectionHeadlineState::WaitingUser => "Waiting for confirmation",
-        ConnectionHeadlineState::Connected => "Connected",
-        ConnectionHeadlineState::Cancelled => "Connection cancelled",
-        ConnectionHeadlineState::Error => "Connection failed",
-    }
-}
-
 fn host_key_decision_task_detail() -> &'static str {
     "The authenticity of the target host cannot be established. Please verify the host key fingerprint below before continuing."
 }
@@ -3216,21 +3206,13 @@ fn connection_progress_task_title(
     attempt: &ConnectionAttemptState,
     current_step: Option<&ConnectionStepStateItem>,
 ) -> String {
-    if connection_progress_visual_state(attempt, current_step)
-        == ConnectionVisualState::HostKeyWarning
-    {
-        return "Host key changed".into();
+    match connection_progress_visual_state(attempt, current_step) {
+        ConnectionVisualState::HostKeyWarning => "Host key changed".into(),
+        ConnectionVisualState::VerifyingHostKey => "Verify host key".into(),
+        ConnectionVisualState::Failed => "Connection failed".into(),
+        ConnectionVisualState::Connected => "Connected".into(),
+        ConnectionVisualState::Connecting => "Connecting".into(),
     }
-
-    if attempt.prompt.is_some()
-        || current_step.is_some_and(|step| step.step_kind == "verify-host-key")
-    {
-        return "Verify host key".into();
-    }
-
-    current_step
-        .map(|step| step.title.clone())
-        .unwrap_or_else(|| default_connection_progress_task_title(attempt.headline).into())
 }
 
 fn connection_progress_task_detail(
@@ -3624,7 +3606,44 @@ fn connection_progress_view_for_attempt(
                 });
             }
         }
-        ConnectionVisualState::Connecting | ConnectionVisualState::Connected => {}
+        ConnectionVisualState::Connecting | ConnectionVisualState::Connected => {
+            if let Some(profile) = profile {
+                let jump_summary = connection_jump_host_summary(profile);
+                main_fields.push(ConnectionProgressFieldRow {
+                    label: "Target".into(),
+                    value: profile.host.clone().into(),
+                    copy_value: profile.host.clone().into(),
+                    monospace: false,
+                });
+                main_fields.push(ConnectionProgressFieldRow {
+                    label: "Path".into(),
+                    value: (if jump_summary == "Direct connection" {
+                        "Direct".to_string()
+                    } else {
+                        jump_summary.clone()
+                    })
+                    .into(),
+                    copy_value: if jump_summary == "Direct connection" {
+                        "".into()
+                    } else {
+                        jump_summary.into()
+                    },
+                    monospace: false,
+                });
+                main_fields.push(ConnectionProgressFieldRow {
+                    label: "Port".into(),
+                    value: format!("{} (SSH)", profile.port).into(),
+                    copy_value: profile.port.to_string().into(),
+                    monospace: false,
+                });
+                main_fields.push(ConnectionProgressFieldRow {
+                    label: "Auth".into(),
+                    value: connection_auth_label(profile).into(),
+                    copy_value: "".into(),
+                    monospace: false,
+                });
+            }
+        }
     }
 
     let detail_fields = profile
@@ -8376,8 +8395,8 @@ mod tests {
         });
     }
 
-    fn bitmap_workspace_terminal_state_fixture_for_test(
-    ) -> (AppWindow, ShellViewModel, WorkspaceFollowTracker) {
+    fn bitmap_workspace_terminal_state_fixture_for_test()
+    -> (AppWindow, ShellViewModel, WorkspaceFollowTracker) {
         i_slint_backend_testing::init_no_event_loop();
 
         let window = AppWindow::new().expect("create app window");
@@ -8410,9 +8429,10 @@ mod tests {
         (window, state, WorkspaceFollowTracker::default())
     }
 
-    fn seeded_bitmap_workspace_terminal_state_for_test(
-    ) -> (AppWindow, ShellViewModel, WorkspaceFollowTracker) {
-        let (window, state, mut follow_tracker) = bitmap_workspace_terminal_state_fixture_for_test();
+    fn seeded_bitmap_workspace_terminal_state_for_test()
+    -> (AppWindow, ShellViewModel, WorkspaceFollowTracker) {
+        let (window, state, mut follow_tracker) =
+            bitmap_workspace_terminal_state_fixture_for_test();
         sync_workspace_session_state(&window, &state, &mut follow_tracker);
         (window, state, follow_tracker)
     }

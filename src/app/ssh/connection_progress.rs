@@ -163,9 +163,9 @@ impl ConnectionPreviewState {
                 headline: ConnectionHeadlineState::Connecting,
                 visual_state: ConnectionVisualState::Connecting,
                 current_hop_label: "Target".into(),
-                current_detail: "Authenticating to deploy@server.interserver.com".into(),
+                current_detail: "Authenticating the secure session with deploy@server.interserver.com.".into(),
                 task_title: "Connecting".into(),
-                task_detail: "Trusted host key found. Completing the SSH session handshake.".into(),
+                task_detail: "Using the trusted host key. Finishing authentication and preparing the remote shell.".into(),
                 hops: vec![
                     local_hop(ConnectionHopVisualState::Completed),
                     target_hop("Target", "server.interserver.com", 22, ConnectionHopVisualState::Current),
@@ -176,7 +176,12 @@ impl ConnectionPreviewState {
                     step("running", "Target", "Authenticating", "Authenticating as deploy"),
                     step("pending", "Target", "Opening session", "Waiting for terminal channel"),
                 ],
-                main_fields: vec![],
+                main_fields: vec![
+                    field("Target", "server.interserver.com", Some("server.interserver.com"), false),
+                    field("Path", "Direct", None, false),
+                    field("Port", "22 (SSH)", Some("22"), false),
+                    field("Auth", "Private key", None, false),
+                ],
                 detail_fields: vec![
                     field("User", "deploy", None, false),
                     field("Authentication", "Private key", None, false),
@@ -198,9 +203,9 @@ impl ConnectionPreviewState {
                 headline: ConnectionHeadlineState::Connecting,
                 visual_state: ConnectionVisualState::Connecting,
                 current_hop_label: "Target".into(),
-                current_detail: "Opening the terminal session through Jump Host 1.".into(),
+                current_detail: "Jump Host 1 is ready. Opening the remote shell on the target host.".into(),
                 task_title: "Connecting".into(),
-                task_detail: "Trusted host keys found. Finishing the multi-hop SSH connection.".into(),
+                task_detail: "Trusted host keys are already known. Completing the multi-hop path and preparing the terminal session.".into(),
                 hops: vec![
                     local_hop(ConnectionHopVisualState::Completed),
                     jump_hop(1, "jump.example.com", 22, ConnectionHopVisualState::Completed),
@@ -213,7 +218,12 @@ impl ConnectionPreviewState {
                     step("done", "Target", "Connecting", "Connected to server.interserver.com:22"),
                     step("running", "Target", "Opening session", "Creating terminal channel"),
                 ],
-                main_fields: vec![],
+                main_fields: vec![
+                    field("Target", "server.interserver.com", Some("server.interserver.com"), false),
+                    field("Path", "jump.example.com:22", Some("jump.example.com:22"), false),
+                    field("Port", "22 (SSH)", Some("22"), false),
+                    field("Auth", "Private key", None, false),
+                ],
                 detail_fields: vec![
                     field("User", "deploy", None, false),
                     field("Authentication", "Private key", None, false),
