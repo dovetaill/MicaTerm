@@ -88,21 +88,23 @@ component SshStatusText inherits Text {
 component ConnectionProgressDotRail inherits Rectangle {
     in property <brush> dot-color: ThemeTokens.ssh-status-hop-divider;
 
-    width: 28px;
+    width: 30px;
     height: 2px;
     background: transparent;
 
     Rectangle { x: 0px; y: 0px; width: 2px; height: 2px; border-radius: 1px; background: root.dot-color; opacity: 0.52; }
-    Rectangle { x: 6px; y: 0px; width: 2px; height: 2px; border-radius: 1px; background: root.dot-color; opacity: 0.72; }
-    Rectangle { x: 12px; y: 0px; width: 2px; height: 2px; border-radius: 1px; background: root.dot-color; opacity: 0.9; }
-    Rectangle { x: 18px; y: 0px; width: 2px; height: 2px; border-radius: 1px; background: root.dot-color; opacity: 0.72; }
-    Rectangle { x: 24px; y: 0px; width: 2px; height: 2px; border-radius: 1px; background: root.dot-color; opacity: 0.52; }
+    Rectangle { x: 7px; y: 0px; width: 2px; height: 2px; border-radius: 1px; background: root.dot-color; opacity: 0.72; }
+    Rectangle { x: 14px; y: 0px; width: 2px; height: 2px; border-radius: 1px; background: root.dot-color; opacity: 0.9; }
+    Rectangle { x: 21px; y: 0px; width: 2px; height: 2px; border-radius: 1px; background: root.dot-color; opacity: 0.72; }
+    Rectangle { x: 28px; y: 0px; width: 2px; height: 2px; border-radius: 1px; background: root.dot-color; opacity: 0.52; }
 }
 
 component ConnectionProgressActionButton inherits Rectangle {
     in property <string> label;
     in property <bool> enabled: true;
     in property <string> tone: "secondary";
+    in property <bool> show-icon: false;
+    in property <image> icon-source;
     callback clicked();
 
     height: root.tone == "tertiary" ? 28px : 56px;
@@ -135,8 +137,8 @@ component ConnectionProgressActionButton inherits Rectangle {
                             ? transparent
                             : ThemeTokens.control-active-surface;
 
-    SshStatusText {
-        x: root.tone == "tertiary" ? 0px : 0px;
+    if !root.show-icon : SshStatusText {
+        x: 0px;
         width: parent.width;
         height: parent.height;
         text: root.label;
@@ -152,6 +154,40 @@ component ConnectionProgressActionButton inherits Rectangle {
         vertical-alignment: center;
         font-size: root.tone == "tertiary" ? 14px : 16px;
         font-weight: root.tone == "tertiary" ? 550 : 600;
+    }
+
+    if root.show-icon : Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+
+        HorizontalLayout {
+            x: (parent.width - self.preferred-width) / 2;
+            y: 0px;
+            width: self.preferred-width;
+            height: parent.height;
+            spacing: 10px;
+
+            Image {
+                width: 18px;
+                height: 18px;
+                source: root.icon-source;
+                image-fit: contain;
+                colorize: root.tone == "primary" ? #f7fbf8 : ThemeTokens.text-primary;
+                opacity: root.enabled ? 0.96 : 0.48;
+            }
+
+            SshStatusText {
+                width: self.preferred-width;
+                height: parent.height;
+                text: root.label;
+                color: root.tone == "primary" ? #f7fbf8 : ThemeTokens.text-primary;
+                opacity: root.enabled ? 1.0 : 0.48;
+                vertical-alignment: center;
+                font-size: 16px;
+                font-weight: 600;
+            }
+        }
     }
 
     button-touch := TouchArea {
@@ -417,6 +453,7 @@ export component TerminalSessionHost inherits Rectangle {
     private property <image> ssh-status-waiting-icon: @image-url("../../assets/icons/ssh-flow/ssh-status-waiting.svg");
     private property <image> ssh-status-warning-icon: @image-url("../../assets/icons/ssh-flow/reference/ssh-status-warning.png");
     private property <image> ssh-status-failed-icon: @image-url("../../assets/icons/ssh-flow/ssh-status-failed.svg");
+    private property <image> ssh-verify-shield-glyph-icon: @image-url("../../assets/icons/ssh-flow/ssh-verify-shield-key.svg");
     private property <image> fluent-chevron-right-icon: @image-url("../../assets/icons/fluent/chevron-right-20-regular.svg");
     private property <image> fluent-chevron-down-icon: @image-url("../../assets/icons/fluent/chevron-down-20-regular.svg");
     private property <image> fluent-dismiss-icon: @image-url("../../assets/icons/fluent/dismiss-20-regular.svg");
@@ -2273,22 +2310,22 @@ export component TerminalSessionHost inherits Rectangle {
                                 spacing: 10px;
 
                                 if index > 0 : connector := Rectangle {
-                                    width: 76px;
+                                    width: 84px;
                                     height: parent.height;
                                     background: transparent;
 
                                     ConnectionProgressDotRail {
                                         x: 0px;
                                         y: 27px;
-                                        width: 28px;
+                                        width: 30px;
                                         dot-color: ThemeTokens.ssh-status-hop-divider;
                                     }
 
                                     Image {
-                                        x: (parent.width - 24px) / 2;
-                                        y: 16px;
-                                        width: 24px;
-                                        height: 24px;
+                                        x: (parent.width - 20px) / 2;
+                                        y: 18px;
+                                        width: 20px;
+                                        height: 20px;
                                         source: root.ssh-chevron-right-icon;
                                         image-fit: contain;
                                     }
@@ -2296,7 +2333,7 @@ export component TerminalSessionHost inherits Rectangle {
                                     ConnectionProgressDotRail {
                                         x: parent.width - self.width;
                                         y: 27px;
-                                        width: 28px;
+                                        width: 30px;
                                         dot-color: ThemeTokens.ssh-status-hop-divider;
                                     }
                                 }
@@ -2438,26 +2475,26 @@ export component TerminalSessionHost inherits Rectangle {
                         background: transparent;
 
                         Rectangle {
-                            x: 30px;
-                            y: 30px;
-                            width: 156px;
-                            height: 156px;
+                            x: 36px;
+                            y: 34px;
+                            width: 148px;
+                            height: 148px;
                             background: transparent;
 
                             Image {
-                                x: 0px;
+                                x: 2px;
                                 y: 0px;
-                                width: 156px;
-                                height: 156px;
+                                width: 144px;
+                                height: 144px;
                                 source: root.connection-progress-verify-shield-icon();
                                 image-fit: contain;
                             }
                         }
 
                         SshStatusText {
-                            x: 198px;
+                            x: 204px;
                             y: 30px;
-                            width: parent.width - 226px;
+                            width: parent.width - 232px;
                             height: 30px;
                             text: root.connection-progress-task-title;
                             color: ThemeTokens.text-primary;
@@ -2467,9 +2504,9 @@ export component TerminalSessionHost inherits Rectangle {
                         }
 
                         SshStatusText {
-                            x: 198px;
+                            x: 204px;
                             y: 66px;
-                            width: parent.width - 226px;
+                            width: parent.width - 232px;
                             height: 44px;
                             text: root.connection-progress-task-detail;
                             color: ThemeTokens.text-secondary;
@@ -2478,17 +2515,17 @@ export component TerminalSessionHost inherits Rectangle {
                         }
 
                         Rectangle {
-                            x: 198px;
+                            x: 204px;
                             y: 118px;
-                            width: parent.width - 226px;
+                            width: parent.width - 232px;
                             height: 1px;
                             background: ThemeTokens.divider-subtle;
                         }
 
                         for field[index] in root.connection-progress-main-fields : Rectangle {
-                            x: 198px;
+                            x: 204px;
                             y: 130px + (index * 38px);
-                            width: parent.width - 226px;
+                            width: parent.width - 232px;
                             height: 34px;
                             background: transparent;
 
@@ -2506,7 +2543,7 @@ export component TerminalSessionHost inherits Rectangle {
                             SshStatusText {
                                 x: 0px;
                                 y: 0px;
-                                width: 114px;
+                                width: 126px;
                                 height: parent.height;
                                 text: field.label;
                                 color: ThemeTokens.text-secondary;
@@ -2515,9 +2552,9 @@ export component TerminalSessionHost inherits Rectangle {
                             }
 
                             if field.monospace : Rectangle {
-                                x: 114px;
+                                x: 126px;
                                 y: 0px;
-                                width: parent.width - 142px;
+                                width: parent.width - 154px;
                                 height: 40px;
                                 border-radius: 12px;
                                 border-width: 1px;
@@ -2539,9 +2576,9 @@ export component TerminalSessionHost inherits Rectangle {
                             }
 
                             if !field.monospace : SshStatusText {
-                                x: 114px;
+                                x: 126px;
                                 y: 0px;
-                                width: parent.width - 142px;
+                                width: parent.width - 154px;
                                 height: parent.height;
                                 text: field.value;
                                 color: ThemeTokens.text-primary;
@@ -2552,11 +2589,11 @@ export component TerminalSessionHost inherits Rectangle {
 
                             if field.copy_value != "" : Rectangle {
                                 x: field.monospace
-                                    ? parent.width - 20px
-                                    : min(parent.width - 20px, 114px + value-measure.preferred-width + 10px);
-                                y: field.monospace ? 9px : 7px;
-                                width: 18px;
-                                height: 18px;
+                                    ? parent.width - 22px
+                                    : min(parent.width - 22px, 126px + value-measure.preferred-width + 6px);
+                                y: field.monospace ? 10px : 7px;
+                                width: 20px;
+                                height: 20px;
                                 border-radius: 0px;
                                 border-width: 0px;
                                 background: transparent;
@@ -3110,20 +3147,23 @@ export component TerminalSessionHost inherits Rectangle {
                             }
 
                             Rectangle {
-                                x: parent.width - 22px;
-                                y: 13px;
+                                x: parent.width - 48px;
+                                y: 12px;
                                 width: 18px;
                                 height: 18px;
                                 background: transparent;
 
                                 Image {
-                                    x: 1px;
-                                    y: 1px;
-                                    width: 16px;
-                                    height: 16px;
-                                    source: root.ssh-chevron-right-icon;
+                                    x: 0px;
+                                    y: 0px;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    source: root.connection-progress-diagnostics-expanded
+                                        ? root.fluent-chevron-down-icon
+                                        : root.fluent-chevron-right-icon;
                                     image-fit: contain;
-                                    opacity: 0.72;
+                                    colorize: ThemeTokens.text-secondary;
+                                    opacity: 0.9;
                                 }
                             }
 
@@ -3231,7 +3271,7 @@ export component TerminalSessionHost inherits Rectangle {
 
                 action-bar := Rectangle {
                     width: parent.width;
-                    height: 92px;
+                    height: 78px;
                     border-radius: 0px;
                     border-width: 0px;
                     border-color: transparent;
@@ -3241,9 +3281,9 @@ export component TerminalSessionHost inherits Rectangle {
                         width: parent.width;
                         height: parent.height;
                         padding-left: 0px;
-                        padding-top: 16px;
-                        padding-right: 0px;
-                        padding-bottom: 16px;
+                        padding-top: 10px;
+                        padding-right: 18px;
+                        padding-bottom: 10px;
                         spacing: 14px;
 
                         ConnectionProgressEscapeBlock {
@@ -3265,6 +3305,8 @@ export component TerminalSessionHost inherits Rectangle {
                             width: 192px;
                             label: "Reject";
                             tone: "secondary";
+                            show-icon: true;
+                            icon-source: root.ssh-verify-shield-glyph-icon;
 
                             clicked => {
                                 root.local-action-requested("reject-host-key");
@@ -3275,6 +3317,8 @@ export component TerminalSessionHost inherits Rectangle {
                             width: 312px;
                             label: "Trust & Continue";
                             tone: "primary";
+                            show-icon: true;
+                            icon-source: root.ssh-verify-shield-glyph-icon;
 
                             clicked => {
                                 root.local-action-requested("trust-host-key");
