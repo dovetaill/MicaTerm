@@ -368,12 +368,7 @@ fn trim_openable_url_token(token: &str) -> Option<&str> {
 
 fn supported_openable_url_scheme_len(token: &str) -> Option<usize> {
     const SUPPORTED_SCHEMES: &[&str] = &[
-        "https://",
-        "http://",
-        "ssh://",
-        "ftp://",
-        "ftps://",
-        "sftp://",
+        "https://", "http://", "ssh://", "ftp://", "ftps://", "sftp://",
     ];
 
     SUPPORTED_SCHEMES

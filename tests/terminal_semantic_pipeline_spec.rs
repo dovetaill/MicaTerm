@@ -304,17 +304,16 @@ fn semantic_style_projection_keeps_navigation_affordances_on_terminal_default_fo
         .expect("url cell")
         .fg_rgba = ansi_fg;
 
-    frame.apply_semantic_style_overlays(
-        None,
-        theme,
-        &[],
-        SearchMatchHighlightStrength::Balanced,
-    );
+    frame.apply_semantic_style_overlays(None, theme, &[], SearchMatchHighlightStrength::Balanced);
     let previous = frame.clone();
     frame.apply_semantic_style_overlays(
         Some(&previous),
         theme,
-        &[url_span.clone(), line_reference_span.clone(), input_path_span.clone()],
+        &[
+            url_span.clone(),
+            line_reference_span.clone(),
+            input_path_span.clone(),
+        ],
         SearchMatchHighlightStrength::Balanced,
     );
 
@@ -338,8 +337,7 @@ fn semantic_style_projection_keeps_navigation_affordances_on_terminal_default_fo
         .find(|cell| cell.col == line_reference_span.start_col)
         .expect("styled line reference cell");
     assert_eq!(
-        line_reference_cell.fg_rgba,
-        previous.palette.default_fg_rgba,
+        line_reference_cell.fg_rgba, previous.palette.default_fg_rgba,
         "file:line tokens should keep the terminal default foreground instead of flipping to semantic accent blue"
     );
     assert!(
@@ -353,8 +351,7 @@ fn semantic_style_projection_keeps_navigation_affordances_on_terminal_default_fo
         .find(|cell| cell.col == input_path_span.start_col)
         .expect("styled input path cell");
     assert_eq!(
-        input_path_cell.fg_rgba,
-        previous.palette.default_fg_rgba,
+        input_path_cell.fg_rgba, previous.palette.default_fg_rgba,
         "prompt-side path tokens should stay on the terminal foreground instead of turning blue just because they contain path punctuation"
     );
     assert!(

@@ -1482,10 +1482,9 @@ impl WindowsNativeSurfaceState {
             };
             let cursor_fill = cursor_overlay_fill_rgba(cursor.bg_rgba, cursor.shape);
             self.ensure_brush(cursor_fill);
-            if let (Some(cursor_rect), Some(brush)) = (
-                cursor_rect(frame.rect, cursor),
-                self.brush_for(cursor_fill),
-            ) {
+            if let (Some(cursor_rect), Some(brush)) =
+                (cursor_rect(frame.rect, cursor), self.brush_for(cursor_fill))
+            {
                 unsafe {
                     render_target.FillRectangle(&cursor_rect, &brush);
                 }
