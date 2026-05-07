@@ -277,50 +277,14 @@ impl ShellViewModel {
             return;
         }
 
-        let ssh_indices = rows
-            .iter()
-            .enumerate()
-            .filter_map(|(index, item)| {
-                (self.console_asset_tree.kind(item.id.as_str())
-                    == Some(ConsoleAssetKind::SshConnection))
-                .then_some(index)
-            })
-            .collect::<Vec<_>>();
-        if ssh_indices.is_empty() {
-            return;
-        }
-
         let selected_row_index = self
             .saved_ssh_picker_selected_asset_id
             .as_deref()
             .and_then(|selected_id| rows.iter().position(|item| item.id == selected_id));
-
-        let next_row_index = if let Some(anchor_index) = selected_row_index {
-            if let Some(current_ssh_position) = ssh_indices.iter().position(|index| *index == anchor_index)
-            {
-                let next_ssh_position = current_ssh_position
-                    .saturating_add_signed(delta as isize)
-                    .clamp(0, ssh_indices.len() - 1);
-                ssh_indices[next_ssh_position]
-            } else if delta > 0 {
-                ssh_indices
-                    .iter()
-                    .copied()
-                    .find(|index| *index > anchor_index)
-                    .unwrap_or_else(|| *ssh_indices.last().expect("non-empty ssh index list"))
-            } else {
-                ssh_indices
-                    .iter()
-                    .rev()
-                    .copied()
-                    .find(|index| *index < anchor_index)
-                    .unwrap_or_else(|| ssh_indices[0])
-            }
-        } else if delta > 0 {
-            ssh_indices[0]
-        } else {
-            *ssh_indices.last().expect("non-empty ssh index list")
-        };
+        let next_row_index = selected_row_index
+            .unwrap_or(0)
+            .saturating_add_signed(delta as isize)
+            .clamp(0, rows.len() - 1);
 
         let next_id = rows[next_row_index].id.clone();
         self.saved_ssh_picker_selected_asset_id = Some(next_id.clone());

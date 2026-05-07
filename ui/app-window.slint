@@ -1528,7 +1528,9 @@ export component AppWindow inherits Window {
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
         focus-sequence: root.blocking-modal-focus-sequence;
-        enter-enabled: root.open-saved-ssh-modal-can-open-selection;
+        enter-enabled: root.open-saved-ssh-modal-items.length > 0;
+        escape-enabled: true;
+        arrow-navigation-enabled: root.open-saved-ssh-modal-items.length > 0;
 
         focus-restore-requested => {
             main-workspace.restore-primary-focus();
@@ -1539,11 +1541,19 @@ export component AppWindow inherits Window {
         }
 
         escape-requested => {
-            root.open-saved-ssh-modal-close-requested();
+            if root.open-saved-ssh-modal-query != "" {
+                root.open-saved-ssh-modal-query-changed("");
+            } else {
+                root.open-saved-ssh-modal-close-requested();
+            }
         }
 
         enter-requested => {
             root.open-saved-ssh-modal-activate-selection-requested();
+        }
+
+        arrow-navigation-requested(delta) => {
+            root.open-saved-ssh-modal-move-selection-requested(delta);
         }
 
         open-saved-ssh-modal-overlay := OpenSavedSshModal {

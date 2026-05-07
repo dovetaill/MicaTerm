@@ -176,6 +176,51 @@ fn saved_ssh_picker_defaults_to_the_first_visible_saved_ssh() {
 }
 
 #[test]
+fn saved_ssh_picker_keyboard_navigation_moves_across_visible_folder_rows() {
+    let mut tree = AssetTree::new();
+    let folder_a = tree.insert_root(ConsoleAssetKind::Folder, "Group A");
+    let ssh_a = tree.insert_child_with_payload(
+        &folder_a,
+        ConsoleAssetKind::SshConnection,
+        "Alpha",
+        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+            host: "10.0.0.10".into(),
+            user: "ops".into(),
+            port: "22".into(),
+            ..AssetSshConnectionSpec::default()
+        }),
+    );
+    let folder_b = tree.insert_root(ConsoleAssetKind::Folder, "Group B");
+    tree.insert_child_with_payload(
+        &folder_b,
+        ConsoleAssetKind::SshConnection,
+        "Bravo",
+        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+            host: "10.0.0.24".into(),
+            user: "deploy".into(),
+            port: "22".into(),
+            ..AssetSshConnectionSpec::default()
+        }),
+    );
+
+    let mut view_model = ShellViewModel::default();
+    view_model.replace_console_asset_tree(tree);
+    view_model.open_saved_ssh_picker();
+
+    assert_eq!(
+        view_model.saved_ssh_picker_selected_asset_id(),
+        Some(ssh_a.as_str())
+    );
+
+    view_model.move_saved_ssh_picker_selection(1);
+
+    assert_eq!(
+        view_model.saved_ssh_picker_selected_asset_id(),
+        Some(folder_b.as_str())
+    );
+}
+
+#[test]
 fn shell_view_model_tracks_top_status_bar_state() {
     let mut view_model = ShellViewModel::default();
 

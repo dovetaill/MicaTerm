@@ -7973,6 +7973,115 @@ fn launcher_picker_move_selection_request_advances_keyboard_target() {
 }
 
 #[test]
+fn launcher_picker_down_arrow_key_advances_selection_and_enter_opens() {
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
+
+        let app = AppWindow::new().unwrap();
+        bind_with_fake_sessions(&app, None);
+        app.show().expect("show app window");
+
+        create_root_ssh(&app, "Prod Bastion", "10.0.0.10");
+        create_root_ssh(&app, "DB Admin", "10.0.0.24");
+        app.invoke_workspace_new_tab_requested();
+        app.invoke_welcome_open_saved_ssh_requested();
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(8));
+        app.window()
+            .dispatch_event(WindowEvent::WindowActiveChanged(true));
+
+        let window_size = app.window().size();
+        let modal_x = ((window_size.width as f32) - 720.0) / 2.0;
+        let modal_y = app.get_layout_titlebar_height()
+            + (((window_size.height as f32) - app.get_layout_titlebar_height() - 620.0) / 2.0);
+        let search_position = LogicalPosition::new(modal_x + 120.0, modal_y + 68.0 + 49.0);
+        app.window()
+            .dispatch_event(WindowEvent::PointerMoved { position: search_position });
+        app.window().dispatch_event(WindowEvent::PointerPressed {
+            position: search_position,
+            button: PointerEventButton::Left,
+        });
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(30));
+        app.window().dispatch_event(WindowEvent::PointerReleased {
+            position: search_position,
+            button: PointerEventButton::Left,
+        });
+
+        app.window().dispatch_event(WindowEvent::KeyPressed {
+            text: Key::DownArrow.into(),
+        });
+        app.window().dispatch_event(WindowEvent::KeyReleased {
+            text: Key::DownArrow.into(),
+        });
+        app.window()
+            .dispatch_event(WindowEvent::KeyPressed { text: "\n".into() });
+        app.window()
+            .dispatch_event(WindowEvent::KeyReleased { text: "\n".into() });
+
+        assert!(!app.get_open_saved_ssh_modal_open());
+        let item = app
+            .get_workspace_tab_items()
+            .row_data(0)
+            .expect("workspace tab after keyboard down-arrow activation");
+        assert_eq!(item.title.as_str(), "DB Admin");
+    });
+}
+
+#[test]
+fn launcher_picker_second_click_on_the_same_row_opens_the_saved_ssh() {
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
+
+        let app = AppWindow::new().unwrap();
+        bind_with_fake_sessions(&app, None);
+        app.show().expect("show app window");
+
+        create_root_ssh(&app, "Prod Bastion", "10.0.0.10");
+        create_root_ssh(&app, "DB Admin", "10.0.0.24");
+        app.invoke_workspace_new_tab_requested();
+        app.invoke_welcome_open_saved_ssh_requested();
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(8));
+        app.window()
+            .dispatch_event(WindowEvent::WindowActiveChanged(true));
+
+        let window_size = app.window().size();
+        let modal_width = 720.0f32;
+        let modal_height = 620.0f32;
+        let header_height = 68.0f32;
+        let row_height = 54.0f32;
+        let modal_x = ((window_size.width as f32) - modal_width) / 2.0;
+        let modal_y = app.get_layout_titlebar_height()
+            + (((window_size.height as f32) - app.get_layout_titlebar_height() - modal_height)
+                / 2.0);
+        let row_position = LogicalPosition::new(
+            modal_x + 120.0,
+            modal_y + header_height + 108.0 + 10.0 + row_height + (row_height / 2.0),
+        );
+
+        for _ in 0..2 {
+            app.window()
+                .dispatch_event(WindowEvent::PointerMoved { position: row_position });
+            app.window().dispatch_event(WindowEvent::PointerPressed {
+                position: row_position,
+                button: PointerEventButton::Left,
+            });
+            i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+            app.window().dispatch_event(WindowEvent::PointerReleased {
+                position: row_position,
+                button: PointerEventButton::Left,
+            });
+            i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(90));
+        }
+
+        assert!(!app.get_open_saved_ssh_modal_open());
+        let item = app
+            .get_workspace_tab_items()
+            .row_data(0)
+            .expect("workspace tab after repeated row click activation");
+        assert_eq!(item.title.as_str(), "DB Admin");
+    });
+}
+
+#[test]
 fn launcher_picker_activation_restores_native_terminal_surface_rect() {
     run_with_large_test_stack(|| {
         i_slint_backend_testing::init_no_event_loop();

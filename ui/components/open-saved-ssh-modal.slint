@@ -1,4 +1,4 @@
-import { ListView } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 import { DialogActionButton, ModalFooterBar, ModalHeaderBar } from "./modal-chrome.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 import { AppTypography } from "../theme/typography.slint";
@@ -16,9 +16,10 @@ component SavedSshPickerRow inherits Rectangle {
     in property <bool> expanded: false;
     in property <bool> selected: false;
     in property <bool> focused: false;
-    callback selected-requested(string);
+    callback clicked-requested(string);
     callback activated-requested(string);
     callback toggle-expanded-requested(string);
+    callback became-selected();
 
     private property <bool> has-disclosure: root.disclosure-state != "none";
     private property <length> indent: root.compact-flat-mode ? 12px : 12px + (root.depth * 12px);
@@ -135,11 +136,17 @@ component SavedSshPickerRow inherits Rectangle {
         mouse-cursor: MouseCursor.pointer;
 
         clicked => {
-            root.selected-requested(root.item-id);
+            root.clicked-requested(root.item-id);
         }
 
         double-clicked => {
             root.activated-requested(root.item-id);
+        }
+    }
+
+    changed selected => {
+        if root.selected {
+            root.became-selected();
         }
     }
 }
@@ -162,6 +169,11 @@ export component OpenSavedSshModal inherits Rectangle {
     callback focus-restore-requested();
 
     private property <image> search-icon: @image-url("../../assets/icons/fluent/search-20-regular.svg");
+    private property <string> armed-activation-item-id: "";
+    private property <length> list-row-height: 54px;
+    private property <length> list-content-padding: 10px;
+    private property <length> list-viewport-y: 0px;
+    private property <length> list-visible-height: 0px;
 
     background: ThemeTokens.modal-body-surface;
     border-radius: 0px;
@@ -172,8 +184,39 @@ export component OpenSavedSshModal inherits Rectangle {
         search-input.focus();
     }
 
+    public function clear-armed-activation() {
+        root.armed-activation-item-id = "";
+        activation-click-guard.running = false;
+    }
+
+    public function arm-activation(item-id: string) {
+        root.armed-activation-item-id = item-id;
+        activation-click-guard.restart();
+    }
+
+    public function ensure-item-visible(index: int) {
+        if index < 0 {
+            return;
+        }
+
+        let row-top = root.list-content-padding + (index * root.list-row-height);
+        let row-bottom = row-top + root.list-row-height;
+        if row-top < root.list-viewport-y {
+            root.list-viewport-y = max(0px, row-top - 6px);
+        } else if row-bottom > root.list-viewport-y + root.list-visible-height {
+            root.list-viewport-y = max(
+                0px,
+                row-bottom - root.list-visible-height + 6px,
+            );
+        }
+    }
+
     changed focus-sequence => {
-        root.focus-query();
+        focus-query-timer.restart();
+    }
+
+    init => {
+        focus-query-timer.restart();
     }
 
     modal-focus := FocusScope {
@@ -286,22 +329,32 @@ export component OpenSavedSshModal inherits Rectangle {
                         selection-foreground-color: ThemeTokens.text-primary;
 
                         edited => {
+                            root.clear-armed-activation();
                             root.query-changed(self.text);
                         }
 
                         key-pressed(event) => {
-                            if (event.text == Key.Escape) {
-                                root.close-requested();
-                                accept
-                            } else if (event.text == Key.DownArrow) {
+                            if event.text == Key.DownArrow {
+                                root.clear-armed-activation();
                                 root.move-selection-requested(1);
                                 accept
-                            } else if (event.text == Key.UpArrow) {
+                            } else if event.text == Key.UpArrow {
+                                root.clear-armed-activation();
                                 root.move-selection-requested(-1);
                                 accept
+                            } else if event.text == Key.Escape {
+                                root.clear-armed-activation();
+                                if root.query != "" {
+                                    root.query-changed("");
+                                } else {
+                                    root.focus-restore-requested();
+                                    root.close-requested();
+                                }
+                                accept
                             } else if (event.text == Key.Return || event.text == "\n")
-                                && root.can-open-selection
+                                && root.items.length > 0
                             {
+                                root.clear-armed-activation();
                                 root.activate-selection-requested();
                                 accept
                             } else {
@@ -360,37 +413,77 @@ export component OpenSavedSshModal inherits Rectangle {
                     }
                 }
 
-                if root.items.length > 0 : list-host := ListView {
+                if root.items.length > 0 : list-scroll := ScrollView {
                     x: 10px;
                     y: 10px;
                     width: parent.width - 20px;
                     height: parent.height - 20px;
+                    viewport-width: scroll-body.width;
+                    viewport-height: scroll-body.height;
+                    mouse-drag-pan-enabled: false;
                     horizontal-scrollbar-policy: always-off;
+                    viewport-y <=> root.list-viewport-y;
 
-                    for item in root.items : SavedSshPickerRow {
-                        width: list-host.width;
-                        item-id: item.id;
-                        item-kind: item.kind;
-                        label: item.label;
-                        secondary-text: item.path_hint;
-                        depth: item.depth;
-                        has-children: item.has_children;
-                        expanded: item.expanded;
-                        selected: item.selected;
-                        focused: item.focused;
-                        disclosure-state: item.disclosure_state;
-                        compact-flat-mode: item.compact_flat_mode;
+                    changed visible-height => {
+                        root.list-visible-height = self.visible-height;
+                    }
 
-                        selected-requested(item-id) => {
-                            root.asset-selected(item-id);
-                        }
+                    init => {
+                        root.list-visible-height = self.visible-height;
+                    }
 
-                        activated-requested(item-id) => {
-                            root.asset-activated(item-id);
-                        }
+                    scroll-body := Rectangle {
+                        width: list-scroll.visible-width;
+                        height: max(
+                            list-scroll.visible-height,
+                            root.list-content-padding
+                                + root.list-content-padding
+                                + (root.items.length * root.list-row-height),
+                        );
+                        background: transparent;
 
-                        toggle-expanded-requested(item-id) => {
-                            root.toggle-expanded-requested(item-id);
+                        for item[index] in root.items : SavedSshPickerRow {
+                            x: 0px;
+                            y: root.list-content-padding + (index * root.list-row-height);
+                            width: scroll-body.width;
+                            height: root.list-row-height;
+                            item-id: item.id;
+                            item-kind: item.kind;
+                            label: item.label;
+                            secondary-text: item.path_hint;
+                            depth: item.depth;
+                            has-children: item.has_children;
+                            expanded: item.expanded;
+                            selected: item.selected;
+                            focused: item.focused;
+                            disclosure-state: item.disclosure_state;
+                            compact-flat-mode: item.compact_flat_mode;
+
+                            clicked-requested(item-id) => {
+                                if root.armed-activation-item-id == item-id {
+                                    root.clear-armed-activation();
+                                    root.asset-activated(item-id);
+                                } else {
+                                    root.arm-activation(item-id);
+                                    root.asset-selected(item-id);
+                                    root.focus-query();
+                                }
+                            }
+
+                            activated-requested(item-id) => {
+                                root.clear-armed-activation();
+                                root.asset-activated(item-id);
+                            }
+
+                            toggle-expanded-requested(item-id) => {
+                                root.clear-armed-activation();
+                                root.toggle-expanded-requested(item-id);
+                                root.focus-query();
+                            }
+
+                            became-selected => {
+                                root.ensure-item-visible(index);
+                            }
                         }
                     }
                 }
@@ -448,6 +541,25 @@ export component OpenSavedSshModal inherits Rectangle {
                     }
                 }
             }
+        }
+    }
+
+    activation-click-guard := Timer {
+        interval: 320ms;
+        running: false;
+
+        triggered => {
+            root.clear-armed-activation();
+        }
+    }
+
+    focus-query-timer := Timer {
+        interval: 1ms;
+        running: false;
+
+        triggered => {
+            self.running = false;
+            root.focus-query();
         }
     }
 }

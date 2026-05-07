@@ -9,6 +9,7 @@ export component BlockingModalShell inherits Rectangle {
     in property <int> focus-sequence: 0;
     in property <bool> escape-enabled: true;
     in property <bool> enter-enabled: false;
+    in property <bool> arrow-navigation-enabled: false;
     in property <length> modal-radius: ThemeTokens.modal-radius;
     in property <brush> modal-surface: ThemeTokens.modal-surface;
     in property <brush> modal-border-color: ThemeTokens.modal-border;
@@ -24,6 +25,7 @@ export component BlockingModalShell inherits Rectangle {
     callback consume-event();
     callback escape-requested();
     callback enter-requested();
+    callback arrow-navigation-requested(int);
 
     width: 100%;
     height: 100%;
@@ -131,6 +133,12 @@ export component BlockingModalShell inherits Rectangle {
                 } else if root.enter-enabled && (event.text == Key.Return || event.text == "\n") {
                     root.enter-requested();
                     accept
+                } else if root.arrow-navigation-enabled && event.text == Key.DownArrow {
+                    root.arrow-navigation-requested(1);
+                    accept
+                } else if root.arrow-navigation-enabled && event.text == Key.UpArrow {
+                    root.arrow-navigation-requested(-1);
+                    accept
                 } else {
                     reject
                 }
@@ -149,6 +157,10 @@ export component BlockingModalShell inherits Rectangle {
     }
 
     changed focus-sequence => {
+        modal-event-scope.focus();
+    }
+
+    init => {
         modal-event-scope.focus();
     }
 }
