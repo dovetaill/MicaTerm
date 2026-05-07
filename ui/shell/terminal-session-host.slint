@@ -1,7 +1,7 @@
 // Workspace content host that switches between welcome, terminal, and error states.
 
 import { ThemeTokens } from "../theme/tokens.slint";
-import { QuickLaunchCardRow, QuickLaunchDetailRow, QuickLaunchGroupRow } from "../welcome/quick-launch-types.slint";
+import { QuickLaunchCardRow } from "../welcome/quick-launch-types.slint";
 import { WelcomeView } from "../welcome/welcome-view.slint";
 
 component TerminalContextMenuRow inherits Rectangle {
@@ -312,20 +312,6 @@ export component TerminalSessionHost inherits Rectangle {
     in property <[ConnectionProgressFieldRow]> connection-progress-detail-fields: [];
     in property <[ConnectionProgressDiagnosticRow]> connection-progress-diagnostics: [];
     in property <[QuickLaunchCardRow]> welcome-quick-launch-recent-items: [];
-    in property <[QuickLaunchCardRow]> welcome-quick-launch-favorite-items: [];
-    in property <[QuickLaunchGroupRow]> welcome-quick-launch-group-items: [];
-    in property <[QuickLaunchCardRow]> welcome-quick-launch-visible-group-items: [];
-    in property <QuickLaunchDetailRow> welcome-quick-launch-selected-detail: {
-        asset_id: "",
-        title: "",
-        subtitle: "",
-        environment: "",
-        auth_summary: "",
-        proxy_summary: "",
-        remark: "",
-        recent_label: "",
-    };
-    in property <string> welcome-quick-launch-search-query: "";
     in property <image> session-surface-image;
     in property <int> session-native-frame-token: 0;
     in property <int> session-rows: 24;
@@ -389,12 +375,7 @@ export component TerminalSessionHost inherits Rectangle {
     callback search-open-requested();
     callback search-close-requested();
     callback search-query-changed(string);
-    callback welcome-quick-launch-asset-selected(string);
-    callback welcome-quick-launch-search-changed(string);
     callback welcome-quick-launch-connect-requested(string);
-    callback welcome-quick-launch-connect-in-new-tab-requested(string);
-    callback welcome-quick-launch-toggle-favorite-requested(string);
-    callback welcome-quick-launch-reveal-in-assets-requested(string);
     callback welcome-open-saved-ssh-requested();
 
     public function restore-primary-focus() {
@@ -1612,34 +1593,9 @@ export component TerminalSessionHost inherits Rectangle {
         width: parent.width;
         height: parent.height;
         recent-items: root.welcome-quick-launch-recent-items;
-        favorite-items: root.welcome-quick-launch-favorite-items;
-        group-items: root.welcome-quick-launch-group-items;
-        visible-group-items: root.welcome-quick-launch-visible-group-items;
-        selected-detail: root.welcome-quick-launch-selected-detail;
-        search-query: root.welcome-quick-launch-search-query;
-
-        asset-selected(asset-id) => {
-            root.welcome-quick-launch-asset-selected(asset-id);
-        }
-
-        search-changed(query) => {
-            root.welcome-quick-launch-search-changed(query);
-        }
 
         connect-requested(asset-id) => {
             root.welcome-quick-launch-connect-requested(asset-id);
-        }
-
-        connect-in-new-tab-requested(asset-id) => {
-            root.welcome-quick-launch-connect-in-new-tab-requested(asset-id);
-        }
-
-        toggle-favorite-requested(asset-id) => {
-            root.welcome-quick-launch-toggle-favorite-requested(asset-id);
-        }
-
-        reveal-in-assets-requested(asset-id) => {
-            root.welcome-quick-launch-reveal-in-assets-requested(asset-id);
         }
 
         open-saved-ssh-requested => {

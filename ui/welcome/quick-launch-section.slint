@@ -1,6 +1,6 @@
 import { ThemeTokens } from "../theme/tokens.slint";
 import { AppTypography } from "../theme/typography.slint";
-import { QuickLaunchCardRow, QuickLaunchGroupRow } from "quick-launch-types.slint";
+import { QuickLaunchCardRow } from "quick-launch-types.slint";
 import { QuickLaunchCard } from "quick-launch-card.slint";
 
 export component QuickLaunchSection inherits Rectangle {
@@ -8,11 +8,11 @@ export component QuickLaunchSection inherits Rectangle {
     in property <string> subtitle: "";
     in property <[QuickLaunchCardRow]> items: [];
     in property <string> empty_text: "No saved SSH connections yet.";
-    callback item-selected(string);
     callback item-activated(string);
-    callback toggle-favorite-requested(string);
 
-    height: 58px + section-body.preferred-height;
+    private property <image> empty-icon: @image-url("../../assets/icons/new-tab/open-saved-ssh.svg");
+
+    height: (root.subtitle != "" ? 54px : 42px) + section-body.preferred-height;
     background: transparent;
 
     section-title := Text {
@@ -37,22 +37,43 @@ export component QuickLaunchSection inherits Rectangle {
 
     section-body := VerticalLayout {
         x: 0px;
-        y: root.subtitle != "" ? 54px : 34px;
+        y: root.subtitle != "" ? 54px : 42px;
         width: parent.width;
         spacing: 8px;
 
         if root.items.length == 0 : Rectangle {
             width: parent.width;
-            height: 72px;
-            border-radius: 0px;
+            height: 104px;
+            border-radius: 10px;
             border-width: 1px;
             border-color: ThemeTokens.divider-subtle;
             background: ThemeTokens.assets-surface;
 
+            icon-shell := Rectangle {
+                x: 20px;
+                y: (parent.height - self.height) / 2;
+                width: 52px;
+                height: 52px;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: ThemeTokens.inspector-surface;
+
+                Image {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: 26px;
+                    height: 26px;
+                    source: root.empty-icon;
+                    image-fit: contain;
+                    colorize: ThemeTokens.text-secondary;
+                }
+            }
+
             Text {
-                x: 16px;
+                x: 92px;
                 y: 0px;
-                width: parent.width - 32px;
+                width: parent.width - 120px;
                 height: parent.height;
                 text: root.empty_text;
                 color: ThemeTokens.text-secondary;
@@ -68,119 +89,8 @@ export component QuickLaunchSection inherits Rectangle {
             width: parent.width;
             item: item;
 
-            selected(asset-id) => {
-                root.item-selected(asset-id);
-            }
-
             activated(asset-id) => {
                 root.item-activated(asset-id);
-            }
-
-            toggle-favorite(asset-id) => {
-                root.toggle-favorite-requested(asset-id);
-            }
-        }
-    }
-}
-
-export component QuickLaunchGroupSection inherits Rectangle {
-    in property <string> title: "Groups";
-    in property <[QuickLaunchGroupRow]> items: [];
-
-    private property <image> folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
-
-    height: 58px + groups-body.preferred-height;
-    background: transparent;
-
-    Text {
-        x: 0px;
-        y: 0px;
-        text: root.title;
-        color: ThemeTokens.text-primary;
-        font-size: 18px;
-        font-weight: 700;
-    }
-
-    Text {
-        x: 0px;
-        y: 26px;
-        width: parent.width;
-        text: "Saved SSH folders projected from the console asset tree";
-        color: ThemeTokens.text-secondary;
-        font-family: AppTypography.ui-font-family;
-        font-size: AppTypography.ui-font-size-caption;
-        font-weight: AppTypography.ui-font-weight-regular;
-    }
-
-    groups-body := VerticalLayout {
-        x: 0px;
-        y: 54px;
-        width: parent.width;
-        spacing: 6px;
-
-        if root.items.length == 0 : Rectangle {
-            width: parent.width;
-            height: 64px;
-            border-radius: 0px;
-            border-width: 1px;
-            border-color: ThemeTokens.divider-subtle;
-            background: ThemeTokens.assets-surface;
-
-            Text {
-                x: 16px;
-                y: 0px;
-                width: parent.width - 32px;
-                height: parent.height;
-                text: "No folders with saved SSH connections.";
-                color: ThemeTokens.text-muted;
-                font-family: AppTypography.ui-font-family;
-                font-size: AppTypography.ui-font-size-body;
-                font-weight: AppTypography.ui-font-weight-regular;
-                vertical-alignment: center;
-            }
-        }
-
-        for group in root.items : Rectangle {
-            width: parent.width;
-            height: 42px;
-            border-radius: 0px;
-            border-width: 1px;
-            border-color: group.selected ? ThemeTokens.accent : ThemeTokens.divider-subtle;
-            background: group.selected
-                ? ThemeTokens.control-active-surface
-                : ThemeTokens.assets-surface;
-
-            Image {
-                x: 12px;
-                y: (parent.height - self.height) / 2;
-                width: 18px;
-                height: 18px;
-                source: root.folder-icon;
-                image-fit: contain;
-                colorize: ThemeTokens.text-primary;
-            }
-
-            Text {
-                x: 40px;
-                y: 0px;
-                width: parent.width - 92px;
-                height: parent.height;
-                text: group.label;
-                color: ThemeTokens.text-primary;
-                vertical-alignment: center;
-                overflow: elide;
-            }
-
-            Text {
-                x: parent.width - 44px;
-                y: 0px;
-                width: 28px;
-                height: parent.height;
-                text: group.count;
-                color: ThemeTokens.text-primary;
-                opacity: 0.64;
-                horizontal-alignment: center;
-                vertical-alignment: center;
             }
         }
     }

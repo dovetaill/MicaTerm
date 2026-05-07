@@ -1,22 +1,34 @@
-//! Persists local quick launch state for the welcome dashboard.
+//! Persists local recent SSH launcher state for the New Tab surface.
 
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::app::app_paths::app_root_paths_for_app;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct QuickLaunchPreferences {
+    #[serde(default, deserialize_with = "deserialize_recent_assets")]
+    pub recent_asset_ids: Vec<QuickLaunchRecentAsset>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QuickLaunchRecentAsset {
+    pub asset_id: String,
     #[serde(default)]
-    pub favorite_asset_ids: Vec<String>,
-    #[serde(default)]
-    pub recent_asset_ids: Vec<String>,
-    #[serde(default)]
-    pub last_selected_asset_id: Option<String>,
+    pub opened_at_unix_seconds: i64,
+}
+
+impl QuickLaunchRecentAsset {
+    pub fn new(asset_id: impl Into<String>, opened_at_unix_seconds: i64) -> Self {
+        Self {
+            asset_id: asset_id.into(),
+            opened_at_unix_seconds,
+        }
+    }
 }
 
 pub struct QuickLaunchPreferencesStore {
@@ -55,14 +67,26 @@ impl QuickLaunchPreferencesStore {
     }
 }
 
-pub fn record_recent_asset_id(existing: Vec<String>, asset_id: &str, cap: usize) -> Vec<String> {
+pub fn record_recent_asset_opened(
+    existing: Vec<QuickLaunchRecentAsset>,
+    asset_id: &str,
+    opened_at_unix_seconds: i64,
+    cap: usize,
+) -> Vec<QuickLaunchRecentAsset> {
     if cap == 0 {
         return Vec::new();
     }
 
     let mut updated = Vec::with_capacity(existing.len().saturating_add(1).min(cap));
-    updated.push(asset_id.to_string());
-    updated.extend(existing.into_iter().filter(|current| current != asset_id));
+    updated.push(QuickLaunchRecentAsset::new(
+        asset_id,
+        opened_at_unix_seconds,
+    ));
+    updated.extend(
+        existing
+            .into_iter()
+            .filter(|current| current.asset_id != asset_id),
+    );
     updated.truncate(cap);
     updated
 }
@@ -71,24 +95,35 @@ pub fn retain_known_ssh_asset_ids(
     prefs: &QuickLaunchPreferences,
     known_asset_ids: &BTreeSet<String>,
 ) -> QuickLaunchPreferences {
-    let favorite_asset_ids = retain_known_ids(&prefs.favorite_asset_ids, known_asset_ids);
-    let recent_asset_ids = retain_known_ids(&prefs.recent_asset_ids, known_asset_ids);
-    let last_selected_asset_id = prefs
-        .last_selected_asset_id
-        .as_ref()
-        .filter(|asset_id| known_asset_ids.contains(*asset_id))
-        .cloned();
+    let recent_asset_ids = prefs
+        .recent_asset_ids
+        .iter()
+        .filter(|entry| known_asset_ids.contains(&entry.asset_id))
+        .cloned()
+        .collect();
 
-    QuickLaunchPreferences {
-        favorite_asset_ids,
-        recent_asset_ids,
-        last_selected_asset_id,
-    }
+    QuickLaunchPreferences { recent_asset_ids }
 }
 
-fn retain_known_ids(ids: &[String], known_asset_ids: &BTreeSet<String>) -> Vec<String> {
-    ids.iter()
-        .filter(|asset_id| known_asset_ids.contains(*asset_id))
-        .cloned()
-        .collect()
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RecentAssetCompat {
+    AssetId(String),
+    Entry(QuickLaunchRecentAsset),
+}
+
+fn deserialize_recent_assets<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Vec<QuickLaunchRecentAsset>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let entries = Vec::<RecentAssetCompat>::deserialize(deserializer)?;
+    Ok(entries
+        .into_iter()
+        .filter_map(|entry| match entry {
+            RecentAssetCompat::AssetId(asset_id) => Some(QuickLaunchRecentAsset::new(asset_id, 0)),
+            RecentAssetCompat::Entry(entry) => (!entry.asset_id.trim().is_empty()).then_some(entry),
+        })
+        .collect())
 }

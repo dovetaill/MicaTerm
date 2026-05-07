@@ -1,8 +1,9 @@
-use mica_term::app::quick_launch_preferences::QuickLaunchPreferences;
+use mica_term::app::quick_launch_preferences::{QuickLaunchPreferences, QuickLaunchRecentAsset};
 use mica_term::shell::assets::{
     AssetNodePayload, AssetSnippetSpec, AssetSocks5ProxySpec, AssetSshConnectionSpec,
     AssetSshProxySpec, AssetTree, ConsoleAssetKind,
 };
+use mica_term::shell::tabs::{WorkspaceTab, WorkspaceTabKind};
 use mica_term::shell::view_model::ShellViewModel;
 
 struct SeededQuickLaunchIds {
@@ -76,12 +77,14 @@ fn quick_launch_recent_projection_prefers_mru_order_and_ssh_assets_only() {
     let (mut view_model, ids) = seeded_view_model();
 
     view_model.apply_quick_launch_preferences(QuickLaunchPreferences {
-        recent_asset_ids: vec![ids.db.clone(), ids.snippet.clone(), ids.prod.clone()],
-        favorite_asset_ids: vec![],
-        last_selected_asset_id: None,
+        recent_asset_ids: vec![
+            QuickLaunchRecentAsset::new(ids.db.clone(), 1_700_000_000),
+            QuickLaunchRecentAsset::new(ids.snippet.clone(), 1_699_999_900),
+            QuickLaunchRecentAsset::new(ids.prod.clone(), 1_699_999_000),
+        ],
     });
 
-    let recent = view_model.quick_launch_recent_items();
+    let recent = view_model.quick_launch_recent_items_at(1_700_000_120);
     let projected_ids = recent
         .iter()
         .map(|item| item.asset_id.as_str())
@@ -89,38 +92,120 @@ fn quick_launch_recent_projection_prefers_mru_order_and_ssh_assets_only() {
 
     assert_eq!(projected_ids, vec![ids.db.as_str(), ids.prod.as_str()]);
     assert_eq!(recent[0].subtitle, "dba@db.example.com");
+    assert_eq!(recent[0].time_label, "2m ago");
+    let db_accent = recent[0].accent_kind.clone();
+
+    view_model.apply_quick_launch_preferences(QuickLaunchPreferences {
+        recent_asset_ids: vec![
+            QuickLaunchRecentAsset::new(ids.prod.clone(), 1_700_000_030),
+            QuickLaunchRecentAsset::new(ids.db.clone(), 1_700_000_000),
+        ],
+    });
+
+    let reordered = view_model.quick_launch_recent_items_at(1_700_000_120);
+    let reordered_db = reordered
+        .iter()
+        .find(|item| item.asset_id == ids.db)
+        .expect("db recent row after reorder");
+    assert_eq!(
+        reordered_db.accent_kind, db_accent,
+        "recent row accent should remain stable for the same saved SSH asset"
+    );
 }
 
 #[test]
-fn quick_launch_group_projection_filters_by_search_query() {
+fn quick_launch_recent_projection_caps_new_tab_rows_to_seven() {
     let (mut view_model, ids) = seeded_view_model();
+    let mut tree = view_model.console_asset_tree().clone();
+    let mut recent_asset_ids = vec![
+        QuickLaunchRecentAsset::new(ids.db.clone(), 1_700_000_000),
+        QuickLaunchRecentAsset::new(ids.prod.clone(), 1_699_999_000),
+    ];
+    for index in 0..8 {
+        let asset_id = tree.insert_root_with_payload(
+            ConsoleAssetKind::SshConnection,
+            format!("Host {index}"),
+            AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+                host: format!("10.0.0.{index}"),
+                user: "ops".into(),
+                ..AssetSshConnectionSpec::default()
+            }),
+        );
+        recent_asset_ids.push(QuickLaunchRecentAsset::new(
+            asset_id,
+            1_699_998_000 - index as i64,
+        ));
+    }
+    view_model.replace_console_asset_tree(tree);
 
-    view_model.set_quick_launch_search_query("db".into());
+    view_model.apply_quick_launch_preferences(QuickLaunchPreferences { recent_asset_ids });
 
-    let groups = view_model.quick_launch_group_items();
-    let visible = view_model.quick_launch_visible_group_items();
+    let recent = view_model.quick_launch_recent_items_at(1_700_000_120);
 
-    assert_eq!(groups.len(), 1);
-    assert_eq!(groups[0].label, "Databases");
-    assert_eq!(groups[0].count, 1);
-    assert_eq!(visible.len(), 1);
-    assert_eq!(visible[0].asset_id, ids.db);
+    assert_eq!(recent.len(), 7);
 }
 
 #[test]
-fn quick_launch_selected_detail_reports_auth_and_proxy_summary() {
+fn quick_launch_recent_projection_includes_connected_saved_ssh_tabs() {
     let (mut view_model, ids) = seeded_view_model();
+    view_model.apply_quick_launch_preferences(QuickLaunchPreferences {
+        recent_asset_ids: vec![],
+    });
+    view_model.set_workspace_tabs(vec![WorkspaceTab {
+        tab_id: "tab-prod".into(),
+        session_id: "session-prod".into(),
+        file_browser_session_id: String::new(),
+        asset_id: ids.prod.clone(),
+        title: "Prod Bastion".into(),
+        subtitle: String::new(),
+        state: "connected".into(),
+        enhanced_session_state: String::new(),
+        error_detail: String::new(),
+        active: true,
+        kind: WorkspaceTabKind::Terminal,
+    }]);
 
-    view_model.select_quick_launch_asset(ids.db.clone());
+    let recent = view_model.quick_launch_recent_items_at(1_700_000_120);
 
-    let detail = view_model
-        .quick_launch_selected_detail()
-        .expect("selected quick launch detail");
+    assert_eq!(recent.len(), 1);
+    assert_eq!(recent[0].asset_id, ids.prod);
+    assert_eq!(recent[0].state_label, "Connected");
+    assert_eq!(recent[0].time_label, "");
+}
 
-    assert_eq!(detail.asset_id, ids.db);
-    assert_eq!(detail.environment, "staging");
-    assert!(detail.auth_summary.contains("Private key"));
-    assert!(detail.proxy_summary.contains("SOCKS5"));
+#[test]
+fn quick_launch_recent_projection_deduplicates_connected_tabs_ahead_of_history() {
+    let (mut view_model, ids) = seeded_view_model();
+    view_model.apply_quick_launch_preferences(QuickLaunchPreferences {
+        recent_asset_ids: vec![
+            QuickLaunchRecentAsset::new(ids.db.clone(), 1_700_000_060),
+            QuickLaunchRecentAsset::new(ids.prod.clone(), 1_700_000_000),
+        ],
+    });
+    view_model.set_workspace_tabs(vec![WorkspaceTab {
+        tab_id: "tab-prod".into(),
+        session_id: "session-prod".into(),
+        file_browser_session_id: String::new(),
+        asset_id: ids.prod.clone(),
+        title: "Prod Bastion".into(),
+        subtitle: String::new(),
+        state: "connected".into(),
+        enhanced_session_state: String::new(),
+        error_detail: String::new(),
+        active: true,
+        kind: WorkspaceTabKind::Terminal,
+    }]);
+
+    let recent = view_model.quick_launch_recent_items_at(1_700_000_120);
+    let projected_ids = recent
+        .iter()
+        .map(|item| item.asset_id.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(projected_ids, vec![ids.prod.as_str(), ids.db.as_str()]);
+    assert_eq!(recent[0].state_label, "Connected");
+    assert_eq!(recent[1].state_label, "");
+    assert_eq!(recent[1].time_label, "1m ago");
 }
 
 #[test]
@@ -131,11 +216,11 @@ fn saved_ssh_picker_projection_filters_to_saved_ssh_assets_in_tree_order() {
 
     let items = view_model.saved_ssh_picker_items();
 
-    assert_eq!(items.len(), 2);
-    assert_eq!(items[0].kind, "folder");
-    assert_eq!(items[0].label, "Databases");
-    assert_eq!(items[1].id, ids.db);
-    assert_eq!(items[1].kind, "ssh");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].id, ids.db);
+    assert_eq!(items[0].kind, "ssh");
+    assert!(items[0].compact_flat_mode);
+    assert!(items[0].path_hint.contains("dba@db.example.com"));
     assert!(
         items.iter().all(|item| item.id != ids.snippet),
         "saved ssh picker must not project snippet assets"

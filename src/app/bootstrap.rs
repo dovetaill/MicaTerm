@@ -34,8 +34,6 @@ use crate::ConnectionProgressHopRow;
 use crate::ConnectionProgressStepRow;
 use crate::ConsoleAssetItem;
 use crate::QuickLaunchCardRow;
-use crate::QuickLaunchDetailRow;
-use crate::QuickLaunchGroupRow;
 use crate::SftpPanelItem;
 use crate::TerminalCommandBlockRow;
 use crate::TerminalOverviewMarkerRow;
@@ -1683,6 +1681,8 @@ fn activate_asset(
                                 error = %err,
                                 "failed to open ssh session for activated asset"
                             );
+                        } else if state.ssh_host_key_prompt_state.is_none() {
+                            state.record_recent_saved_ssh_asset(asset_id);
                         }
                     } else {
                         let message = "SSH session bridge is unavailable.";
@@ -1766,6 +1766,54 @@ fn open_saved_ssh_asset_from_quick_launch(
             );
         }
     }
+}
+
+fn activate_saved_ssh_picker_asset(
+    window: &AppWindow,
+    state: &mut ShellViewModel,
+    session_bridge: Option<&ShellSessionBridge>,
+    pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
+    workspace_follow_tracker: &Rc<RefCell<WorkspaceFollowTracker>>,
+    asset_id: &str,
+) {
+    match state.console_asset_tree().kind(asset_id) {
+        Some(ConsoleAssetKind::Folder) => {
+            state.toggle_saved_ssh_picker_expanded(asset_id);
+            sync_saved_ssh_picker_state(window, state);
+            return;
+        }
+        Some(ConsoleAssetKind::SshConnection) => {}
+        _ => return,
+    }
+
+    state.close_saved_ssh_picker();
+    if state
+        .active_workspace_tab()
+        .is_some_and(|tab| tab.is_launcher())
+    {
+        state.close_workspace_launcher_tab();
+    }
+    open_saved_ssh_asset_from_quick_launch(
+        state,
+        session_bridge,
+        pending_host_key_approval,
+        asset_id,
+        OpenSessionMode::ActivateExisting,
+    );
+    sync_welcome_quick_launch_state(window, state);
+    sync_workspace_tabs_with_manager(
+        window,
+        state,
+        &mut workspace_follow_tracker.borrow_mut(),
+        session_bridge.map(|bridge| &bridge.manager),
+    );
+    sync_workspace_terminal_runtime_defaults(window, session_bridge);
+    schedule_workspace_terminal_runtime_defaults_sync(
+        window,
+        session_bridge.map(|bridge| bridge.terminal_defaults.clone()),
+    );
+    sync_saved_ssh_picker_state(window, state);
+    windowing::sync_ssh_host_key_modal_state(window, state);
 }
 
 fn resolve_pending_host_key(
@@ -1977,46 +2025,16 @@ fn sync_workspace_tab_items(window: &AppWindow, state: &ShellViewModel) {
 }
 
 fn sync_welcome_quick_launch_state(window: &AppWindow, state: &ShellViewModel) {
-    let selected_asset_id = state.quick_launch_selected_asset_id();
-    let active_group_id = state.quick_launch_active_group_id();
     let project_card = |item: crate::shell::quick_launch::QuickLaunchCardItem| QuickLaunchCardRow {
         asset_id: item.asset_id.clone().into(),
         title: item.title.into(),
         subtitle: item.subtitle.into(),
         badge: item.badge.into(),
         meta: item.meta.into(),
+        time_label: item.time_label.into(),
+        state_label: item.state_label.into(),
         icon_kind: item.icon_kind.into(),
         accent_kind: item.accent_kind.into(),
-        favorite: item.favorite,
-        selected: selected_asset_id == Some(item.asset_id.as_str()),
-    };
-    let project_group =
-        |item: crate::shell::quick_launch::QuickLaunchGroupItem| QuickLaunchGroupRow {
-            group_id: item.group_id.clone().into(),
-            label: item.label.into(),
-            count: i32::try_from(item.count).unwrap_or(i32::MAX),
-            selected: active_group_id == Some(item.group_id.as_str()),
-        };
-    let project_detail =
-        |item: crate::shell::quick_launch::QuickLaunchDetailItem| QuickLaunchDetailRow {
-            asset_id: item.asset_id.into(),
-            title: item.title.into(),
-            subtitle: item.subtitle.into(),
-            environment: item.environment.into(),
-            auth_summary: item.auth_summary.into(),
-            proxy_summary: item.proxy_summary.into(),
-            remark: item.remark.into(),
-            recent_label: item.recent_label.into(),
-        };
-    let empty_detail = || QuickLaunchDetailRow {
-        asset_id: "".into(),
-        title: "".into(),
-        subtitle: "".into(),
-        environment: "".into(),
-        auth_summary: "".into(),
-        proxy_summary: "".into(),
-        remark: "".into(),
-        recent_label: "".into(),
     };
 
     sync_vec_model(
@@ -2028,40 +2046,6 @@ fn sync_welcome_quick_launch_state(window: &AppWindow, state: &ShellViewModel) {
             .collect::<Vec<_>>(),
         |model| window.set_welcome_quick_launch_recent_items(model),
     );
-    sync_vec_model(
-        window.get_welcome_quick_launch_favorite_items(),
-        state
-            .quick_launch_favorite_items()
-            .into_iter()
-            .map(project_card)
-            .collect::<Vec<_>>(),
-        |model| window.set_welcome_quick_launch_favorite_items(model),
-    );
-    sync_vec_model(
-        window.get_welcome_quick_launch_group_items(),
-        state
-            .quick_launch_group_items()
-            .into_iter()
-            .map(project_group)
-            .collect::<Vec<_>>(),
-        |model| window.set_welcome_quick_launch_group_items(model),
-    );
-    sync_vec_model(
-        window.get_welcome_quick_launch_visible_group_items(),
-        state
-            .quick_launch_visible_group_items()
-            .into_iter()
-            .map(project_card)
-            .collect::<Vec<_>>(),
-        |model| window.set_welcome_quick_launch_visible_group_items(model),
-    );
-    window.set_welcome_quick_launch_selected_detail(
-        state
-            .quick_launch_selected_detail()
-            .map(project_detail)
-            .unwrap_or_else(empty_detail),
-    );
-    window.set_welcome_quick_launch_search_query(state.quick_launch_search_query().into());
 }
 
 fn sync_saved_ssh_picker_state(window: &AppWindow, state: &ShellViewModel) {
@@ -2084,6 +2068,7 @@ fn sync_saved_ssh_picker_state(window: &AppWindow, state: &ShellViewModel) {
         .collect::<Vec<_>>();
 
     window.set_open_saved_ssh_modal_open(state.saved_ssh_picker_open());
+    window.set_open_saved_ssh_modal_can_open_selection(state.saved_ssh_picker_can_open_selection());
     window.set_open_saved_ssh_modal_query(state.saved_ssh_picker_query().into());
     window.set_open_saved_ssh_modal_items(ModelRc::new(VecModel::from(items)));
     sync_workspace_native_terminal_surface_geometry(window);
@@ -6773,6 +6758,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         &credential_store,
         &private_key_importer,
         &keychain_repo,
+        &quick_launch_store,
         &vault_session,
         &workspace_follow_tracker,
         &pending_host_key_approval,
@@ -6812,39 +6798,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
-    let quick_launch_store_ref = quick_launch_store.clone();
-    window.on_welcome_quick_launch_asset_selected(move |asset_id| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.select_quick_launch_asset(asset_id.to_string());
-        sync_welcome_quick_launch_state(&window, &state);
-        save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let quick_launch_store_ref = quick_launch_store.clone();
-    window.on_welcome_quick_launch_search_changed(move |query| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.set_quick_launch_search_query(query.to_string());
-        sync_welcome_quick_launch_state(&window, &state);
-        save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let quick_launch_store_ref = quick_launch_store.clone();
-    window.on_welcome_quick_launch_toggle_favorite_requested(move |asset_id| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.toggle_quick_launch_favorite(asset_id.as_str());
-        sync_welcome_quick_launch_state(&window, &state);
-        save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let session_runtime_guard_ref = session_runtime_guard.clone();
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
@@ -6865,50 +6818,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             session_bridge_ref.as_deref(),
             &pending_host_key_approval_ref,
             asset_id.as_str(),
-            OpenSessionMode::ForceNewTab,
-        );
-        sync_welcome_quick_launch_state(&window, &state);
-        sync_workspace_tabs_with_manager(
-            &window,
-            &state,
-            &mut workspace_follow_tracker_ref.borrow_mut(),
-            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
-        );
-        sync_workspace_terminal_runtime_defaults(&window, session_bridge_ref.as_deref());
-        schedule_workspace_terminal_runtime_defaults_sync(
-            &window,
-            session_bridge_ref
-                .as_ref()
-                .map(|bridge| bridge.terminal_defaults.clone()),
-        );
-        sync_saved_ssh_picker_state(&window, &state);
-        windowing::sync_ssh_host_key_modal_state(&window, &state);
-        save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let session_bridge_ref = session_bridge.clone();
-    let session_runtime_guard_ref = session_runtime_guard.clone();
-    let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
-    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
-    let quick_launch_store_ref = quick_launch_store.clone();
-    window.on_welcome_quick_launch_connect_in_new_tab_requested(move |asset_id| {
-        let _keep_runtime_alive = &session_runtime_guard_ref;
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        if state
-            .active_workspace_tab()
-            .is_some_and(|tab| tab.is_launcher())
-        {
-            state.close_workspace_launcher_tab();
-        }
-        open_saved_ssh_asset_from_quick_launch(
-            &mut state,
-            session_bridge_ref.as_deref(),
-            &pending_host_key_approval_ref,
-            asset_id.as_str(),
-            OpenSessionMode::ForceNewTab,
+            OpenSessionMode::ActivateExisting,
         );
         sync_welcome_quick_launch_state(&window, &state);
         sync_workspace_tabs_with_manager(
@@ -6985,60 +6895,42 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        match state.console_asset_tree().kind(asset_id.as_str()) {
-            Some(ConsoleAssetKind::Folder) => {
-                state.toggle_saved_ssh_picker_expanded(asset_id.as_str());
-                sync_saved_ssh_picker_state(&window, &state);
-                return;
-            }
-            Some(ConsoleAssetKind::SshConnection) => {}
-            _ => return,
-        }
-        state.close_saved_ssh_picker();
-        if state
-            .active_workspace_tab()
-            .is_some_and(|tab| tab.is_launcher())
-        {
-            state.close_workspace_launcher_tab();
-        }
-        open_saved_ssh_asset_from_quick_launch(
+        activate_saved_ssh_picker_asset(
+            &window,
             &mut state,
             session_bridge_ref.as_deref(),
             &pending_host_key_approval_ref,
+            &workspace_follow_tracker_ref,
             asset_id.as_str(),
-            OpenSessionMode::ForceNewTab,
         );
-        sync_welcome_quick_launch_state(&window, &state);
-        sync_workspace_tabs_with_manager(
-            &window,
-            &state,
-            &mut workspace_follow_tracker_ref.borrow_mut(),
-            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
-        );
-        sync_workspace_terminal_runtime_defaults(&window, session_bridge_ref.as_deref());
-        schedule_workspace_terminal_runtime_defaults_sync(
-            &window,
-            session_bridge_ref
-                .as_ref()
-                .map(|bridge| bridge.terminal_defaults.clone()),
-        );
-        sync_saved_ssh_picker_state(&window, &state);
-        windowing::sync_ssh_host_key_modal_state(&window, &state);
         save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
     });
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let session_runtime_guard_ref = session_runtime_guard.clone();
+    let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let quick_launch_store_ref = quick_launch_store.clone();
-    window.on_welcome_quick_launch_reveal_in_assets_requested(move |asset_id| {
+    window.on_open_saved_ssh_modal_activate_selection_requested(move || {
+        let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        state.select_quick_launch_asset(asset_id.to_string());
-        state.select_sidebar_destination(SidebarDestination::Console);
-        state.select_asset(asset_id.as_str());
-        assets_keychain::sync_sidebar_state(&window, &state);
-        let (width, height) = current_window_size(&window);
-        sync_shell_layout(&window, &mut state, width, height);
+        let Some(asset_id) = state
+            .saved_ssh_picker_selected_asset_id()
+            .map(str::to_string)
+        else {
+            return;
+        };
+        activate_saved_ssh_picker_asset(
+            &window,
+            &mut state,
+            session_bridge_ref.as_deref(),
+            &pending_host_key_approval_ref,
+            &workspace_follow_tracker_ref,
+            asset_id.as_str(),
+        );
         save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
     });
 
@@ -7308,6 +7200,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let workspace_terminal_no_surface_since_ref = Rc::clone(&workspace_terminal_no_surface_since);
     let workspace_terminal_idle_cache_shrunk_ref = Rc::clone(&workspace_terminal_idle_cache_shrunk);
     let effects_ref = Rc::clone(&effects);
+    let quick_launch_store_ref = quick_launch_store.clone();
     window.on_workspace_session_local_action_requested(move |action_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -7326,6 +7219,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &pending_host_key_approval_ref,
                     asset_id.as_str(),
                 );
+                save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
                 sync_workspace_tabs_with_manager(
                     &window,
                     &state,

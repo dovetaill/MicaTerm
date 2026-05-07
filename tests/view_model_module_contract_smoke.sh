@@ -30,7 +30,7 @@ grep -F 'pub fn visible_console_asset_rows(&self) -> Vec<VisibleAssetRow>' \
   "$ROOT_DIR/src/shell/view_model/projection.rs" >/dev/null
 grep -F 'pub fn workspace_tabs(&self) -> &[WorkspaceTab]' \
   "$ROOT_DIR/src/shell/view_model/workspace.rs" >/dev/null
-grep -F 'pub fn set_quick_launch_search_query(&mut self, query: String)' \
+grep -F 'pub fn quick_launch_recent_items(&self) -> Vec<QuickLaunchCardItem>' \
   "$ROOT_DIR/src/shell/view_model/quick_launch.rs" >/dev/null
 grep -F 'pub fn select_sidebar_destination(&mut self, destination: SidebarDestination)' \
   "$ROOT_DIR/src/shell/view_model/assets.rs" >/dev/null
@@ -51,8 +51,14 @@ if grep -F 'pub fn workspace_tabs(&self) -> &[WorkspaceTab]' "$VIEW_MODEL_ROOT" 
   exit 1
 fi
 
-if grep -F 'pub fn set_quick_launch_search_query(&mut self, query: String)' "$VIEW_MODEL_ROOT" >/dev/null; then
+if grep -F 'pub fn quick_launch_recent_items(&self) -> Vec<QuickLaunchCardItem>' "$VIEW_MODEL_ROOT" >/dev/null; then
   echo "quick launch impls must move out of src/shell/view_model.rs" >&2
+  exit 1
+fi
+
+if grep -F 'pub fn set_quick_launch_search_query(&mut self, query: String)' \
+  "$ROOT_DIR/src/shell/view_model/quick_launch.rs" >/dev/null; then
+  echo "legacy quick launch search APIs should be retired with the old New Tab domain" >&2
   exit 1
 fi
 

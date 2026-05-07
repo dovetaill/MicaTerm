@@ -19,7 +19,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use crate::app::keychain::{
     KeychainCatalog, KeychainIdentityAuthKind, KeychainNodePayload, KeychainSshKeySpec,
 };
-use crate::app::quick_launch_preferences::{QuickLaunchPreferences, record_recent_asset_id};
+use crate::app::quick_launch_preferences::QuickLaunchPreferences;
 use crate::app::sftp::{
     FILE_BROWSER_MODIFIED_COLUMN_MIN_PX, FILE_BROWSER_SIZE_COLUMN_MIN_PX,
     FILE_BROWSER_TYPE_COLUMN_MIN_PX, FileBrowserSession, FileBrowserSortColumn,
@@ -51,9 +51,9 @@ use crate::shell::keychain::{
 };
 use crate::shell::metrics::ShellMetrics;
 use crate::shell::quick_launch::{
-    QUICK_LAUNCH_RECENT_LIMIT, QuickLaunchAssetRecord, QuickLaunchCardItem, QuickLaunchDetailItem,
-    QuickLaunchGroupItem, collect_quick_launch_records, group_id_for_asset,
-    matches_quick_launch_query, project_card_item, project_detail_item,
+    QUICK_LAUNCH_RECENT_LIMIT, QuickLaunchAssetRecord, QuickLaunchCardItem,
+    collect_quick_launch_records, format_recent_time_label, project_connected_card_item,
+    project_recent_card_item,
 };
 use crate::shell::sidebar::SidebarDestination;
 use crate::shell::tabs::WorkspaceTab;
@@ -677,9 +677,6 @@ pub struct ShellViewModel {
     pub selected_keychain_ids: Vec<String>,
     pub focused_keychain_id: Option<String>,
     quick_launch_preferences: QuickLaunchPreferences,
-    quick_launch_search_query: String,
-    quick_launch_selected_asset_id: Option<String>,
-    quick_launch_active_group_id: Option<String>,
     saved_ssh_picker_open: bool,
     saved_ssh_picker_query: String,
     saved_ssh_picker_selected_asset_id: Option<String>,
@@ -766,9 +763,6 @@ impl Default for ShellViewModel {
             selected_keychain_ids: Vec::new(),
             focused_keychain_id: None,
             quick_launch_preferences: QuickLaunchPreferences::default(),
-            quick_launch_search_query: String::new(),
-            quick_launch_selected_asset_id: None,
-            quick_launch_active_group_id: None,
             saved_ssh_picker_open: false,
             saved_ssh_picker_query: String::new(),
             saved_ssh_picker_selected_asset_id: None,

@@ -143,8 +143,6 @@ fn weak_small_text_hotspots_stop_relying_on_tiny_sizes_and_low_opacity() {
         .expect("read quick launch section");
     let quick_launch_card =
         fs::read_to_string("ui/welcome/quick-launch-card.slint").expect("read quick launch card");
-    let quick_launch_detail = fs::read_to_string("ui/welcome/quick-launch-detail-pane.slint")
-        .expect("read quick launch detail pane");
     let right_panel = fs::read_to_string("ui/shell/right-panel.slint").expect("read right panel");
 
     assert!(
@@ -169,11 +167,8 @@ fn weak_small_text_hotspots_stop_relying_on_tiny_sizes_and_low_opacity() {
     );
 
     assert!(
-        !quick_launch_detail.contains("opacity: 0.56;")
-            && !quick_launch_detail.contains("opacity: 0.58;")
-            && !quick_launch_detail.contains("opacity: 0.74;")
-            && quick_launch_detail.contains("color: ThemeTokens.text-secondary;"),
-        "welcome detail helper copy should use explicit semantic colors instead of multiple low-opacity text layers"
+        !Path::new("ui/welcome/quick-launch-detail-pane.slint").exists(),
+        "the retired quick launch detail pane should be removed once the New Tab flow no longer uses the old quick-launch detail domain"
     );
 
     assert!(

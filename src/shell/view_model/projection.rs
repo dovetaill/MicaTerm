@@ -41,30 +41,18 @@ impl ShellViewModel {
         self.selected_asset_ids.clear();
         self.focused_asset_id = None;
         if self
-            .quick_launch_selected_asset_id
-            .as_deref()
-            .is_some_and(|asset_id| !self.console_asset_tree.contains(asset_id))
-        {
-            self.quick_launch_selected_asset_id = None;
-        }
-        if self
-            .quick_launch_active_group_id
-            .as_deref()
-            .is_some_and(|group_id| !self.console_asset_tree.contains(group_id))
-        {
-            self.quick_launch_active_group_id = None;
-        }
-        if self
             .saved_ssh_picker_selected_asset_id
             .as_deref()
             .is_some_and(|asset_id| !self.console_asset_tree.contains(asset_id))
         {
             self.saved_ssh_picker_selected_asset_id = None;
         }
+        if self.saved_ssh_picker_open && self.saved_ssh_picker_selected_asset_id.is_none() {
+            self.saved_ssh_picker_selected_asset_id = self.first_saved_ssh_picker_asset_id();
+        }
         self.clear_active_asset_rename_session();
         self.context_target_asset_id = None;
         self.close_context_menu();
-        self.ensure_quick_launch_selection();
     }
 
     pub fn console_asset_tree(&self) -> &AssetTree {

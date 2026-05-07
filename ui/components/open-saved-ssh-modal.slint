@@ -1,39 +1,157 @@
 import { ListView } from "std-widgets.slint";
-import { ModalFooterBar, ModalHeaderBar } from "./modal-chrome.slint";
+import { DialogActionButton, ModalFooterBar, ModalHeaderBar } from "./modal-chrome.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
-import { AssetNodeRow } from "./asset-node-row.slint";
+import { AppTypography } from "../theme/typography.slint";
 import { ConsoleAssetItem } from "../shell/assets-sidebar.slint";
 
-component DialogActionButton inherits Rectangle {
-    in property <string> label: "";
-    callback clicked();
+component SavedSshPickerRow inherits Rectangle {
+    in property <string> item-id;
+    in property <string> item-kind;
+    in property <string> label;
+    in property <string> secondary-text: "";
+    in property <int> depth: 0;
+    in property <bool> has-children: false;
+    in property <string> disclosure-state: "none";
+    in property <bool> compact-flat-mode: false;
+    in property <bool> expanded: false;
+    in property <bool> selected: false;
+    in property <bool> focused: false;
+    callback selected-requested(string);
+    callback activated-requested(string);
+    callback toggle-expanded-requested(string);
 
-    width: 96px;
-    height: 34px;
-    border-radius: 0px;
+    private property <bool> is-ssh: root.item-kind == "ssh";
+    private property <bool> has-disclosure: root.disclosure-state != "none";
+    private property <length> indent: root.compact-flat-mode ? 12px : 12px + (root.depth * 12px);
+    private property <image> chevron-right-icon: @image-url("../../assets/icons/fluent/chevron-right-20-regular.svg");
+    private property <image> chevron-down-icon: @image-url("../../assets/icons/fluent/chevron-down-20-regular.svg");
+    private property <image> folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
+    private property <image> folder-open-icon: @image-url("../../assets/icons/fluent/folder-open-20-regular.svg");
+    private property <image> search-result-open-icon: @image-url("../../assets/icons/new-tab/chevron-right.svg");
+    private property <image> ssh-icon: @image-url("../../assets/icons/new-tab/server-stack.svg");
+    private property <image> disclosure-icon: root.disclosure-state == "expanded"
+        ? root.chevron-down-icon
+        : root.chevron-right-icon;
+    private property <image> kind-icon: root.item-kind == "folder"
+        ? (root.expanded ? root.folder-open-icon : root.folder-icon)
+        : root.ssh-icon;
+
+    height: 54px;
+    border-radius: 12px;
     border-width: 1px;
-    border-color: ThemeTokens.divider-subtle;
-    background: action-touch.pressed
+    border-color: root.focused
+        ? ThemeTokens.focus-ring
+        : row-touch.has-hover || root.selected
+            ? ThemeTokens.modal-field-hover-border
+            : ThemeTokens.modal-field-border;
+    background: row-touch.pressed
         ? ThemeTokens.control-pressed-surface
-        : action-touch.has-hover
-            ? ThemeTokens.control-hover-surface
-            : ThemeTokens.control-active-surface;
+        : root.selected
+            ? ThemeTokens.control-active-surface
+            : row-touch.has-hover
+                ? ThemeTokens.control-hover-surface
+                : ThemeTokens.modal-field-surface;
 
-    Text {
-        width: parent.width;
+    Rectangle {
+        x: root.indent;
+        y: 0px;
+        width: 16px;
         height: parent.height;
-        text: root.label;
-        color: ThemeTokens.text-primary;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+        background: transparent;
+
+        if root.has-disclosure : Image {
+            x: 0px;
+            y: 19px;
+            width: 14px;
+            height: 14px;
+            source: root.disclosure-icon;
+            image-fit: contain;
+            colorize: root.selected ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
+            opacity: row-touch.has-hover || root.selected ? 1 : 0.76;
+        }
+
+        disclosure-touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            enabled: root.has-disclosure;
+
+            clicked => {
+                root.toggle-expanded-requested(root.item-id);
+            }
+        }
     }
 
-    action-touch := TouchArea {
-        width: parent.width;
+    icon-shell := Rectangle {
+        x: root.indent + (root.has-disclosure ? 16px : 0px);
+        y: 11px;
+        width: 30px;
+        height: 30px;
+        border-radius: 10px;
+        border-width: 1px;
+        border-color: root.selected ? ThemeTokens.focus-ring : ThemeTokens.modal-inner-border;
+        background: root.selected ? ThemeTokens.control-hover-surface : ThemeTokens.modal-section-surface;
+
+        Image {
+            x: 7px;
+            y: 7px;
+            width: 16px;
+            height: 16px;
+            source: root.kind-icon;
+            image-fit: contain;
+            colorize: root.selected ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
+        }
+    }
+
+    Text {
+        x: icon-shell.x + icon-shell.width + 12px;
+        y: root.secondary-text == "" ? 0px : 8px;
+        width: parent.width - self.x - 42px;
+        height: root.secondary-text == "" ? parent.height : 18px;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        font-family: AppTypography.ui-font-family;
+        font-size: AppTypography.ui-font-size-body;
+        font-weight: root.selected ? 700 : AppTypography.ui-font-weight-regular;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.secondary-text != "" : Text {
+        x: icon-shell.x + icon-shell.width + 12px;
+        y: 27px;
+        width: parent.width - self.x - 42px;
+        height: 16px;
+        text: root.secondary-text;
+        color: ThemeTokens.text-secondary;
+        font-family: AppTypography.ui-font-family;
+        font-size: AppTypography.ui-font-size-caption;
+        font-weight: AppTypography.ui-font-weight-regular;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.is-ssh : Image {
+        x: parent.width - 22px;
+        y: 19px;
+        width: 10px;
+        height: 14px;
+        source: root.search-result-open-icon;
+        image-fit: contain;
+        colorize: row-touch.has-hover || root.selected ? ThemeTokens.text-primary : ThemeTokens.text-muted;
+        opacity: row-touch.has-hover || root.selected ? 0.92 : 0.56;
+    }
+
+    row-touch := TouchArea {
+        x: root.indent + (root.has-disclosure ? 16px : 0px);
+        width: parent.width - self.x;
         height: parent.height;
 
         clicked => {
-            root.clicked();
+            root.selected-requested(root.item-id);
+        }
+
+        double-clicked => {
+            root.activated-requested(root.item-id);
         }
     }
 }
@@ -41,40 +159,44 @@ component DialogActionButton inherits Rectangle {
 export component OpenSavedSshModal inherits Rectangle {
     in property <string> query: "";
     in property <[ConsoleAssetItem]> items: [];
+    in property <bool> can-open-selection: false;
+    in property <int> focus-sequence: 0;
     callback close-requested();
     callback query-changed(string);
     callback asset-selected(string);
     callback asset-activated(string);
+    callback activate-selection-requested();
     callback toggle-expanded-requested(string);
     callback drag-requested(length, length);
     callback drag-moved(length, length);
     callback drag-ended();
     callback focus-restore-requested();
 
-    background: ThemeTokens.assets-surface;
+    private property <image> search-icon: @image-url("../../assets/icons/fluent/search-20-regular.svg");
+
+    background: ThemeTokens.modal-body-surface;
     border-radius: 0px;
-    border-width: 1px;
-    border-color: ThemeTokens.divider-subtle;
+    border-width: 0px;
+    border-color: transparent;
+
+    public function focus-query() {
+        search-input.focus();
+    }
+
+    changed focus-sequence => {
+        root.focus-query();
+    }
 
     modal-focus := FocusScope {
         width: parent.width;
         height: parent.height;
 
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.focus-restore-requested();
-                root.close-requested();
-                accept
-            } else {
-                reject
-            }
-        }
-
         header := ModalHeaderBar {
             x: 0px;
             y: 0px;
             width: parent.width;
-            title: "Open Saved SSH Connections";
+            title: "Browse Saved SSH";
+            subtitle: "Search and open a saved host without leaving New Tab.";
             prominent: true;
 
             close-requested => {
@@ -102,86 +224,152 @@ export component OpenSavedSshModal inherits Rectangle {
             y: header.height;
             width: parent.width;
             height: parent.height - header.height - footer.height;
-            background: transparent;
+            background: ThemeTokens.modal-body-surface;
 
-            search-shell := Rectangle {
+            search-panel := Rectangle {
                 x: 18px;
                 y: 16px;
                 width: parent.width - 36px;
-                height: 40px;
-                border-radius: 0px;
+                height: 78px;
+                border-radius: 14px;
                 border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.inspector-surface;
+                border-color: ThemeTokens.modal-inner-border;
+                background: ThemeTokens.modal-section-surface;
 
-                TextInput {
-                    x: 12px;
-                    y: 8px;
-                    width: parent.width - 24px;
-                    height: 24px;
-                    text: root.query;
-                    color: ThemeTokens.text-primary;
-                    selection-background-color: ThemeTokens.accent;
-                    selection-foreground-color: ThemeTokens.text-primary;
+                Text {
+                    x: 16px;
+                    y: 10px;
+                    text: "Search saved hosts";
+                    color: ThemeTokens.text-secondary;
+                    font-family: AppTypography.ui-font-family;
+                    font-size: AppTypography.ui-font-size-caption;
+                    font-weight: AppTypography.ui-font-weight-regular;
+                }
 
-                    edited => {
-                        root.query-changed(self.text);
+                search-shell := Rectangle {
+                    x: 16px;
+                    y: 32px;
+                    width: parent.width - 32px;
+                    height: 34px;
+                    border-radius: 10px;
+                    border-width: 1px;
+                    border-color: search-input.has-focus
+                        ? ThemeTokens.input-focus-ring
+                        : search-touch.has-hover
+                            ? ThemeTokens.modal-field-hover-border
+                            : ThemeTokens.modal-field-border;
+                    background: ThemeTokens.modal-field-surface;
+
+                    Image {
+                        x: 10px;
+                        y: 8px;
+                        width: 18px;
+                        height: 18px;
+                        source: root.search-icon;
+                        image-fit: contain;
+                        colorize: ThemeTokens.text-secondary;
+                    }
+
+                    if search-input.text == "" : placeholder := Text {
+                        x: 36px;
+                        y: 0px;
+                        width: parent.width - 46px;
+                        height: parent.height;
+                        text: "Search by name, user, or host";
+                        color: ThemeTokens.text-muted;
+                        font-family: AppTypography.ui-font-family;
+                        font-size: AppTypography.ui-font-size-body;
+                        font-weight: AppTypography.ui-font-weight-regular;
+                        vertical-alignment: center;
+                    }
+
+                    search-input := TextInput {
+                        x: 36px;
+                        y: 5px;
+                        width: parent.width - 46px;
+                        height: 24px;
+                        text: root.query;
+                        color: ThemeTokens.text-primary;
+                        font-family: AppTypography.ui-font-family;
+                        font-size: AppTypography.ui-font-size-body;
+                        font-weight: AppTypography.ui-font-weight-regular;
+                        selection-background-color: ThemeTokens.accent;
+                        selection-foreground-color: ThemeTokens.text-primary;
+
+                        edited => {
+                            root.query-changed(self.text);
+                        }
+                    }
+
+                    search-touch := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-cursor: MouseCursor.text;
+
+                        clicked => {
+                            root.focus-query();
+                        }
                     }
                 }
             }
 
-            if root.items.length == 0 : Rectangle {
+            list-shell := Rectangle {
                 x: 18px;
-                y: 68px;
+                y: search-panel.y + search-panel.height + 14px;
                 width: parent.width - 36px;
-                height: parent.height - 84px;
-                border-radius: 0px;
+                height: parent.height - self.y - 18px;
+                border-radius: 14px;
                 border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.inspector-surface;
+                border-color: ThemeTokens.modal-inner-border;
+                background: ThemeTokens.modal-section-surface;
 
-                Text {
+                if root.items.length == 0 : Rectangle {
                     x: 16px;
-                    y: 0px;
+                    y: 16px;
                     width: parent.width - 32px;
-                    height: parent.height;
-                    text: "No saved SSH connections match this query.";
-                    color: ThemeTokens.text-primary;
-                    opacity: 0.6;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    wrap: word-wrap;
+                    height: parent.height - 32px;
+                    border-radius: 12px;
+                    border-width: 1px;
+                    border-color: ThemeTokens.modal-field-border;
+                    background: ThemeTokens.modal-field-surface;
+
+                    Text {
+                        x: 20px;
+                        y: 0px;
+                        width: parent.width - 40px;
+                        height: parent.height;
+                        text: root.query == ""
+                            ? "No saved SSH targets yet. Add one from Assets and it will appear here."
+                            : "No saved SSH targets match this search.";
+                        color: ThemeTokens.text-secondary;
+                        font-family: AppTypography.ui-font-family;
+                        font-size: AppTypography.ui-font-size-body;
+                        font-weight: AppTypography.ui-font-weight-regular;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                    }
                 }
-            }
 
-            if root.items.length > 0 : list-shell := Rectangle {
-                x: 18px;
-                y: 68px;
-                width: parent.width - 36px;
-                height: parent.height - 84px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.inspector-surface;
+                if root.items.length > 0 : list-host := ListView {
+                    x: 10px;
+                    y: 10px;
+                    width: parent.width - 20px;
+                    height: parent.height - 20px;
+                    horizontal-scrollbar-policy: always-off;
 
-                list-host := ListView {
-                    x: 8px;
-                    y: 8px;
-                    width: parent.width - 16px;
-                    height: parent.height - 16px;
-
-                    for item in root.items : AssetNodeRow {
+                    for item in root.items : SavedSshPickerRow {
                         width: list-host.width;
                         item-id: item.id;
                         item-kind: item.kind;
                         label: item.label;
+                        secondary-text: item.path_hint;
                         depth: item.depth;
                         has-children: item.has_children;
                         expanded: item.expanded;
                         selected: item.selected;
                         focused: item.focused;
                         disclosure-state: item.disclosure_state;
-                        path-hint: item.path_hint;
                         compact-flat-mode: item.compact_flat_mode;
 
                         selected-requested(item-id) => {
@@ -203,28 +391,51 @@ export component OpenSavedSshModal inherits Rectangle {
         footer := ModalFooterBar {
             y: parent.height - self.height;
             width: parent.width;
-            height: 56px;
-            surface: ThemeTokens.activity-surface;
-            divider-color: ThemeTokens.divider-strong;
-            content-padding-top: 11px;
-            content-padding-bottom: 11px;
+            height: 54px;
+            surface: ThemeTokens.modal-footer-surface;
+            divider-color: ThemeTokens.modal-inner-border;
+            content-padding-left: 18px;
+            content-padding-right: 18px;
+            content-padding-top: 8px;
+            content-padding-bottom: 8px;
             content-spacing: 0px;
 
             HorizontalLayout {
-                height: 34px;
-                spacing: 12px;
+                height: 38px;
+                spacing: 10px;
+
+                Text {
+                    vertical-alignment: center;
+                    text: root.can-open-selection
+                        ? "Enter opens the selected SSH."
+                        : "Select a saved SSH target to open it.";
+                    color: ThemeTokens.text-secondary;
+                    font-family: AppTypography.ui-font-family;
+                    font-size: AppTypography.ui-font-size-caption;
+                    font-weight: AppTypography.ui-font-weight-regular;
+                }
 
                 Rectangle {
                     horizontal-stretch: 1;
                     background: transparent;
                 }
 
-                cancel-button := DialogActionButton {
-                    label: "Cancel";
+                DialogActionButton {
+                    label: "Close";
 
                     clicked => {
                         root.focus-restore-requested();
                         root.close-requested();
+                    }
+                }
+
+                DialogActionButton {
+                    label: "Open";
+                    primary: true;
+                    enabled: root.can-open-selection;
+
+                    clicked => {
+                        root.activate-selection-requested();
                     }
                 }
             }

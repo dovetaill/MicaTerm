@@ -219,10 +219,25 @@ impl ShellViewModel {
         &self.saved_ssh_picker_query
     }
 
+    pub fn saved_ssh_picker_selected_asset_id(&self) -> Option<&str> {
+        self.saved_ssh_picker_selected_asset_id.as_deref()
+    }
+
+    pub fn saved_ssh_picker_can_open_selection(&self) -> bool {
+        self.saved_ssh_picker_selected_asset_id
+            .as_deref()
+            .is_some_and(|asset_id| {
+                self.console_asset_tree.kind(asset_id) == Some(ConsoleAssetKind::SshConnection)
+            })
+    }
+
     pub fn open_saved_ssh_picker(&mut self) {
         self.saved_ssh_picker_open = true;
         self.saved_ssh_picker_query.clear();
         self.saved_ssh_picker_selected_asset_id = self.first_saved_ssh_picker_asset_id();
+        if let Some(asset_id) = self.saved_ssh_picker_selected_asset_id.clone() {
+            self.expand_saved_ssh_picker_path(asset_id.as_str());
+        }
     }
 
     pub fn close_saved_ssh_picker(&mut self) {
@@ -234,6 +249,11 @@ impl ShellViewModel {
     pub fn set_saved_ssh_picker_query(&mut self, query: String) {
         self.saved_ssh_picker_query = query;
         self.saved_ssh_picker_selected_asset_id = self.first_saved_ssh_picker_asset_id();
+        if self.saved_ssh_picker_query.trim().is_empty() {
+            if let Some(asset_id) = self.saved_ssh_picker_selected_asset_id.clone() {
+                self.expand_saved_ssh_picker_path(asset_id.as_str());
+            }
+        }
     }
 
     pub fn select_saved_ssh_picker_asset(&mut self, asset_id: String) {
@@ -242,6 +262,7 @@ impl ShellViewModel {
             .iter()
             .any(|item| item.id == asset_id)
         {
+            self.expand_saved_ssh_picker_path(asset_id.as_str());
             self.saved_ssh_picker_selected_asset_id = Some(asset_id);
         }
     }
@@ -262,23 +283,34 @@ impl ShellViewModel {
         let mut rows = Vec::new();
         let query_active = !self.saved_ssh_picker_query.trim().is_empty();
         for root_id in self.console_asset_tree.root_ids() {
-            self.collect_saved_ssh_picker_rows(root_id, 0, query_active, &mut rows);
+            if query_active {
+                self.collect_saved_ssh_picker_search_rows(root_id, &mut rows);
+            } else {
+                self.collect_saved_ssh_picker_tree_rows(root_id, 0, &mut rows);
+            }
         }
         rows
     }
 
-    fn first_saved_ssh_picker_asset_id(&self) -> Option<String> {
-        self.saved_ssh_picker_items()
-            .into_iter()
-            .find(|item| item.kind == ConsoleAssetKind::SshConnection.id())
-            .map(|item| item.id)
+    pub(crate) fn first_saved_ssh_picker_asset_id(&self) -> Option<String> {
+        let query_active = !self.saved_ssh_picker_query.trim().is_empty();
+        for root_id in self.console_asset_tree.root_ids() {
+            let next = if query_active {
+                self.first_matching_saved_ssh_picker_asset(root_id)
+            } else {
+                self.first_saved_ssh_picker_asset_in_tree(root_id)
+            };
+            if next.is_some() {
+                return next;
+            }
+        }
+        None
     }
 
-    fn collect_saved_ssh_picker_rows(
+    fn collect_saved_ssh_picker_tree_rows(
         &self,
         node_id: &str,
         depth: usize,
-        query_active: bool,
         rows: &mut Vec<SavedSshPickerItem>,
     ) -> bool {
         let Some(node) = self.console_asset_tree.node(node_id) else {
@@ -303,7 +335,7 @@ impl ShellViewModel {
                     focused: self.saved_ssh_picker_selected_asset_id.as_deref()
                         == Some(node.id.as_str()),
                     disclosure_state: "none".into(),
-                    path_hint: String::new(),
+                    path_hint: self.saved_ssh_picker_secondary_text(node.id.as_str()),
                     compact_flat_mode: false,
                 });
                 true
@@ -312,10 +344,9 @@ impl ShellViewModel {
                 let mut child_rows = Vec::new();
                 let mut has_matching_descendants = false;
                 for child_id in &node.children {
-                    has_matching_descendants |= self.collect_saved_ssh_picker_rows(
+                    has_matching_descendants |= self.collect_saved_ssh_picker_tree_rows(
                         child_id,
                         depth + 1,
-                        query_active,
                         &mut child_rows,
                     );
                 }
@@ -330,12 +361,12 @@ impl ShellViewModel {
                     label: node.title.clone(),
                     depth,
                     has_children: true,
-                    expanded: query_active || node.expanded,
+                    expanded: node.expanded,
                     selected: self.saved_ssh_picker_selected_asset_id.as_deref()
                         == Some(node.id.as_str()),
                     focused: self.saved_ssh_picker_selected_asset_id.as_deref()
                         == Some(node.id.as_str()),
-                    disclosure_state: if query_active || node.expanded {
+                    disclosure_state: if node.expanded {
                         "expanded".into()
                     } else {
                         "collapsed".into()
@@ -344,12 +375,52 @@ impl ShellViewModel {
                     compact_flat_mode: false,
                 });
 
-                if query_active || node.expanded {
+                if node.expanded {
                     rows.extend(child_rows);
                 }
                 true
             }
             ConsoleAssetKind::SnippetPackage | ConsoleAssetKind::Snippet => false,
+        }
+    }
+
+    fn collect_saved_ssh_picker_search_rows(
+        &self,
+        node_id: &str,
+        rows: &mut Vec<SavedSshPickerItem>,
+    ) {
+        let Some(node) = self.console_asset_tree.node(node_id) else {
+            return;
+        };
+
+        match node.kind {
+            ConsoleAssetKind::SshConnection => {
+                if !self.saved_ssh_picker_matches(node_id) {
+                    return;
+                }
+
+                rows.push(SavedSshPickerItem {
+                    id: node.id.clone(),
+                    kind: node.kind.id().into(),
+                    label: node.title.clone(),
+                    depth: 0,
+                    has_children: false,
+                    expanded: false,
+                    selected: self.saved_ssh_picker_selected_asset_id.as_deref()
+                        == Some(node.id.as_str()),
+                    focused: self.saved_ssh_picker_selected_asset_id.as_deref()
+                        == Some(node.id.as_str()),
+                    disclosure_state: "none".into(),
+                    path_hint: self.saved_ssh_picker_search_secondary_text(node.id.as_str()),
+                    compact_flat_mode: true,
+                });
+            }
+            ConsoleAssetKind::Folder => {
+                for child_id in &node.children {
+                    self.collect_saved_ssh_picker_search_rows(child_id, rows);
+                }
+            }
+            ConsoleAssetKind::SnippetPackage | ConsoleAssetKind::Snippet => {}
         }
     }
 
@@ -373,5 +444,89 @@ impl ShellViewModel {
         ]
         .into_iter()
         .any(|value| value.to_ascii_lowercase().contains(&query))
+    }
+
+    fn saved_ssh_picker_secondary_text(&self, node_id: &str) -> String {
+        let Some(spec) = self.console_asset_tree.ssh_connection_spec(node_id) else {
+            return String::new();
+        };
+
+        let mut secondary = format!("{}@{}", spec.user.trim(), spec.host.trim());
+        let port = spec.port.trim();
+        if !port.is_empty() && port != "22" {
+            secondary.push(':');
+            secondary.push_str(port);
+        }
+        secondary
+    }
+
+    fn saved_ssh_picker_search_secondary_text(&self, node_id: &str) -> String {
+        let secondary = self.saved_ssh_picker_secondary_text(node_id);
+        let group_path = self.saved_ssh_picker_group_path(node_id);
+        if group_path.is_empty() {
+            secondary
+        } else if secondary.is_empty() {
+            group_path
+        } else {
+            format!("{secondary} - {group_path}")
+        }
+    }
+
+    fn saved_ssh_picker_group_path(&self, node_id: &str) -> String {
+        let mut labels = Vec::new();
+        let mut cursor = self.console_asset_tree.parent_id(node_id).flatten();
+
+        while let Some(parent_id) = cursor {
+            let Some(node) = self.console_asset_tree.node(parent_id) else {
+                break;
+            };
+            if node.kind == ConsoleAssetKind::Folder {
+                labels.push(node.title.clone());
+            }
+            cursor = self.console_asset_tree.parent_id(parent_id).flatten();
+        }
+
+        labels.reverse();
+        labels.join(" / ")
+    }
+
+    fn first_saved_ssh_picker_asset_in_tree(&self, node_id: &str) -> Option<String> {
+        let node = self.console_asset_tree.node(node_id)?;
+        match node.kind {
+            ConsoleAssetKind::SshConnection => Some(node.id.clone()),
+            ConsoleAssetKind::Folder => node
+                .children
+                .iter()
+                .find_map(|child_id| self.first_saved_ssh_picker_asset_in_tree(child_id)),
+            ConsoleAssetKind::SnippetPackage | ConsoleAssetKind::Snippet => None,
+        }
+    }
+
+    fn first_matching_saved_ssh_picker_asset(&self, node_id: &str) -> Option<String> {
+        let node = self.console_asset_tree.node(node_id)?;
+        match node.kind {
+            ConsoleAssetKind::SshConnection => self
+                .saved_ssh_picker_matches(node_id)
+                .then(|| node.id.clone()),
+            ConsoleAssetKind::Folder => node
+                .children
+                .iter()
+                .find_map(|child_id| self.first_matching_saved_ssh_picker_asset(child_id)),
+            ConsoleAssetKind::SnippetPackage | ConsoleAssetKind::Snippet => None,
+        }
+    }
+
+    fn expand_saved_ssh_picker_path(&mut self, asset_id: &str) {
+        let mut parent_chain = Vec::new();
+        let mut cursor = self.console_asset_tree.parent_id(asset_id).flatten();
+        while let Some(parent_id) = cursor {
+            parent_chain.push(parent_id.to_string());
+            cursor = self.console_asset_tree.parent_id(parent_id).flatten();
+        }
+
+        for parent_id in parent_chain {
+            self.console_asset_tree
+                .set_expanded(parent_id.as_str(), true);
+        }
     }
 }

@@ -839,6 +839,7 @@ pub(super) fn bind_assets_keychain_callbacks(
     credential_store: &Arc<dyn CredentialStore>,
     private_key_importer: &Arc<dyn PrivateKeyImporter>,
     keychain_repo: &Option<Rc<dyn KeychainCatalogRepository>>,
+    quick_launch_store: &Option<Rc<QuickLaunchPreferencesStore>>,
     vault_session: &Rc<RefCell<VaultSessionState>>,
     workspace_follow_tracker: &Rc<RefCell<WorkspaceFollowTracker>>,
     pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
@@ -1619,6 +1620,7 @@ pub(super) fn bind_assets_keychain_callbacks(
     let asset_click_tracker_ref = Rc::clone(asset_click_tracker);
     let pending_double_click_activation_ref = Rc::clone(pending_double_click_activation);
     let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
+    let quick_launch_store_ref = quick_launch_store.clone();
     window.on_asset_selected(move |item_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
@@ -1647,6 +1649,7 @@ pub(super) fn bind_assets_keychain_callbacks(
                     session_bridge_ref.as_deref(),
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                 );
+                save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
             }
         }
         sync_assets_toolbar_state(&window, &state);
@@ -1677,6 +1680,7 @@ pub(super) fn bind_assets_keychain_callbacks(
     let asset_click_tracker_ref = Rc::clone(asset_click_tracker);
     let pending_double_click_activation_ref = Rc::clone(pending_double_click_activation);
     let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
+    let quick_launch_store_ref = quick_launch_store.clone();
     window.on_asset_activated(move |item_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
@@ -1707,6 +1711,7 @@ pub(super) fn bind_assets_keychain_callbacks(
                     session_bridge_ref.as_deref(),
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                 );
+                save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
             }
         }
         sync_assets_toolbar_state(&window, &state);
@@ -1794,6 +1799,7 @@ pub(super) fn bind_assets_keychain_callbacks(
     let sftp_async_runtime_ref = sftp_async_runtime.clone();
     let sftp_result_tx_ref = sftp_result_tx.clone();
     let sftp_transfer_result_tx_ref = sftp_transfer_result_tx.clone();
+    let quick_launch_store_ref = quick_launch_store.clone();
     window.on_assets_context_menu_action_invoked(move |action_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
@@ -1816,6 +1822,10 @@ pub(super) fn bind_assets_keychain_callbacks(
                                 session_bridge_ref.as_deref(),
                                 &pending_host_key_approval_ref,
                                 &asset_id,
+                            );
+                            save_quick_launch_preferences_from_state(
+                                &quick_launch_store_ref,
+                                &state,
                             );
                         }
                     }

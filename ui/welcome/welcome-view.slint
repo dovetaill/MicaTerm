@@ -1,36 +1,61 @@
-// Minimal launcher surface shown by the workspace new-tab flow.
+// Productized SSH launcher surface shown by the workspace New Tab flow.
 
 import { ScrollView } from "std-widgets.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 import { AppTypography } from "../theme/typography.slint";
-import { QuickLaunchCardRow, QuickLaunchDetailRow, QuickLaunchGroupRow } from "quick-launch-types.slint";
+import { QuickLaunchCardRow } from "quick-launch-types.slint";
 import { QuickLaunchSection } from "quick-launch-section.slint";
 
 component LauncherPrimaryActionButton inherits Rectangle {
     in property <string> label: "";
     callback clicked();
 
-    height: 38px;
-    border-radius: 0px;
+    private property <image> open-icon: @image-url("../../assets/icons/new-tab/open-saved-ssh.svg");
+
+    height: 64px;
+    border-radius: 8px;
     border-width: 1px;
-    border-color: ThemeTokens.accent;
+    border-color: button-touch.pressed || button-touch.has-hover ? ThemeTokens.focus-ring : ThemeTokens.divider-subtle;
     background: button-touch.pressed
         ? ThemeTokens.control-pressed-surface
         : button-touch.has-hover
             ? ThemeTokens.control-hover-surface
-            : ThemeTokens.accent;
+            : ThemeTokens.control-active-surface;
+
+    Rectangle {
+        x: 18px;
+        y: (parent.height - self.height) / 2;
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        background: ThemeTokens.inspector-surface;
+        border-width: 1px;
+        border-color: ThemeTokens.divider-subtle;
+
+        Image {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 24px;
+            height: 24px;
+            source: root.open-icon;
+            image-fit: contain;
+            colorize: button-touch.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
+        }
+    }
 
     Text {
-        width: parent.width;
+        x: 64px;
+        y: 0px;
+        width: parent.width - 82px;
         height: parent.height;
         text: root.label;
         font-family: AppTypography.ui-font-family;
         font-size: AppTypography.ui-font-size-body;
-        font-weight: AppTypography.ui-font-weight-regular;
+        font-weight: 700;
         letter-spacing: 0px;
         color: ThemeTokens.text-primary;
-        horizontal-alignment: center;
         vertical-alignment: center;
+        overflow: elide;
     }
 
     button-touch := TouchArea {
@@ -45,27 +70,10 @@ component LauncherPrimaryActionButton inherits Rectangle {
 
 export component WelcomeView inherits Rectangle {
     in property <[QuickLaunchCardRow]> recent-items: [];
-    in property <[QuickLaunchCardRow]> favorite-items: [];
-    in property <[QuickLaunchGroupRow]> group-items: [];
-    in property <[QuickLaunchCardRow]> visible-group-items: [];
-    in property <QuickLaunchDetailRow> selected-detail: {
-        asset_id: "",
-        title: "",
-        subtitle: "",
-        environment: "",
-        auth_summary: "",
-        proxy_summary: "",
-        remark: "",
-        recent_label: "",
-    };
-    in property <string> search-query: "";
-    callback asset-selected(string);
-    callback search-changed(string);
     callback connect-requested(string);
-    callback connect-in-new-tab-requested(string);
-    callback toggle-favorite-requested(string);
-    callback reveal-in-assets-requested(string);
     callback open-saved-ssh-requested();
+
+    private property <image> connection-motif: @image-url("../../assets/icons/new-tab/connection-motif.svg");
 
     background: transparent;
 
@@ -77,56 +85,60 @@ export component WelcomeView inherits Rectangle {
 
         scroll-body := Rectangle {
             width: body-scroll.visible-width;
-            height: max(body-scroll.visible-height, body-column.preferred-height + 48px);
+            height: max(body-scroll.visible-height, body-column.preferred-height + 72px);
             background: transparent;
 
             body-column := VerticalLayout {
-                x: 28px;
-                y: 28px;
-                width: parent.width - 56px;
-                spacing: 18px;
+                x: 48px;
+                y: 52px;
+                width: parent.width - 96px;
+                spacing: 26px;
 
-                header-card := Rectangle {
+                header-block := Rectangle {
                     width: parent.width;
-                    height: 132px;
+                    height: 214px;
                     border-radius: 0px;
-                    border-width: 1px;
-                    border-color: ThemeTokens.divider-subtle;
-                    background: ThemeTokens.assets-surface;
+                    background: transparent;
 
-                    Rectangle {
-                        x: 0px;
-                        y: 0px;
-                        width: 4px;
-                        height: parent.height;
-                        background: ThemeTokens.accent;
+                    Image {
+                        visible: parent.width > 780px;
+                        x: parent.width - self.width - 18px;
+                        y: 10px;
+                        width: min(640px, parent.width * 0.50);
+                        height: 190px;
+                        source: root.connection-motif;
+                        image-fit: contain;
+                        colorize: ThemeTokens.text-muted;
+                        opacity: ThemeTokens.dark-mode ? 0.22 : 0.15;
                     }
 
                     Text {
-                        x: 24px;
-                        y: 18px;
+                        x: 0px;
+                        y: 10px;
                         text: "New Tab";
                         color: ThemeTokens.text-primary;
+                        font-family: AppTypography.ui-font-family;
                         font-size: 30px;
                         font-weight: 700;
                     }
 
                     Text {
-                        x: 24px;
-                        y: 58px;
-                        width: parent.width - 48px;
-                        text: "Open a recent connection or browse saved SSH targets.";
+                        x: 0px;
+                        y: 52px;
+                        width: min(560px, parent.width - 40px);
+                        text: "Continue your work by opening a recent SSH connection.";
                         color: ThemeTokens.text-secondary;
                         font-family: AppTypography.ui-font-family;
                         font-size: AppTypography.ui-font-size-body;
                         font-weight: AppTypography.ui-font-weight-regular;
+                        wrap: word-wrap;
                     }
 
                     open-saved-ssh-button := LauncherPrimaryActionButton {
-                        x: 24px;
-                        y: 84px;
-                        width: 240px;
-                        label: "Open Saved SSH Connections";
+                        x: 0px;
+                        y: 104px;
+                        width: 264px;
+                        label: "Open Saved SSH";
 
                         clicked => {
                             root.open-saved-ssh-requested();
@@ -137,20 +149,12 @@ export component WelcomeView inherits Rectangle {
                 QuickLaunchSection {
                     width: parent.width;
                     title: "Recent Connections";
-                    subtitle: "Most recently launched saved SSH sessions";
+                    subtitle: "";
                     items: root.recent-items;
-                    empty_text: "No recent SSH connections yet. Use Open Saved SSH Connections to browse your saved hosts.";
-
-                    item-selected(asset-id) => {
-                        root.asset-selected(asset-id);
-                    }
+                    empty_text: "No recent SSH connections yet. Open a saved SSH target to start a session.";
 
                     item-activated(asset-id) => {
                         root.connect-requested(asset-id);
-                    }
-
-                    toggle-favorite-requested(asset-id) => {
-                        root.toggle-favorite-requested(asset-id);
                     }
                 }
             }

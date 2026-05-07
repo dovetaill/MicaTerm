@@ -7555,140 +7555,129 @@ fn connect_action_reuses_existing_ephemeral_session_for_same_draft() {
 }
 
 #[test]
-fn quick_launch_connect_opens_saved_asset_session_and_updates_recent_order() {
-    i_slint_backend_testing::init_no_event_loop();
+fn quick_launch_connect_opens_saved_asset_session_and_records_recent_items() {
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
 
-    let app = AppWindow::new().unwrap();
-    bind_with_fake_sessions(&app, None);
+        let app = AppWindow::new().unwrap();
+        bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+        app.show().expect("show app window");
 
-    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
-    create_root_ssh(&app, "DB Replica", "10.0.0.24");
-    let find_asset_id = |label: &str| {
-        let rows = app.get_console_asset_items();
-        (0..rows.row_count())
-            .filter_map(|index| rows.row_data(index))
-            .find(|row| row.label.as_str() == label)
-            .map(|row| row.id.to_string())
-            .expect("asset id by label")
-    };
-    let prod_id = find_asset_id("Prod Bastion");
-    let db_id = find_asset_id("DB Replica");
+        create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        create_root_ssh(&app, "DB Replica", "10.0.0.24");
+        let find_asset_id = |label: &str| {
+            let rows = app.get_console_asset_items();
+            (0..rows.row_count())
+                .filter_map(|index| rows.row_data(index))
+                .find(|row| row.label.as_str() == label)
+                .map(|row| row.id.to_string())
+                .expect("asset id by label")
+        };
+        let prod_id = find_asset_id("Prod Bastion");
+        let db_id = find_asset_id("DB Replica");
 
-    app.invoke_welcome_quick_launch_connect_requested(prod_id.clone().into());
-    app.invoke_welcome_quick_launch_connect_requested(db_id.clone().into());
+        app.invoke_workspace_new_tab_requested();
+        app.invoke_welcome_quick_launch_connect_requested(prod_id.clone().into());
+        settle_terminal_projection();
+        app.invoke_workspace_new_tab_requested();
+        app.invoke_welcome_quick_launch_connect_requested(db_id.clone().into());
+        settle_terminal_projection();
 
-    let recent = app.get_welcome_quick_launch_recent_items();
-    assert_eq!(app.get_workspace_tab_items().row_count(), 2);
-    assert_eq!(recent.row_count(), 2);
-    assert_eq!(
-        recent.row_data(0).expect("recent row 0").asset_id.as_str(),
-        db_id.as_str()
-    );
-    assert_eq!(
-        recent.row_data(1).expect("recent row 1").asset_id.as_str(),
-        prod_id.as_str()
-    );
-    assert_eq!(
-        app.get_welcome_quick_launch_selected_detail()
-            .asset_id
-            .as_str(),
-        db_id.as_str()
-    );
+        let recent = app.get_welcome_quick_launch_recent_items();
+        assert_eq!(app.get_workspace_tab_items().row_count(), 2);
+        assert_eq!(recent.row_count(), 2);
+        let recent_ids = (0..recent.row_count())
+            .filter_map(|index| recent.row_data(index))
+            .map(|row| row.asset_id.to_string())
+            .collect::<Vec<_>>();
+        assert!(recent_ids.iter().any(|asset_id| asset_id == &prod_id));
+        assert!(recent_ids.iter().any(|asset_id| asset_id == &db_id));
+        assert!(
+            !recent
+                .row_data(0)
+                .expect("recent row 0")
+                .state_label
+                .as_str()
+                .is_empty(),
+            "recent row should expose connected state when a saved SSH session is already open"
+        );
+    });
 }
 
 #[test]
-fn quick_launch_reveal_in_assets_selects_console_asset() {
-    i_slint_backend_testing::init_no_event_loop();
+fn asset_activation_records_saved_ssh_into_new_tab_recent_items() {
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
 
-    let app = AppWindow::new().unwrap();
-    bind_with_fake_sessions(&app, None);
+        let app = AppWindow::new().unwrap();
+        bind_with_fake_sessions(&app, None);
 
-    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
-    app.invoke_sidebar_destination_selected("snippets".into());
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.clone().into());
+        settle_terminal_projection();
+        app.invoke_workspace_new_tab_requested();
 
-    app.invoke_welcome_quick_launch_reveal_in_assets_requested(ssh_id.clone().into());
-
-    let row = app
-        .get_console_asset_items()
-        .row_data(0)
-        .expect("console row after reveal");
-    assert_eq!(app.get_active_sidebar_destination().as_str(), "console");
-    assert_eq!(row.id.as_str(), ssh_id.as_str());
-    assert!(row.selected);
-    assert!(row.focused);
+        let recent = app.get_welcome_quick_launch_recent_items();
+        assert_eq!(recent.row_count(), 1);
+        let row = recent.row_data(0).expect("connected recent row");
+        assert_eq!(row.asset_id.as_str(), ssh_id.as_str());
+        assert!(
+            !row.time_label.as_str().is_empty(),
+            "asset activation should record the saved SSH in recent items even before the runtime reaches connected state"
+        );
+    });
 }
 
 #[test]
-fn quick_launch_toggle_favorite_and_search_refresh_dashboard_projection() {
-    i_slint_backend_testing::init_no_event_loop();
+fn active_recent_connection_row_returns_to_existing_tab_without_duplicate_session() {
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
 
-    let app = AppWindow::new().unwrap();
-    bind_with_fake_sessions(&app, None);
+        let app = AppWindow::new().unwrap();
+        bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
 
-    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
-    create_root_ssh(&app, "DB Replica", "10.0.0.24");
-    let find_asset_id = |label: &str| {
-        let rows = app.get_console_asset_items();
-        (0..rows.row_count())
-            .filter_map(|index| rows.row_data(index))
-            .find(|row| row.label.as_str() == label)
-            .map(|row| row.id.to_string())
-            .expect("asset id by label")
-    };
-    let prod_id = find_asset_id("Prod Bastion");
-    let db_id = find_asset_id("DB Replica");
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.clone().into());
+        settle_terminal_projection();
+        let existing_session_id = app.get_active_workspace_session_id().to_string();
 
-    app.invoke_welcome_quick_launch_toggle_favorite_requested(prod_id.clone().into());
+        app.invoke_workspace_new_tab_requested();
+        assert_eq!(app.get_workspace_tab_items().row_count(), 2);
 
-    let favorites = app.get_welcome_quick_launch_favorite_items();
-    assert_eq!(favorites.row_count(), 1);
-    assert_eq!(
-        favorites
+        app.invoke_welcome_quick_launch_connect_requested(ssh_id.into());
+
+        assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+        assert_eq!(
+            app.get_active_workspace_session_id().as_str(),
+            existing_session_id.as_str()
+        );
+        let active_tab = app
+            .get_workspace_tab_items()
             .row_data(0)
-            .expect("favorite row 0")
-            .asset_id
-            .as_str(),
-        prod_id.as_str()
-    );
-    assert!(favorites.row_data(0).expect("favorite row 0").favorite);
-
-    app.invoke_welcome_quick_launch_search_changed("db".into());
-
-    let visible_group_items = app.get_welcome_quick_launch_visible_group_items();
-    assert_eq!(app.get_welcome_quick_launch_search_query().as_str(), "db");
-    assert_eq!(visible_group_items.row_count(), 1);
-    assert_eq!(
-        visible_group_items
-            .row_data(0)
-            .expect("visible group row 0")
-            .asset_id
-            .as_str(),
-        db_id.as_str()
-    );
-    assert_eq!(
-        app.get_welcome_quick_launch_selected_detail()
-            .asset_id
-            .as_str(),
-        db_id.as_str()
-    );
+            .expect("existing tab after active recent row click");
+        assert_eq!(active_tab.session_id.as_str(), existing_session_id.as_str());
+        assert_eq!(active_tab.title.as_str(), "Prod Bastion");
+    });
 }
 
 #[test]
 fn workspace_new_tab_request_opens_single_launcher_tab() {
-    i_slint_backend_testing::init_no_event_loop();
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
 
-    let app = AppWindow::new().unwrap();
-    bind_with_fake_sessions(&app, None);
+        let app = AppWindow::new().unwrap();
+        bind_with_fake_sessions(&app, None);
 
-    app.invoke_workspace_new_tab_requested();
-    app.invoke_workspace_new_tab_requested();
+        app.invoke_workspace_new_tab_requested();
+        app.invoke_workspace_new_tab_requested();
 
-    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
-    assert_eq!(
-        app.get_active_workspace_session_id().as_str(),
-        "workspace-launcher"
-    );
+        assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+        assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
+        assert_eq!(
+            app.get_active_workspace_session_id().as_str(),
+            "workspace-launcher"
+        );
+    });
 }
 
 #[test]
@@ -7771,62 +7760,66 @@ fn workspace_tab_selection_restores_native_terminal_surface_rect_immediately() {
 
 #[test]
 fn launcher_recent_connection_replaces_launcher_tab_with_real_session_tab() {
-    i_slint_backend_testing::init_no_event_loop();
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
 
-    let app = AppWindow::new().unwrap();
-    bind_with_fake_sessions(&app, None);
+        let app = AppWindow::new().unwrap();
+        bind_with_fake_sessions(&app, None);
 
-    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
 
-    app.invoke_workspace_new_tab_requested();
-    app.invoke_welcome_quick_launch_connect_requested(ssh_id.into());
+        app.invoke_workspace_new_tab_requested();
+        app.invoke_welcome_quick_launch_connect_requested(ssh_id.into());
 
-    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    let item = app
-        .get_workspace_tab_items()
-        .row_data(0)
-        .expect("workspace tab after launcher connect");
-    assert_ne!(item.session_id.as_str(), "workspace-launcher");
-    assert_eq!(item.title.as_str(), "Prod Bastion");
+        assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+        let item = app
+            .get_workspace_tab_items()
+            .row_data(0)
+            .expect("workspace tab after launcher connect");
+        assert_ne!(item.session_id.as_str(), "workspace-launcher");
+        assert_eq!(item.title.as_str(), "Prod Bastion");
+    });
 }
 
 #[test]
 fn launcher_quick_launch_connect_restores_native_terminal_surface_rect() {
-    i_slint_backend_testing::init_no_event_loop();
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
 
-    let app = AppWindow::new().unwrap();
-    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
-    app.show().expect("show app window");
+        let app = AppWindow::new().unwrap();
+        bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+        app.show().expect("show app window");
 
-    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
 
-    app.invoke_workspace_new_tab_requested();
+        app.invoke_workspace_new_tab_requested();
 
-    assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
-    assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
-    assert_eq!(
-        app.get_layout_workspace_session_native_surface_height(),
-        0.0
-    );
+        assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
+        assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
+        assert_eq!(
+            app.get_layout_workspace_session_native_surface_height(),
+            0.0
+        );
 
-    app.invoke_welcome_quick_launch_connect_requested(ssh_id.into());
-    settle_terminal_projection();
+        app.invoke_welcome_quick_launch_connect_requested(ssh_id.into());
+        settle_terminal_projection();
 
-    let item = app
-        .get_workspace_tab_items()
-        .row_data(0)
-        .expect("workspace tab after launcher quick launch connect");
-    assert_ne!(item.session_id.as_str(), "workspace-launcher");
-    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
-    assert!(
-        app.get_layout_workspace_session_native_surface_width() > 0.0
-            && app.get_layout_workspace_session_native_surface_height() > 0.0,
-        "launcher quick launch connect should restore the native terminal rect as soon as the launcher tab is replaced so the retained surface does not stay collapsed under a live terminal host"
-    );
-    assert!(
-        app.get_workspace_session_surface_seqno() > 0,
-        "launcher quick launch connect should stage a terminal payload together with the restored host mode so the revived geometry is backed by a real frame"
-    );
+        let item = app
+            .get_workspace_tab_items()
+            .row_data(0)
+            .expect("workspace tab after launcher quick launch connect");
+        assert_ne!(item.session_id.as_str(), "workspace-launcher");
+        assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+        assert!(
+            app.get_layout_workspace_session_native_surface_width() > 0.0
+                && app.get_layout_workspace_session_native_surface_height() > 0.0,
+            "launcher quick launch connect should restore the native terminal rect as soon as the launcher tab is replaced so the retained surface does not stay collapsed under a live terminal host"
+        );
+        assert!(
+            app.get_workspace_session_surface_seqno() > 0,
+            "launcher quick launch connect should stage a terminal payload together with the restored host mode so the revived geometry is backed by a real frame"
+        );
+    });
 }
 
 #[test]
@@ -7839,10 +7832,8 @@ fn duplicate_ssh_tabs_keep_resolved_titles_and_reuse_suffix_gaps() {
     let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
 
     app.invoke_asset_activated(ssh_id.clone().into());
-    app.invoke_workspace_new_tab_requested();
-    app.invoke_welcome_quick_launch_connect_in_new_tab_requested(ssh_id.clone().into());
-    app.invoke_workspace_new_tab_requested();
-    app.invoke_welcome_quick_launch_connect_in_new_tab_requested(ssh_id.clone().into());
+    app.invoke_asset_activated(ssh_id.clone().into());
+    app.invoke_asset_activated(ssh_id.clone().into());
 
     let rows = app.get_workspace_tab_items();
     assert_eq!(rows.row_count(), 3);
@@ -7866,8 +7857,7 @@ fn duplicate_ssh_tabs_keep_resolved_titles_and_reuse_suffix_gaps() {
         .to_string();
     app.invoke_workspace_tab_close_requested(second_tab_session_id.into());
 
-    app.invoke_workspace_new_tab_requested();
-    app.invoke_welcome_quick_launch_connect_in_new_tab_requested(ssh_id.into());
+    app.invoke_asset_activated(ssh_id.into());
 
     let reopened_rows = app.get_workspace_tab_items();
     assert_eq!(reopened_rows.row_count(), 3);
@@ -7899,69 +7889,105 @@ fn duplicate_ssh_tabs_keep_resolved_titles_and_reuse_suffix_gaps() {
 
 #[test]
 fn launcher_picker_activation_replaces_launcher_tab_and_closes_modal() {
-    i_slint_backend_testing::init_no_event_loop();
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
 
-    let app = AppWindow::new().unwrap();
-    bind_with_fake_sessions(&app, None);
+        let app = AppWindow::new().unwrap();
+        bind_with_fake_sessions(&app, None);
 
-    let ssh_id = create_root_ssh(&app, "DB Admin", "10.0.0.24");
+        let ssh_id = create_root_ssh(&app, "DB Admin", "10.0.0.24");
 
-    app.invoke_workspace_new_tab_requested();
-    app.invoke_welcome_open_saved_ssh_requested();
-    assert!(app.get_open_saved_ssh_modal_open());
+        app.invoke_workspace_new_tab_requested();
+        app.invoke_welcome_open_saved_ssh_requested();
+        assert!(app.get_open_saved_ssh_modal_open());
 
-    app.invoke_open_saved_ssh_modal_asset_activated(ssh_id.into());
+        app.invoke_open_saved_ssh_modal_asset_activated(ssh_id.into());
 
-    assert!(!app.get_open_saved_ssh_modal_open());
-    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    let item = app
-        .get_workspace_tab_items()
-        .row_data(0)
-        .expect("workspace tab after picker activation");
-    assert_ne!(item.session_id.as_str(), "workspace-launcher");
-    assert_eq!(item.title.as_str(), "DB Admin");
+        assert!(!app.get_open_saved_ssh_modal_open());
+        assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+        let item = app
+            .get_workspace_tab_items()
+            .row_data(0)
+            .expect("workspace tab after picker activation");
+        assert_ne!(item.session_id.as_str(), "workspace-launcher");
+        assert_eq!(item.title.as_str(), "DB Admin");
+    });
+}
+
+#[test]
+fn launcher_picker_primary_open_request_activates_the_selected_saved_ssh() {
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
+
+        let app = AppWindow::new().unwrap();
+        bind_with_fake_sessions(&app, None);
+
+        create_root_ssh(&app, "Prod Bastion", "10.0.0.10");
+        create_root_ssh(&app, "DB Admin", "10.0.0.24");
+        let ssh_id = find_console_asset_id(&app, "DB Admin");
+
+        app.invoke_workspace_new_tab_requested();
+        app.invoke_welcome_open_saved_ssh_requested();
+        assert!(app.get_open_saved_ssh_modal_open());
+        assert!(app.get_open_saved_ssh_modal_can_open_selection());
+
+        app.invoke_open_saved_ssh_modal_asset_selected(ssh_id.clone().into());
+        assert!(app.get_open_saved_ssh_modal_can_open_selection());
+
+        app.invoke_open_saved_ssh_modal_activate_selection_requested();
+
+        assert!(!app.get_open_saved_ssh_modal_open());
+        assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+        let item = app
+            .get_workspace_tab_items()
+            .row_data(0)
+            .expect("workspace tab after picker primary open");
+        assert_eq!(item.title.as_str(), "DB Admin");
+    });
 }
 
 #[test]
 fn launcher_picker_activation_restores_native_terminal_surface_rect() {
-    i_slint_backend_testing::init_no_event_loop();
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
 
-    let app = AppWindow::new().unwrap();
-    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
-    app.show().expect("show app window");
+        let app = AppWindow::new().unwrap();
+        bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+        app.show().expect("show app window");
 
-    let ssh_id = create_root_ssh(&app, "DB Admin", "10.0.0.24");
+        let ssh_id = create_root_ssh(&app, "DB Admin", "10.0.0.24");
 
-    app.invoke_workspace_new_tab_requested();
-    app.invoke_welcome_open_saved_ssh_requested();
+        app.invoke_workspace_new_tab_requested();
+        app.invoke_welcome_open_saved_ssh_requested();
 
-    assert!(app.get_open_saved_ssh_modal_open());
-    assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
-    assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
-    assert_eq!(
-        app.get_layout_workspace_session_native_surface_height(),
-        0.0
-    );
+        assert!(app.get_open_saved_ssh_modal_open());
+        assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
+        assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
+        assert_eq!(
+            app.get_layout_workspace_session_native_surface_height(),
+            0.0
+        );
 
-    app.invoke_open_saved_ssh_modal_asset_activated(ssh_id.into());
-    settle_terminal_projection();
+        app.invoke_open_saved_ssh_modal_asset_activated(ssh_id.into());
+        settle_terminal_projection();
 
-    assert!(!app.get_open_saved_ssh_modal_open());
-    let item = app
-        .get_workspace_tab_items()
-        .row_data(0)
-        .expect("workspace tab after picker activation");
-    assert_ne!(item.session_id.as_str(), "workspace-launcher");
-    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
-    assert!(
-        app.get_layout_workspace_session_native_surface_width() > 0.0
-            && app.get_layout_workspace_session_native_surface_height() > 0.0,
-        "saved ssh picker activation should restore the native terminal rect as soon as the launcher tab is replaced so the retained surface does not remain collapsed under a live terminal host"
-    );
-    assert!(
-        app.get_workspace_session_surface_seqno() > 0,
-        "saved ssh picker activation should stage a terminal payload together with the restored host mode so the revived geometry is backed by a real frame"
-    );
+        assert!(!app.get_open_saved_ssh_modal_open());
+        let item = app
+            .get_workspace_tab_items()
+            .row_data(0)
+            .expect("workspace tab after picker activation");
+        assert_ne!(item.session_id.as_str(), "workspace-launcher");
+        assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+        assert!(
+            app.get_layout_workspace_session_native_surface_width() > 0.0
+                && app.get_layout_workspace_session_native_surface_height() > 0.0,
+            "saved ssh picker activation should restore the native terminal rect as soon as the launcher tab is replaced so the retained surface does not remain collapsed under a live terminal host"
+        );
+        assert!(
+            app.get_workspace_session_surface_seqno() > 0,
+            "saved ssh picker activation should stage a terminal payload together with the restored host mode so the revived geometry is backed by a real frame"
+        );
+    });
 }
 
 #[test]

@@ -162,15 +162,15 @@ fn shell_view_model_starts_in_welcome_mode_with_right_panel_hidden() {
 }
 
 #[test]
-fn quick_launch_selection_falls_back_to_first_visible_item() {
+fn saved_ssh_picker_defaults_to_the_first_visible_saved_ssh() {
     let (tree, prod_asset_id) = sample_quick_launch_asset_tree();
     let mut view_model = ShellViewModel::default();
 
     view_model.replace_console_asset_tree(tree);
-    view_model.ensure_quick_launch_selection();
+    view_model.open_saved_ssh_picker();
 
     assert_eq!(
-        view_model.quick_launch_selected_asset_id(),
+        view_model.saved_ssh_picker_selected_asset_id(),
         Some(prod_asset_id.as_str())
     );
 }

@@ -4,81 +4,95 @@ import { QuickLaunchCardRow } from "quick-launch-types.slint";
 
 export component QuickLaunchCard inherits Rectangle {
     in property <QuickLaunchCardRow> item;
-    callback selected(string);
     callback activated(string);
-    callback toggle-favorite(string);
 
-    private property <image> console-icon: @image-url("../../assets/icons/fluent/window-console-20-regular.svg");
-    private property <image> folder-icon: @image-url("../../assets/icons/fluent/folder-open-20-regular.svg");
-    private property <image> gateway-icon: @image-url("../../assets/icons/fluent/navigation-24-regular.svg");
+    private property <image> server-stack-icon: @image-url("../../assets/icons/new-tab/server-stack.svg");
+    private property <image> chevron-icon: @image-url("../../assets/icons/new-tab/chevron-right.svg");
+
     function accent-brush() -> brush {
-        if root.item.accent_kind == "danger" {
-            return ThemeTokens.status-error-surface;
+        if root.item.accent_kind == "lime" {
+            return #8cf86f;
+        } else if root.item.accent_kind == "violet" {
+            return #b778ff;
+        } else if root.item.accent_kind == "blue" {
+            return #69aaff;
+        } else if root.item.accent_kind == "amber" {
+            return #ffa62b;
+        } else if root.item.accent_kind == "cyan" {
+            return #4be7e4;
+        } else if root.item.accent_kind == "yellow" {
+            return #f5ea17;
+        } else if root.item.accent_kind == "pink" {
+            return #ff6bb5;
+        } else if root.item.accent_kind == "danger" {
+            return ThemeTokens.status-error-accent;
         } else if root.item.accent_kind == "warning" {
-            return ThemeTokens.status-busy-surface;
+            return ThemeTokens.status-busy-accent;
         } else if root.item.accent_kind == "info" {
-            return ThemeTokens.accent;
+            return ThemeTokens.link-accent;
+        } else if root.item.accent_kind == "connected" {
+            return ThemeTokens.status-success-accent;
         }
-        return ThemeTokens.control-active-surface;
+        return ThemeTokens.text-secondary;
     }
 
-    height: 84px;
-    border-radius: 0px;
+    height: 92px;
+    border-radius: 10px;
     border-width: 1px;
-    border-color: touch.pressed || touch.has-hover ? ThemeTokens.accent : ThemeTokens.divider-subtle;
+    border-color: touch.has-hover || touch.pressed ? ThemeTokens.focus-ring : ThemeTokens.divider-subtle;
     background: touch.pressed
         ? ThemeTokens.control-pressed-surface
         : touch.has-hover
             ? ThemeTokens.control-hover-surface
             : ThemeTokens.assets-surface;
 
-    accent-strip := Rectangle {
-        x: 0px;
-        y: 0px;
-        width: 3px;
-        height: parent.height;
-        background: root.accent-brush();
-    }
-
     icon-shell := Rectangle {
-        x: 18px;
+        x: 24px;
         y: 18px;
-        width: 44px;
-        height: 44px;
-        border-radius: 0px;
-        background: root.accent-brush();
-        opacity: ThemeTokens.dark-mode ? 0.88 : 0.94;
+        width: 56px;
+        height: 56px;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: root.accent-brush();
+        background: ThemeTokens.inspector-surface;
+
+        Rectangle {
+            x: 8px;
+            y: 8px;
+            width: parent.width - 16px;
+            height: parent.height - 16px;
+            border-radius: 8px;
+            background: root.accent-brush();
+            opacity: ThemeTokens.dark-mode ? 0.08 : 0.11;
+        }
 
         Image {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: 20px;
-            height: 20px;
-            source: root.item.icon_kind == "folder"
-                ? root.folder-icon
-                : root.item.icon_kind == "gateway"
-                    ? root.gateway-icon
-                    : root.console-icon;
+            width: 32px;
+            height: 32px;
+            source: root.server-stack-icon;
             image-fit: contain;
-            colorize: ThemeTokens.text-primary;
+            colorize: root.accent-brush();
         }
     }
 
     title-text := Text {
-        x: 78px;
-        y: 16px;
-        width: parent.width - 138px;
+        x: 104px;
+        y: 20px;
+        width: parent.width - 272px;
         text: root.item.title;
         color: ThemeTokens.text-primary;
-        font-size: 15px;
+        font-family: AppTypography.ui-font-family;
+        font-size: 17px;
         font-weight: 700;
         overflow: elide;
     }
 
     subtitle-text := Text {
-        x: 78px;
-        y: 38px;
-        width: parent.width - 138px;
+        x: 104px;
+        y: root.item.meta == "" ? 50px : 44px;
+        width: parent.width - 272px;
         text: root.item.subtitle;
         color: ThemeTokens.text-secondary;
         font-family: AppTypography.ui-font-family;
@@ -87,39 +101,41 @@ export component QuickLaunchCard inherits Rectangle {
         overflow: elide;
     }
 
-    meta-text := Text {
-        x: 78px;
-        y: 58px;
-        width: parent.width - 138px;
-        text: root.item.meta != "" ? root.item.meta : "Open saved SSH connection";
-        color: ThemeTokens.text-secondary;
+    if root.item.meta != "" : meta-text := Text {
+        x: 104px;
+        y: 64px;
+        width: parent.width - 272px;
+        text: root.item.meta;
+        color: ThemeTokens.text-muted;
         font-family: AppTypography.ui-font-family;
         font-size: AppTypography.ui-font-size-caption;
         font-weight: AppTypography.ui-font-weight-regular;
         overflow: elide;
     }
 
-    if root.item.badge != "" : badge-chip := Rectangle {
-        x: parent.width - self.width - 18px;
-        y: 18px;
-        width: max(56px, badge-label.preferred-width + 18px);
-        height: 24px;
-        border-radius: 0px;
-        background: ThemeTokens.inspector-surface;
-        border-width: 1px;
-        border-color: ThemeTokens.divider-subtle;
+    time-text := Text {
+        x: parent.width - 160px;
+        y: 0px;
+        width: 104px;
+        height: parent.height;
+        text: root.item.state_label != "" ? root.item.state_label : root.item.time_label;
+        color: root.item.state_label != "" ? ThemeTokens.status-success-accent : ThemeTokens.text-secondary;
+        font-family: AppTypography.ui-font-family;
+        font-size: AppTypography.ui-font-size-body;
+        font-weight: root.item.state_label != "" ? 650 : AppTypography.ui-font-weight-regular;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        overflow: elide;
+    }
 
-        badge-label := Text {
-            x: 9px;
-            y: 0px;
-            width: parent.width - 18px;
-            height: parent.height;
-            text: root.item.badge;
-            color: ThemeTokens.text-primary;
-            font-size: 11px;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
+    Image {
+        x: parent.width - 42px;
+        y: (parent.height - self.height) / 2;
+        width: 22px;
+        height: 22px;
+        source: root.chevron-icon;
+        image-fit: contain;
+        colorize: touch.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
     }
 
     touch := TouchArea {
@@ -129,7 +145,6 @@ export component QuickLaunchCard inherits Rectangle {
         height: parent.height;
 
         clicked => {
-            root.selected(root.item.asset_id);
             root.activated(root.item.asset_id);
         }
     }

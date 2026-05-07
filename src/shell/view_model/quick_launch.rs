@@ -1,29 +1,16 @@
-//! ShellViewModel quick launch domain impls.
+//! ShellViewModel recent SSH launcher domain impls.
 
 use super::*;
+use crate::app::quick_launch_preferences::{QuickLaunchRecentAsset, record_recent_asset_opened};
+use chrono::Utc;
 
 impl ShellViewModel {
     pub fn quick_launch_preferences(&self) -> &QuickLaunchPreferences {
         &self.quick_launch_preferences
     }
 
-    pub fn quick_launch_search_query(&self) -> &str {
-        &self.quick_launch_search_query
-    }
-
-    pub fn quick_launch_selected_asset_id(&self) -> Option<&str> {
-        self.quick_launch_selected_asset_id.as_deref()
-    }
-
-    pub fn quick_launch_active_group_id(&self) -> Option<&str> {
-        self.quick_launch_active_group_id.as_deref()
-    }
-
     pub fn apply_quick_launch_preferences(&mut self, prefs: QuickLaunchPreferences) {
-        self.quick_launch_selected_asset_id = prefs.last_selected_asset_id.clone();
         self.quick_launch_preferences = prefs;
-        self.sync_quick_launch_group_from_selected();
-        self.ensure_quick_launch_selection();
     }
 
     pub fn record_recent_saved_ssh_asset(&mut self, asset_id: &str) {
@@ -35,294 +22,123 @@ impl ShellViewModel {
             return;
         }
 
-        self.quick_launch_preferences.recent_asset_ids = record_recent_asset_id(
+        self.quick_launch_preferences.recent_asset_ids = record_recent_asset_opened(
             self.quick_launch_preferences.recent_asset_ids.clone(),
             asset_id,
+            Utc::now().timestamp(),
             QUICK_LAUNCH_RECENT_LIMIT,
         );
-        self.quick_launch_preferences.last_selected_asset_id = Some(asset_id.to_string());
-        self.quick_launch_selected_asset_id = Some(asset_id.to_string());
-        self.sync_quick_launch_group_from_selected();
-        self.ensure_quick_launch_selection();
-    }
-
-    pub fn toggle_quick_launch_favorite(&mut self, asset_id: &str) {
-        if self
-            .console_asset_tree
-            .ssh_connection_spec(asset_id)
-            .is_none()
-        {
-            return;
-        }
-
-        if let Some(index) = self
-            .quick_launch_preferences
-            .favorite_asset_ids
-            .iter()
-            .position(|current| current == asset_id)
-        {
-            self.quick_launch_preferences
-                .favorite_asset_ids
-                .remove(index);
-        } else {
-            self.quick_launch_preferences
-                .favorite_asset_ids
-                .insert(0, asset_id.to_string());
-        }
-
-        self.ensure_quick_launch_selection();
-    }
-
-    pub fn select_quick_launch_asset(&mut self, asset_id: String) {
-        if self
-            .console_asset_tree
-            .ssh_connection_spec(&asset_id)
-            .is_none()
-        {
-            return;
-        }
-
-        self.quick_launch_preferences.last_selected_asset_id = Some(asset_id.clone());
-        self.quick_launch_selected_asset_id = Some(asset_id);
-        self.sync_quick_launch_group_from_selected();
-        self.ensure_quick_launch_selection();
-    }
-
-    pub fn set_quick_launch_search_query(&mut self, query: String) {
-        self.quick_launch_search_query = query;
-        self.ensure_quick_launch_selection();
     }
 
     pub fn quick_launch_recent_items(&self) -> Vec<QuickLaunchCardItem> {
-        let records = self.matching_quick_launch_records();
-        self.ordered_quick_launch_cards_from_ids(
+        self.quick_launch_recent_items_at(Utc::now().timestamp())
+    }
+
+    pub fn quick_launch_recent_items_at(&self, now_unix_seconds: i64) -> Vec<QuickLaunchCardItem> {
+        let records = self.quick_launch_records();
+        self.ordered_new_tab_connection_cards(
             &self.quick_launch_preferences.recent_asset_ids,
             &records,
+            now_unix_seconds,
         )
-    }
-
-    pub fn quick_launch_favorite_items(&self) -> Vec<QuickLaunchCardItem> {
-        let records = self.matching_quick_launch_records();
-        self.ordered_quick_launch_cards_from_ids(
-            &self.quick_launch_preferences.favorite_asset_ids,
-            &records,
-        )
-    }
-
-    pub fn quick_launch_group_items(&self) -> Vec<QuickLaunchGroupItem> {
-        let records = self.matching_quick_launch_records();
-        let mut groups = Vec::<QuickLaunchGroupItem>::new();
-        let mut positions = HashMap::<String, usize>::new();
-
-        for record in records {
-            let Some(group) = record.group else {
-                continue;
-            };
-
-            if let Some(position) = positions.get(&group.id).copied() {
-                groups[position].count += 1;
-            } else {
-                positions.insert(group.id.clone(), groups.len());
-                groups.push(QuickLaunchGroupItem {
-                    group_id: group.id,
-                    label: group.label,
-                    count: 1,
-                });
-            }
-        }
-
-        groups
-    }
-
-    pub fn quick_launch_visible_group_items(&self) -> Vec<QuickLaunchCardItem> {
-        let records = self.matching_quick_launch_records();
-        self.visible_group_records(&records)
-            .into_iter()
-            .map(|record| {
-                project_card_item(
-                    &record,
-                    self.is_quick_launch_favorite(record.asset_id.as_str()),
-                )
-            })
-            .collect()
-    }
-
-    pub fn quick_launch_selected_detail(&self) -> Option<QuickLaunchDetailItem> {
-        let selected_asset_id = self.quick_launch_selected_asset_id.as_deref()?;
-        let records = self.quick_launch_records();
-        let record = records
-            .iter()
-            .find(|record| record.asset_id == selected_asset_id)?;
-
-        Some(project_detail_item(
-            record,
-            self.quick_launch_recent_label(selected_asset_id),
-        ))
-    }
-
-    pub fn ensure_quick_launch_selection(&mut self) {
-        let records = self.matching_quick_launch_records();
-        let visible_asset_ids = self.visible_asset_ids_from_records(&records);
-        if self
-            .quick_launch_selected_asset_id
-            .as_deref()
-            .is_some_and(|asset_id| {
-                visible_asset_ids
-                    .iter()
-                    .any(|visible_asset_id| visible_asset_id == asset_id)
-            })
-        {
-            self.sync_quick_launch_group_from_selected();
-            return;
-        }
-
-        self.quick_launch_selected_asset_id =
-            self.first_visible_quick_launch_asset_id_from_records(&records);
-        self.quick_launch_preferences.last_selected_asset_id =
-            self.quick_launch_selected_asset_id.clone();
-        self.sync_quick_launch_group_from_selected();
     }
 
     fn quick_launch_records(&self) -> Vec<QuickLaunchAssetRecord> {
         collect_quick_launch_records(&self.console_asset_tree)
     }
 
-    fn matching_quick_launch_records(&self) -> Vec<QuickLaunchAssetRecord> {
-        self.quick_launch_records()
-            .into_iter()
-            .filter(|record| {
-                matches_quick_launch_query(record, self.quick_launch_search_query.as_str())
-            })
-            .collect()
-    }
-
-    fn ordered_quick_launch_cards_from_ids(
+    fn ordered_new_tab_connection_cards(
         &self,
-        ids: &[String],
+        entries: &[QuickLaunchRecentAsset],
         records: &[QuickLaunchAssetRecord],
+        now_unix_seconds: i64,
     ) -> Vec<QuickLaunchCardItem> {
-        self.ordered_quick_launch_asset_ids_from_preferences(ids, records)
-            .into_iter()
-            .filter_map(|asset_id| {
-                records
-                    .iter()
-                    .find(|record| record.asset_id == asset_id)
-                    .map(|record| {
-                        project_card_item(record, self.is_quick_launch_favorite(asset_id.as_str()))
-                    })
-            })
-            .collect()
-    }
-
-    fn ordered_quick_launch_asset_ids_from_preferences(
-        &self,
-        ids: &[String],
-        records: &[QuickLaunchAssetRecord],
-    ) -> Vec<String> {
-        let mut ordered = Vec::new();
         let mut seen = BTreeSet::new();
+        let mut items = Vec::new();
 
-        for asset_id in ids {
+        for asset_id in self.connected_quick_launch_asset_ids(records) {
+            if items.len() >= QUICK_LAUNCH_RECENT_LIMIT {
+                break;
+            }
             if !seen.insert(asset_id.clone()) {
                 continue;
             }
-            if records.iter().any(|record| record.asset_id == *asset_id) {
-                ordered.push(asset_id.clone());
+            if let Some(record) = records.iter().find(|record| record.asset_id == asset_id) {
+                items.push(project_connected_card_item(record));
             }
         }
 
-        ordered
+        for entry in entries {
+            if items.len() >= QUICK_LAUNCH_RECENT_LIMIT {
+                break;
+            }
+            if !seen.insert(entry.asset_id.clone()) {
+                continue;
+            }
+            if let Some(record) = records
+                .iter()
+                .find(|record| record.asset_id == entry.asset_id)
+            {
+                items.push(project_recent_card_item(
+                    record,
+                    format_recent_time_label(entry.opened_at_unix_seconds, now_unix_seconds),
+                    recent_accent_kind(record.asset_id.as_str()).into(),
+                ));
+            }
+        }
+
+        items
     }
 
-    fn visible_group_records(
-        &self,
-        records: &[QuickLaunchAssetRecord],
-    ) -> Vec<QuickLaunchAssetRecord> {
-        let Some(group_id) = self.active_quick_launch_group_id_for_records(records) else {
-            return records.to_vec();
-        };
+    fn connected_quick_launch_asset_ids(&self, records: &[QuickLaunchAssetRecord]) -> Vec<String> {
+        let mut ordered_tabs = Vec::new();
+        if let Some(active_tab_id) = self.active_workspace_tab_id() {
+            if let Some(tab) = self
+                .workspace_tabs()
+                .iter()
+                .find(|tab| tab.tab_id == active_tab_id)
+            {
+                ordered_tabs.push(tab);
+            }
+        }
+        for tab in self.workspace_tabs() {
+            if ordered_tabs
+                .iter()
+                .any(|ordered_tab| ordered_tab.tab_id == tab.tab_id)
+            {
+                continue;
+            }
+            ordered_tabs.push(tab);
+        }
 
-        records
-            .iter()
-            .filter(|record| {
-                record
-                    .group
-                    .as_ref()
-                    .is_some_and(|group| group.id == group_id)
+        let mut seen = BTreeSet::new();
+        ordered_tabs
+            .into_iter()
+            .filter(|tab| {
+                tab.kind == crate::shell::tabs::WorkspaceTabKind::Terminal
+                    && tab.state == "connected"
+                    && !tab.asset_id.is_empty()
+                    && !self.workspace_terminal_session_hidden(tab.session_id.as_str())
             })
-            .cloned()
+            .filter(|tab| records.iter().any(|record| record.asset_id == tab.asset_id))
+            .filter_map(|tab| {
+                seen.insert(tab.asset_id.clone())
+                    .then(|| tab.asset_id.clone())
+            })
             .collect()
     }
+}
 
-    fn active_quick_launch_group_id_for_records<'a>(
-        &'a self,
-        records: &[QuickLaunchAssetRecord],
-    ) -> Option<&'a str> {
-        self.quick_launch_active_group_id
-            .as_deref()
-            .filter(|group_id| {
-                records.iter().any(|record| {
-                    record
-                        .group
-                        .as_ref()
-                        .is_some_and(|group| group.id == *group_id)
-                })
-            })
-    }
+fn recent_accent_kind(asset_id: &str) -> &'static str {
+    const ACCENTS: [&str; QUICK_LAUNCH_RECENT_LIMIT] =
+        ["lime", "violet", "blue", "amber", "cyan", "yellow", "pink"];
 
-    fn visible_asset_ids_from_records(&self, records: &[QuickLaunchAssetRecord]) -> Vec<String> {
-        self.visible_group_records(records)
-            .into_iter()
-            .map(|record| record.asset_id)
-            .collect()
-    }
+    let hash = asset_id
+        .as_bytes()
+        .iter()
+        .fold(0xcbf29ce484222325_u64, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+        });
 
-    fn first_visible_quick_launch_asset_id_from_records(
-        &self,
-        records: &[QuickLaunchAssetRecord],
-    ) -> Option<String> {
-        self.ordered_quick_launch_asset_ids_from_preferences(
-            &self.quick_launch_preferences.recent_asset_ids,
-            records,
-        )
-        .into_iter()
-        .next()
-        .or_else(|| {
-            self.ordered_quick_launch_asset_ids_from_preferences(
-                &self.quick_launch_preferences.favorite_asset_ids,
-                records,
-            )
-            .into_iter()
-            .next()
-        })
-        .or_else(|| {
-            self.visible_group_records(records)
-                .into_iter()
-                .map(|record| record.asset_id)
-                .next()
-        })
-    }
-
-    fn is_quick_launch_favorite(&self, asset_id: &str) -> bool {
-        self.quick_launch_preferences
-            .favorite_asset_ids
-            .iter()
-            .any(|favorite_id| favorite_id == asset_id)
-    }
-
-    fn quick_launch_recent_label(&self, asset_id: &str) -> String {
-        self.quick_launch_preferences
-            .recent_asset_ids
-            .iter()
-            .position(|recent_id| recent_id == asset_id)
-            .map(|index| format!("Recent #{}", index + 1))
-            .unwrap_or_default()
-    }
-
-    fn sync_quick_launch_group_from_selected(&mut self) {
-        self.quick_launch_active_group_id = self
-            .quick_launch_selected_asset_id
-            .as_deref()
-            .and_then(|asset_id| group_id_for_asset(&self.console_asset_tree, asset_id));
-    }
+    ACCENTS[(hash as usize) % ACCENTS.len()]
 }
