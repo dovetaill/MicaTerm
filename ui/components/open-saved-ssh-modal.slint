@@ -20,14 +20,12 @@ component SavedSshPickerRow inherits Rectangle {
     callback activated-requested(string);
     callback toggle-expanded-requested(string);
 
-    private property <bool> is-ssh: root.item-kind == "ssh";
     private property <bool> has-disclosure: root.disclosure-state != "none";
     private property <length> indent: root.compact-flat-mode ? 12px : 12px + (root.depth * 12px);
     private property <image> chevron-right-icon: @image-url("../../assets/icons/fluent/chevron-right-20-regular.svg");
     private property <image> chevron-down-icon: @image-url("../../assets/icons/fluent/chevron-down-20-regular.svg");
     private property <image> folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
     private property <image> folder-open-icon: @image-url("../../assets/icons/fluent/folder-open-20-regular.svg");
-    private property <image> search-result-open-icon: @image-url("../../assets/icons/new-tab/chevron-right.svg");
     private property <image> ssh-icon: @image-url("../../assets/icons/new-tab/server-stack.svg");
     private property <image> disclosure-icon: root.disclosure-state == "expanded"
         ? root.chevron-down-icon
@@ -105,7 +103,7 @@ component SavedSshPickerRow inherits Rectangle {
     Text {
         x: icon-shell.x + icon-shell.width + 12px;
         y: root.secondary-text == "" ? 0px : 8px;
-        width: parent.width - self.x - 42px;
+        width: parent.width - self.x - 18px;
         height: root.secondary-text == "" ? parent.height : 18px;
         text: root.label;
         color: ThemeTokens.text-primary;
@@ -119,7 +117,7 @@ component SavedSshPickerRow inherits Rectangle {
     if root.secondary-text != "" : Text {
         x: icon-shell.x + icon-shell.width + 12px;
         y: 27px;
-        width: parent.width - self.x - 42px;
+        width: parent.width - self.x - 18px;
         height: 16px;
         text: root.secondary-text;
         color: ThemeTokens.text-secondary;
@@ -130,21 +128,11 @@ component SavedSshPickerRow inherits Rectangle {
         overflow: elide;
     }
 
-    if root.is-ssh : Image {
-        x: parent.width - 22px;
-        y: 19px;
-        width: 10px;
-        height: 14px;
-        source: root.search-result-open-icon;
-        image-fit: contain;
-        colorize: row-touch.has-hover || root.selected ? ThemeTokens.text-primary : ThemeTokens.text-muted;
-        opacity: row-touch.has-hover || root.selected ? 0.92 : 0.56;
-    }
-
     row-touch := TouchArea {
         x: root.indent + (root.has-disclosure ? 16px : 0px);
         width: parent.width - self.x;
         height: parent.height;
+        mouse-cursor: MouseCursor.pointer;
 
         clicked => {
             root.selected-requested(root.item-id);
@@ -166,6 +154,7 @@ export component OpenSavedSshModal inherits Rectangle {
     callback asset-selected(string);
     callback asset-activated(string);
     callback activate-selection-requested();
+    callback move-selection-requested(int);
     callback toggle-expanded-requested(string);
     callback drag-requested(length, length);
     callback drag-moved(length, length);
@@ -299,6 +288,26 @@ export component OpenSavedSshModal inherits Rectangle {
                         edited => {
                             root.query-changed(self.text);
                         }
+
+                        key-pressed(event) => {
+                            if (event.text == Key.Escape) {
+                                root.close-requested();
+                                accept
+                            } else if (event.text == Key.DownArrow) {
+                                root.move-selection-requested(1);
+                                accept
+                            } else if (event.text == Key.UpArrow) {
+                                root.move-selection-requested(-1);
+                                accept
+                            } else if (event.text == Key.Return || event.text == "\n")
+                                && root.can-open-selection
+                            {
+                                root.activate-selection-requested();
+                                accept
+                            } else {
+                                reject
+                            }
+                        }
                     }
 
                     search-touch := TouchArea {
@@ -407,8 +416,8 @@ export component OpenSavedSshModal inherits Rectangle {
                 Text {
                     vertical-alignment: center;
                     text: root.can-open-selection
-                        ? "Enter opens the selected SSH."
-                        : "Select a saved SSH target to open it.";
+                        ? "Up/Down selects, Enter opens the highlighted SSH."
+                        : "Search or browse, then use Up/Down to choose a saved SSH.";
                     color: ThemeTokens.text-secondary;
                     font-family: AppTypography.ui-font-family;
                     font-size: AppTypography.ui-font-size-caption;

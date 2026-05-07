@@ -6877,6 +6877,15 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
+    window.on_open_saved_ssh_modal_move_selection_requested(move |delta| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.move_saved_ssh_picker_selection(delta);
+        sync_saved_ssh_picker_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
     window.on_open_saved_ssh_modal_toggle_expanded_requested(move |asset_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();

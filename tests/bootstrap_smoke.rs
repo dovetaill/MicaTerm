@@ -7947,6 +7947,32 @@ fn launcher_picker_primary_open_request_activates_the_selected_saved_ssh() {
 }
 
 #[test]
+fn launcher_picker_move_selection_request_advances_keyboard_target() {
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
+
+        let app = AppWindow::new().unwrap();
+        bind_with_fake_sessions(&app, None);
+
+        create_root_ssh(&app, "Prod Bastion", "10.0.0.10");
+        create_root_ssh(&app, "DB Admin", "10.0.0.24");
+        app.invoke_workspace_new_tab_requested();
+        app.invoke_welcome_open_saved_ssh_requested();
+        assert!(app.get_open_saved_ssh_modal_can_open_selection());
+
+        app.invoke_open_saved_ssh_modal_move_selection_requested(1);
+        app.invoke_open_saved_ssh_modal_activate_selection_requested();
+
+        assert!(!app.get_open_saved_ssh_modal_open());
+        let item = app
+            .get_workspace_tab_items()
+            .row_data(0)
+            .expect("workspace tab after keyboard picker activation");
+        assert_eq!(item.title.as_str(), "DB Admin");
+    });
+}
+
+#[test]
 fn launcher_picker_activation_restores_native_terminal_surface_rect() {
     run_with_large_test_stack(|| {
         i_slint_backend_testing::init_no_event_loop();

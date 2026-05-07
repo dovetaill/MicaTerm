@@ -557,6 +557,7 @@ export component AppWindow inherits Window {
     callback open-saved-ssh-modal-asset-selected(string);
     callback open-saved-ssh-modal-asset-activated(string);
     callback open-saved-ssh-modal-activate-selection-requested();
+    callback open-saved-ssh-modal-move-selection-requested(int);
     callback open-saved-ssh-modal-toggle-expanded-requested(string);
     callback asset-selected(string);
     callback asset-activated(string);
@@ -1573,6 +1574,10 @@ export component AppWindow inherits Window {
 
             activate-selection-requested => {
                 root.open-saved-ssh-modal-activate-selection-requested();
+            }
+
+            move-selection-requested(step) => {
+                root.open-saved-ssh-modal-move-selection-requested(step);
             }
 
             toggle-expanded-requested(item-id) => {

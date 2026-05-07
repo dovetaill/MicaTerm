@@ -51,6 +51,7 @@ grep -F 'callback open-saved-ssh-modal-query-changed(string);' "$APP_WINDOW" >/d
 grep -F 'callback open-saved-ssh-modal-asset-activated(string);' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <bool> open-saved-ssh-modal-can-open-selection: false;' "$APP_WINDOW" >/dev/null
 grep -F 'callback open-saved-ssh-modal-activate-selection-requested();' "$APP_WINDOW" >/dev/null
+grep -F 'callback open-saved-ssh-modal-move-selection-requested(int);' "$APP_WINDOW" >/dev/null
 grep -F 'callback welcome-open-saved-ssh-requested();' "$WORKSPACE_PANE" >/dev/null
 grep -F 'callback welcome-open-saved-ssh-requested();' "$SESSION_HOST" >/dev/null
 ! grep -F 'welcome-quick-launch-favorite-items' "$WORKSPACE_PANE" >/dev/null
@@ -64,3 +65,6 @@ grep -F 'callback welcome-open-saved-ssh-requested();' "$SESSION_HOST" >/dev/nul
 grep -F 'export component OpenSavedSshModal inherits Rectangle {' "$MODAL" >/dev/null
 grep -F 'component SavedSshPickerRow inherits Rectangle {' "$MODAL" >/dev/null
 grep -F 'callback activate-selection-requested();' "$MODAL" >/dev/null
+grep -F 'callback move-selection-requested(int);' "$MODAL" >/dev/null
+grep -F 'double-clicked => {' "$MODAL" >/dev/null
+! grep -F 'assets/icons/new-tab/chevron-right.svg' "$MODAL" >/dev/null
