@@ -68,4 +68,5 @@ grep -F 'callback activate-selection-requested();' "$MODAL" >/dev/null
 grep -F 'callback move-selection-requested(int);' "$MODAL" >/dev/null
 grep -F 'double-clicked => {' "$MODAL" >/dev/null
 grep -F 'ScrollView {' "$MODAL" >/dev/null
+grep -F 'active-rail := Rectangle {' "$MODAL" >/dev/null
 ! grep -F 'assets/icons/new-tab/chevron-right.svg' "$MODAL" >/dev/null

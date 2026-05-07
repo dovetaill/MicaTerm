@@ -51,6 +51,28 @@ component SavedSshPickerRow inherits Rectangle {
                 ? ThemeTokens.control-hover-surface
                 : ThemeTokens.modal-field-surface;
 
+    selection-glow := Rectangle {
+        x: 1px;
+        y: 1px;
+        width: parent.width - 2px;
+        height: parent.height - 2px;
+        border-radius: parent.border-radius;
+        border-width: 1px;
+        border-color: ThemeTokens.focus-ring;
+        background: transparent;
+        opacity: root.selected ? (ThemeTokens.dark-mode ? 0.18 : 0.12) : 0;
+    }
+
+    active-rail := Rectangle {
+        x: 8px;
+        y: 10px;
+        width: 3px;
+        height: parent.height - 20px;
+        border-radius: 2px;
+        background: ThemeTokens.focus-ring;
+        opacity: root.selected ? 0.92 : 0;
+    }
+
     Rectangle {
         x: root.indent;
         y: 0px;
