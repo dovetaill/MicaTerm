@@ -262,6 +262,8 @@ struct TerminalPrepareDiagnostics {
     reused_shaped_row_count: usize,
     fresh_shaped_row_count: usize,
     dirty_row_count: usize,
+    dirty_row_first: Option<u32>,
+    dirty_row_last: Option<u32>,
     prepared_row_reuse_count: usize,
     glyph_raster_cache_entry_count: usize,
 }
@@ -854,10 +856,11 @@ fn prepare_native_terminal_frame_with_diagnostics(
     };
     *context.previous_shaped_rows = Some(rows);
     *context.previous_source_frame = Some(source_frame);
-    *context.previous_styled_frame = Some(frame_model);
-
+    *context.previous_styled_frame = Some(frame_model.clone());
     let shaped_row_count = presentable_frame.shaped_row_count;
     let dirty_row_count = presentable_frame.dirty_row_count;
+    let dirty_row_first = frame_model.dirty_rows.first().copied();
+    let dirty_row_last = frame_model.dirty_rows.last().copied();
     let diagnostics = TerminalPrepareDiagnostics {
         prepare_native_terminal_frame_us: prepare_started.elapsed().as_micros() as u64,
         model_frame_us,
@@ -868,10 +871,11 @@ fn prepare_native_terminal_frame_with_diagnostics(
         reused_shaped_row_count,
         fresh_shaped_row_count: shaped_row_count.saturating_sub(reused_shaped_row_count),
         dirty_row_count,
+        dirty_row_first,
+        dirty_row_last,
         prepared_row_reuse_count: context.renderer.last_prepared_row_reuse_count(),
         glyph_raster_cache_entry_count: context.renderer.glyph_raster_cache_entry_count(),
     };
-
     Ok((
         NativeTerminalFrame {
             frame_token: prepared.frame_token,

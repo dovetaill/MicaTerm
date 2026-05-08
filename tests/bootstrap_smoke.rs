@@ -1032,6 +1032,7 @@ struct PasteProjectionRuntimeControl {
 struct ScrollProjectionState {
     surface: Arc<Mutex<Option<TerminalSurfaceState>>>,
     scroll_call_count: Arc<Mutex<usize>>,
+    event_tx: Arc<Mutex<Option<mpsc::UnboundedSender<SessionRuntimeEvent>>>>,
 }
 
 #[derive(Clone, Default)]
@@ -1139,6 +1140,37 @@ impl SelectionBoundaryState {
 }
 
 impl ScrollProjectionState {
+    fn set_event_tx(&self, event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>) {
+        *self
+            .event_tx
+            .lock()
+            .expect("lock scroll projection event tx") = Some(event_tx);
+    }
+
+    fn emit_surface_with_viewport(&self, offset: u32, max_offset: u32) {
+        let mut surface_guard = self.surface.lock().expect("lock scroll projection surface");
+        let current = surface_guard
+            .clone()
+            .expect("current scroll projection surface");
+        let next_surface = bootstrap_surface_with_viewport(
+            current.session_id,
+            current.seqno.saturating_add(1),
+            offset,
+            max_offset,
+        );
+        *surface_guard = Some(next_surface.clone());
+        drop(surface_guard);
+
+        if let Some(event_tx) = self
+            .event_tx
+            .lock()
+            .expect("lock scroll projection event tx")
+            .as_ref()
+        {
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(next_surface));
+        }
+    }
+
     fn record_scroll_call(&self) {
         let mut count = self
             .scroll_call_count
@@ -2396,6 +2428,7 @@ impl SessionRuntimeLauncher for ScrollProjectionLauncher {
                 .surface
                 .lock()
                 .expect("lock scroll projection surface") = Some(surface.clone());
+            state.set_event_tx(event_tx.clone());
             let _ = event_tx.send(SessionRuntimeEvent::Connected);
             let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
             Ok(Box::new(ScrollProjectionRuntimeControl { state })
@@ -2433,6 +2466,7 @@ impl SessionRuntimeLauncher for CountingScrollProjectionLauncher {
                 .surface
                 .lock()
                 .expect("lock scroll projection surface") = Some(surface.clone());
+            state.set_event_tx(event_tx.clone());
             let _ = event_tx.send(SessionRuntimeEvent::Connected);
             let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
             Ok(Box::new(ScrollProjectionRuntimeControl { state })
@@ -7994,8 +8028,9 @@ fn launcher_picker_down_arrow_key_advances_selection_and_enter_opens() {
         let modal_y = app.get_layout_titlebar_height()
             + (((window_size.height as f32) - app.get_layout_titlebar_height() - 620.0) / 2.0);
         let search_position = LogicalPosition::new(modal_x + 120.0, modal_y + 68.0 + 49.0);
-        app.window()
-            .dispatch_event(WindowEvent::PointerMoved { position: search_position });
+        app.window().dispatch_event(WindowEvent::PointerMoved {
+            position: search_position,
+        });
         app.window().dispatch_event(WindowEvent::PointerPressed {
             position: search_position,
             button: PointerEventButton::Left,
@@ -8058,8 +8093,9 @@ fn launcher_picker_second_click_on_the_same_row_opens_the_saved_ssh() {
         );
 
         for _ in 0..2 {
-            app.window()
-                .dispatch_event(WindowEvent::PointerMoved { position: row_position });
+            app.window().dispatch_event(WindowEvent::PointerMoved {
+                position: row_position,
+            });
             app.window().dispatch_event(WindowEvent::PointerPressed {
                 position: row_position,
                 button: PointerEventButton::Left,
@@ -8104,8 +8140,9 @@ fn launcher_picker_escape_clears_query_before_closing_modal() {
         let search_position = LogicalPosition::new(modal_x + 120.0, modal_y + 68.0 + 49.0);
         app.window()
             .dispatch_event(WindowEvent::WindowActiveChanged(true));
-        app.window()
-            .dispatch_event(WindowEvent::PointerMoved { position: search_position });
+        app.window().dispatch_event(WindowEvent::PointerMoved {
+            position: search_position,
+        });
         app.window().dispatch_event(WindowEvent::PointerPressed {
             position: search_position,
             button: PointerEventButton::Left,
@@ -11096,6 +11133,58 @@ fn bootstrap_projects_terminal_scrollback_state_into_window_properties() {
     assert_eq!(app.get_workspace_session_viewport_offset_lines(), 3);
     assert_eq!(app.get_workspace_session_viewport_max_offset_lines(), 8);
     assert!(!app.get_workspace_session_viewport_at_bottom());
+}
+
+#[test]
+fn single_line_scrollback_does_not_shrink_workspace_terminal_width() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let state = ScrollProjectionState::default();
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(CountingScrollProjectionLauncher::new(state.clone())),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    state.emit_surface_with_viewport(0, 0);
+    settle_terminal_projection();
+
+    let width_without_scrollback = app.get_layout_workspace_session_native_surface_width();
+    let cols_without_scrollback = app.get_layout_workspace_session_preferred_cols();
+
+    state.emit_surface_with_viewport(0, 1);
+    settle_terminal_projection();
+
+    assert_eq!(app.get_workspace_session_viewport_max_offset_lines(), 1);
+    assert_eq!(
+        app.get_layout_workspace_session_native_surface_width(),
+        width_without_scrollback,
+        "a transient one-line scrollback should not reserve scrollbar gutter width because that feeds back into PTY cols and makes bottom-anchored TUIs reflow"
+    );
+    assert_eq!(
+        app.get_layout_workspace_session_preferred_cols(),
+        cols_without_scrollback,
+        "a transient one-line scrollback should keep the preferred PTY cols stable"
+    );
+
+    state.emit_surface_with_viewport(0, 2);
+    settle_terminal_projection();
+
+    assert_eq!(app.get_workspace_session_viewport_max_offset_lines(), 2);
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() < width_without_scrollback,
+        "once scrollback grows beyond one line the scrollbar gutter may reserve width again"
+    );
+    assert!(
+        app.get_layout_workspace_session_preferred_cols() < cols_without_scrollback,
+        "once scrollback grows beyond one line the host may reduce preferred PTY cols to make room for the real scrollbar gutter"
+    );
 }
 
 #[test]

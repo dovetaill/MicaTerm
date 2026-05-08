@@ -543,7 +543,11 @@ export component TerminalSessionHost inherits Rectangle {
     }
 
     function scrollbar-visible() -> bool {
-        return !root.session-mouse-grabbed && root.session-viewport-max-offset-lines > 0;
+        return !root.session-alternate-screen-active
+            && !root.session-mouse-grabbed
+            // Ignore a one-line scrollback wobble so the host width stays stable
+            // while main-screen TUIs repaint near the bottom edge.
+            && root.session-viewport-max-offset-lines > 1;
     }
 
     function scrollbar-track-x() -> length {

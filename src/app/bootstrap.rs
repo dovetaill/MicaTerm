@@ -2717,9 +2717,6 @@ fn present_workspace_native_terminal_frame(window: &AppWindow, frame: NativeTerm
         if let Some(surface) = surface.borrow().as_ref() {
             surface.update_terminal_rect(rect);
             surface.present(frame);
-            if let Some(image) = surface.host_image_snapshot() {
-                window.set_workspace_session_surface_image(image);
-            }
         }
     });
 }

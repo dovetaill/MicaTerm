@@ -1,12 +1,13 @@
 //! SSH runtime channel pump and output coalescing helpers.
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use russh::client;
 use russh::{Channel, ChannelMsg, Disconnect};
 use tokio::sync::mpsc;
-use tokio::time::{Sleep, sleep};
+use tokio::time::{Sleep, sleep, timeout};
 use uuid::Uuid;
 
 use crate::app::ssh::shell_integration::runtime_shell_events;
@@ -30,12 +31,14 @@ pub(super) async fn run_channel_pump(
     _transport_chain_guard: TransportChainGuard,
 ) {
     let mut command_channel_open = true;
+    let mut pending_channel_messages = VecDeque::new();
     let mut dirty_notifier = SurfaceDirtyNotifier::default();
     let mut dirty_timer: Option<std::pin::Pin<Box<Sleep>>> = None;
     let mut dirty_timer_interval: Option<std::time::Duration> = None;
     let mut working_set_trim_scheduler = WorkingSetTrimScheduler::default();
     let mut working_set_trim_timer: Option<std::pin::Pin<Box<Sleep>>> = None;
     let mut shell_integration = super::TerminalShellIntegrationState::default();
+    let mut synchronized_output = SynchronizedOutputBatcher::default();
 
     loop {
         tokio::select! {
@@ -173,6 +176,19 @@ pub(super) async fn run_channel_pump(
                         }
                     }
                     Some(RuntimeCommand::Disconnect) => {
+                        if let Some(ready_bytes) = synchronized_output.finish() {
+                            process_ready_remote_output(
+                                ready_bytes.as_slice(),
+                                &terminal,
+                                &event_tx,
+                                &mut shell_integration,
+                                &mut dirty_notifier,
+                                &mut dirty_timer,
+                                &mut dirty_timer_interval,
+                                &mut working_set_trim_scheduler,
+                                &mut working_set_trim_timer,
+                            );
+                        }
                         if dirty_notifier.take_pending() {
                             let _ = event_tx.send(SessionRuntimeEvent::SurfaceDirty);
                         }
@@ -189,34 +205,46 @@ pub(super) async fn run_channel_pump(
                     }
                 }
             }
-            maybe_message = channel.wait() => {
+            maybe_message = async {
+                if let Some(message) = pending_channel_messages.pop_front() {
+                    Some(message)
+                } else {
+                    channel.wait().await
+                }
+            } => {
                 match maybe_message {
-                    Some(ChannelMsg::Data { data }) | Some(ChannelMsg::ExtendedData { data, .. }) => {
-                        let parsed = runtime_shell_events(data.as_ref());
-                        if let Some(cwd) = parsed.cwd.as_ref() {
-                            let _ = event_tx.send(SessionRuntimeEvent::CurrentDirectoryChanged(cwd.clone()));
-                        }
-                        if apply_shell_integration_events(&mut shell_integration, &parsed) {
-                            let _ = event_tx.send(SessionRuntimeEvent::ShellIntegrationChanged(
-                                shell_integration,
-                            ));
-                        }
-                        if !parsed.sanitized_bytes.is_empty() {
-                            apply_remote_output(&terminal, &parsed.sanitized_bytes);
-                            working_set_trim_scheduler.record_output(parsed.sanitized_bytes.len());
-                            working_set_trim_timer =
-                                Some(Box::pin(sleep(WORKING_SET_TRIM_IDLE_INTERVAL)));
-                            let now = Instant::now();
-                            let (should_arm, preferred_interval) = dirty_notifier.record_output(now);
-                            let should_speed_up_timer = dirty_timer_interval
-                                .is_some_and(|current_interval| preferred_interval < current_interval);
-                            if should_arm || should_speed_up_timer {
-                                dirty_timer = Some(Box::pin(sleep(preferred_interval)));
-                                dirty_timer_interval = Some(preferred_interval);
-                            }
+                    Some(message @ ChannelMsg::Data { .. }) | Some(message @ ChannelMsg::ExtendedData { .. }) => {
+                        let output_batch =
+                            collect_ready_output_batch(message, &mut channel, &mut pending_channel_messages)
+                                .await;
+                        for ready_bytes in synchronized_output.push_bytes(output_batch.raw_bytes.as_slice()) {
+                            process_ready_remote_output(
+                                ready_bytes.as_slice(),
+                                &terminal,
+                                &event_tx,
+                                &mut shell_integration,
+                                &mut dirty_notifier,
+                                &mut dirty_timer,
+                                &mut dirty_timer_interval,
+                                &mut working_set_trim_scheduler,
+                                &mut working_set_trim_timer,
+                            );
                         }
                     }
                     Some(ChannelMsg::Close) | Some(ChannelMsg::Eof) | None => {
+                        if let Some(ready_bytes) = synchronized_output.finish() {
+                            process_ready_remote_output(
+                                ready_bytes.as_slice(),
+                                &terminal,
+                                &event_tx,
+                                &mut shell_integration,
+                                &mut dirty_notifier,
+                                &mut dirty_timer,
+                                &mut dirty_timer_interval,
+                                &mut working_set_trim_scheduler,
+                                &mut working_set_trim_timer,
+                            );
+                        }
                         if dirty_notifier.take_pending() {
                             let _ = event_tx.send(SessionRuntimeEvent::SurfaceDirty);
                         }
@@ -224,6 +252,19 @@ pub(super) async fn run_channel_pump(
                         break;
                     }
                     Some(ChannelMsg::Failure) => {
+                        if let Some(ready_bytes) = synchronized_output.finish() {
+                            process_ready_remote_output(
+                                ready_bytes.as_slice(),
+                                &terminal,
+                                &event_tx,
+                                &mut shell_integration,
+                                &mut dirty_notifier,
+                                &mut dirty_timer,
+                                &mut dirty_timer_interval,
+                                &mut working_set_trim_scheduler,
+                                &mut working_set_trim_timer,
+                            );
+                        }
                         if dirty_notifier.take_pending() {
                             let _ = event_tx.send(SessionRuntimeEvent::SurfaceDirty);
                         }
@@ -250,6 +291,236 @@ pub(super) async fn run_channel_pump(
             }
         }
     }
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ReadyOutputBatch {
+    raw_bytes: Vec<u8>,
+    chunk_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedOutputBatch {
+    sanitized_bytes: Vec<u8>,
+    cwd: Option<String>,
+    next_shell_state: super::TerminalShellIntegrationState,
+    shell_integration_changed: bool,
+}
+
+#[derive(Debug, Default)]
+struct SynchronizedOutputBatcher {
+    plain_buffer: Vec<u8>,
+    sync_buffer: Vec<u8>,
+    sync_active: bool,
+}
+
+impl SynchronizedOutputBatcher {
+    fn push_bytes(&mut self, bytes: &[u8]) -> Vec<Vec<u8>> {
+        let mut ready_batches = Vec::new();
+        if self.sync_active {
+            self.sync_buffer.extend_from_slice(bytes);
+            self.process_sync_buffer(&mut ready_batches);
+        } else {
+            self.plain_buffer.extend_from_slice(bytes);
+            self.process_plain_buffer(&mut ready_batches);
+        }
+        ready_batches
+    }
+
+    fn finish(&mut self) -> Option<Vec<u8>> {
+        if self.sync_active {
+            self.sync_active = false;
+            if self.sync_buffer.is_empty() {
+                None
+            } else {
+                Some(std::mem::take(&mut self.sync_buffer))
+            }
+        } else if self.plain_buffer.is_empty() {
+            None
+        } else {
+            Some(std::mem::take(&mut self.plain_buffer))
+        }
+    }
+
+    fn process_plain_buffer(&mut self, ready_batches: &mut Vec<Vec<u8>>) {
+        loop {
+            let Some(sync_start) =
+                find_subsequence(self.plain_buffer.as_slice(), SYNC_OUTPUT_START)
+            else {
+                let keep_suffix_len =
+                    partial_marker_suffix_len(self.plain_buffer.as_slice(), SYNC_OUTPUT_START);
+                let emit_len = self.plain_buffer.len().saturating_sub(keep_suffix_len);
+                if emit_len > 0 {
+                    ready_batches.push(self.plain_buffer.drain(..emit_len).collect());
+                }
+                return;
+            };
+
+            if sync_start > 0 {
+                ready_batches.push(self.plain_buffer.drain(..sync_start).collect());
+            }
+            self.sync_active = true;
+            self.sync_buffer.extend(self.plain_buffer.drain(..));
+            self.process_sync_buffer(ready_batches);
+            if !self.sync_active {
+                continue;
+            }
+            return;
+        }
+    }
+
+    fn process_sync_buffer(&mut self, ready_batches: &mut Vec<Vec<u8>>) {
+        loop {
+            let Some(sync_end) = find_subsequence(self.sync_buffer.as_slice(), SYNC_OUTPUT_END)
+            else {
+                return;
+            };
+            let emit_len = sync_end + SYNC_OUTPUT_END.len();
+            ready_batches.push(self.sync_buffer.drain(..emit_len).collect());
+            self.sync_active = false;
+            if self.sync_buffer.is_empty() {
+                return;
+            }
+            self.plain_buffer.extend(self.sync_buffer.drain(..));
+            self.process_plain_buffer(ready_batches);
+            return;
+        }
+    }
+}
+
+const SYNC_OUTPUT_START: &[u8] = b"\x1b[?2026h";
+const SYNC_OUTPUT_END: &[u8] = b"\x1b[?2026l";
+
+async fn collect_ready_output_batch(
+    initial_message: ChannelMsg,
+    channel: &mut Channel<client::Msg>,
+    pending_channel_messages: &mut VecDeque<ChannelMsg>,
+) -> ReadyOutputBatch {
+    let mut backlog = VecDeque::from([initial_message]);
+
+    while let Ok(Some(message)) = timeout(Duration::ZERO, channel.wait()).await {
+        backlog.push_back(message);
+        if !matches!(
+            backlog.back(),
+            Some(ChannelMsg::Data { .. } | ChannelMsg::ExtendedData { .. })
+        ) {
+            break;
+        }
+    }
+
+    let Some(first_message) = backlog.pop_front() else {
+        return ReadyOutputBatch::default();
+    };
+    let output_batch = take_contiguous_output_messages(first_message, &mut backlog);
+    pending_channel_messages.extend(backlog);
+    output_batch
+}
+
+fn take_contiguous_output_messages(
+    first_message: ChannelMsg,
+    backlog: &mut VecDeque<ChannelMsg>,
+) -> ReadyOutputBatch {
+    let mut batch = ReadyOutputBatch::default();
+    let mut next_message = Some(first_message);
+
+    while let Some(message) = next_message.take() {
+        let Some(bytes) = channel_output_bytes(&message) else {
+            backlog.push_front(message);
+            break;
+        };
+        batch.raw_bytes.extend_from_slice(bytes);
+        batch.chunk_count = batch.chunk_count.saturating_add(1);
+
+        match backlog.front() {
+            Some(ChannelMsg::Data { .. } | ChannelMsg::ExtendedData { .. }) => {
+                next_message = backlog.pop_front();
+            }
+            _ => break,
+        }
+    }
+
+    batch
+}
+
+fn process_ready_remote_output(
+    ready_bytes: &[u8],
+    terminal: &Arc<Mutex<TerminalSession>>,
+    event_tx: &mpsc::UnboundedSender<SessionRuntimeEvent>,
+    shell_integration: &mut super::TerminalShellIntegrationState,
+    dirty_notifier: &mut SurfaceDirtyNotifier,
+    dirty_timer: &mut Option<std::pin::Pin<Box<Sleep>>>,
+    dirty_timer_interval: &mut Option<std::time::Duration>,
+    working_set_trim_scheduler: &mut WorkingSetTrimScheduler,
+    working_set_trim_timer: &mut Option<std::pin::Pin<Box<Sleep>>>,
+) {
+    let parsed = parse_output_chunks(*shell_integration, &[ready_bytes]);
+
+    if let Some(cwd) = parsed.cwd.as_ref() {
+        let _ = event_tx.send(SessionRuntimeEvent::CurrentDirectoryChanged(cwd.clone()));
+    }
+    if parsed.shell_integration_changed {
+        *shell_integration = parsed.next_shell_state;
+        let _ = event_tx.send(SessionRuntimeEvent::ShellIntegrationChanged(
+            *shell_integration,
+        ));
+    }
+    if !parsed.sanitized_bytes.is_empty() {
+        apply_remote_output(terminal, &parsed.sanitized_bytes);
+        working_set_trim_scheduler.record_output(parsed.sanitized_bytes.len());
+        *working_set_trim_timer = Some(Box::pin(sleep(WORKING_SET_TRIM_IDLE_INTERVAL)));
+        let now = Instant::now();
+        let (should_arm, preferred_interval) = dirty_notifier.record_output(now);
+        let should_speed_up_timer = dirty_timer_interval
+            .is_some_and(|current_interval| preferred_interval < current_interval);
+        if should_arm || should_speed_up_timer {
+            *dirty_timer = Some(Box::pin(sleep(preferred_interval)));
+            *dirty_timer_interval = Some(preferred_interval);
+        }
+    }
+}
+
+fn parse_output_chunks(
+    initial_shell_state: super::TerminalShellIntegrationState,
+    chunks: &[&[u8]],
+) -> ParsedOutputBatch {
+    let mut merged_bytes = Vec::with_capacity(chunks.iter().map(|chunk| chunk.len()).sum());
+    for chunk in chunks {
+        merged_bytes.extend_from_slice(chunk);
+    }
+    let parsed = runtime_shell_events(merged_bytes.as_slice());
+    let mut next_shell_state = initial_shell_state;
+    let shell_integration_changed = apply_shell_integration_events(&mut next_shell_state, &parsed);
+
+    ParsedOutputBatch {
+        sanitized_bytes: parsed.sanitized_bytes,
+        cwd: parsed.cwd,
+        next_shell_state,
+        shell_integration_changed,
+    }
+}
+
+fn channel_output_bytes(message: &ChannelMsg) -> Option<&[u8]> {
+    match message {
+        ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. } => Some(data.as_ref()),
+        _ => None,
+    }
+}
+
+fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+fn partial_marker_suffix_len(bytes: &[u8], marker: &[u8]) -> usize {
+    let max_suffix = bytes.len().min(marker.len().saturating_sub(1));
+    (1..=max_suffix)
+        .rev()
+        .find(|&suffix_len| bytes.ends_with(&marker[..suffix_len]))
+        .unwrap_or(0)
 }
 
 fn apply_shell_integration_events(
@@ -438,5 +709,60 @@ mod tests {
 
         assert!(scheduler.trim_due());
         assert!(!scheduler.trim_due());
+    }
+
+    #[test]
+    fn parse_output_chunks_merges_split_shell_integration_sequences() {
+        let parsed = parse_output_chunks(
+            crate::app::ssh::runtime::TerminalShellIntegrationState::default(),
+            &[
+                b"\x1b]133;".as_slice(),
+                b"B\x07prompt ready".as_slice(),
+                b"\x1b]7;file://remote/home/tester\x07".as_slice(),
+            ],
+        );
+
+        assert_eq!(parsed.sanitized_bytes, b"prompt ready");
+        assert_eq!(parsed.cwd.as_deref(), Some("/home/tester"));
+        assert!(parsed.shell_integration_changed);
+        assert!(parsed.next_shell_state.has_markers);
+        assert!(parsed.next_shell_state.input_active);
+        assert!(!parsed.next_shell_state.command_running);
+    }
+
+    #[test]
+    fn synchronized_output_batcher_waits_for_sync_end_across_chunks() {
+        let mut batcher = SynchronizedOutputBatcher::default();
+
+        let first = batcher.push_bytes(b"prefix\x1b[?2026hframe-1");
+        let second = batcher.push_bytes(b"-continued\x1b[?2026l");
+
+        assert_eq!(first, vec![b"prefix".to_vec()]);
+        assert_eq!(
+            second,
+            vec![b"\x1b[?2026hframe-1-continued\x1b[?2026l".to_vec()]
+        );
+    }
+
+    #[test]
+    fn collect_output_batch_keeps_output_chunks_until_first_control_message() {
+        let mut backlog = std::collections::VecDeque::from([
+            ChannelMsg::ExtendedData {
+                data: b" stderr".as_slice().into(),
+                ext: 1,
+            },
+            ChannelMsg::Close,
+        ]);
+
+        let batch = take_contiguous_output_messages(
+            ChannelMsg::Data {
+                data: b"stdout".as_slice().into(),
+            },
+            &mut backlog,
+        );
+
+        assert_eq!(batch.raw_bytes, b"stdout stderr");
+        assert_eq!(batch.chunk_count, 2);
+        assert!(matches!(backlog.front(), Some(ChannelMsg::Close)));
     }
 }
