@@ -85,13 +85,17 @@ fn bind_with_fake_sessions(app: &AppWindow) {
 }
 
 fn sample_handle(title: &str, subtitle: &str, state: SessionState) -> SessionHandle {
+    let can_reconnect = matches!(
+        &state,
+        SessionState::Cancelled | SessionState::Disconnected | SessionState::Error(_)
+    );
     SessionHandle {
         session_id: Uuid::new_v4(),
         asset_id: "asset-prod".into(),
         title: title.into(),
         subtitle: subtitle.into(),
         state,
-        can_reconnect: false,
+        can_reconnect,
         enhanced_session_state: EnhancedSessionState::Plain,
     }
 }
@@ -1379,6 +1383,20 @@ fn connection_progress_workspace_host_contract_exposes_timeline_models_and_foote
 
 #[test]
 fn connection_progress_workspace_host_contract_exposes_inline_host_key_actions() {
+    fn action_block<'a>(source: &'a str, action: &str) -> &'a str {
+        let action_index = source
+            .find(action)
+            .unwrap_or_else(|| panic!("missing action block: {action}"));
+        let block_start = source[..action_index]
+            .rfind("if root.connection-progress-visual-state")
+            .unwrap_or(0);
+        let block_end = source[action_index..]
+            .find("if root.connection-progress-visual-state")
+            .map(|offset| action_index + offset)
+            .unwrap_or(source.len());
+        &source[block_start..block_end]
+    }
+
     let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
     let workspace_pane =
         fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
@@ -1402,11 +1420,7 @@ fn connection_progress_workspace_host_contract_exposes_inline_host_key_actions()
         "WorkspacePane should forward host-key prompt fingerprint state into TerminalSessionHost"
     );
 
-    let trust_action_index = terminal_host
-        .find("trust-host-key")
-        .expect("trust host key callback should remain routed");
-    let trust_action_window = &terminal_host[trust_action_index.saturating_sub(220)
-        ..(trust_action_index + 120).min(terminal_host.len())];
+    let trust_action_window = action_block(&terminal_host, "trust-host-key");
     assert!(
         trust_action_window.contains("Trust & Continue"),
         "connection-progress host should expose the reference-style trust action for unknown host keys"
@@ -1415,11 +1429,7 @@ fn connection_progress_workspace_host_contract_exposes_inline_host_key_actions()
         terminal_host.contains("trust-host-key"),
         "host-key trust should route back through the workspace local-action callback"
     );
-    let reject_action_index = terminal_host
-        .find("reject-host-key")
-        .expect("reject host key callback should remain routed");
-    let reject_action_window = &terminal_host[reject_action_index.saturating_sub(220)
-        ..(reject_action_index + 120).min(terminal_host.len())];
+    let reject_action_window = action_block(&terminal_host, "reject-host-key");
     assert!(
         reject_action_window.contains("Reject"),
         "connection-progress host should expose the reference-style reject action for unknown host keys"

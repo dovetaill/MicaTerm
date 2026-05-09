@@ -1773,15 +1773,20 @@ impl ShellViewModel {
         }
 
         self.active_workspace_tab_id = active_tab_id.clone();
-        self.active_workspace_session_id = active_tab_id
-            .as_deref()
-            .and_then(|active_id| {
-                self.workspace_tabs
-                    .iter()
-                    .find(|tab| tab.tab_id == active_id)
-                    .map(|tab| tab.session_id.clone())
-            })
-            .filter(|session_id| !session_id.is_empty());
+        self.active_workspace_session_id = active_tab_id.as_deref().and_then(|active_id| {
+            self.workspace_tabs
+                .iter()
+                .find(|tab| tab.tab_id == active_id)
+                .and_then(|tab| {
+                    if !tab.session_id.is_empty() {
+                        Some(tab.session_id.clone())
+                    } else if tab.is_launcher() {
+                        Some(tab.tab_id.clone())
+                    } else {
+                        None
+                    }
+                })
+        });
         if self.active_workspace_terminal_surface().is_none() {
             self.active_workspace_terminal_surface = None;
         }
