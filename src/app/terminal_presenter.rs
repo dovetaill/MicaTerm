@@ -1423,11 +1423,11 @@ mod tests {
             1,
             1,
             32,
-            vec!["https://example.com ERROR".into()],
+            vec!["[dev@mica ~]$ cargo test".into()],
         );
         surface.visible_rows = vec![TerminalRowState {
             index: 0,
-            text: "https://example.com ERROR".into(),
+            text: "[dev@mica ~]$ cargo test".into(),
             wrapped: false,
         }];
         surface.default_fg_rgba = 0xffd8_dfe8;
@@ -1468,7 +1468,7 @@ mod tests {
             &mut shaped_row_cache,
         );
 
-        prepare_native_terminal_frame_with_diagnostics(
+        let (dark_frame, dark_diagnostics) = prepare_native_terminal_frame_with_diagnostics(
             &mut context,
             &surface,
             TerminalPresentationOptions {
@@ -1478,7 +1478,7 @@ mod tests {
             },
         )?;
         surface.seqno = 2;
-        let (_, diagnostics) = prepare_native_terminal_frame_with_diagnostics(
+        let (light_frame, diagnostics) = prepare_native_terminal_frame_with_diagnostics(
             &mut context,
             &surface,
             TerminalPresentationOptions {
@@ -1488,9 +1488,19 @@ mod tests {
             },
         )?;
 
+        assert_ne!(
+            dark_frame.presentable_frame.row_content_hashes,
+            light_frame.presentable_frame.row_content_hashes,
+            "theme-sensitive semantic recoloring should change row content hashes before the renderer evaluates prepared-row cache reuse"
+        );
+        assert_eq!(
+            dark_diagnostics.prepared_row_reuse_count, 0,
+            "the initial themed frame should start from an empty prepared-row cache"
+        );
+
         assert_eq!(
             diagnostics.prepared_row_reuse_count, 0,
-            "switching semantic theme colors should invalidate retained prepared rows so the renderer cannot replay stale dark-theme glyph colors into the next light-theme frame"
+            "switching prompt semantic theme colors should invalidate retained prepared rows so the renderer cannot replay stale dark-theme glyph colors into the next light-theme frame"
         );
         assert_eq!(
             diagnostics.dirty_row_count, 1,
