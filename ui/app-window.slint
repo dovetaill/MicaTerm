@@ -1547,6 +1547,12 @@ export component AppWindow inherits Window {
         height: root.height - titlebar.height;
         enabled: root.workspace-tab-context-menu-open;
 
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down {
+                root.close-workspace-tab-context-menu-requested();
+            }
+        }
+
         clicked => {
             root.close-workspace-tab-context-menu-requested();
         }

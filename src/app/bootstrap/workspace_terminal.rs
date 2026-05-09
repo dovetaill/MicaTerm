@@ -20,21 +20,40 @@ pub(super) fn sync_workspace_projection_from_manager(
     state: &mut ShellViewModel,
     manager: &SessionManager,
 ) -> WorkspaceProjectionDelta {
+    let mut claimed_manager_tab_ids = HashSet::new();
     let mut next_tabs = manager
         .ordered_sessions()
         .into_iter()
         .filter(|handle| {
             !state.workspace_terminal_session_hidden(handle.session_id.to_string().as_str())
         })
-        .map(|handle| WorkspaceTab::from_session(&handle))
+        .map(|handle| {
+            let existing = state
+                .workspace_tabs()
+                .iter()
+                .find(|tab| {
+                    !claimed_manager_tab_ids.contains(&tab.tab_id)
+                        && (tab.session_id == handle.session_id.to_string()
+                            || (tab.kind == crate::shell::tabs::WorkspaceTabKind::Terminal
+                                && tab.session_id.is_empty()
+                                && !tab.asset_id.is_empty()
+                                && tab.asset_id == handle.asset_id))
+                })
+                .cloned();
+            let mut projected = existing
+                .as_ref()
+                .map(|tab| WorkspaceTab::from_session_with_tab_id(&handle, tab.tab_id.clone()))
+                .unwrap_or_else(|| WorkspaceTab::from_session(&handle));
+            if let Some(existing) = existing {
+                claimed_manager_tab_ids.insert(existing.tab_id.clone());
+                projected.connection_profile = existing.connection_profile;
+            }
+            projected
+        })
         .collect::<Vec<_>>();
     let manager_session_ids = next_tabs
         .iter()
         .map(|tab| tab.session_id.clone())
-        .collect::<HashSet<_>>();
-    let manager_asset_ids = next_tabs
-        .iter()
-        .map(|tab| tab.asset_id.clone())
         .collect::<HashSet<_>>();
     let preserved_error_tabs = state
         .workspace_tabs()
@@ -42,7 +61,7 @@ pub(super) fn sync_workspace_projection_from_manager(
         .filter(|tab| {
             tab.state == "error"
                 && !manager_session_ids.contains(&tab.session_id)
-                && !manager_asset_ids.contains(&tab.asset_id)
+                && !claimed_manager_tab_ids.contains(&tab.tab_id)
         })
         .cloned()
         .collect::<Vec<_>>();
@@ -66,7 +85,7 @@ pub(super) fn sync_workspace_projection_from_manager(
         preserved_sftp_tabs,
     ));
     next_tabs = state.normalized_workspace_tabs_projection(next_tabs);
-    let next_session_id = next_tabs.iter().find(|tab| tab.active).and_then(|tab| {
+    let projected_active_session_id = next_tabs.iter().find(|tab| tab.active).and_then(|tab| {
         if !tab.uses_terminal_surface()
             && !tab.uses_connection_progress_surface()
             && !tab.can_reconnect()
@@ -76,6 +95,13 @@ pub(super) fn sync_workspace_projection_from_manager(
 
         Uuid::parse_str(tab.session_id.as_str()).ok()
     });
+    let next_session_id = if state.active_workspace_tab_id().is_none()
+        && state.active_workspace_terminal_surface().is_none()
+    {
+        None
+    } else {
+        projected_active_session_id
+    };
     let current_surface_signature = state
         .active_workspace_terminal_surface()
         .map(TerminalSurfaceState::signature);

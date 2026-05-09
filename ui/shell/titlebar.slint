@@ -309,6 +309,17 @@ export component Titlebar inherits Rectangle {
                 active-session-summary-touch := TouchArea {
                     width: parent.width;
                     height: parent.height;
+
+                    pointer-event(event) => {
+                        if event.kind == PointerEventKind.down && event.button == PointerEventButton.left
+                        {
+                            root.drag-requested();
+                        }
+                    }
+
+                    double-clicked => {
+                        root.drag-double-clicked();
+                    }
                 }
 
                 changed has-hover => {

@@ -9236,6 +9236,148 @@ mod tests {
     }
 
     #[test]
+    fn workspace_projection_preserves_reconnected_error_tab_identity() {
+        let runtime = tokio::runtime::Runtime::new().expect("create tokio runtime");
+        let manager =
+            SessionManager::new_with_launcher(runtime.handle().clone(), Arc::new(NoopLauncher));
+        let handle = manager
+            .open_session(sample_profile("asset-prod"), OpenSessionMode::ForceNewTab)
+            .expect("open session");
+        let mut state = ShellViewModel::default();
+        let tab_id = "workspace-terminal-error:prod".to_string();
+
+        state.set_workspace_tabs(vec![WorkspaceTab::terminal_error(
+            tab_id.clone(),
+            "asset-prod",
+            "Prod Bastion",
+            "ops",
+            "10.0.0.12",
+            22,
+            "connection failed",
+            Some(sample_profile("asset-prod")),
+        )]);
+
+        let delta =
+            workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
+        assert!(delta.tabs_changed);
+        assert_eq!(state.workspace_tabs().len(), 1);
+        assert_eq!(state.workspace_tabs()[0].tab_id, tab_id);
+        assert_eq!(
+            state.workspace_tabs()[0].session_id,
+            handle.session_id.to_string()
+        );
+        assert_eq!(state.active_workspace_tab_id(), Some(tab_id.as_str()));
+    }
+
+    #[test]
+    fn workspace_projection_only_consumes_one_error_tab_per_live_session() {
+        let runtime = tokio::runtime::Runtime::new().expect("create tokio runtime");
+        let manager =
+            SessionManager::new_with_launcher(runtime.handle().clone(), Arc::new(NoopLauncher));
+        let handle = manager
+            .open_session(sample_profile("asset-prod"), OpenSessionMode::ForceNewTab)
+            .expect("open session");
+        let mut state = ShellViewModel::default();
+        let first_tab_id = "workspace-terminal-error:prod-a".to_string();
+        let second_tab_id = "workspace-terminal-error:prod-b".to_string();
+        let profile = sample_profile("asset-prod");
+
+        state.set_workspace_tabs(vec![
+            WorkspaceTab::terminal_error(
+                first_tab_id.clone(),
+                "asset-prod",
+                "Prod Bastion",
+                "ops",
+                "10.0.0.12",
+                22,
+                "first failure",
+                Some(profile.clone()),
+            ),
+            WorkspaceTab::terminal_error(
+                second_tab_id.clone(),
+                "asset-prod",
+                "Prod Bastion",
+                "ops",
+                "10.0.0.12",
+                22,
+                "second failure",
+                Some(profile),
+            ),
+        ]);
+
+        let delta =
+            workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
+        assert!(delta.tabs_changed);
+        assert_eq!(
+            state.workspace_tabs().len(),
+            2,
+            "one live session should only consume one preserved error tab slot"
+        );
+        assert_eq!(state.workspace_tabs()[0].tab_id, first_tab_id);
+        assert_eq!(
+            state.workspace_tabs()[0].session_id,
+            handle.session_id.to_string()
+        );
+        assert_eq!(state.workspace_tabs()[1].tab_id, second_tab_id);
+        assert!(state.workspace_tabs()[1].session_id.is_empty());
+        assert_eq!(state.workspace_tabs()[1].state, "error");
+    }
+
+    #[test]
+    fn workspace_projection_switches_active_surface_when_projection_changes_active_tab() {
+        let runtime = tokio::runtime::Runtime::new().expect("create tokio runtime");
+        let manager = SessionManager::new_with_launcher(
+            runtime.handle().clone(),
+            Arc::new(SequencedSurfaceLauncher),
+        );
+        let first = manager
+            .open_session(sample_profile("asset-prod"), OpenSessionMode::ForceNewTab)
+            .expect("open first session");
+        let second = manager
+            .open_session(sample_profile("asset-stage"), OpenSessionMode::ForceNewTab)
+            .expect("open second session");
+
+        runtime.block_on(async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        });
+
+        let mut state = ShellViewModel::default();
+        let initial_delta =
+            workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
+        assert!(initial_delta.tabs_changed);
+        assert!(!initial_delta.surface_changed);
+
+        let hydration_delta =
+            workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
+        assert!(hydration_delta.surface_changed);
+        assert_eq!(
+            state
+                .active_workspace_terminal_surface()
+                .map(|surface| surface.session_id),
+            Some(first.session_id)
+        );
+
+        state.hide_workspace_terminal_session(first.session_id.to_string().as_str());
+        let switch_delta =
+            workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
+        assert!(switch_delta.tabs_changed);
+        assert!(
+            switch_delta.surface_changed,
+            "when projection promotes a different terminal tab to active, the visible surface should switch in the same tick"
+        );
+        assert_eq!(
+            state.active_workspace_tab_id(),
+            Some(second.session_id.to_string().as_str())
+        );
+        assert_eq!(
+            state
+                .active_workspace_terminal_surface()
+                .map(|surface| surface.session_id),
+            Some(second.session_id)
+        );
+    }
+
+    #[test]
     fn workspace_session_state_refreshes_terminal_image_across_surface_updates() {
         with_bitmap_workspace_presenter_on_large_stack_for_test(|| {
             i_slint_backend_testing::init_no_event_loop();

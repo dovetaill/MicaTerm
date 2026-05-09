@@ -99,6 +99,42 @@ fn tab_bar_contract_requires_workspace_tab_model_instead_of_single_placeholder()
 }
 
 #[test]
+fn titlebar_active_session_summary_preserves_drag_contract() {
+    let content = std::fs::read_to_string("ui/shell/titlebar.slint").unwrap();
+
+    assert!(
+        content.contains("active-session-summary-touch := TouchArea {"),
+        "titlebar should expose a dedicated hover target for the active session summary lane"
+    );
+    assert!(
+        content.contains("root.drag-requested();"),
+        "summary hover lane should still forward primary down events into the native drag path"
+    );
+    assert!(
+        content.contains("root.drag-double-clicked();"),
+        "summary hover lane should keep the titlebar double-click maximize contract"
+    );
+}
+
+#[test]
+fn workspace_tab_context_menu_dismiss_layer_closes_on_pointer_events() {
+    let content = std::fs::read_to_string("ui/app-window.slint").unwrap();
+
+    assert!(
+        content.contains("workspace-tab-context-menu-dismiss-layer := TouchArea {"),
+        "app window should expose a dismiss layer while the workspace tab context menu is open"
+    );
+    assert!(
+        content.contains("pointer-event(event) => {"),
+        "dismiss layer should react to pointer events so non-primary clicks do not get trapped behind the menu overlay"
+    );
+    assert!(
+        content.contains("root.close-workspace-tab-context-menu-requested();"),
+        "dismiss layer should always close the workspace tab context menu when an outside pointer event lands"
+    );
+}
+
+#[test]
 fn window_shell_exposes_minimum_window_budget() {
     let spec = window_command_spec();
 
