@@ -1,0 +1,5 @@
+[env]
+# Slint's generated `AppWindow::new()` tree is large enough that debug/test worker threads can
+# overflow Rust's default stack after the workspace chrome grows. Keep cargo-spawned test threads
+# on a larger baseline stack so UI smoke tests exercise the real window tree without ad-hoc envs.
+RUST_MIN_STACK = "33554432"

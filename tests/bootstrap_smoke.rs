@@ -6419,7 +6419,7 @@ fn opening_saved_ssh_asset_twice_creates_two_tabs() {
         .get_workspace_tab_items()
         .row_data(0)
         .expect("first workspace tab")
-        .session_id
+        .tab_id
         .to_string();
 
     app.invoke_asset_activated(ssh_id.into());
@@ -6429,7 +6429,7 @@ fn opening_saved_ssh_asset_twice_creates_two_tabs() {
         .get_workspace_tab_items()
         .row_data(1)
         .expect("second workspace tab")
-        .session_id
+        .tab_id
         .to_string();
     assert_ne!(first_session_id, second_session_id);
     assert_eq!(
@@ -7689,7 +7689,7 @@ fn active_recent_connection_row_returns_to_existing_tab_without_duplicate_sessio
             .get_workspace_tab_items()
             .row_data(0)
             .expect("existing tab after active recent row click");
-        assert_eq!(active_tab.session_id.as_str(), existing_session_id.as_str());
+        assert_eq!(active_tab.tab_id.as_str(), existing_session_id.as_str());
         assert_eq!(active_tab.title.as_str(), "Prod Bastion");
     });
 }
@@ -7810,8 +7810,126 @@ fn launcher_recent_connection_replaces_launcher_tab_with_real_session_tab() {
             .get_workspace_tab_items()
             .row_data(0)
             .expect("workspace tab after launcher connect");
-        assert_ne!(item.session_id.as_str(), "workspace-launcher");
+        assert_ne!(item.tab_id.as_str(), "workspace-launcher");
         assert_eq!(item.title.as_str(), "Prod Bastion");
+    });
+}
+
+#[test]
+fn workspace_tab_reorder_callback_preserves_active_session_and_ui_order() {
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
+
+        let app = AppWindow::new().unwrap();
+        bind_with_fake_sessions(&app, None);
+
+        let prod_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        let stage_id = create_root_ssh(&app, "Stage Bastion", "10.0.0.22");
+
+        app.invoke_asset_activated(prod_id.into());
+        settle_terminal_projection();
+        let first_tab_id = app.get_active_workspace_session_id().to_string();
+
+        app.invoke_asset_activated(stage_id.into());
+        settle_terminal_projection();
+        let second_tab_id = app.get_active_workspace_session_id().to_string();
+
+        let tab_ids = |app: &AppWindow| {
+            let tabs = app.get_workspace_tab_items();
+            (0..tabs.row_count())
+                .map(|index| {
+                    tabs.row_data(index)
+                        .expect("workspace tab row")
+                        .tab_id
+                        .to_string()
+                })
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            tab_ids(&app),
+            vec![first_tab_id.clone(), second_tab_id.clone()]
+        );
+        assert_eq!(
+            app.get_active_workspace_session_id().as_str(),
+            second_tab_id
+        );
+
+        app.invoke_workspace_tab_reorder_requested(second_tab_id.clone().into(), 0);
+
+        assert_eq!(tab_ids(&app), vec![second_tab_id.clone(), first_tab_id]);
+        assert_eq!(
+            app.get_active_workspace_session_id().as_str(),
+            second_tab_id,
+            "drag reorder should only change UI order and must not switch the active session"
+        );
+    });
+}
+
+#[test]
+fn workspace_tab_menu_tooltip_and_close_all_follow_session_first_contract() {
+    run_with_large_test_stack(|| {
+        i_slint_backend_testing::init_no_event_loop();
+
+        i_slint_backend_selector::with_platform(|platform| {
+            platform.set_clipboard_text("", slint::platform::Clipboard::DefaultClipboard);
+            Ok(())
+        })
+        .expect("clear clipboard");
+
+        let app = AppWindow::new().unwrap();
+        bind_with_fake_sessions(&app, None);
+
+        let prod_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        let stage_id = create_root_ssh(&app, "Stage Bastion", "10.0.0.22");
+
+        app.invoke_asset_activated(prod_id.into());
+        settle_terminal_projection();
+        let prod_tab_id = app.get_active_workspace_session_id().to_string();
+
+        app.invoke_asset_activated(stage_id.into());
+        settle_terminal_projection();
+        let stage_tab_id = app.get_active_workspace_session_id().to_string();
+
+        app.invoke_workspace_tab_hovered(prod_tab_id.clone().into(), 144.0, 84.0);
+        assert!(app.get_workspace_tab_tooltip_visible());
+        let tooltip_text = app.get_workspace_tab_tooltip_text().to_string();
+        assert!(
+            !tooltip_text.is_empty(),
+            "tab hover should publish tooltip copy through the shared app-window overlay state"
+        );
+        app.invoke_workspace_tab_hover_ended(prod_tab_id.clone().into());
+        assert!(!app.get_workspace_tab_tooltip_visible());
+
+        app.invoke_workspace_tab_context_menu_requested(prod_tab_id.clone().into(), 168.0, 96.0);
+        assert!(app.get_workspace_tab_context_menu_open());
+        assert_eq!(
+            app.get_active_workspace_session_id().as_str(),
+            stage_tab_id,
+            "opening the context menu on an inactive tab must not switch the active session"
+        );
+
+        app.invoke_workspace_tab_context_menu_action_invoked("copy-name".into());
+        let copied_name = i_slint_backend_selector::with_platform(|platform| {
+            Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
+        })
+        .expect("read copied name");
+        assert_eq!(copied_name.as_deref(), Some("Prod Bastion"));
+
+        app.invoke_workspace_tab_context_menu_requested(prod_tab_id.clone().into(), 168.0, 96.0);
+        app.invoke_workspace_tab_context_menu_action_invoked("copy-host".into());
+        let copied_host = i_slint_backend_selector::with_platform(|platform| {
+            Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
+        })
+        .expect("read copied host");
+        assert_eq!(copied_host.as_deref(), Some("10.0.0.12"));
+
+        app.invoke_workspace_tab_context_menu_requested(prod_tab_id.into(), 168.0, 96.0);
+        app.invoke_workspace_tab_context_menu_action_invoked("close-all".into());
+
+        assert_eq!(app.get_workspace_tab_items().row_count(), 0);
+        assert_eq!(app.get_active_workspace_session_id().as_str(), "");
+        assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
     });
 }
 
@@ -7842,7 +7960,7 @@ fn launcher_quick_launch_connect_restores_native_terminal_surface_rect() {
             .get_workspace_tab_items()
             .row_data(0)
             .expect("workspace tab after launcher quick launch connect");
-        assert_ne!(item.session_id.as_str(), "workspace-launcher");
+        assert_ne!(item.tab_id.as_str(), "workspace-launcher");
         assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
         assert!(
             app.get_layout_workspace_session_native_surface_width() > 0.0
@@ -7887,7 +8005,7 @@ fn duplicate_ssh_tabs_keep_resolved_titles_and_reuse_suffix_gaps() {
     let second_tab_session_id = rows
         .row_data(1)
         .expect("second prod tab session id")
-        .session_id
+        .tab_id
         .to_string();
     app.invoke_workspace_tab_close_requested(second_tab_session_id.into());
 
@@ -7943,7 +8061,7 @@ fn launcher_picker_activation_replaces_launcher_tab_and_closes_modal() {
             .get_workspace_tab_items()
             .row_data(0)
             .expect("workspace tab after picker activation");
-        assert_ne!(item.session_id.as_str(), "workspace-launcher");
+        assert_ne!(item.tab_id.as_str(), "workspace-launcher");
         assert_eq!(item.title.as_str(), "DB Admin");
     });
 }
@@ -8203,7 +8321,7 @@ fn launcher_picker_activation_restores_native_terminal_surface_rect() {
             .get_workspace_tab_items()
             .row_data(0)
             .expect("workspace tab after picker activation");
-        assert_ne!(item.session_id.as_str(), "workspace-launcher");
+        assert_ne!(item.tab_id.as_str(), "workspace-launcher");
         assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
         assert!(
             app.get_layout_workspace_session_native_surface_width() > 0.0
@@ -8362,7 +8480,7 @@ fn launcher_picker_folder_activation_does_not_attempt_to_open_session() {
         .get_workspace_tab_items()
         .row_data(0)
         .expect("launcher tab after folder activation");
-    assert_eq!(item.session_id.as_str(), "workspace-launcher");
+    assert_eq!(item.tab_id.as_str(), "workspace-launcher");
     assert_eq!(item.title.as_str(), "New Tab");
 }
 

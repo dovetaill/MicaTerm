@@ -82,6 +82,18 @@ pub struct SavedSshPickerItem {
     pub compact_flat_mode: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveWorkspaceTabSummary {
+    pub tab_id: String,
+    pub display_name: String,
+    pub host: String,
+    pub username: String,
+    pub port: u16,
+    pub connection_status: String,
+    pub connection_status_label: String,
+    pub tooltip_text: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RightPanelView {
     Appearance,
@@ -643,6 +655,38 @@ pub struct SftpPanelRenderCache {
     pub full_resync_required: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceTabCloseScope {
+    One,
+    Others,
+    Left,
+    Right,
+    All,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct WorkspaceTabClosePlan {
+    pub victim_tab_ids: Vec<String>,
+    pub next_active_tab_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct WorkspaceTabContextMenuState {
+    pub open: bool,
+    pub anchor_tab_id: Option<String>,
+    pub anchor_x: f32,
+    pub anchor_y: f32,
+    pub reconnect_enabled: bool,
+    pub clone_connection_enabled: bool,
+    pub close_enabled: bool,
+    pub copy_name_enabled: bool,
+    pub copy_host_enabled: bool,
+    pub close_others_enabled: bool,
+    pub close_all_enabled: bool,
+    pub close_left_enabled: bool,
+    pub close_right_enabled: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellViewModel {
     pub show_welcome: bool,
@@ -690,6 +734,9 @@ pub struct ShellViewModel {
     pub sftp_transfer_tasks: Vec<crate::app::sftp::TransferTask>,
     pub sftp_queue_drawer_open: bool,
     workspace_tabs: Vec<WorkspaceTab>,
+    workspace_tab_order: Vec<String>,
+    workspace_tab_clone_window_supported: bool,
+    workspace_tab_context_menu_state: WorkspaceTabContextMenuState,
     hidden_workspace_terminal_session_ids: HashSet<String>,
     active_workspace_tab_id: Option<String>,
     active_workspace_session_id: Option<String>,
@@ -776,6 +823,9 @@ impl Default for ShellViewModel {
             sftp_transfer_tasks: Vec::new(),
             sftp_queue_drawer_open: false,
             workspace_tabs: Vec::new(),
+            workspace_tab_order: Vec::new(),
+            workspace_tab_clone_window_supported: false,
+            workspace_tab_context_menu_state: WorkspaceTabContextMenuState::default(),
             hidden_workspace_terminal_session_ids: HashSet::new(),
             active_workspace_tab_id: None,
             active_workspace_session_id: None,
@@ -1653,23 +1703,70 @@ impl ShellViewModel {
         self.ssh_host_key_prompt_state.take().is_some()
     }
 
-    fn normalize_workspace_tabs(&mut self) {
-        let active_tab_id = self
-            .active_workspace_tab_id
+    fn normalized_workspace_tab_order_for_tabs(&self, tabs: &[WorkspaceTab]) -> Vec<String> {
+        let live_tab_ids = tabs
+            .iter()
+            .map(|tab| tab.tab_id.clone())
+            .collect::<HashSet<_>>();
+        let mut order = self
+            .workspace_tab_order
+            .iter()
+            .filter(|tab_id| live_tab_ids.contains(*tab_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        for tab in tabs {
+            if !order.iter().any(|tab_id| tab_id == &tab.tab_id) {
+                order.push(tab.tab_id.clone());
+            }
+        }
+        order
+    }
+
+    fn active_workspace_tab_id_for_tabs(&self, tabs: &[WorkspaceTab]) -> Option<String> {
+        self.active_workspace_tab_id
             .as_deref()
-            .filter(|candidate| {
-                self.workspace_tabs
-                    .iter()
-                    .any(|tab| tab.tab_id == *candidate)
-            })
+            .filter(|candidate| tabs.iter().any(|tab| tab.tab_id == *candidate))
             .map(str::to_string)
             .or_else(|| {
-                self.workspace_tabs
-                    .iter()
+                tabs.iter()
                     .find(|tab| tab.active)
                     .map(|tab| tab.tab_id.clone())
             })
-            .or_else(|| self.workspace_tabs.first().map(|tab| tab.tab_id.clone()));
+            .or_else(|| tabs.first().map(|tab| tab.tab_id.clone()))
+    }
+
+    fn sort_workspace_tabs_by_order(tabs: &mut [WorkspaceTab], order: &[String]) {
+        let positions = order
+            .iter()
+            .enumerate()
+            .map(|(index, tab_id)| (tab_id.as_str(), index))
+            .collect::<HashMap<_, _>>();
+        tabs.sort_by_key(|tab| {
+            positions
+                .get(tab.tab_id.as_str())
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
+    }
+
+    pub(crate) fn normalized_workspace_tabs_projection(
+        &self,
+        mut tabs: Vec<WorkspaceTab>,
+    ) -> Vec<WorkspaceTab> {
+        let order = self.normalized_workspace_tab_order_for_tabs(&tabs);
+        Self::sort_workspace_tabs_by_order(&mut tabs, &order);
+        let active_tab_id = self.active_workspace_tab_id_for_tabs(&tabs);
+        for tab in &mut tabs {
+            tab.active = active_tab_id.as_deref() == Some(tab.tab_id.as_str());
+        }
+        tabs
+    }
+
+    fn normalize_workspace_tabs(&mut self) {
+        self.workspace_tab_order =
+            self.normalized_workspace_tab_order_for_tabs(&self.workspace_tabs);
+        Self::sort_workspace_tabs_by_order(&mut self.workspace_tabs, &self.workspace_tab_order);
+        let active_tab_id = self.active_workspace_tab_id_for_tabs(&self.workspace_tabs);
 
         for tab in &mut self.workspace_tabs {
             tab.active = active_tab_id.as_deref() == Some(tab.tab_id.as_str());

@@ -467,7 +467,9 @@ fn tabbar_sizes_workspace_tabs_from_title_content_instead_of_even_stretch() {
         fs::read_to_string("ui/components/active-tab.slint").expect("read active tab component");
 
     assert!(
-        tabbar.contains("for item in root.items : ActiveTab {\n            horizontal-stretch: 0;"),
+        tabbar.contains(
+            "for item[index] in root.items : ActiveTab {\n            horizontal-stretch: 0;"
+        ),
         "workspace tabs should explicitly opt out of stretch layout inside the repeated tab row"
     );
     assert!(
@@ -1581,7 +1583,7 @@ fn double_click_and_context_menu_open_create_distinct_sessions() {
         .get_workspace_tab_items()
         .row_data(0)
         .expect("first workspace tab")
-        .session_id
+        .tab_id
         .to_string();
 
     app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
@@ -1592,7 +1594,7 @@ fn double_click_and_context_menu_open_create_distinct_sessions() {
         .get_workspace_tab_items()
         .row_data(1)
         .expect("second workspace tab")
-        .session_id
+        .tab_id
         .to_string();
     assert_ne!(first_session_id, second_session_id);
     assert_eq!(
@@ -1607,11 +1609,37 @@ fn workspace_tab_projection_uses_tab_identity_for_generic_tabbar_selection() {
     let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
 
     assert!(
-        bootstrap.contains("session_id: tab.tab_id.clone().into()"),
+        bootstrap.contains("tab_id: tab.tab_id.clone().into()"),
         "workspace tab projection should feed tab ids into the tabbar model so terminal and sftp tabs share one selection identity contract"
     );
     assert!(
         tabbar.contains("title: item.title;"),
         "TabBar should keep rendering the generic workspace tab title binding so SFTP tabs can display `Files: <host>` without a special case"
+    );
+}
+
+#[test]
+fn workspace_tabbar_drag_reorder_contract_is_wired_end_to_end() {
+    let bootstrap = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let workspace_pane =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+    let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
+
+    assert!(
+        tabbar.contains("callback tab-reorder-requested(string, int);"),
+        "TabBar should expose a final drop callback so drag reorder commits through stable tab ids instead of mutating UI order implicitly"
+    );
+    assert!(
+        workspace_pane.contains("callback workspace-tab-reorder-requested(string, int);"),
+        "WorkspacePane should forward tab reorder requests through its shared workspace callback surface"
+    );
+    assert!(
+        app_window.contains("callback workspace-tab-reorder-requested(string, int);"),
+        "AppWindow should surface the workspace tab reorder callback so Rust owns the final UI-order commit"
+    );
+    assert!(
+        bootstrap.contains("window.on_workspace_tab_reorder_requested"),
+        "bootstrap should handle final tab reorder drops and route them into ShellViewModel::reorder_workspace_tab"
     );
 }

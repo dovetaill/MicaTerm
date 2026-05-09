@@ -21,7 +21,7 @@ grep -F 'callback workspace-session-text-input(string);' "$APP_WINDOW" >/dev/nul
 grep -F 'callback workspace-session-key-input(string, bool, bool, bool);' "$APP_WINDOW" >/dev/null
 grep -F 'callback workspace-session-resize-requested(int, int);' "$APP_WINDOW" >/dev/null
 ! grep -F 'width: 216px;' "$TABBAR" >/dev/null
-grep -F 'for item in root.items : ActiveTab {' "$TABBAR" >/dev/null
+grep -F 'for item[index] in root.items : ActiveTab {' "$TABBAR" >/dev/null
 grep -F '@image-url("../../assets/icons/fluent/add-20-regular.svg")' "$TABBAR" >/dev/null
 grep -F 'callback new-tab-requested();' "$TABBAR" >/dev/null
 grep -F 'new-tab-requested => {' "$WORKSPACE_PANE" >/dev/null

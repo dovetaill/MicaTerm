@@ -26,7 +26,7 @@ grep -F 'double-clicked => {' "$ROW" >/dev/null
 grep -F 'callback asset-selected(string);' "$ASSETS" >/dev/null
 grep -F 'callback asset-activated(string);' "$ASSETS" >/dev/null
 grep -F 'items: root.workspace-tab-items;' "$APP_WINDOW" >/dev/null
-grep -F 'for item in root.items : ActiveTab {' "$TABBAR" >/dev/null
+grep -F 'for item[index] in root.items : ActiveTab {' "$TABBAR" >/dev/null
 grep -F 'x: 12px;' "$ASSETS" >/dev/null
 grep -F 'width: parent.width - 24px;' "$ASSETS" >/dev/null
 grep -F 'y: 12px + list-host.height;' "$ASSETS" >/dev/null

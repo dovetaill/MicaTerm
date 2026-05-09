@@ -73,6 +73,7 @@ export component WorkspacePane inherits Rectangle {
     in-out property <int> workspace-session-selection-end-row: -1;
     in-out property <int> workspace-session-selection-end-col: -1;
     in-out property <bool> workspace-session-context-menu-open: false;
+    in property <bool> workspace-tab-context-menu-open: false;
     out property <length> layout-workspace-session-native-surface-x:
         content-host.x + session-host.native-surface-x;
     out property <length> layout-workspace-session-native-surface-y:
@@ -91,6 +92,10 @@ export component WorkspacePane inherits Rectangle {
         session-host.preferred-terminal-cols;
     callback workspace-tab-selected(string);
     callback workspace-tab-close-requested(string);
+    callback workspace-tab-reorder-requested(string, int);
+    callback workspace-tab-context-menu-requested(string, length, length);
+    callback workspace-tab-hovered(string, length, length);
+    callback workspace-tab-hover-ended(string);
     callback workspace-new-tab-requested();
     callback text-input(string);
     callback key-input(string, bool, bool, bool);
@@ -129,13 +134,31 @@ export component WorkspacePane inherits Rectangle {
             width: 100%;
             min-width: 0px;
             items: root.workspace-tab-items;
+            suppress-hover-tooltip: root.workspace-tab-context-menu-open
+                || root.workspace-session-context-menu-open;
 
-            tab-selected(session-id) => {
-                root.workspace-tab-selected(session-id);
+            tab-selected(tab-id) => {
+                root.workspace-tab-selected(tab-id);
             }
 
-            tab-close-requested(session-id) => {
-                root.workspace-tab-close-requested(session-id);
+            tab-close-requested(tab-id) => {
+                root.workspace-tab-close-requested(tab-id);
+            }
+
+            tab-reorder-requested(tab-id, target-index) => {
+                root.workspace-tab-reorder-requested(tab-id, target-index);
+            }
+
+            tab-context-menu-requested(tab-id, anchor-x, anchor-y) => {
+                root.workspace-tab-context-menu-requested(tab-id, anchor-x, anchor-y);
+            }
+
+            tab-hovered(tab-id, anchor-x, anchor-y) => {
+                root.workspace-tab-hovered(tab-id, anchor-x, anchor-y);
+            }
+
+            tab-hover-ended(tab-id) => {
+                root.workspace-tab-hover-ended(tab-id);
             }
 
             new-tab-requested => {
@@ -309,4 +332,5 @@ export component WorkspacePane inherits Rectangle {
             }
         }
     }
+
 }

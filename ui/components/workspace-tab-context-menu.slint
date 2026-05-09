@@ -1,0 +1,163 @@
+import { AssetsContextMenuRow } from "assets-context-menu-row.slint";
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component WorkspaceTabContextMenu inherits Rectangle {
+    in property <length> anchor-x: 0px;
+    in property <length> anchor-y: 0px;
+    in property <length> host-width: 0px;
+    in property <length> host-height: 0px;
+    in property <bool> reconnect-enabled: false;
+    in property <bool> clone-connection-enabled: false;
+    in property <bool> close-enabled: false;
+    in property <bool> copy-name-enabled: false;
+    in property <bool> copy-host-enabled: false;
+    in property <bool> close-others-enabled: false;
+    in property <bool> close-all-enabled: false;
+    in property <bool> close-right-enabled: false;
+    in property <bool> close-left-enabled: false;
+    callback close-requested();
+    callback action-invoked(string);
+
+    private property <image> reconnect-icon: @image-url("../../assets/icons/fluent/arrow-clockwise-20-regular.svg");
+    private property <image> clone-icon: @image-url("../../assets/icons/fluent/add-square-multiple-20-regular.svg");
+    private property <image> close-icon: @image-url("../../assets/icons/fluent/dismiss-20-regular.svg");
+    private property <image> copy-icon: @image-url("../../assets/icons/fluent/copy-20-regular.svg");
+    private property <image> close-scope-icon: @image-url("../../assets/icons/fluent/subtract-20-regular.svg");
+
+    x: max(8px, min(root.anchor-x, max(8px, root.host-width - self.width - 8px)));
+    y: max(8px, min(root.anchor-y, max(8px, root.host-height - self.height - 8px)));
+    width: 236px;
+    height: 300px;
+    z: 110;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: ThemeTokens.divider-strong;
+    background: ThemeTokens.panel-surface;
+    clip: true;
+
+    public function focus-menu() {
+        menu-focus.focus();
+    }
+
+    menu-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.close-requested();
+                accept
+            } else {
+                reject
+            }
+        }
+    }
+
+    menu-column := VerticalLayout {
+        x: 0px;
+        y: 6px;
+        width: parent.width;
+        spacing: 0px;
+
+        AssetsContextMenuRow {
+            action-id: "reconnect";
+            label: "Reconnect";
+            icon-source: root.reconnect-icon;
+            enabled: root.reconnect-enabled;
+
+            invoked(action-id) => {
+                root.action-invoked(action-id);
+            }
+        }
+
+        AssetsContextMenuRow {
+            action-id: "clone-connection";
+            label: "Clone Connection";
+            icon-source: root.clone-icon;
+            enabled: root.clone-connection-enabled;
+
+            invoked(action-id) => {
+                root.action-invoked(action-id);
+            }
+        }
+
+        AssetsContextMenuRow {
+            action-id: "close";
+            label: "Close";
+            icon-source: root.close-icon;
+            enabled: root.close-enabled;
+            divider-before: true;
+
+            invoked(action-id) => {
+                root.action-invoked(action-id);
+            }
+        }
+
+        AssetsContextMenuRow {
+            action-id: "copy-name";
+            label: "Copy Name";
+            icon-source: root.copy-icon;
+            enabled: root.copy-name-enabled;
+
+            invoked(action-id) => {
+                root.action-invoked(action-id);
+            }
+        }
+
+        AssetsContextMenuRow {
+            action-id: "copy-host";
+            label: "Copy Host";
+            icon-source: root.copy-icon;
+            enabled: root.copy-host-enabled;
+
+            invoked(action-id) => {
+                root.action-invoked(action-id);
+            }
+        }
+
+        AssetsContextMenuRow {
+            action-id: "close-others";
+            label: "Close Others";
+            icon-source: root.close-scope-icon;
+            enabled: root.close-others-enabled;
+            divider-before: true;
+
+            invoked(action-id) => {
+                root.action-invoked(action-id);
+            }
+        }
+
+        AssetsContextMenuRow {
+            action-id: "close-all";
+            label: "Close All";
+            icon-source: root.close-scope-icon;
+            enabled: root.close-all-enabled;
+
+            invoked(action-id) => {
+                root.action-invoked(action-id);
+            }
+        }
+
+        AssetsContextMenuRow {
+            action-id: "close-right";
+            label: "Close Tabs to the Right";
+            icon-source: root.close-scope-icon;
+            enabled: root.close-right-enabled;
+
+            invoked(action-id) => {
+                root.action-invoked(action-id);
+            }
+        }
+
+        AssetsContextMenuRow {
+            action-id: "close-left";
+            label: "Close Tabs to the Left";
+            icon-source: root.close-scope-icon;
+            enabled: root.close-left-enabled;
+
+            invoked(action-id) => {
+                root.action-invoked(action-id);
+            }
+        }
+    }
+}

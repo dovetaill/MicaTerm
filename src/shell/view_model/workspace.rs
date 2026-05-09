@@ -1,6 +1,7 @@
 //! ShellViewModel workspace domain impls.
 
 use super::*;
+use crate::app::ssh::profile::ConnectionProfile;
 use crate::app::terminal_semantic::count_search_query_matches_in_lines;
 
 impl ShellViewModel {
@@ -30,7 +31,18 @@ impl ShellViewModel {
     pub fn set_workspace_tabs(&mut self, tabs: Vec<WorkspaceTab>) {
         self.workspace_tabs = tabs;
         self.normalize_workspace_tabs();
+        self.sync_workspace_tab_context_menu_after_tab_change();
         let _ = self.recompute_sftp_queue_summary();
+    }
+
+    pub fn workspace_tab_by_id(&self, tab_id: &str) -> Option<&WorkspaceTab> {
+        self.workspace_tabs.iter().find(|tab| tab.tab_id == tab_id)
+    }
+
+    pub fn tab_index_by_id(&self, tab_id: &str) -> Option<usize> {
+        self.workspace_tabs
+            .iter()
+            .position(|tab| tab.tab_id == tab_id)
     }
 
     pub fn active_workspace_session_id(&self) -> Option<&str> {
@@ -62,18 +74,114 @@ impl ShellViewModel {
 
     pub fn active_workspace_tab(&self) -> Option<&WorkspaceTab> {
         let active_id = self.active_workspace_tab_id.as_deref()?;
-        self.workspace_tabs
-            .iter()
-            .find(|tab| tab.tab_id == active_id)
+        self.workspace_tab_by_id(active_id)
+    }
+
+    pub fn active_workspace_tab_summary(&self) -> Option<ActiveWorkspaceTabSummary> {
+        let tab = self.active_workspace_tab()?;
+        Some(ActiveWorkspaceTabSummary {
+            tab_id: tab.tab_id.clone(),
+            display_name: tab.display_name.clone(),
+            host: tab.host.clone(),
+            username: tab.username.clone(),
+            port: tab.port,
+            connection_status: tab.connection_status.clone(),
+            connection_status_label: tab.connection_status_label().to_string(),
+            tooltip_text: tab.summary_tooltip_text(),
+        })
+    }
+
+    pub fn workspace_tab_context_menu_state(&self) -> &WorkspaceTabContextMenuState {
+        &self.workspace_tab_context_menu_state
+    }
+
+    pub fn workspace_tab_copy_name_text(&self, tab_id: &str) -> Option<String> {
+        let tab = self.workspace_tab_by_id(tab_id)?;
+        (!tab.display_name.is_empty()).then(|| tab.display_name.clone())
+    }
+
+    pub fn workspace_tab_copy_host_text(&self, tab_id: &str) -> Option<String> {
+        let tab = self.workspace_tab_by_id(tab_id)?;
+        (!tab.host.is_empty()).then(|| tab.host.clone())
+    }
+
+    pub fn workspace_tab_connection_profile(&self, tab_id: &str) -> Option<ConnectionProfile> {
+        self.workspace_tab_by_id(tab_id)
+            .and_then(|tab| tab.connection_profile.clone())
+    }
+
+    pub fn workspace_tab_close_plan(
+        &self,
+        anchor_tab_id: Option<&str>,
+        scope: WorkspaceTabCloseScope,
+    ) -> Option<WorkspaceTabClosePlan> {
+        let order = self.normalized_workspace_tab_order_for_tabs(&self.workspace_tabs);
+        if order.is_empty() {
+            return None;
+        }
+
+        let victim_tab_ids = match scope {
+            WorkspaceTabCloseScope::All => order.clone(),
+            WorkspaceTabCloseScope::One
+            | WorkspaceTabCloseScope::Others
+            | WorkspaceTabCloseScope::Left
+            | WorkspaceTabCloseScope::Right => {
+                let anchor_tab_id = anchor_tab_id?;
+                let anchor_index = order.iter().position(|tab_id| tab_id == anchor_tab_id)?;
+                match scope {
+                    WorkspaceTabCloseScope::One => vec![anchor_tab_id.to_string()],
+                    WorkspaceTabCloseScope::Others => order
+                        .iter()
+                        .filter(|tab_id| tab_id.as_str() != anchor_tab_id)
+                        .cloned()
+                        .collect(),
+                    WorkspaceTabCloseScope::Left => order[..anchor_index].to_vec(),
+                    WorkspaceTabCloseScope::Right => order[(anchor_index + 1)..].to_vec(),
+                    WorkspaceTabCloseScope::All => unreachable!(),
+                }
+            }
+        };
+
+        if victim_tab_ids.is_empty() {
+            return None;
+        }
+
+        let next_active_tab_id =
+            self.next_active_workspace_tab_id_after_batch_close(&order, &victim_tab_ids);
+        Some(WorkspaceTabClosePlan {
+            victim_tab_ids,
+            next_active_tab_id,
+        })
+    }
+
+    pub fn open_workspace_tab_context_menu(
+        &mut self,
+        tab_id: &str,
+        anchor_x: f32,
+        anchor_y: f32,
+    ) -> bool {
+        let Some(menu_state) =
+            self.resolve_workspace_tab_context_menu_state(tab_id, anchor_x, anchor_y)
+        else {
+            return false;
+        };
+
+        self.workspace_tab_context_menu_state = menu_state;
+        true
+    }
+
+    pub fn close_workspace_tab_context_menu(&mut self) {
+        self.workspace_tab_context_menu_state = WorkspaceTabContextMenuState::default();
     }
 
     pub fn activate_workspace_tab(&mut self, tab_id: &str) -> bool {
-        if !self.workspace_tabs.iter().any(|tab| tab.tab_id == tab_id) {
+        if self.workspace_tab_by_id(tab_id).is_none() {
             return false;
         }
 
         self.active_workspace_tab_id = Some(tab_id.to_string());
         self.normalize_workspace_tabs();
+        self.close_workspace_tab_context_menu();
         let _ = self.recompute_sftp_queue_summary();
         true
     }
@@ -106,6 +214,31 @@ impl ShellViewModel {
 
     pub fn close_workspace_tab(&mut self, tab_id: &str) -> bool {
         self.close_workspace_tab_with_fallback(tab_id)
+    }
+
+    pub fn reorder_workspace_tab(&mut self, tab_id: &str, target_index: usize) -> bool {
+        if self.workspace_tab_by_id(tab_id).is_none() {
+            return false;
+        }
+
+        self.normalize_workspace_tabs();
+        let Some(current_index) = self.workspace_tab_order.iter().position(|id| id == tab_id)
+        else {
+            return false;
+        };
+
+        let mut next_order = self.workspace_tab_order.clone();
+        let moved_tab_id = next_order.remove(current_index);
+        let clamped_index = target_index.min(next_order.len());
+        next_order.insert(clamped_index, moved_tab_id);
+        if next_order == self.workspace_tab_order {
+            return false;
+        }
+
+        self.workspace_tab_order = next_order;
+        self.normalize_workspace_tabs();
+        self.sync_workspace_tab_context_menu_after_tab_change();
+        true
     }
 
     pub fn close_workspace_session_with_fallback(&mut self, session_id: &str) -> bool {
@@ -154,6 +287,7 @@ impl ShellViewModel {
         }
 
         self.normalize_workspace_tabs();
+        self.sync_workspace_tab_context_menu_after_tab_change();
         true
     }
 
@@ -165,6 +299,25 @@ impl ShellViewModel {
         self.active_workspace_tab()
             .map(WorkspaceTab::can_reconnect)
             .unwrap_or(false)
+    }
+
+    pub fn workspace_tab_can_reconnect(&self, tab_id: &str) -> bool {
+        self.workspace_tab_by_id(tab_id)
+            .map(WorkspaceTab::can_reconnect)
+            .unwrap_or(false)
+    }
+
+    pub fn workspace_tab_can_clone_connection(&self, tab_id: &str) -> bool {
+        self.workspace_tab_clone_window_supported
+            && self
+                .workspace_tab_by_id(tab_id)
+                .map(WorkspaceTab::can_clone_connection)
+                .unwrap_or(false)
+    }
+
+    pub fn set_workspace_tab_clone_window_supported(&mut self, supported: bool) {
+        self.workspace_tab_clone_window_supported = supported;
+        self.sync_workspace_tab_context_menu_after_tab_change();
     }
 
     pub fn active_workspace_session_enhanced_state(&self) -> &str {
@@ -552,5 +705,241 @@ impl ShellViewModel {
             self.console_asset_tree
                 .set_expanded(parent_id.as_str(), true);
         }
+    }
+
+    fn resolve_workspace_tab_context_menu_state(
+        &self,
+        tab_id: &str,
+        anchor_x: f32,
+        anchor_y: f32,
+    ) -> Option<WorkspaceTabContextMenuState> {
+        let tab = self.workspace_tab_by_id(tab_id)?;
+        let close_left_enabled = self
+            .workspace_tab_close_plan(Some(tab_id), WorkspaceTabCloseScope::Left)
+            .is_some();
+        let close_right_enabled = self
+            .workspace_tab_close_plan(Some(tab_id), WorkspaceTabCloseScope::Right)
+            .is_some();
+
+        Some(WorkspaceTabContextMenuState {
+            open: true,
+            anchor_tab_id: Some(tab.tab_id.clone()),
+            anchor_x,
+            anchor_y,
+            reconnect_enabled: tab.can_reconnect(),
+            clone_connection_enabled: self.workspace_tab_can_clone_connection(tab_id),
+            close_enabled: true,
+            copy_name_enabled: !tab.display_name.is_empty(),
+            copy_host_enabled: !tab.host.is_empty(),
+            close_others_enabled: self.workspace_tabs.len() > 1,
+            close_all_enabled: !self.workspace_tabs.is_empty(),
+            close_left_enabled,
+            close_right_enabled,
+        })
+    }
+
+    fn sync_workspace_tab_context_menu_after_tab_change(&mut self) {
+        if !self.workspace_tab_context_menu_state.open {
+            return;
+        }
+
+        let Some(anchor_tab_id) = self.workspace_tab_context_menu_state.anchor_tab_id.clone()
+        else {
+            self.close_workspace_tab_context_menu();
+            return;
+        };
+        let anchor_x = self.workspace_tab_context_menu_state.anchor_x;
+        let anchor_y = self.workspace_tab_context_menu_state.anchor_y;
+        let Some(menu_state) = self.resolve_workspace_tab_context_menu_state(
+            anchor_tab_id.as_str(),
+            anchor_x,
+            anchor_y,
+        ) else {
+            self.close_workspace_tab_context_menu();
+            return;
+        };
+
+        self.workspace_tab_context_menu_state = menu_state;
+    }
+
+    fn next_active_workspace_tab_id_after_batch_close(
+        &self,
+        order: &[String],
+        victim_tab_ids: &[String],
+    ) -> Option<String> {
+        if order.is_empty() {
+            return None;
+        }
+
+        let victim_ids = victim_tab_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::HashSet<_>>();
+        let survivors = order
+            .iter()
+            .filter(|tab_id| !victim_ids.contains(tab_id.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if survivors.is_empty() {
+            return None;
+        }
+
+        if let Some(active_tab_id) = self
+            .active_workspace_tab_id()
+            .filter(|tab_id| !victim_ids.contains(*tab_id))
+        {
+            return Some(active_tab_id.to_string());
+        }
+
+        let Some(active_index) = self
+            .active_workspace_tab_id()
+            .and_then(|active_tab_id| order.iter().position(|tab_id| tab_id == active_tab_id))
+        else {
+            return survivors.first().cloned();
+        };
+
+        for tab_id in order.iter().skip(active_index + 1) {
+            if !victim_ids.contains(tab_id.as_str()) {
+                return Some(tab_id.clone());
+            }
+        }
+
+        for tab_id in order[..active_index].iter().rev() {
+            if !victim_ids.contains(tab_id.as_str()) {
+                return Some(tab_id.clone());
+            }
+        }
+
+        survivors.first().cloned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shell::tabs::WorkspaceTabKind;
+
+    fn terminal_tab(tab_id: &str, label: &str, state: &str) -> WorkspaceTab {
+        WorkspaceTab {
+            tab_id: tab_id.into(),
+            session_id: tab_id.into(),
+            file_browser_session_id: String::new(),
+            asset_id: format!("asset-{tab_id}"),
+            display_name: label.into(),
+            host: format!("{tab_id}.example.com"),
+            username: "ops".into(),
+            port: 22,
+            connection_status: state.into(),
+            title: label.into(),
+            subtitle: String::new(),
+            state: state.into(),
+            enhanced_session_state: String::new(),
+            error_detail: String::new(),
+            active: false,
+            kind: WorkspaceTabKind::Terminal,
+            reconnectable: matches!(state, "disconnected" | "error"),
+            connection_profile: None,
+        }
+    }
+
+    #[test]
+    fn workspace_tab_context_menu_disables_single_tab_range_actions() {
+        let mut state = ShellViewModel::default();
+        state.set_workspace_tabs(vec![terminal_tab("tab-a", "Prod", "connected")]);
+
+        assert!(state.open_workspace_tab_context_menu("tab-a", 128.0, 48.0));
+
+        let menu = state.workspace_tab_context_menu_state();
+        assert!(menu.open);
+        assert_eq!(menu.anchor_tab_id.as_deref(), Some("tab-a"));
+        assert!(menu.close_enabled);
+        assert!(menu.copy_name_enabled);
+        assert!(menu.copy_host_enabled);
+        assert!(menu.close_all_enabled);
+        assert!(!menu.reconnect_enabled);
+        assert!(!menu.clone_connection_enabled);
+        assert!(!menu.close_others_enabled);
+        assert!(!menu.close_left_enabled);
+        assert!(!menu.close_right_enabled);
+    }
+
+    #[test]
+    fn workspace_tab_context_menu_uses_reordered_ui_edges_for_enablement() {
+        let mut state = ShellViewModel::default();
+        state.set_workspace_tabs(vec![
+            terminal_tab("tab-a", "A", "connected"),
+            terminal_tab("tab-b", "B", "connected"),
+            terminal_tab("tab-c", "C", "connected"),
+        ]);
+        assert!(state.reorder_workspace_tab("tab-c", 0));
+
+        assert!(state.open_workspace_tab_context_menu("tab-c", 40.0, 16.0));
+        let first_menu = state.workspace_tab_context_menu_state();
+        assert!(!first_menu.close_left_enabled);
+        assert!(first_menu.close_right_enabled);
+
+        assert!(state.open_workspace_tab_context_menu("tab-b", 220.0, 16.0));
+        let last_menu = state.workspace_tab_context_menu_state();
+        assert!(last_menu.close_left_enabled);
+        assert!(!last_menu.close_right_enabled);
+    }
+
+    #[test]
+    fn workspace_close_scope_plans_freeze_ui_order_and_final_active() {
+        let mut state = ShellViewModel::default();
+        state.set_workspace_tabs(vec![
+            terminal_tab("tab-a", "A", "connected"),
+            terminal_tab("tab-b", "B", "connected"),
+            terminal_tab("tab-c", "C", "connected"),
+            terminal_tab("tab-d", "D", "connected"),
+        ]);
+        assert!(state.reorder_workspace_tab("tab-c", 0));
+        assert!(state.reorder_workspace_tab("tab-d", 2));
+        assert!(state.activate_workspace_tab("tab-b"));
+
+        let close_others = state
+            .workspace_tab_close_plan(Some("tab-a"), WorkspaceTabCloseScope::Others)
+            .expect("close others plan");
+        assert_eq!(
+            close_others.victim_tab_ids,
+            vec![
+                "tab-c".to_string(),
+                "tab-d".to_string(),
+                "tab-b".to_string()
+            ]
+        );
+        assert_eq!(close_others.next_active_tab_id.as_deref(), Some("tab-a"));
+
+        let close_left = state
+            .workspace_tab_close_plan(Some("tab-d"), WorkspaceTabCloseScope::Left)
+            .expect("close left plan");
+        assert_eq!(
+            close_left.victim_tab_ids,
+            vec!["tab-c".to_string(), "tab-a".to_string()]
+        );
+        assert_eq!(close_left.next_active_tab_id.as_deref(), Some("tab-b"));
+
+        let close_right = state
+            .workspace_tab_close_plan(Some("tab-a"), WorkspaceTabCloseScope::Right)
+            .expect("close right plan");
+        assert_eq!(
+            close_right.victim_tab_ids,
+            vec!["tab-d".to_string(), "tab-b".to_string()]
+        );
+        assert_eq!(close_right.next_active_tab_id.as_deref(), Some("tab-a"));
+
+        let close_all = state
+            .workspace_tab_close_plan(None, WorkspaceTabCloseScope::All)
+            .expect("close all plan");
+        assert_eq!(
+            close_all.victim_tab_ids,
+            vec![
+                "tab-c".to_string(),
+                "tab-a".to_string(),
+                "tab-d".to_string(),
+                "tab-b".to_string()
+            ]
+        );
+        assert_eq!(close_all.next_active_tab_id, None);
     }
 }

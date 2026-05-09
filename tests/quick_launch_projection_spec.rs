@@ -156,13 +156,20 @@ fn quick_launch_recent_projection_includes_connected_saved_ssh_tabs() {
         session_id: "session-prod".into(),
         file_browser_session_id: String::new(),
         asset_id: ids.prod.clone(),
+        display_name: "Prod Bastion".into(),
+        host: "10.0.0.12".into(),
+        username: "ops".into(),
+        port: 22,
+        connection_status: "connected".into(),
         title: "Prod Bastion".into(),
-        subtitle: String::new(),
+        subtitle: "ops@10.0.0.12:22".into(),
         state: "connected".into(),
         enhanced_session_state: String::new(),
         error_detail: String::new(),
         active: true,
         kind: WorkspaceTabKind::Terminal,
+        reconnectable: false,
+        connection_profile: None,
     }]);
 
     let recent = view_model.quick_launch_recent_items_at(1_700_000_120);
@@ -187,13 +194,20 @@ fn quick_launch_recent_projection_deduplicates_connected_tabs_ahead_of_history()
         session_id: "session-prod".into(),
         file_browser_session_id: String::new(),
         asset_id: ids.prod.clone(),
+        display_name: "Prod Bastion".into(),
+        host: "10.0.0.12".into(),
+        username: "ops".into(),
+        port: 22,
+        connection_status: "connected".into(),
         title: "Prod Bastion".into(),
-        subtitle: String::new(),
+        subtitle: "ops@10.0.0.12:22".into(),
         state: "connected".into(),
         enhanced_session_state: String::new(),
         error_detail: String::new(),
         active: true,
         kind: WorkspaceTabKind::Terminal,
+        reconnectable: false,
+        connection_profile: None,
     }]);
 
     let recent = view_model.quick_launch_recent_items_at(1_700_000_120);

@@ -8,21 +8,43 @@ export component ActiveTab inherits Rectangle {
     in property <string> subtitle: "";
     in property <string> state: "connected";
     in property <bool> active: false;
+    in property <bool> drag-active: false;
+    in property <bool> show-leading-insertion-line: false;
     callback selected();
     callback close-requested();
+    callback context-menu-requested(length, length);
+    callback hovered(length, length);
+    callback hover-ended();
+    callback drag-started(length, length);
+    callback drag-moved(length, length);
+    callback drag-ended(length, length);
+    callback drag-cancelled();
 
     in property <length> min-chip-width: 120px;
     in property <length> max-chip-width: 220px;
     private property <image> close-icon: @image-url("../../assets/icons/fluent/dismiss-20-regular.svg");
     private property <length> close-zone-width: 28px;
+    private property <length> reorder-threshold: 6px;
     out property <bool> has-hover: content-hit-target.has-hover || close-hit-target.has-hover;
-    private property <bool> close-visible: root.active || root.has-hover;
+    private property <bool> close-visible: root.active || root.has-hover || root.drag-active;
+
+    function absolute-length(value: length) -> length {
+        return value < 0px ? -value : value;
+    }
+
+    function should-start-reorder(delta-x: length, delta-y: length) -> bool {
+        let horizontal = root.absolute-length(delta-x);
+        let vertical = root.absolute-length(delta-y);
+        return horizontal >= root.reorder-threshold && horizontal > vertical;
+    }
 
     min-width: 0px;
     height: 34px;
     preferred-width: min(root.max-chip-width, max(root.min-chip-width, title-metric.preferred-width + 62px));
+    y: root.drag-active ? -2px : 0px;
     border-radius: 10px;
-    border-width: 0px;
+    border-width: root.drag-active ? 1px : 0px;
+    border-color: root.drag-active ? ThemeTokens.divider-strong : transparent;
     background: root.active
         ? ThemeTokens.tab-active-surface
         : (content-hit-target.pressed || close-hit-target.pressed)
@@ -31,6 +53,7 @@ export component ActiveTab inherits Rectangle {
                 ? ThemeTokens.tab-hover-surface
                 : transparent;
     clip: true;
+    opacity: root.drag-active ? 0.92 : 1;
 
     title-metric := Text {
         x: 0px;
@@ -43,6 +66,17 @@ export component ActiveTab inherits Rectangle {
         font-size: AppTypography.ui-font-size-body;
         font-weight: AppTypography.ui-font-weight-regular;
         letter-spacing: 0px;
+    }
+
+    insertion-line := Rectangle {
+        x: 0px;
+        y: 6px;
+        width: 2px;
+        height: parent.height - 12px;
+        border-radius: 1px;
+        background: ThemeTokens.tab-active-line;
+        opacity: 0.88;
+        visible: root.show-leading-insertion-line;
     }
 
     state-dot := Rectangle {
@@ -127,8 +161,44 @@ export component ActiveTab inherits Rectangle {
     content-hit-target := TouchArea {
         width: max(0px, close-button.x);
         height: parent.height;
+        mouse-cursor: root.drag-active ? MouseCursor.grabbing : MouseCursor.grab;
 
-        clicked => { root.selected(); }
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                root.context-menu-requested(
+                    self.mouse-x + self.absolute-position.x,
+                    self.mouse-y + self.absolute-position.y,
+                );
+            } else if event.kind == PointerEventKind.move && self.pressed {
+                let delta-x = self.mouse-x - self.pressed-x;
+                let delta-y = self.mouse-y - self.pressed-y;
+                if !root.drag-active && root.should-start-reorder(delta-x, delta-y) {
+                    root.hover-ended();
+                    root.drag-started(
+                        self.pressed-x + self.absolute-position.x,
+                        self.pressed-y + self.absolute-position.y,
+                    );
+                }
+                if root.drag-active {
+                    root.drag-moved(
+                        self.mouse-x + self.absolute-position.x,
+                        self.mouse-y + self.absolute-position.y,
+                    );
+                }
+            } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left
+            {
+                if root.drag-active {
+                    root.drag-ended(
+                        self.mouse-x + self.absolute-position.x,
+                        self.mouse-y + self.absolute-position.y,
+                    );
+                } else {
+                    root.selected();
+                }
+            } else if event.kind == PointerEventKind.cancel {
+                root.drag-cancelled();
+            }
+        }
     }
 
     close-hit-target := TouchArea {
@@ -136,6 +206,32 @@ export component ActiveTab inherits Rectangle {
         width: root.close-zone-width + 4px;
         height: parent.height;
 
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                root.context-menu-requested(
+                    self.mouse-x + self.absolute-position.x,
+                    self.mouse-y + self.absolute-position.y,
+                );
+            }
+        }
+
         clicked => { root.close-requested(); }
+    }
+
+    changed has-hover => {
+        if root.has-hover {
+            root.hovered(
+                root.absolute-position.x + root.width / 2,
+                root.absolute-position.y + root.height + 8px,
+            );
+        } else {
+            root.hover-ended();
+        }
+    }
+
+    changed drag-active => {
+        if root.drag-active {
+            root.hover-ended();
+        }
     }
 }

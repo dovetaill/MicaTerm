@@ -264,14 +264,6 @@ impl ShellViewModel {
             .get(tab.file_browser_session_id.as_str())
     }
 
-    pub(super) fn active_workspace_sftp_session_mut(&mut self) -> Option<&mut FileBrowserSession> {
-        let session_id = self
-            .active_workspace_tab()
-            .filter(|tab| tab.kind == crate::shell::tabs::WorkspaceTabKind::Sftp)
-            .map(|tab| tab.file_browser_session_id.clone())?;
-        self.file_browser_sessions.get_mut(&session_id)
-    }
-
     pub fn active_file_browser_session_id(&self) -> Option<&str> {
         self.active_workspace_sftp_session()
             .map(|session| session.file_browser_session_id.as_str())
@@ -1161,19 +1153,32 @@ impl ShellViewModel {
         let Some(active_tab_id) = self.active_workspace_tab_id().map(str::to_owned) else {
             return false;
         };
-        let Some(browser_session) = self.active_workspace_sftp_session_mut() else {
-            return false;
-        };
+        self.reconnect_workspace_sftp_tab(active_tab_id.as_str())
+            .is_some()
+    }
+
+    pub fn reconnect_workspace_sftp_tab(&mut self, tab_id: &str) -> Option<String> {
+        let file_browser_session_id = self
+            .workspace_tabs
+            .iter()
+            .find(|tab| {
+                tab.tab_id == tab_id && tab.kind == crate::shell::tabs::WorkspaceTabKind::Sftp
+            })
+            .map(|tab| tab.file_browser_session_id.clone())?;
+        let browser_session = self
+            .file_browser_sessions
+            .get_mut(&file_browser_session_id)?;
         browser_session.mark_connecting();
+        let linked_terminal_session_id = browser_session.linked_terminal_session_id.clone();
         if let Some(tab) = self
             .workspace_tabs
             .iter_mut()
-            .find(|tab| tab.tab_id == active_tab_id)
+            .find(|tab| tab.tab_id == tab_id)
         {
             tab.state = SftpPanelMode::Connecting.id().into();
             tab.error_detail.clear();
         }
-        true
+        linked_terminal_session_id
     }
 
     pub fn sftp_remote_file_editor_state(&self) -> &SftpRemoteFileEditorState {

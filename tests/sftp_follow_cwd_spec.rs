@@ -699,12 +699,12 @@ fn expanding_to_workspace_keeps_the_quick_browser_following_terminal_switches() 
     let db_session_id = app.get_active_workspace_session_id().to_string();
 
     let workspace_tabs = app.get_workspace_tab_items();
-    let prod_session_id = workspace_tabs
+    let prod_tab_id = workspace_tabs
         .row_data(0)
         .expect("prod tab")
-        .session_id
+        .tab_id
         .to_string();
-    app.invoke_workspace_tab_selected(prod_session_id.into());
+    app.invoke_workspace_tab_selected(prod_tab_id.into());
     flush_runtime_projection();
 
     app.invoke_open_sftp_panel_requested();

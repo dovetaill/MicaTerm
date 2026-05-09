@@ -776,7 +776,7 @@ fn app_window_round_trips_workspace_tab_items_and_active_session() {
     let app = AppWindow::new().unwrap();
     app.set_workspace_tab_items(ModelRc::new(VecModel::from(vec![
         WorkspaceTabItem {
-            session_id: "session-1".into(),
+            tab_id: "session-1".into(),
             title: "Prod Bastion".into(),
             subtitle: "ops@example.com:22".into(),
             state: "connected".into(),
@@ -784,7 +784,7 @@ fn app_window_round_trips_workspace_tab_items_and_active_session() {
             active: false,
         },
         WorkspaceTabItem {
-            session_id: "session-2".into(),
+            tab_id: "session-2".into(),
             title: "Staging Bastion".into(),
             subtitle: "ops@staging.example.com:22".into(),
             state: "error".into(),

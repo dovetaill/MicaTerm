@@ -95,7 +95,7 @@ fn tab_bar_contract_requires_workspace_tab_model_instead_of_single_placeholder()
 
     assert!(content.contains("export struct WorkspaceTabItem {"));
     assert!(content.contains("in property <[WorkspaceTabItem]> items: [];"));
-    assert!(content.contains("for item in root.items : ActiveTab {"));
+    assert!(content.contains("for item[index] in root.items : ActiveTab {"));
 }
 
 #[test]

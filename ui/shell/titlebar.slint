@@ -22,6 +22,11 @@ export component Titlebar inherits Rectangle {
     in property <bool> is-window-maximized: false;
     in property <bool> is-window-active: true;
     in property <bool> is-window-always-on-top: false;
+    in property <bool> active-session-summary-visible: false;
+    in property <string> active-session-display-name: "";
+    in property <string> active-session-host: "";
+    in property <string> active-session-status-label: "";
+    in property <string> active-session-summary-tooltip: "";
 
     private property <image> navigation-icon: @image-url("../../assets/icons/fluent/navigation-24-regular.svg");
     private property <image> header-logotype: @image-url("../../assets/icons/mica-term-header-logotype.svg");
@@ -69,6 +74,13 @@ export component Titlebar inherits Rectangle {
         : root.transfer-queue-active > 0
             ? ThemeTokens.status-busy-accent
             : ThemeTokens.accent;
+    private property <string> active-session-summary-detail: root.active-session-host != ""
+        ? root.active-session-host
+            + (root.active-session-status-label != ""
+                ? " · " + root.active-session-status-label
+                : "")
+        : root.active-session-status-label;
+    private property <length> active-session-summary-reserved-right-width: root.transfer-summary-visible ? 220px : 24px;
     private property <length> transfer-summary-anchor-width: max(0px, min(196px, drag-zone.width - 12px));
     out property <string> tooltip-text <=> root.tooltip-text-value;
     out property <bool> tooltip-visible <=> root.tooltip-visible-value;
@@ -254,6 +266,62 @@ export component Titlebar inherits Rectangle {
 
                 double-clicked => {
                     root.drag-double-clicked();
+                }
+            }
+
+            if root.active-session-summary-visible : active-session-summary-lane := Rectangle {
+                x: 12px;
+                y: 0px;
+                width: max(0px, parent.width - root.active-session-summary-reserved-right-width);
+                height: parent.height;
+                background: transparent;
+                private property <bool> has-hover: active-session-summary-touch.has-hover;
+
+                HorizontalLayout {
+                    width: parent.width;
+                    height: parent.height;
+                    spacing: 6px;
+                    padding-left: 0px;
+                    padding-right: 0px;
+
+                    active-session-name := Text {
+                        min-width: 0px;
+                        horizontal-stretch: 3;
+                        text: root.active-session-display-name;
+                        color: ThemeTokens.text-primary;
+                        font-size: 12px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    if root.active-session-summary-detail != "" : active-session-detail := Text {
+                        min-width: 0px;
+                        horizontal-stretch: 2;
+                        text: root.active-session-summary-detail;
+                        color: ThemeTokens.text-secondary;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+
+                active-session-summary-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+                }
+
+                changed has-hover => {
+                    if self.has-hover && root.active-session-summary-tooltip != "" {
+                        root.schedule-tooltip(
+                            "active-session-summary",
+                            root.active-session-summary-tooltip,
+                            self.absolute-position.x + self.width / 2,
+                            self.absolute-position.y + self.height + 8px,
+                        );
+                    } else {
+                        root.queue-tooltip-close("active-session-summary");
+                    }
                 }
             }
 

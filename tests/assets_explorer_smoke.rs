@@ -262,7 +262,7 @@ fn double_clicking_same_ssh_asset_twice_creates_two_distinct_tabs() {
         .get_workspace_tab_items()
         .row_data(0)
         .expect("first workspace tab")
-        .session_id
+        .tab_id
         .to_string();
 
     app.invoke_asset_activated(ssh_id.into());
@@ -272,7 +272,7 @@ fn double_clicking_same_ssh_asset_twice_creates_two_distinct_tabs() {
         .get_workspace_tab_items()
         .row_data(1)
         .expect("second workspace tab")
-        .session_id
+        .tab_id
         .to_string();
     assert_ne!(first_session_id, second_session_id);
     assert_eq!(
@@ -298,7 +298,7 @@ fn explicit_open_context_action_opens_distinct_tabs_each_time() {
         .get_workspace_tab_items()
         .row_data(0)
         .expect("first workspace tab")
-        .session_id
+        .tab_id
         .to_string();
 
     app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
@@ -309,7 +309,7 @@ fn explicit_open_context_action_opens_distinct_tabs_each_time() {
         .get_workspace_tab_items()
         .row_data(1)
         .expect("second workspace tab")
-        .session_id
+        .tab_id
         .to_string();
     assert_ne!(first_session_id, second_session_id);
     assert_eq!(
@@ -335,13 +335,13 @@ fn clicking_workspace_tabs_switches_active_session_and_close_hit_target_closes_t
         .get_workspace_tab_items()
         .row_data(0)
         .expect("first workspace tab")
-        .session_id
+        .tab_id
         .to_string();
     let second_session_id = app
         .get_workspace_tab_items()
         .row_data(1)
         .expect("second workspace tab")
-        .session_id
+        .tab_id
         .to_string();
 
     let mut tabs = ElementHandle::find_by_element_type_name(&app, "ActiveTab").collect::<Vec<_>>();

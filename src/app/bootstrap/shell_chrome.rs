@@ -431,6 +431,19 @@ pub(super) fn sync_top_status_bar_state(
     window.set_is_window_maximized(state.is_window_maximized());
     window.set_is_window_active(state.is_window_active);
     window.set_is_window_always_on_top(state.is_always_on_top);
+    if let Some(summary) = state.active_workspace_tab_summary() {
+        window.set_active_session_summary_visible(true);
+        window.set_active_session_display_name(summary.display_name.into());
+        window.set_active_session_host(summary.host.into());
+        window.set_active_session_status_label(summary.connection_status_label.into());
+        window.set_active_session_summary_tooltip(summary.tooltip_text.into());
+    } else {
+        window.set_active_session_summary_visible(false);
+        window.set_active_session_display_name("".into());
+        window.set_active_session_host("".into());
+        window.set_active_session_status_label("".into());
+        window.set_active_session_summary_tooltip("".into());
+    }
     window.set_settings_modal_open(state.settings_modal_open());
     window.set_settings_modal_theme_variant(state.settings_modal_theme_variant_id().into());
     window.set_settings_modal_terminal_scrollback_limit(

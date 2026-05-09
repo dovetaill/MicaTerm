@@ -4,7 +4,7 @@ import { ThemeTokens } from "../theme/tokens.slint";
 import { ActiveTab } from "../components/active-tab.slint";
 
 export struct WorkspaceTabItem {
-    session_id: string,
+    tab_id: string,
     title: string,
     subtitle: string,
     state: string,
@@ -14,12 +14,84 @@ export struct WorkspaceTabItem {
 
 export component TabBar inherits Rectangle {
     in property <[WorkspaceTabItem]> items: [];
+    in property <bool> suppress-hover-tooltip: false;
     callback tab-selected(string);
     callback tab-close-requested(string);
+    callback tab-reorder-requested(string, int);
+    callback tab-context-menu-requested(string, length, length);
+    callback tab-hovered(string, length, length);
+    callback tab-hover-ended(string);
     callback new-tab-requested();
     // State contract forwarded from Rust projections: connecting / connected / disconnected / error.
 
     private property <image> new-tab-icon: @image-url("../../assets/icons/fluent/add-20-regular.svg");
+    private property <bool> drag-active: false;
+    private property <string> dragged-tab-id: "";
+    private property <int> drag-source-index: -1;
+    private property <length> drag-origin-x: 0px;
+    private property <length> drag-current-x: 0px;
+    private property <length> drag-tab-width: 0px;
+    private property <int> drag-preview-slot: -1;
+
+    function drag-step-count() -> int {
+        if root.drag-tab-width <= 0px {
+            return 0;
+        }
+        let delta = (root.drag-current-x - root.drag-origin-x) / root.drag-tab-width;
+        return delta >= 0
+            ? Math.floor(delta + 0.5)
+            : -Math.floor((-delta) + 0.5);
+    }
+
+    function drag-target-index() -> int {
+        if !root.drag-active || root.drag-source-index < 0 || root.items.length == 0 {
+            return -1;
+        }
+        let candidate = root.drag-source-index + root.drag-step-count();
+        return min(root.items.length - 1, max(0, candidate));
+    }
+
+    function show-reorder-preview() -> bool {
+        return root.drag-active
+            && root.drag-preview-slot >= 0
+            && root.drag-target-index() != root.drag-source-index;
+    }
+
+    function begin-drag(tab-id: string, source-index: int, tab-width: length, pointer-x: length) {
+        root.drag-active = true;
+        root.dragged-tab-id = tab-id;
+        root.drag-source-index = source-index;
+        root.drag-origin-x = pointer-x;
+        root.drag-current-x = pointer-x;
+        root.drag-tab-width = max(1px, tab-width);
+        root.drag-preview-slot = source-index;
+        root.tab-hover-ended(tab-id);
+    }
+
+    function update-drag(pointer-x: length) {
+        if !root.drag-active {
+            return;
+        }
+        root.drag-current-x = pointer-x;
+        let target-index = root.drag-target-index();
+        if target-index < 0 {
+            root.drag-preview-slot = -1;
+        } else if target-index <= root.drag-source-index {
+            root.drag-preview-slot = target-index;
+        } else {
+            root.drag-preview-slot = target-index + 1;
+        }
+    }
+
+    function reset-drag() {
+        root.drag-active = false;
+        root.dragged-tab-id = "";
+        root.drag-source-index = -1;
+        root.drag-origin-x = 0px;
+        root.drag-current-x = 0px;
+        root.drag-tab-width = 0px;
+        root.drag-preview-slot = -1;
+    }
 
     width: 100%;
     min-width: 0px;
@@ -43,20 +115,83 @@ export component TabBar inherits Rectangle {
         padding-bottom: 0px;
         spacing: 0px;
 
-        for item in root.items : ActiveTab {
+        for item[index] in root.items : ActiveTab {
             horizontal-stretch: 0;
             min-width: 0px;
             title: item.title;
             subtitle: item.subtitle;
             state: item.state;
             active: item.active;
+            drag-active: root.drag-active && root.dragged-tab-id == item.tab_id;
+            show-leading-insertion-line: root.show-reorder-preview() && root.drag-preview-slot == index;
 
             selected => {
-                root.tab-selected(item.session_id);
+                root.tab-selected(item.tab_id);
             }
 
             close-requested => {
-                root.tab-close-requested(item.session_id);
+                root.tab-close-requested(item.tab_id);
+            }
+
+            drag-started(pointer-x, _pointer-y) => {
+                root.begin-drag(item.tab_id, index, self.width, pointer-x);
+            }
+
+            drag-moved(pointer-x, _pointer-y) => {
+                if root.dragged-tab-id == item.tab_id {
+                    root.update-drag(pointer-x);
+                }
+            }
+
+            drag-ended(pointer-x, _pointer-y) => {
+                if root.dragged-tab-id == item.tab_id {
+                    root.update-drag(pointer-x);
+                    let target-index = root.drag-target-index();
+                    let dragged-tab-id = root.dragged-tab-id;
+                    let should-commit =
+                        target-index >= 0 && target-index != root.drag-source-index;
+                    root.reset-drag();
+                    if should-commit {
+                        root.tab-reorder-requested(dragged-tab-id, target-index);
+                    }
+                }
+            }
+
+            drag-cancelled => {
+                if root.dragged-tab-id == item.tab_id {
+                    root.reset-drag();
+                }
+            }
+
+            context-menu-requested(anchor-x, anchor-y) => {
+                root.tab-context-menu-requested(item.tab_id, anchor-x, anchor-y);
+            }
+
+            hovered(anchor-x, anchor-y) => {
+                if !(root.suppress-hover-tooltip || root.drag-active) {
+                    root.tab-hovered(item.tab_id, anchor-x, anchor-y);
+                }
+            }
+
+            hover-ended => {
+                root.tab-hover-ended(item.tab_id);
+            }
+        }
+
+        end-insertion-line := Rectangle {
+            width: root.show-reorder-preview() && root.drag-preview-slot == root.items.length ? 8px : 0px;
+            height: parent.height;
+            background: transparent;
+
+            Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: 6px;
+                width: 2px;
+                height: parent.height - 12px;
+                border-radius: 1px;
+                background: ThemeTokens.tab-active-line;
+                opacity: 0.88;
+                visible: parent.width > 0px;
             }
         }
 
@@ -86,6 +221,7 @@ export component TabBar inherits Rectangle {
             new-tab-touch := TouchArea {
                 width: parent.width;
                 height: parent.height;
+                enabled: !root.drag-active;
 
                 clicked => {
                     root.new-tab-requested();

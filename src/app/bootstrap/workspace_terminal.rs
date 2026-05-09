@@ -16,29 +16,6 @@ pub struct WorkspaceTerminalPointerState {
     pub ctrl: bool,
 }
 
-pub(super) fn projected_active_workspace_tab_id(
-    state: &ShellViewModel,
-    next_tabs: &[WorkspaceTab],
-) -> Option<String> {
-    state
-        .active_workspace_tab_id()
-        .filter(|candidate| next_tabs.iter().any(|tab| tab.tab_id == *candidate))
-        .map(str::to_string)
-        .or_else(|| {
-            state
-                .workspace_tabs()
-                .iter()
-                .find(|tab| {
-                    tab.active
-                        && next_tabs
-                            .iter()
-                            .any(|candidate| candidate.tab_id == tab.tab_id)
-                })
-                .map(|tab| tab.tab_id.clone())
-        })
-        .or_else(|| next_tabs.first().map(|tab| tab.tab_id.clone()))
-}
-
 pub(super) fn sync_workspace_projection_from_manager(
     state: &mut ShellViewModel,
     manager: &SessionManager,
@@ -88,13 +65,17 @@ pub(super) fn sync_workspace_projection_from_manager(
         manager,
         preserved_sftp_tabs,
     ));
-    let active_id = projected_active_workspace_tab_id(state, &next_tabs);
-    for tab in &mut next_tabs {
-        tab.active = active_id.as_deref() == Some(tab.tab_id.as_str());
-    }
-    let next_session_id = state
-        .active_workspace_terminal_session_id()
-        .and_then(|session_id| Uuid::parse_str(session_id).ok());
+    next_tabs = state.normalized_workspace_tabs_projection(next_tabs);
+    let next_session_id = next_tabs.iter().find(|tab| tab.active).and_then(|tab| {
+        if !tab.uses_terminal_surface()
+            && !tab.uses_connection_progress_surface()
+            && !tab.can_reconnect()
+        {
+            return None;
+        }
+
+        Uuid::parse_str(tab.session_id.as_str()).ok()
+    });
     let current_surface_signature = state
         .active_workspace_terminal_surface()
         .map(TerminalSurfaceState::signature);

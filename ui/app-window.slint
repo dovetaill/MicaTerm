@@ -24,6 +24,7 @@ import { ThemeTokens } from "theme/tokens.slint";
 import { AppTypography } from "theme/typography.slint";
 import { TitlebarTooltip } from "components/titlebar-tooltip.slint";
 import { WindowResizeGrips } from "components/window-resize-grips.slint";
+import { WorkspaceTabContextMenu } from "components/workspace-tab-context-menu.slint";
 import { QuickLaunchCardRow } from "welcome/quick-launch-types.slint";
 import { ConsoleAssetItem } from "shell/assets-sidebar.slint";
 import { RightPanel, SftpPanelItem } from "shell/right-panel.slint";
@@ -273,6 +274,11 @@ export component AppWindow inherits Window {
     in-out property <string> keychain-ssh-key-modal-public-key: "";
     in-out property <string> keychain-ssh-key-modal-fingerprint: "";
     in-out property <[WorkspaceTabItem]> workspace-tab-items: [];
+    in-out property <bool> active-session-summary-visible: false;
+    in-out property <string> active-session-display-name: "";
+    in-out property <string> active-session-host: "";
+    in-out property <string> active-session-status-label: "";
+    in-out property <string> active-session-summary-tooltip: "";
     in-out property <string> active-workspace-session-id: "";
     in-out property <string> workspace-session-host-mode: "welcome";
     in-out property <string> workspace-session-title: "";
@@ -324,6 +330,10 @@ export component AppWindow inherits Window {
     in-out property <bool> workspace-session-mouse-grabbed: false;
     in-out property <bool> workspace-session-link-hovered: false;
     in-out property <bool> workspace-session-link-armed: false;
+    in-out property <bool> workspace-tab-tooltip-visible: false;
+    in-out property <string> workspace-tab-tooltip-text: "";
+    in-out property <length> workspace-tab-tooltip-anchor-x: 0px;
+    in-out property <length> workspace-tab-tooltip-anchor-y: 0px;
     in-out property <[string]> workspace-session-visible-lines: [];
     in-out property <[TerminalCommandBlockRow]> workspace-session-command-blocks: [];
     in-out property <[TerminalOverviewMarkerRow]> workspace-session-overview-markers: [];
@@ -342,6 +352,18 @@ export component AppWindow inherits Window {
     in-out property <int> workspace-session-selection-end-row: -1;
     in-out property <int> workspace-session-selection-end-col: -1;
     in-out property <bool> workspace-session-context-menu-open: false;
+    in-out property <bool> workspace-tab-context-menu-open: false;
+    in-out property <length> workspace-tab-context-menu-anchor-x: 0px;
+    in-out property <length> workspace-tab-context-menu-anchor-y: 0px;
+    in-out property <bool> workspace-tab-context-menu-reconnect-enabled: false;
+    in-out property <bool> workspace-tab-context-menu-clone-connection-enabled: false;
+    in-out property <bool> workspace-tab-context-menu-close-enabled: false;
+    in-out property <bool> workspace-tab-context-menu-copy-name-enabled: false;
+    in-out property <bool> workspace-tab-context-menu-copy-host-enabled: false;
+    in-out property <bool> workspace-tab-context-menu-close-others-enabled: false;
+    in-out property <bool> workspace-tab-context-menu-close-all-enabled: false;
+    in-out property <bool> workspace-tab-context-menu-close-right-enabled: false;
+    in-out property <bool> workspace-tab-context-menu-close-left-enabled: false;
     in-out property <bool> assets-context-menu-open: false;
     in-out property <length> assets-context-menu-anchor-x: 0px;
     in-out property <length> assets-context-menu-anchor-y: 0px;
@@ -531,6 +553,9 @@ export component AppWindow inherits Window {
     callback blocking-modal-focus-restore-requested();
     callback workspace-tab-selected(string);
     callback workspace-tab-close-requested(string);
+    callback workspace-tab-reorder-requested(string, int);
+    callback workspace-tab-hovered(string, length, length);
+    callback workspace-tab-hover-ended(string);
     callback workspace-new-tab-requested();
     callback workspace-session-text-input(string);
     callback workspace-session-key-input(string, bool, bool, bool);
@@ -547,6 +572,9 @@ export component AppWindow inherits Window {
     callback workspace-session-scroll-jump-requested(float);
     callback workspace-session-mouse-input(string, string, int, int, bool, bool, bool);
     callback workspace-session-context-menu-open-changed(bool);
+    callback workspace-tab-context-menu-requested(string, length, length);
+    callback workspace-tab-context-menu-action-invoked(string);
+    callback close-workspace-tab-context-menu-requested();
     callback workspace-session-search-open-requested();
     callback workspace-session-search-close-requested();
     callback workspace-session-search-query-changed(string);
@@ -692,6 +720,12 @@ export component AppWindow inherits Window {
         }
     }
 
+    changed workspace-tab-context-menu-open => {
+        if root.workspace-tab-context-menu-open {
+            workspace-tab-context-menu-overlay.focus-menu();
+        }
+    }
+
     // The shell frame owns the full frameless surface so Rust can query a single set of geometry
     // exports for titlebar hit-testing and responsive panel layout.
     shell-frame := Rectangle {
@@ -726,6 +760,11 @@ export component AppWindow inherits Window {
                 transfer-queue-current-session: root.transfer-queue-current-session;
                 show-global-menu: root.show-global-menu;
                 workspace-focus-mode: root.workspace-focus-mode;
+                active-session-summary-visible: root.active-session-summary-visible;
+                active-session-display-name: root.active-session-display-name;
+                active-session-host: root.active-session-host;
+                active-session-status-label: root.active-session-status-label;
+                active-session-summary-tooltip: root.active-session-summary-tooltip;
                 is-window-maximized: root.is-window-maximized;
                 is-window-active: root.is-window-active;
                 is-window-always-on-top: root.is-window-always-on-top;
@@ -985,13 +1024,30 @@ export component AppWindow inherits Window {
                         workspace-session-selection-end-row <=> root.workspace-session-selection-end-row;
                         workspace-session-selection-end-col <=> root.workspace-session-selection-end-col;
                         workspace-session-context-menu-open <=> root.workspace-session-context-menu-open;
+                        workspace-tab-context-menu-open: root.workspace-tab-context-menu-open;
 
-                        workspace-tab-selected(session-id) => {
-                            root.workspace-tab-selected(session-id);
+                        workspace-tab-selected(tab-id) => {
+                            root.workspace-tab-selected(tab-id);
                         }
 
-                        workspace-tab-close-requested(session-id) => {
-                            root.workspace-tab-close-requested(session-id);
+                        workspace-tab-close-requested(tab-id) => {
+                            root.workspace-tab-close-requested(tab-id);
+                        }
+
+                        workspace-tab-reorder-requested(tab-id, target-index) => {
+                            root.workspace-tab-reorder-requested(tab-id, target-index);
+                        }
+
+                        workspace-tab-context-menu-requested(tab-id, anchor-x, anchor-y) => {
+                            root.workspace-tab-context-menu-requested(tab-id, anchor-x, anchor-y);
+                        }
+
+                        workspace-tab-hovered(tab-id, anchor-x, anchor-y) => {
+                            root.workspace-tab-hovered(tab-id, anchor-x, anchor-y);
+                        }
+
+                        workspace-tab-hover-ended(tab-id) => {
+                            root.workspace-tab-hover-ended(tab-id);
                         }
 
                         workspace-new-tab-requested => {
@@ -1349,12 +1405,15 @@ export component AppWindow inherits Window {
     }
 
     tooltip-overlay := TitlebarTooltip {
-        text: titlebar.tooltip-text;
-        anchor-x: titlebar.tooltip-anchor-x;
-        anchor-y: titlebar.tooltip-anchor-y;
-        tooltip-visible: titlebar.tooltip-visible;
+        text: root.workspace-tab-tooltip-visible ? root.workspace-tab-tooltip-text : titlebar.tooltip-text;
+        anchor-x: root.workspace-tab-tooltip-visible ? root.workspace-tab-tooltip-anchor-x : titlebar.tooltip-anchor-x;
+        anchor-y: root.workspace-tab-tooltip-visible ? root.workspace-tab-tooltip-anchor-y : titlebar.tooltip-anchor-y;
+        tooltip-visible: root.workspace-tab-context-menu-open
+            ? false
+            : (root.workspace-tab-tooltip-visible ? true : titlebar.tooltip-visible);
         host-width: root.width;
         host-height: root.height;
+        multiline-start-aligned: root.workspace-tab-tooltip-visible;
     }
 
     sync-feedback-overlay := TitlebarTooltip {
@@ -1478,6 +1537,43 @@ export component AppWindow inherits Window {
 
         clicked => {
             root.close-assets-context-menu-requested();
+        }
+    }
+
+    workspace-tab-context-menu-dismiss-layer := TouchArea {
+        x: 0px;
+        y: titlebar.height;
+        width: root.width;
+        height: root.height - titlebar.height;
+        enabled: root.workspace-tab-context-menu-open;
+
+        clicked => {
+            root.close-workspace-tab-context-menu-requested();
+        }
+    }
+
+    workspace-tab-context-menu-overlay := WorkspaceTabContextMenu {
+        visible: root.workspace-tab-context-menu-open;
+        anchor-x: root.workspace-tab-context-menu-anchor-x;
+        anchor-y: root.workspace-tab-context-menu-anchor-y;
+        host-width: root.width;
+        host-height: root.height;
+        reconnect-enabled: root.workspace-tab-context-menu-reconnect-enabled;
+        clone-connection-enabled: root.workspace-tab-context-menu-clone-connection-enabled;
+        close-enabled: root.workspace-tab-context-menu-close-enabled;
+        copy-name-enabled: root.workspace-tab-context-menu-copy-name-enabled;
+        copy-host-enabled: root.workspace-tab-context-menu-copy-host-enabled;
+        close-others-enabled: root.workspace-tab-context-menu-close-others-enabled;
+        close-all-enabled: root.workspace-tab-context-menu-close-all-enabled;
+        close-right-enabled: root.workspace-tab-context-menu-close-right-enabled;
+        close-left-enabled: root.workspace-tab-context-menu-close-left-enabled;
+
+        close-requested => {
+            root.close-workspace-tab-context-menu-requested();
+        }
+
+        action-invoked(action-id) => {
+            root.workspace-tab-context-menu-action-invoked(action-id);
         }
     }
 

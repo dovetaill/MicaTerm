@@ -85,9 +85,10 @@ use crate::app::ssh::runtime::{
     TerminalMouseEventKind, TerminalMouseInput, TerminalRuntimeDefaults, TerminalSurfaceState,
     UnknownHostKeyError, load_optional_stored_secret_bundle, stored_secret_lookup_message,
 };
+#[cfg(test)]
+use crate::app::ssh::session_manager::{EnhancedSessionState, SessionState};
 use crate::app::ssh::session_manager::{
-    EnhancedSessionState, OpenSessionMode, SessionHandle, SessionManager, SessionRuntimeControl,
-    SessionRuntimeLauncher, SessionState,
+    OpenSessionMode, SessionHandle, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher,
 };
 use crate::app::terminal_atlas::TerminalAtlasSelection;
 use crate::app::terminal_model::TerminalModelFrame;
@@ -185,7 +186,7 @@ use crate::shell::tabs::WorkspaceTab;
 use crate::shell::view_model::{
     AssetModalState, AssetSshConnectionDraft, KeychainIdentityDraft, KeychainSshKeyDraft,
     RightPanelView, ShellViewModel, SnippetActivation, SshModalAction, SyncModalMode,
-    SyncModalViewState, VaultPanelViewState,
+    SyncModalViewState, VaultPanelViewState, WorkspaceTabClosePlan, WorkspaceTabCloseScope,
 };
 use crate::theme::{ThemeMode, ThemeVariant};
 use russh::keys::ssh_key::{LineEnding, rand_core::OsRng};
@@ -1398,17 +1399,56 @@ fn persist_keychain_identity_secret(
     persist_keychain_identity_secret_bundle(credential_store, credential_ref.as_str(), &bundle)
 }
 
-fn merge_session_handle_into_tabs(state: &mut ShellViewModel, handle: &SessionHandle) {
+fn merge_workspace_tab_into_tabs(state: &mut ShellViewModel, mut next_tab: WorkspaceTab) {
     let mut tabs = state.workspace_tabs().to_vec();
-    let next_tab = WorkspaceTab::from_session(handle);
-
-    if let Some(existing) = tabs
-        .iter_mut()
-        .find(|tab| tab.session_id == next_tab.session_id)
-    {
+    if let Some(existing) = tabs.iter_mut().find(|tab| tab.tab_id == next_tab.tab_id) {
         *existing = next_tab;
+    } else if !next_tab.session_id.is_empty() {
+        if let Some(existing) = tabs
+            .iter_mut()
+            .find(|tab| tab.session_id == next_tab.session_id)
+        {
+            next_tab.tab_id = existing.tab_id.clone();
+            *existing = next_tab;
+        } else {
+            tabs.push(next_tab);
+        }
+    } else if !next_tab.asset_id.is_empty() {
+        if let Some(existing) = tabs.iter_mut().find(|tab| {
+            tab.kind == crate::shell::tabs::WorkspaceTabKind::Terminal
+                && tab.session_id.is_empty()
+                && tab.asset_id == next_tab.asset_id
+        }) {
+            next_tab.tab_id = existing.tab_id.clone();
+            *existing = next_tab;
+        } else {
+            tabs.push(next_tab);
+        }
     } else {
         tabs.push(next_tab);
+    }
+
+    state.set_workspace_tabs(tabs);
+}
+
+fn merge_session_handle_into_tabs(state: &mut ShellViewModel, handle: &SessionHandle) {
+    let mut tabs = state.workspace_tabs().to_vec();
+    if let Some(existing) = tabs
+        .iter_mut()
+        .find(|tab| tab.session_id == handle.session_id.to_string())
+    {
+        let tab_id = existing.tab_id.clone();
+        *existing = WorkspaceTab::from_session_with_tab_id(handle, tab_id);
+    } else if let Some(existing) = tabs.iter_mut().find(|tab| {
+        tab.kind == crate::shell::tabs::WorkspaceTabKind::Terminal
+            && tab.session_id.is_empty()
+            && !tab.asset_id.is_empty()
+            && tab.asset_id == handle.asset_id
+    }) {
+        let tab_id = existing.tab_id.clone();
+        *existing = WorkspaceTab::from_session_with_tab_id(handle, tab_id);
+    } else {
+        tabs.push(WorkspaceTab::from_session(handle));
     }
 
     state.set_workspace_tabs(tabs);
@@ -1514,20 +1554,20 @@ fn show_failed_session_tab(
     profile: &ConnectionProfile,
     message: impl Into<String>,
 ) {
-    let asset_id = profile
-        .asset_id
-        .clone()
-        .unwrap_or_else(|| format!("session-error:{}", Uuid::new_v4()));
-    let handle = SessionHandle {
-        session_id: Uuid::new_v4(),
-        asset_id,
-        title: profile.name.clone(),
-        subtitle: format!("{}@{}:{}", profile.user, profile.host, profile.port),
-        state: SessionState::Error(message.into()),
-        can_reconnect: true,
-        enhanced_session_state: EnhancedSessionState::Plain,
-    };
-    merge_session_handle_into_tabs(state, &handle);
+    let tab = WorkspaceTab::terminal_error(
+        format!("workspace-terminal-error:{}", Uuid::new_v4()),
+        profile
+            .asset_id
+            .clone()
+            .unwrap_or_else(|| format!("session-error:{}", Uuid::new_v4())),
+        profile.name.clone(),
+        profile.user.clone(),
+        profile.host.clone(),
+        profile.port,
+        message.into(),
+        Some(profile.clone()),
+    );
+    merge_workspace_tab_into_tabs(state, tab);
 }
 
 fn show_failed_saved_asset_tab(
@@ -1535,35 +1575,48 @@ fn show_failed_saved_asset_tab(
     asset_id: &str,
     message: impl Into<String>,
 ) {
-    let (title, subtitle) = match (
+    let message = message.into();
+    let (title, username, host, port, connection_profile) = match (
         state.console_asset_tree().node(asset_id),
         state.console_asset_tree().ssh_connection_spec(asset_id),
     ) {
         (Some(node), Some(spec)) => {
             let port = if spec.port.trim().is_empty() {
-                "22"
+                22
             } else {
-                spec.port.trim()
+                spec.port.trim().parse::<u16>().unwrap_or(22)
             };
+            let profile =
+                ConnectionProfile::from_saved_asset(asset_id, node.title.as_str(), spec).ok();
             (
                 node.title.clone(),
-                format!("{}@{}:{}", spec.user.trim(), spec.host.trim(), port),
+                spec.user.trim().to_string(),
+                spec.host.trim().to_string(),
+                port,
+                profile,
             )
         }
-        (Some(node), None) => (node.title.clone(), String::new()),
-        _ => ("SSH Connection".into(), String::new()),
+        (Some(node), None) => (node.title.clone(), String::new(), String::new(), 0, None),
+        _ => (
+            "SSH Connection".into(),
+            String::new(),
+            String::new(),
+            0,
+            None,
+        ),
     };
 
-    let handle = SessionHandle {
-        session_id: Uuid::new_v4(),
-        asset_id: asset_id.to_string(),
+    let tab = WorkspaceTab::terminal_error(
+        format!("workspace-terminal-error:{}", Uuid::new_v4()),
+        asset_id.to_string(),
         title,
-        subtitle,
-        state: SessionState::Error(message.into()),
-        can_reconnect: true,
-        enhanced_session_state: EnhancedSessionState::Plain,
-    };
-    merge_session_handle_into_tabs(state, &handle);
+        username,
+        host,
+        port,
+        message,
+        connection_profile,
+    );
+    merge_workspace_tab_into_tabs(state, tab);
 }
 
 fn prompt_unknown_host_key(
@@ -2007,13 +2060,33 @@ fn close_workspace_tab_by_id(
     true
 }
 
+fn close_workspace_tabs_from_plan(
+    state: &mut ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+    plan: WorkspaceTabClosePlan,
+) -> bool {
+    let mut closed_any = false;
+    for tab_id in &plan.victim_tab_ids {
+        closed_any |= close_workspace_tab_by_id(state, bridge, tab_id.as_str());
+    }
+    if !closed_any {
+        return false;
+    }
+
+    if let Some(next_active_tab_id) = plan.next_active_tab_id.as_deref() {
+        let _ = state.activate_workspace_tab(next_active_tab_id);
+    }
+
+    true
+}
+
 fn sync_workspace_tab_items(window: &AppWindow, state: &ShellViewModel) {
     let tabs = state
         .workspace_tabs()
         .iter()
         .map(|tab| WorkspaceTabItem {
-            session_id: tab.tab_id.clone().into(),
-            title: tab.title.clone().into(),
+            tab_id: tab.tab_id.clone().into(),
+            title: tab.display_name.clone().into(),
             subtitle: tab.subtitle.clone().into(),
             state: tab.state.clone().into(),
             enhanced_session_state: tab.enhanced_session_state.clone().into(),
@@ -2022,6 +2095,104 @@ fn sync_workspace_tab_items(window: &AppWindow, state: &ShellViewModel) {
         .collect::<Vec<_>>();
 
     window.set_workspace_tab_items(ModelRc::new(VecModel::from(tabs)));
+}
+
+fn sync_workspace_tab_context_menu_state(window: &AppWindow, state: &ShellViewModel) {
+    let menu = state.workspace_tab_context_menu_state();
+    window.set_workspace_tab_context_menu_open(menu.open);
+    window.set_workspace_tab_context_menu_anchor_x(menu.anchor_x);
+    window.set_workspace_tab_context_menu_anchor_y(menu.anchor_y);
+    window.set_workspace_tab_context_menu_reconnect_enabled(menu.reconnect_enabled);
+    window.set_workspace_tab_context_menu_clone_connection_enabled(menu.clone_connection_enabled);
+    window.set_workspace_tab_context_menu_close_enabled(menu.close_enabled);
+    window.set_workspace_tab_context_menu_copy_name_enabled(menu.copy_name_enabled);
+    window.set_workspace_tab_context_menu_copy_host_enabled(menu.copy_host_enabled);
+    window.set_workspace_tab_context_menu_close_others_enabled(menu.close_others_enabled);
+    window.set_workspace_tab_context_menu_close_all_enabled(menu.close_all_enabled);
+    window.set_workspace_tab_context_menu_close_right_enabled(menu.close_right_enabled);
+    window.set_workspace_tab_context_menu_close_left_enabled(menu.close_left_enabled);
+}
+
+fn show_workspace_tab_tooltip(
+    window: &AppWindow,
+    state: &ShellViewModel,
+    tab_id: &str,
+    anchor_x: f32,
+    anchor_y: f32,
+) {
+    let Some(tab) = state.workspace_tab_by_id(tab_id) else {
+        clear_workspace_tab_tooltip(window);
+        return;
+    };
+
+    window.set_workspace_tab_tooltip_text(tab.summary_tooltip_text().into());
+    window.set_workspace_tab_tooltip_anchor_x(anchor_x);
+    window.set_workspace_tab_tooltip_anchor_y(anchor_y);
+    window.set_workspace_tab_tooltip_visible(true);
+}
+
+fn clear_workspace_tab_tooltip(window: &AppWindow) {
+    window.set_workspace_tab_tooltip_visible(false);
+    window.set_workspace_tab_tooltip_text("".into());
+    window.set_workspace_tab_tooltip_anchor_x(0.0);
+    window.set_workspace_tab_tooltip_anchor_y(0.0);
+}
+
+fn reconnect_workspace_tab_by_id(
+    state: &mut ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+    tab_id: &str,
+) -> anyhow::Result<bool> {
+    let Some(tab) = state.workspace_tab_by_id(tab_id).cloned() else {
+        return Ok(false);
+    };
+    let Some(bridge) = bridge else {
+        return Ok(false);
+    };
+
+    let active_before = state.active_workspace_tab_id().map(str::to_owned);
+    let restore_active_after_reconnect = active_before.as_deref() != Some(tab_id);
+
+    match tab.kind {
+        crate::shell::tabs::WorkspaceTabKind::Terminal => {
+            if let Ok(session_id) = Uuid::parse_str(tab.session_id.as_str()) {
+                bridge.manager.retry_session(session_id)?;
+                let _ = workspace_terminal::sync_workspace_projection_from_manager(
+                    state,
+                    &bridge.manager,
+                );
+            } else if let Some(profile) = tab.connection_profile.clone() {
+                if let Err(err) = open_session_with_profile(
+                    state,
+                    bridge,
+                    profile.clone(),
+                    OpenSessionMode::ForceNewTab,
+                ) {
+                    show_failed_session_tab(state, &profile, err.to_string());
+                    return Err(err);
+                }
+            } else {
+                return Ok(false);
+            }
+        }
+        crate::shell::tabs::WorkspaceTabKind::Sftp => {
+            let Some(session_id) = state
+                .reconnect_workspace_sftp_tab(tab_id)
+                .and_then(|session_id| Uuid::parse_str(session_id.as_str()).ok())
+            else {
+                return Ok(false);
+            };
+            bridge.manager.retry_session(session_id)?;
+            state.hide_workspace_terminal_session(session_id.to_string().as_str());
+        }
+        crate::shell::tabs::WorkspaceTabKind::Launcher => return Ok(false),
+    }
+
+    if restore_active_after_reconnect && let Some(active_tab_id) = active_before.as_deref() {
+        let _ = state.activate_workspace_tab(active_tab_id);
+    }
+
+    Ok(true)
 }
 
 fn sync_welcome_quick_launch_state(window: &AppWindow, state: &ShellViewModel) {
@@ -4244,6 +4415,7 @@ fn sync_workspace_tabs_with_manager(
     manager: Option<&SessionManager>,
 ) {
     sync_workspace_tab_items(window, state);
+    sync_workspace_tab_context_menu_state(window, state);
     sync_workspace_session_state_with_manager(window, state, follow_tracker, manager);
 }
 
@@ -7114,6 +7286,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window.on_workspace_tab_selected(move |tab_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        clear_workspace_tab_tooltip(&window);
         if state.activate_workspace_tab(tab_id.as_str()) {
             let defer_quick_browser_sync =
                 state.show_right_panel && state.quick_browser_follows_active_terminal();
@@ -7152,11 +7325,48 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
+    window.on_workspace_tab_hovered(move |tab_id, anchor_x, anchor_y| {
+        let window = handle.unwrap();
+        let state = state.borrow();
+        show_workspace_tab_tooltip(&window, &state, tab_id.as_str(), anchor_x, anchor_y);
+    });
+
+    let handle = window.as_weak();
+    window.on_workspace_tab_hover_ended(move |_tab_id| {
+        let window = handle.unwrap();
+        clear_workspace_tab_tooltip(&window);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_workspace_tab_context_menu_requested(move |tab_id, anchor_x, anchor_y| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        clear_workspace_tab_tooltip(&window);
+        state.close_context_menu();
+        if state.open_workspace_tab_context_menu(tab_id.as_str(), anchor_x, anchor_y) {
+            sync_workspace_tab_context_menu_state(&window, &state);
+            assets_keychain::sync_assets_context_menu_state(&window, &state);
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_close_workspace_tab_context_menu_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.close_workspace_tab_context_menu();
+        sync_workspace_tab_context_menu_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let session_runtime_guard_ref = session_runtime_guard.clone();
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let workspace_terminal_no_surface_since_ref = Rc::clone(&workspace_terminal_no_surface_since);
     let workspace_terminal_idle_cache_shrunk_ref = Rc::clone(&workspace_terminal_idle_cache_shrunk);
+    let effects_ref = Rc::clone(&effects);
     window.on_workspace_tab_close_requested(move |tab_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
@@ -7194,7 +7404,169 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
+            shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
             assets_keychain::sync_assets_context_menu_state(&window, &state);
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let effects_ref = Rc::clone(&effects);
+    window.on_workspace_tab_reorder_requested(move |tab_id, target_index| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        clear_workspace_tab_tooltip(&window);
+        state.close_workspace_tab_context_menu();
+        sync_workspace_tab_context_menu_state(&window, &state);
+        if state.reorder_workspace_tab(tab_id.as_str(), target_index.max(0) as usize) {
+            sync_workspace_tabs_with_manager(
+                &window,
+                &state,
+                &mut workspace_follow_tracker_ref.borrow_mut(),
+                session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+            );
+            shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let workspace_terminal_no_surface_since_ref = Rc::clone(&workspace_terminal_no_surface_since);
+    let workspace_terminal_idle_cache_shrunk_ref = Rc::clone(&workspace_terminal_idle_cache_shrunk);
+    let effects_ref = Rc::clone(&effects);
+    window.on_workspace_tab_context_menu_action_invoked(move |action_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let anchor_tab_id = state
+            .workspace_tab_context_menu_state()
+            .anchor_tab_id
+            .clone();
+        state.close_workspace_tab_context_menu();
+        clear_workspace_tab_tooltip(&window);
+        sync_workspace_tab_context_menu_state(&window, &state);
+
+        let Some(anchor_tab_id) = anchor_tab_id else {
+            return;
+        };
+
+        match action_id.as_str() {
+            "close" | "close-others" | "close-left" | "close-right" | "close-all" => {
+                let scope = match action_id.as_str() {
+                    "close" => WorkspaceTabCloseScope::One,
+                    "close-others" => WorkspaceTabCloseScope::Others,
+                    "close-left" => WorkspaceTabCloseScope::Left,
+                    "close-right" => WorkspaceTabCloseScope::Right,
+                    "close-all" => WorkspaceTabCloseScope::All,
+                    _ => unreachable!(),
+                };
+                let plan = state.workspace_tab_close_plan(
+                    (scope != WorkspaceTabCloseScope::All).then_some(anchor_tab_id.as_str()),
+                    scope,
+                );
+                let Some(plan) = plan else {
+                    return;
+                };
+                let had_active_surface = state.active_workspace_terminal_surface().is_some();
+                if close_workspace_tabs_from_plan(&mut state, session_bridge_ref.as_deref(), plan) {
+                    if let Some(session_bridge) = session_bridge_ref.as_ref() {
+                        let _ = workspace_terminal::sync_workspace_projection_from_manager(
+                            &mut state,
+                            &session_bridge.manager,
+                        );
+                        let (rows, cols) = state
+                            .active_workspace_terminal_surface()
+                            .map(|surface| (surface.rows as i32, surface.cols as i32))
+                            .unwrap_or((24, 80));
+                        workspace_terminal::forward_active_workspace_resize(
+                            &state,
+                            Some(session_bridge),
+                            rows,
+                            cols,
+                        );
+                    }
+                    let has_active_surface_after_close =
+                        state.active_workspace_terminal_surface().is_some();
+                    if had_active_surface && !has_active_surface_after_close {
+                        rearm_workspace_terminal_no_surface_idle_shrink(
+                            Instant::now(),
+                            &mut workspace_terminal_no_surface_since_ref.borrow_mut(),
+                            &mut workspace_terminal_idle_cache_shrunk_ref.borrow_mut(),
+                        );
+                    }
+                    sync_workspace_tabs_with_manager(
+                        &window,
+                        &state,
+                        &mut workspace_follow_tracker_ref.borrow_mut(),
+                        session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+                    );
+                    shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+                    assets_keychain::sync_assets_context_menu_state(&window, &state);
+                }
+            }
+            "copy-name" => {
+                if let Some(text) = state.workspace_tab_copy_name_text(anchor_tab_id.as_str()) {
+                    let _ = workspace_terminal::set_system_clipboard_text(text.as_str());
+                }
+            }
+            "copy-host" => {
+                if let Some(text) = state.workspace_tab_copy_host_text(anchor_tab_id.as_str()) {
+                    let _ = workspace_terminal::set_system_clipboard_text(text.as_str());
+                }
+            }
+            "reconnect" => {
+                match reconnect_workspace_tab_by_id(
+                    &mut state,
+                    session_bridge_ref.as_deref(),
+                    anchor_tab_id.as_str(),
+                ) {
+                    Ok(true) => {
+                        sync_workspace_tabs_with_manager(
+                            &window,
+                            &state,
+                            &mut workspace_follow_tracker_ref.borrow_mut(),
+                            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+                        );
+                        shell_chrome::sync_top_status_bar_state(
+                            &window,
+                            &state,
+                            effects_ref.as_ref(),
+                        );
+                        sftp::sync_right_panel_state(&window, &mut state);
+                    }
+                    Ok(false) => {}
+                    Err(err) => {
+                        tracing::error!(
+                            target: "app.ssh",
+                            tab_id = anchor_tab_id.as_str(),
+                            error = %err,
+                            "failed to reconnect workspace tab"
+                        );
+                        sync_workspace_tabs_with_manager(
+                            &window,
+                            &state,
+                            &mut workspace_follow_tracker_ref.borrow_mut(),
+                            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+                        );
+                        shell_chrome::sync_top_status_bar_state(
+                            &window,
+                            &state,
+                            effects_ref.as_ref(),
+                        );
+                    }
+                }
+            }
+            "clone-connection" => {
+                tracing::debug!(
+                    target: "app.ssh",
+                    tab_id = anchor_tab_id.as_str(),
+                    "clone connection is disabled until a dedicated new-window host is available"
+                );
+            }
+            _ => {}
         }
     });
 
@@ -8634,6 +9006,233 @@ mod tests {
             1,
             "surface refresh should not manufacture a second workspace tab"
         );
+    }
+
+    #[test]
+    fn workspace_tab_from_session_projects_structured_metadata() {
+        let session_id = Uuid::new_v4();
+        let tab = WorkspaceTab::from_session(&SessionHandle {
+            session_id,
+            asset_id: "asset-prod".into(),
+            title: "Prod Bastion".into(),
+            subtitle: "ops@10.0.0.12:22".into(),
+            state: SessionState::Disconnected,
+            can_reconnect: true,
+            enhanced_session_state: EnhancedSessionState::Enhanced,
+        });
+
+        assert_eq!(tab.tab_id, session_id.to_string());
+        assert_eq!(tab.session_id, session_id.to_string());
+        assert_eq!(tab.display_name, "Prod Bastion");
+        assert_eq!(tab.host, "10.0.0.12");
+        assert_eq!(tab.username, "ops");
+        assert_eq!(tab.port, 22);
+        assert_eq!(tab.connection_status, "disconnected");
+        assert_eq!(tab.title, "Prod Bastion");
+        assert_eq!(tab.subtitle, "");
+    }
+
+    #[test]
+    fn workspace_active_tab_summary_exposes_structured_metadata() {
+        let session_id = Uuid::new_v4();
+        let mut state = ShellViewModel::default();
+        let mut tab = WorkspaceTab::from_session(&SessionHandle {
+            session_id,
+            asset_id: "asset-prod".into(),
+            title: "Prod Bastion".into(),
+            subtitle: "ops@10.0.0.12:22".into(),
+            state: SessionState::Connected,
+            can_reconnect: false,
+            enhanced_session_state: EnhancedSessionState::Plain,
+        });
+        tab.active = true;
+        state.set_workspace_tabs(vec![tab]);
+
+        let summary = state
+            .active_workspace_tab_summary()
+            .expect("active tab summary");
+        assert_eq!(summary.tab_id, session_id.to_string());
+        assert_eq!(summary.display_name, "Prod Bastion");
+        assert_eq!(summary.host, "10.0.0.12");
+        assert_eq!(summary.username, "ops");
+        assert_eq!(summary.port, 22);
+        assert_eq!(summary.connection_status, "connected");
+    }
+
+    #[test]
+    fn workspace_projection_reorder_survives_projection_tick_and_preserves_active_tab() {
+        let runtime = tokio::runtime::Runtime::new().expect("create tokio runtime");
+        let manager =
+            SessionManager::new_with_launcher(runtime.handle().clone(), Arc::new(NoopLauncher));
+        let first = manager
+            .open_session(sample_profile("asset-prod"), OpenSessionMode::ForceNewTab)
+            .expect("open first session");
+        let second = manager
+            .open_session(sample_profile("asset-stage"), OpenSessionMode::ForceNewTab)
+            .expect("open second session");
+        let mut state = ShellViewModel::default();
+
+        let initial_delta =
+            workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
+        assert!(initial_delta.tabs_changed);
+        assert_eq!(
+            state
+                .workspace_tabs()
+                .iter()
+                .map(|tab| tab.tab_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                first.session_id.to_string().as_str(),
+                second.session_id.to_string().as_str()
+            ]
+        );
+
+        assert!(
+            state.reorder_workspace_tab(second.session_id.to_string().as_str(), 0),
+            "reorder should update the presentation order"
+        );
+        let active_before_projection = state
+            .active_workspace_tab_id()
+            .expect("active tab id after reorder")
+            .to_string();
+        assert_eq!(active_before_projection, first.session_id.to_string());
+        assert_eq!(
+            state
+                .workspace_tabs()
+                .iter()
+                .map(|tab| tab.tab_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                second.session_id.to_string().as_str(),
+                first.session_id.to_string().as_str()
+            ]
+        );
+
+        let projection_delta =
+            workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
+        assert!(
+            !projection_delta.tabs_changed,
+            "projection should merge manager updates into the existing UI order instead of snapping back"
+        );
+        assert_eq!(
+            state.active_workspace_tab_id(),
+            Some(active_before_projection.as_str())
+        );
+        assert_eq!(
+            state
+                .workspace_tabs()
+                .iter()
+                .map(|tab| tab.tab_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                second.session_id.to_string().as_str(),
+                first.session_id.to_string().as_str()
+            ]
+        );
+    }
+
+    #[test]
+    fn workspace_close_fallback_uses_ui_order_after_reorder() {
+        let first_session_id = Uuid::new_v4();
+        let second_session_id = Uuid::new_v4();
+        let third_session_id = Uuid::new_v4();
+        let mut state = ShellViewModel::default();
+        state.set_workspace_tabs(vec![
+            WorkspaceTab::from_session(&SessionHandle {
+                session_id: first_session_id,
+                asset_id: "asset-a".into(),
+                title: "A".into(),
+                subtitle: "ops@10.0.0.1:22".into(),
+                state: SessionState::Connected,
+                can_reconnect: false,
+                enhanced_session_state: EnhancedSessionState::Plain,
+            }),
+            WorkspaceTab::from_session(&SessionHandle {
+                session_id: second_session_id,
+                asset_id: "asset-b".into(),
+                title: "B".into(),
+                subtitle: "ops@10.0.0.2:22".into(),
+                state: SessionState::Connected,
+                can_reconnect: false,
+                enhanced_session_state: EnhancedSessionState::Plain,
+            }),
+            WorkspaceTab::from_session(&SessionHandle {
+                session_id: third_session_id,
+                asset_id: "asset-c".into(),
+                title: "C".into(),
+                subtitle: "ops@10.0.0.3:22".into(),
+                state: SessionState::Connected,
+                can_reconnect: false,
+                enhanced_session_state: EnhancedSessionState::Plain,
+            }),
+        ]);
+
+        assert!(state.reorder_workspace_tab(third_session_id.to_string().as_str(), 0));
+        assert!(state.activate_workspace_tab(first_session_id.to_string().as_str()));
+        assert!(state.close_workspace_tab(first_session_id.to_string().as_str()));
+        assert_eq!(
+            state.active_workspace_tab_id(),
+            Some(second_session_id.to_string().as_str()),
+            "close fallback should follow the visible UI order and choose the right neighbor first"
+        );
+        assert_eq!(
+            state
+                .workspace_tabs()
+                .iter()
+                .map(|tab| tab.tab_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                third_session_id.to_string().as_str(),
+                second_session_id.to_string().as_str()
+            ]
+        );
+    }
+
+    #[test]
+    fn workspace_merge_session_reuses_preserved_error_tab_slot() {
+        let mut state = ShellViewModel::default();
+        let tab_id = "workspace-terminal-error:prod".to_string();
+        let profile = sample_profile("asset-prod");
+
+        merge_workspace_tab_into_tabs(
+            &mut state,
+            WorkspaceTab::terminal_error(
+                tab_id.clone(),
+                "asset-prod",
+                "Prod Bastion",
+                "ops",
+                "10.0.0.12",
+                22,
+                "connection failed",
+                Some(profile.clone()),
+            ),
+        );
+        assert_eq!(state.workspace_tabs().len(), 1);
+        assert_eq!(state.workspace_tabs()[0].tab_id, tab_id);
+        assert!(state.workspace_tabs()[0].session_id.is_empty());
+
+        let session_id = Uuid::new_v4();
+        merge_session_handle_into_tabs(
+            &mut state,
+            &SessionHandle {
+                session_id,
+                asset_id: "asset-prod".into(),
+                title: "Prod Bastion".into(),
+                subtitle: "ops@10.0.0.12:22".into(),
+                state: SessionState::Connecting,
+                can_reconnect: true,
+                enhanced_session_state: EnhancedSessionState::Enhanced,
+            },
+        );
+
+        assert_eq!(
+            state.workspace_tabs().len(),
+            1,
+            "reconnect projection should bind the live session back into the preserved tab instead of creating a duplicate"
+        );
+        assert_eq!(state.workspace_tabs()[0].tab_id, tab_id);
+        assert_eq!(state.workspace_tabs()[0].session_id, session_id.to_string());
+        assert_eq!(state.active_workspace_tab_id(), Some(tab_id.as_str()));
     }
 
     #[test]
