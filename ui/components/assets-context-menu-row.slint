@@ -62,7 +62,9 @@ export component AssetsContextMenuRow inherits Rectangle {
         letter-spacing: 0px;
         color: ThemeTokens.text-primary;
         opacity: root.enabled ? 1.0 : 0.54;
+        wrap: no-wrap;
         vertical-alignment: center;
+        overflow: elide;
     }
 
     if root.has-children : Text {

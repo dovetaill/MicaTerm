@@ -81,6 +81,7 @@ impl ShellViewModel {
         let tab = self.active_workspace_tab()?;
         Some(ActiveWorkspaceTabSummary {
             tab_id: tab.tab_id.clone(),
+            primary_summary_text: tab.primary_summary_text(),
             display_name: tab.display_name.clone(),
             host: tab.host.clone(),
             username: tab.username.clone(),

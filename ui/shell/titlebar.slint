@@ -23,6 +23,7 @@ export component Titlebar inherits Rectangle {
     in property <bool> is-window-active: true;
     in property <bool> is-window-always-on-top: false;
     in property <bool> active-session-summary-visible: false;
+    in property <string> active-session-primary-summary: "";
     in property <string> active-session-display-name: "";
     in property <string> active-session-host: "";
     in property <string> active-session-status-label: "";
@@ -74,12 +75,7 @@ export component Titlebar inherits Rectangle {
         : root.transfer-queue-active > 0
             ? ThemeTokens.status-busy-accent
             : ThemeTokens.accent;
-    private property <string> active-session-summary-detail: root.active-session-host != ""
-        ? root.active-session-host
-            + (root.active-session-status-label != ""
-                ? " · " + root.active-session-status-label
-                : "")
-        : root.active-session-status-label;
+    private property <string> active-session-summary-detail: root.active-session-status-label;
     private property <length> active-session-summary-reserved-right-width: root.transfer-summary-visible ? 220px : 24px;
     private property <length> transfer-summary-anchor-width: max(0px, min(196px, drag-zone.width - 12px));
     out property <string> tooltip-text <=> root.tooltip-text-value;
@@ -287,7 +283,7 @@ export component Titlebar inherits Rectangle {
                     active-session-name := Text {
                         min-width: 0px;
                         horizontal-stretch: 3;
-                        text: root.active-session-display-name;
+                        text: root.active-session-primary-summary;
                         color: ThemeTokens.text-primary;
                         font-size: 12px;
                         font-weight: 600;
