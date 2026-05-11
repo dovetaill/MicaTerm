@@ -1763,11 +1763,15 @@ fn workspace_tabbar_drag_preview_contract_uses_gap_and_insertion_feedback() {
         "TabBar should derive a dedicated placeholder gap width from the dragged tab geometry"
     );
     assert!(
-        tabbar.contains("leading-gap-width: root.show-reorder-preview() && root.drag-preview-slot == index"),
+        tabbar.contains(
+            "leading-gap-width: root.show-reorder-preview() && root.drag-preview-slot == index"
+        ),
         "TabBar should drive per-tab placeholder gaps from the existing drag preview slot contract"
     );
     assert!(
-        tabbar.contains("root.drag-preview-slot == root.items.length ? root.drag-preview-gap-width : 0px;"),
+        tabbar.contains(
+            "root.drag-preview-slot == root.items.length ? root.drag-preview-gap-width : 0px;"
+        ),
         "TabBar should keep an explicit trailing placeholder gap for end-of-strip drops"
     );
 }
