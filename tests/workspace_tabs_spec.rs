@@ -1710,3 +1710,37 @@ fn titlebar_active_session_summary_contract_exposes_primary_summary_lane() {
         "Titlebar should render the primary summary lane from the dedicated summary string"
     );
 }
+
+#[test]
+fn workspace_tab_context_menu_contract_uses_wider_single_line_labels() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let context_menu = fs::read_to_string("ui/components/workspace-tab-context-menu.slint")
+        .expect("read workspace tab context menu");
+    let menu_row = fs::read_to_string("ui/components/assets-context-menu-row.slint")
+        .expect("read shared context menu row");
+
+    assert!(
+        context_menu.contains("width: 292px;"),
+        "workspace tab context menu should widen into the approved desktop-safe range"
+    );
+    assert!(
+        context_menu.contains("label: \"Close Right Tabs\";"),
+        "workspace tab context menu should use the shorter right-close label"
+    );
+    assert!(
+        context_menu.contains("label: \"Close Left Tabs\";"),
+        "workspace tab context menu should use the shorter left-close label"
+    );
+    assert!(
+        menu_row.contains("wrap: no-wrap;"),
+        "shared context menu rows should keep labels to a single line"
+    );
+    assert!(
+        menu_row.contains("overflow: elide;"),
+        "shared context menu rows should elide long labels instead of spilling outside the menu"
+    );
+    assert!(
+        app_window.contains("workspace-tab-context-menu-overlay := WorkspaceTabContextMenu {"),
+        "AppWindow should keep the workspace tab context menu wired through its overlay host"
+    );
+}

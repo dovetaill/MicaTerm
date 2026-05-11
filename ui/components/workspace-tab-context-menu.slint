@@ -26,7 +26,7 @@ export component WorkspaceTabContextMenu inherits Rectangle {
 
     x: max(8px, min(root.anchor-x, max(8px, root.host-width - self.width - 8px)));
     y: max(8px, min(root.anchor-y, max(8px, root.host-height - self.height - 8px)));
-    width: 236px;
+    width: 292px;
     height: 300px;
     z: 110;
     border-radius: 12px;
@@ -140,7 +140,7 @@ export component WorkspaceTabContextMenu inherits Rectangle {
 
         AssetsContextMenuRow {
             action-id: "close-right";
-            label: "Close Tabs to the Right";
+            label: "Close Right Tabs";
             icon-source: root.close-scope-icon;
             enabled: root.close-right-enabled;
 
@@ -151,7 +151,7 @@ export component WorkspaceTabContextMenu inherits Rectangle {
 
         AssetsContextMenuRow {
             action-id: "close-left";
-            label: "Close Tabs to the Left";
+            label: "Close Left Tabs";
             icon-source: root.close-scope-icon;
             enabled: root.close-left-enabled;
 
