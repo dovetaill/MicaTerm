@@ -181,6 +181,40 @@ fn workspace_can_activate_sftp_tab_without_losing_terminal_tab_identity() {
 }
 
 #[test]
+fn workspace_active_tab_summary_projects_host_then_display_name_for_titlebar() {
+    let terminal_tab = WorkspaceTab::from_session(&sample_handle(
+        "Prod Bastion",
+        "ops@10.0.0.12:22",
+        SessionState::Connected,
+    ));
+
+    let mut view_model = ShellViewModel::default();
+    view_model.set_workspace_tabs(vec![terminal_tab]);
+
+    let summary = view_model
+        .active_workspace_tab_summary()
+        .expect("active workspace tab summary");
+    assert_eq!(summary.primary_summary_text, "10.0.0.12 · Prod Bastion");
+    assert_eq!(
+        summary.tooltip_text,
+        "Prod Bastion\nHost: 10.0.0.12\nUser: ops\nPort: 22\nStatus: Connected"
+    );
+}
+
+#[test]
+fn workspace_active_tab_summary_avoids_empty_separator_when_host_is_missing() {
+    let sftp_tab = WorkspaceTab::sftp("tab-files-1", "browser-1", "Files: Prod");
+
+    let mut view_model = ShellViewModel::default();
+    view_model.set_workspace_tabs(vec![sftp_tab]);
+
+    let summary = view_model
+        .active_workspace_tab_summary()
+        .expect("active workspace tab summary");
+    assert_eq!(summary.primary_summary_text, "Files: Prod");
+}
+
+#[test]
 fn workspace_tabs_hide_connection_details_from_visible_copy() {
     let named = WorkspaceTab::from_session(&sample_handle(
         "Prod Bastion",
@@ -1651,5 +1685,28 @@ fn workspace_tabbar_drag_reorder_contract_is_wired_end_to_end() {
     assert!(
         bootstrap.contains("window.on_workspace_tab_reorder_requested"),
         "bootstrap should handle final tab reorder drops and route them into ShellViewModel::reorder_workspace_tab"
+    );
+}
+
+#[test]
+fn titlebar_active_session_summary_contract_exposes_primary_summary_lane() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let titlebar = fs::read_to_string("ui/shell/titlebar.slint").expect("read titlebar");
+
+    assert!(
+        app_window.contains("in-out property <string> active-session-primary-summary: \"\";"),
+        "AppWindow should expose a dedicated primary summary string for the titlebar lane"
+    );
+    assert!(
+        app_window.contains("active-session-primary-summary: root.active-session-primary-summary;"),
+        "AppWindow should forward the primary summary string into Titlebar"
+    );
+    assert!(
+        titlebar.contains("in property <string> active-session-primary-summary: \"\";"),
+        "Titlebar should accept a dedicated primary summary string"
+    );
+    assert!(
+        titlebar.contains("text: root.active-session-primary-summary;"),
+        "Titlebar should render the primary summary lane from the dedicated summary string"
     );
 }

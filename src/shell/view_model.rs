@@ -85,6 +85,7 @@ pub struct SavedSshPickerItem {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveWorkspaceTabSummary {
     pub tab_id: String,
+    pub primary_summary_text: String,
     pub display_name: String,
     pub host: String,
     pub username: String,

@@ -275,6 +275,7 @@ export component AppWindow inherits Window {
     in-out property <string> keychain-ssh-key-modal-fingerprint: "";
     in-out property <[WorkspaceTabItem]> workspace-tab-items: [];
     in-out property <bool> active-session-summary-visible: false;
+    in-out property <string> active-session-primary-summary: "";
     in-out property <string> active-session-display-name: "";
     in-out property <string> active-session-host: "";
     in-out property <string> active-session-status-label: "";
@@ -761,6 +762,7 @@ export component AppWindow inherits Window {
                 show-global-menu: root.show-global-menu;
                 workspace-focus-mode: root.workspace-focus-mode;
                 active-session-summary-visible: root.active-session-summary-visible;
+                active-session-primary-summary: root.active-session-primary-summary;
                 active-session-display-name: root.active-session-display-name;
                 active-session-host: root.active-session-host;
                 active-session-status-label: root.active-session-status-label;

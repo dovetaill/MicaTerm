@@ -433,12 +433,14 @@ pub(super) fn sync_top_status_bar_state(
     window.set_is_window_always_on_top(state.is_always_on_top);
     if let Some(summary) = state.active_workspace_tab_summary() {
         window.set_active_session_summary_visible(true);
+        window.set_active_session_primary_summary(summary.primary_summary_text.into());
         window.set_active_session_display_name(summary.display_name.into());
         window.set_active_session_host(summary.host.into());
         window.set_active_session_status_label(summary.connection_status_label.into());
         window.set_active_session_summary_tooltip(summary.tooltip_text.into());
     } else {
         window.set_active_session_summary_visible(false);
+        window.set_active_session_primary_summary("".into());
         window.set_active_session_display_name("".into());
         window.set_active_session_host("".into());
         window.set_active_session_status_label("".into());

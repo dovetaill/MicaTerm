@@ -175,6 +175,19 @@ impl WorkspaceTab {
         connection_status_label(self.connection_status.as_str())
     }
 
+    pub fn primary_summary_text(&self) -> String {
+        let host = self.host.trim();
+        let display_name = self.display_name.trim();
+
+        match (host.is_empty(), display_name.is_empty()) {
+            (true, true) => String::new(),
+            (false, true) => host.to_string(),
+            (true, false) => display_name.to_string(),
+            (false, false) if host == display_name => display_name.to_string(),
+            (false, false) => format!("{host} · {display_name}"),
+        }
+    }
+
     pub fn summary_tooltip_text(&self) -> String {
         let mut lines = Vec::new();
         if !self.display_name.is_empty() {
