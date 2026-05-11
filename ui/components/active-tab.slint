@@ -10,6 +10,7 @@ export component ActiveTab inherits Rectangle {
     in property <bool> active: false;
     in property <bool> drag-active: false;
     in property <bool> show-leading-insertion-line: false;
+    in property <length> leading-gap-width: 0px;
     callback selected();
     callback close-requested();
     callback context-menu-requested(length, length);
@@ -25,6 +26,10 @@ export component ActiveTab inherits Rectangle {
     private property <image> close-icon: @image-url("../../assets/icons/fluent/dismiss-20-regular.svg");
     private property <length> close-zone-width: 28px;
     private property <length> reorder-threshold: 6px;
+    private property <length> tab-surface-width: max(0px, root.width - root.leading-gap-width);
+    private property <length> preview-marker-x: root.leading-gap-width > 0px
+        ? max(3px, root.leading-gap-width - 4px)
+        : 0px;
     out property <bool> has-hover: content-hit-target.has-hover || close-hit-target.has-hover;
     private property <bool> close-visible: root.active || root.has-hover || root.drag-active;
 
@@ -40,20 +45,12 @@ export component ActiveTab inherits Rectangle {
 
     min-width: 0px;
     height: 34px;
-    preferred-width: min(root.max-chip-width, max(root.min-chip-width, title-metric.preferred-width + 62px));
-    y: root.drag-active ? -2px : 0px;
-    border-radius: 10px;
-    border-width: root.drag-active ? 1px : 0px;
-    border-color: root.drag-active ? ThemeTokens.divider-strong : transparent;
-    background: root.active
-        ? ThemeTokens.tab-active-surface
-        : (content-hit-target.pressed || close-hit-target.pressed)
-            ? ThemeTokens.control-pressed-surface
-            : root.has-hover
-                ? ThemeTokens.tab-hover-surface
-                : transparent;
-    clip: true;
-    opacity: root.drag-active ? 0.92 : 1;
+    preferred-width: min(root.max-chip-width, max(root.min-chip-width, title-metric.preferred-width + 62px))
+        + root.leading-gap-width;
+    y: root.drag-active ? -3px : 0px;
+    background: transparent;
+    clip: false;
+    animate y { duration: 110ms; easing: ease-out; }
 
     title-metric := Text {
         x: 0px;
@@ -68,154 +65,197 @@ export component ActiveTab inherits Rectangle {
         letter-spacing: 0px;
     }
 
+    preview-gap := Rectangle {
+        x: 0px;
+        y: 4px;
+        width: max(0px, root.leading-gap-width - 4px);
+        height: parent.height - 8px;
+        border-radius: 8px;
+        border-width: root.leading-gap-width > 0px ? 1px : 0px;
+        border-color: ThemeTokens.divider-subtle;
+        background: ThemeTokens.control-hover-surface;
+        opacity: root.leading-gap-width > 0px ? 0.72 : 0;
+        visible: root.leading-gap-width > 0px;
+        animate width { duration: 140ms; easing: ease-out; }
+        animate opacity { duration: 120ms; }
+    }
+
     insertion-line := Rectangle {
-        x: 0px;
-        y: 6px;
-        width: 2px;
-        height: parent.height - 12px;
-        border-radius: 1px;
+        x: root.preview-marker-x;
+        y: 4px;
+        width: 3px;
+        height: parent.height - 8px;
+        border-radius: 2px;
         background: ThemeTokens.tab-active-line;
-        opacity: 0.88;
+        opacity: root.show-leading-insertion-line ? 1 : 0;
         visible: root.show-leading-insertion-line;
+        animate x { duration: 140ms; easing: ease-out; }
+        animate opacity { duration: 120ms; }
     }
 
-    state-dot := Rectangle {
-        x: 8px;
-        y: (parent.height - self.height) / 2;
-        width: 2px;
-        height: 14px;
-        border-radius: 1px;
-        background: root.state == "error" || root.state == "disconnected"
-            ? ThemeTokens.status-error-accent
-            : root.state == "connecting"
-                ? ThemeTokens.status-busy-accent
-                : root.state == "launcher" ? ThemeTokens.divider-subtle
-                : ThemeTokens.status-success-accent;
-    }
-
-    active-indicator := Rectangle {
-        x: 10px;
-        y: parent.height - 2px;
-        width: parent.width - 20px;
-        height: 2px;
-        border-radius: 1px;
-        background: ThemeTokens.tab-active-line;
-        visible: root.active;
-    }
-
-    bottom-divider := Rectangle {
-        x: 0px;
-        y: parent.height - 1px;
-        width: parent.width;
-        height: 1px;
-        background: root.active ? transparent : ThemeTokens.divider-subtle;
-    }
-
-    trailing-divider := Rectangle {
-        x: parent.width - 1px;
-        y: 8px;
-        width: 1px;
-        height: parent.height - 16px;
-        background: root.active || root.has-hover ? transparent : ThemeTokens.divider-subtle;
-    }
-
-    close-button := Rectangle {
-        x: parent.width - root.close-zone-width - 4px;
-        y: 3px;
-        width: root.close-zone-width;
-        height: 24px;
-        border-radius: 4px;
-        background: close-hit-target.pressed
-            ? ThemeTokens.control-pressed-surface
-            : close-hit-target.has-hover
-                ? ThemeTokens.control-hover-surface
-                : transparent;
-        opacity: root.close-visible ? 1 : 0;
-
-        if (root.close-icon.width > 0 && root.close-icon.height > 0) : Image {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-        width: 14px;
-        height: 14px;
-        source <=> root.close-icon;
-        image-fit: contain;
-        colorize: close-hit-target.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
-    }
-    }
-
-    title-label := Text {
-        x: 18px;
+    tab-surface := Rectangle {
+        x: root.leading-gap-width;
         y: 0px;
-        width: max(0px, close-button.x - 24px);
+        width: root.tab-surface-width;
         height: parent.height;
-        text: root.title;
-        font-family: AppTypography.ui-font-family;
-        color: root.active ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
-        font-size: AppTypography.ui-font-size-body;
-        font-weight: AppTypography.ui-font-weight-regular;
-        letter-spacing: 0px;
-        vertical-alignment: center;
-        overflow: elide;
-    }
+        border-radius: 10px;
+        border-width: root.drag-active ? 1px : 0px;
+        border-color: root.drag-active ? ThemeTokens.divider-strong : transparent;
+        background: root.drag-active
+            ? ThemeTokens.tab-active-surface
+            : root.active
+                ? ThemeTokens.tab-active-surface
+                : (content-hit-target.pressed || close-hit-target.pressed)
+                    ? ThemeTokens.control-pressed-surface
+                    : root.has-hover
+                        ? ThemeTokens.tab-hover-surface
+                        : transparent;
+        clip: true;
+        opacity: root.drag-active ? 0.98 : 1;
+        animate x { duration: 140ms; easing: ease-out; }
+        animate width { duration: 140ms; easing: ease-out; }
+        animate opacity { duration: 110ms; }
 
-    content-hit-target := TouchArea {
-        width: max(0px, close-button.x);
-        height: parent.height;
-        mouse-cursor: root.drag-active ? MouseCursor.grabbing : MouseCursor.grab;
+        state-dot := Rectangle {
+            x: 8px;
+            y: (parent.height - self.height) / 2;
+            width: 2px;
+            height: 14px;
+            border-radius: 1px;
+            background: root.state == "error" || root.state == "disconnected"
+                ? ThemeTokens.status-error-accent
+                : root.state == "connecting"
+                    ? ThemeTokens.status-busy-accent
+                    : root.state == "launcher" ? ThemeTokens.divider-subtle
+                    : ThemeTokens.status-success-accent;
+        }
 
-        pointer-event(event) => {
-            if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
-                root.context-menu-requested(
-                    self.mouse-x + self.absolute-position.x,
-                    self.mouse-y + self.absolute-position.y,
-                );
-            } else if event.kind == PointerEventKind.move && self.pressed {
-                let delta-x = self.mouse-x - self.pressed-x;
-                let delta-y = self.mouse-y - self.pressed-y;
-                if !root.drag-active && root.should-start-reorder(delta-x, delta-y) {
-                    root.hover-ended();
-                    root.drag-started(
-                        self.pressed-x + self.absolute-position.x,
-                        self.pressed-y + self.absolute-position.y,
+        active-indicator := Rectangle {
+            x: 10px;
+            y: parent.height - 2px;
+            width: parent.width - 20px;
+            height: 2px;
+            border-radius: 1px;
+            background: ThemeTokens.tab-active-line;
+            visible: root.active && !root.drag-active;
+        }
+
+        bottom-divider := Rectangle {
+            x: 0px;
+            y: parent.height - 1px;
+            width: parent.width;
+            height: 1px;
+            background: root.active || root.drag-active ? transparent : ThemeTokens.divider-subtle;
+        }
+
+        trailing-divider := Rectangle {
+            x: parent.width - 1px;
+            y: 8px;
+            width: 1px;
+            height: parent.height - 16px;
+            background: root.active || root.has-hover || root.drag-active
+                ? transparent
+                : ThemeTokens.divider-subtle;
+        }
+
+        close-button := Rectangle {
+            x: parent.width - root.close-zone-width - 4px;
+            y: 3px;
+            width: root.close-zone-width;
+            height: 24px;
+            border-radius: 4px;
+            background: close-hit-target.pressed
+                ? ThemeTokens.control-pressed-surface
+                : close-hit-target.has-hover
+                    ? ThemeTokens.control-hover-surface
+                    : transparent;
+            opacity: root.close-visible ? 1 : 0;
+
+            if (root.close-icon.width > 0 && root.close-icon.height > 0) : Image {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: 14px;
+                height: 14px;
+                source <=> root.close-icon;
+                image-fit: contain;
+                colorize: close-hit-target.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
+            }
+        }
+
+        title-label := Text {
+            x: 18px;
+            y: 0px;
+            width: max(0px, close-button.x - 24px);
+            height: parent.height;
+            text: root.title;
+            font-family: AppTypography.ui-font-family;
+            color: root.active || root.drag-active ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
+            font-size: AppTypography.ui-font-size-body;
+            font-weight: AppTypography.ui-font-weight-regular;
+            letter-spacing: 0px;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        content-hit-target := TouchArea {
+            width: max(0px, close-button.x);
+            height: parent.height;
+            mouse-cursor: root.drag-active ? MouseCursor.grabbing : MouseCursor.grab;
+
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                    root.context-menu-requested(
+                        self.mouse-x + self.absolute-position.x,
+                        self.mouse-y + self.absolute-position.y,
                     );
+                } else if event.kind == PointerEventKind.move && self.pressed {
+                    let delta-x = self.mouse-x - self.pressed-x;
+                    let delta-y = self.mouse-y - self.pressed-y;
+                    if !root.drag-active && root.should-start-reorder(delta-x, delta-y) {
+                        root.hover-ended();
+                        root.drag-started(
+                            self.pressed-x + self.absolute-position.x,
+                            self.pressed-y + self.absolute-position.y,
+                        );
+                    }
+                    if root.drag-active {
+                        root.drag-moved(
+                            self.mouse-x + self.absolute-position.x,
+                            self.mouse-y + self.absolute-position.y,
+                        );
+                    }
+                } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left
+                {
+                    if root.drag-active {
+                        root.drag-ended(
+                            self.mouse-x + self.absolute-position.x,
+                            self.mouse-y + self.absolute-position.y,
+                        );
+                    } else {
+                        root.selected();
+                    }
+                } else if event.kind == PointerEventKind.cancel {
+                    root.drag-cancelled();
                 }
-                if root.drag-active {
-                    root.drag-moved(
+            }
+        }
+
+        close-hit-target := TouchArea {
+            x: close-button.x;
+            width: root.close-zone-width + 4px;
+            height: parent.height;
+
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                    root.context-menu-requested(
                         self.mouse-x + self.absolute-position.x,
                         self.mouse-y + self.absolute-position.y,
                     );
                 }
-            } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left
-            {
-                if root.drag-active {
-                    root.drag-ended(
-                        self.mouse-x + self.absolute-position.x,
-                        self.mouse-y + self.absolute-position.y,
-                    );
-                } else {
-                    root.selected();
-                }
-            } else if event.kind == PointerEventKind.cancel {
-                root.drag-cancelled();
             }
+
+            clicked => { root.close-requested(); }
         }
-    }
-
-    close-hit-target := TouchArea {
-        x: close-button.x;
-        width: root.close-zone-width + 4px;
-        height: parent.height;
-
-        pointer-event(event) => {
-            if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
-                root.context-menu-requested(
-                    self.mouse-x + self.absolute-position.x,
-                    self.mouse-y + self.absolute-position.y,
-                );
-            }
-        }
-
-        clicked => { root.close-requested(); }
     }
 
     changed has-hover => {

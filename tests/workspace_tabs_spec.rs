@@ -1744,3 +1744,30 @@ fn workspace_tab_context_menu_contract_uses_wider_single_line_labels() {
         "AppWindow should keep the workspace tab context menu wired through its overlay host"
     );
 }
+
+#[test]
+fn workspace_tabbar_drag_preview_contract_uses_gap_and_insertion_feedback() {
+    let active_tab = fs::read_to_string("ui/components/active-tab.slint").expect("read active tab");
+    let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
+
+    assert!(
+        active_tab.contains("in property <length> leading-gap-width: 0px;"),
+        "ActiveTab should accept an explicit leading gap width for drag preview placeholders"
+    );
+    assert!(
+        active_tab.contains("preview-gap := Rectangle {"),
+        "ActiveTab should render a dedicated placeholder gap surface instead of only a thin insertion line"
+    );
+    assert!(
+        tabbar.contains("private property <length> drag-preview-gap-width:"),
+        "TabBar should derive a dedicated placeholder gap width from the dragged tab geometry"
+    );
+    assert!(
+        tabbar.contains("leading-gap-width: root.show-reorder-preview() && root.drag-preview-slot == index"),
+        "TabBar should drive per-tab placeholder gaps from the existing drag preview slot contract"
+    );
+    assert!(
+        tabbar.contains("root.drag-preview-slot == root.items.length ? root.drag-preview-gap-width : 0px;"),
+        "TabBar should keep an explicit trailing placeholder gap for end-of-strip drops"
+    );
+}

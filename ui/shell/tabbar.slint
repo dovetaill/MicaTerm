@@ -32,6 +32,9 @@ export component TabBar inherits Rectangle {
     private property <length> drag-current-x: 0px;
     private property <length> drag-tab-width: 0px;
     private property <int> drag-preview-slot: -1;
+    private property <length> drag-preview-gap-width: root.show-reorder-preview()
+        ? min(44px, max(28px, root.drag-tab-width * 0.36))
+        : 0px;
 
     function drag-step-count() -> int {
         if root.drag-tab-width <= 0px {
@@ -123,6 +126,9 @@ export component TabBar inherits Rectangle {
             state: item.state;
             active: item.active;
             drag-active: root.drag-active && root.dragged-tab-id == item.tab_id;
+            leading-gap-width: root.show-reorder-preview() && root.drag-preview-slot == index
+                ? root.drag-preview-gap-width
+                : 0px;
             show-leading-insertion-line: root.show-reorder-preview() && root.drag-preview-slot == index;
 
             selected => {
@@ -179,18 +185,32 @@ export component TabBar inherits Rectangle {
         }
 
         end-insertion-line := Rectangle {
-            width: root.show-reorder-preview() && root.drag-preview-slot == root.items.length ? 8px : 0px;
+            width: root.show-reorder-preview() && root.drag-preview-slot == root.items.length ? root.drag-preview-gap-width : 0px;
             height: parent.height;
             background: transparent;
+            animate width { duration: 140ms; easing: ease-out; }
 
             Rectangle {
-                x: (parent.width - self.width) / 2;
-                y: 6px;
-                width: 2px;
-                height: parent.height - 12px;
-                border-radius: 1px;
+                x: 2px;
+                y: 4px;
+                width: max(0px, parent.width - 6px);
+                height: parent.height - 8px;
+                border-radius: 8px;
+                border-width: parent.width > 0px ? 1px : 0px;
+                border-color: ThemeTokens.divider-subtle;
+                background: ThemeTokens.control-hover-surface;
+                opacity: parent.width > 0px ? 0.72 : 0;
+                visible: parent.width > 0px;
+            }
+
+            Rectangle {
+                x: max(3px, parent.width - 4px);
+                y: 4px;
+                width: 3px;
+                height: parent.height - 8px;
+                border-radius: 2px;
                 background: ThemeTokens.tab-active-line;
-                opacity: 0.88;
+                opacity: parent.width > 0px ? 1 : 0;
                 visible: parent.width > 0px;
             }
         }
