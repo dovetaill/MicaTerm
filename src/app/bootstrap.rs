@@ -2276,13 +2276,29 @@ fn terminal_rgb_to_rgba((red, green, blue): (u8, u8, u8)) -> u32 {
     0xff00_0000 | (u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)
 }
 
+fn terminal_rgba_to_rgba((red, green, blue, alpha): (u8, u8, u8, f32)) -> u32 {
+    let alpha = (alpha.clamp(0.0, 1.0) * 255.0).round() as u32;
+    (alpha << 24) | (u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)
+}
+
 fn sync_workspace_terminal_shell_chrome(window: &AppWindow, preset: TerminalThemePreset) {
+    window.set_workspace_session_selection_surface(slint_color_from_rgba(terminal_rgba_to_rgba(
+        preset.selection_bg,
+    )));
+    window.set_workspace_session_scrollbar_track(slint_color_from_rgba(terminal_rgb_to_rgba(
+        preset.scrollbar_track,
+    )));
     window.set_workspace_session_scrollbar_thumb(slint_color_from_rgba(terminal_rgb_to_rgba(
         preset.scrollbar_thumb,
     )));
     window.set_workspace_session_scrollbar_thumb_active(slint_color_from_rgba(
         terminal_rgb_to_rgba(preset.scrollbar_thumb_active),
     ));
+    window
+        .set_workspace_session_frame_surface(slint_color_from_rgba(0xff00_0000 | preset.frame_bg));
+    window.set_workspace_session_frame_border(slint_color_from_rgba(terminal_rgb_to_rgba(
+        preset.split,
+    )));
 }
 
 fn clear_workspace_terminal_semantic_projection(window: &AppWindow) {

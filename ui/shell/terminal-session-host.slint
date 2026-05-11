@@ -327,8 +327,12 @@ export component TerminalSessionHost inherits Rectangle {
     in property <color> session-cursor-bg: ThemeTokens.terminal-cursor-bg;
     in property <color> session-default-fg: ThemeTokens.terminal-default-fg;
     in property <color> session-default-bg: ThemeTokens.terminal-default-bg;
+    in property <color> session-selection-surface: ThemeTokens.terminal-selection-surface;
+    in property <color> session-scrollbar-track: ThemeTokens.terminal-scrollbar-track-surface;
     in property <color> session-scrollbar-thumb: ThemeTokens.terminal-scrollbar-thumb-surface;
     in property <color> session-scrollbar-thumb-active: ThemeTokens.terminal-scrollbar-thumb-active-surface;
+    in property <color> session-frame-surface: ThemeTokens.terminal-frame-background;
+    in property <color> session-frame-border: ThemeTokens.divider-subtle;
     in property <bool> session-mouse-grabbed: false;
     in property <bool> link-hovered: false;
     in property <bool> link-armed: false;
@@ -1724,10 +1728,8 @@ export component TerminalSessionHost inherits Rectangle {
             height: parent.height;
             clip: true;
             border-width: 1px;
-            border-color: ThemeTokens.divider-subtle;
-            background: root.session-render-mode == "native"
-                ? root.session-default-bg
-                : ThemeTokens.panel-surface;
+            border-color: root.session-frame-border;
+            background: root.session-frame-surface;
 
             blank-surface := Rectangle {
                 x: root.terminal-surface-origin-x();
@@ -1759,7 +1761,7 @@ export component TerminalSessionHost inherits Rectangle {
                         root.selection-visible-start-row(),
                         root.selection-visible-start-row(),
                     );
-                    background: ThemeTokens.terminal-selection-surface;
+                    background: root.session-selection-surface;
                 }
 
                 if root.selection-overlay-active() && root.selection-visible-start-row() < root.selection-visible-end-row() : selection-overlay-first-row := Rectangle {
@@ -1773,7 +1775,7 @@ export component TerminalSessionHost inherits Rectangle {
                         root.selection-visible-start-row(),
                         root.selection-visible-start-row(),
                     );
-                    background: ThemeTokens.terminal-selection-surface;
+                    background: root.session-selection-surface;
                 }
 
                 if root.selection-overlay-active() && root.selection-visible-start-row() + 1 < root.selection-visible-end-row() : selection-overlay-middle-rows := Rectangle {
@@ -1784,7 +1786,7 @@ export component TerminalSessionHost inherits Rectangle {
                         root.selection-visible-start-row() + 1,
                         root.selection-visible-end-row() - 1,
                     );
-                    background: ThemeTokens.terminal-selection-surface;
+                    background: root.session-selection-surface;
                 }
 
                 if root.selection-overlay-active() && root.selection-visible-start-row() < root.selection-visible-end-row() : selection-overlay-last-row := Rectangle {
@@ -1795,7 +1797,7 @@ export component TerminalSessionHost inherits Rectangle {
                         root.selection-visible-end-row(),
                         root.selection-visible-end-row(),
                     );
-                    background: ThemeTokens.terminal-selection-surface;
+                    background: root.session-selection-surface;
                 }
 
                 input-capture := TouchArea {
@@ -2018,7 +2020,7 @@ export component TerminalSessionHost inherits Rectangle {
                 width: root.overview-ruler-width;
                 height: root.snapped-terminal-visible-grid-height();
                 border-radius: parent.width / 2;
-                background: ThemeTokens.terminal-scrollbar-track-surface;
+                background: root.session-scrollbar-track;
                 opacity: 0.42;
 
                 for marker in root.session-overview-markers : Rectangle {
@@ -2059,7 +2061,7 @@ export component TerminalSessionHost inherits Rectangle {
                 border-radius: self.width / 2;
                 background: scrollbar-track-touch.has-hover || root.scrollbar-thumb-drag-active
                     ? root.session-scrollbar-thumb
-                    : ThemeTokens.terminal-scrollbar-track-surface;
+                    : root.session-scrollbar-track;
 
                 scrollbar-track-touch := TouchArea {
                     width: parent.width;

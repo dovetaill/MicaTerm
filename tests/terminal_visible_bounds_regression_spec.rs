@@ -89,9 +89,10 @@ fn native_mode_keeps_host_surface_backdrop_opaque_behind_child_presenter() {
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
 
     assert!(
-        host_source.contains("background: root.session-render-mode == \"native\"")
-            && host_source.contains("? root.session-default-bg")
-            && host_source.contains(": ThemeTokens.panel-surface;"),
+        host_source.contains("surface-frame := Rectangle {")
+            && host_source.contains("background: root.session-frame-surface;")
+            && host_source.contains("blank-surface := Rectangle {")
+            && host_source.contains("background: root.session-default-bg;"),
         "native mode should keep an opaque host-side terminal backdrop behind the retained child HWND so screenshot/composition gaps do not read as terminal transparency"
     );
 }

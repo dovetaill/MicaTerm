@@ -37,9 +37,9 @@ fn premium_default_dark_theme_uses_the_product_grade_calm_shell_ladder() {
     assert_eq!(spec.shell.sidebar_background, 0x18_212b);
     assert_eq!(spec.shell.sidebar_panel_background, 0x1b_2430);
     assert_eq!(spec.shell.right_panel_background, 0x1c_2431);
-    assert_eq!(spec.shell.terminal_frame_background, 0x10_1824);
+    assert_eq!(spec.shell.terminal_frame_background, 0x11_151c);
     assert_eq!(spec.shell.separator, 0x26_303b);
-    assert_eq!(spec.shell.border, 0x31_3d4b);
+    assert_eq!(spec.shell.border, 0x11_151c);
     assert_eq!(spec.shell.hairline, 0x3a_4857);
     assert_eq!(spec.shell.text_primary, 0xe6_ecf3);
     assert_eq!(spec.shell.text_secondary, 0xba_c4d0);
@@ -47,10 +47,10 @@ fn premium_default_dark_theme_uses_the_product_grade_calm_shell_ladder() {
     assert_eq!(spec.shell.tab_active, 0x22_3040);
     assert_eq!(spec.shell.tab_hover, 0x20_2b38);
     assert_eq!(spec.shell.sidebar_item_selected, 0x29_3846);
-    assert_eq!(spec.terminal.background.base, 0x0c_141c);
-    assert_eq!(spec.terminal.foreground.default, 0xe3_eaf2);
-    assert_eq!(spec.terminal.foreground.inactive, 0xbc_c6d2);
-    assert_eq!(spec.decoration.warning, 0xc9_a86a);
+    assert_eq!(spec.terminal.background.base, 0x0a_0e14);
+    assert_eq!(spec.terminal.foreground.default, 0xb3_b1ad);
+    assert_eq!(spec.terminal.foreground.inactive, 0x82_8c99);
+    assert_eq!(spec.decoration.warning, 0xff_b454);
 }
 
 #[test]
@@ -63,14 +63,14 @@ fn premium_default_light_theme_avoids_the_flat_white_sheet_look() {
     assert_eq!(spec.shell.sidebar_background, 0xeb_f0f5);
     assert_eq!(spec.shell.sidebar_panel_background, 0xf1_f5f9);
     assert_eq!(spec.shell.right_panel_background, 0xf3_f6fa);
-    assert_eq!(spec.shell.terminal_frame_background, 0xed_f2f6);
+    assert_eq!(spec.shell.terminal_frame_background, 0xe6_e9ef);
     assert_eq!(spec.shell.text_primary, 0x24_303d);
     assert_eq!(spec.shell.text_secondary, 0x49_586a);
     assert_eq!(spec.shell.tab_active_indicator, 0x63_88b4);
-    assert_eq!(spec.terminal.background.base, 0xf8_fafc);
-    assert_eq!(spec.terminal.foreground.default, 0x26_3240);
-    assert_eq!(spec.terminal.foreground.inactive, 0x5f_6e80);
-    assert_eq!(spec.decoration.info, 0x5e_81ae);
+    assert_eq!(spec.terminal.background.base, 0xfa_fafa);
+    assert_eq!(spec.terminal.foreground.default, 0x5c_6166);
+    assert_eq!(spec.terminal.foreground.inactive, 0x6b_7480);
+    assert_eq!(spec.decoration.info, 0x39_9ee6);
 }
 
 #[test]

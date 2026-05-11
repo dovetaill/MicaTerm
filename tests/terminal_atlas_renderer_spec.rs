@@ -239,8 +239,8 @@ fn atlas_renderer_viewport_background_is_quiet_and_row_band_free() -> Result<()>
         "dark viewport background should not alternate into visible row banding between adjacent rows"
     );
     assert!(
-        color_distance(dark_top, dark_bottom) >= 4 && color_distance(dark_top, dark_bottom) <= 18,
-        "dark viewport background should keep only a very subtle top-to-bottom lift instead of a flat black slab or obvious gradient"
+        color_distance(dark_top, dark_bottom) <= 2,
+        "dark viewport background should stay effectively flat for the Ayu default preset instead of drifting into a renderer-only gradient"
     );
 
     let mut light_session = TerminalSession::new(4, 12);
@@ -273,9 +273,8 @@ fn atlas_renderer_viewport_background_is_quiet_and_row_band_free() -> Result<()>
         "light viewport background should not reintroduce parity-based banding between adjacent empty rows"
     );
     assert!(
-        color_distance(light_top, light_bottom) >= 1
-            && color_distance(light_top, light_bottom) <= 12,
-        "light viewport background should keep only a very soft top-to-bottom lift instead of a harsh blank white canvas"
+        color_distance(light_top, light_bottom) <= 2,
+        "light viewport background should stay effectively flat for the Ayu default preset instead of drifting into a renderer-only gradient"
     );
 
     Ok(())

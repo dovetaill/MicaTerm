@@ -150,8 +150,21 @@ fn bitmap_host_selection_source_exposes_local_overlay_contract() {
         "terminal session host should render local single-row, first-row, middle-row, and last-row selection rectangles for the bitmap path"
     );
     assert!(
-        host_source.contains("background: ThemeTokens.terminal-selection-surface;"),
-        "terminal session host should source bitmap host selection overlays from the shared terminal selection token so Catppuccin palette updates stay consistent across local overlays and presenter-rendered frames"
+        host_source.contains("in property <color> session-selection-surface:")
+            && host_source.contains("background: root.session-selection-surface;"),
+        "terminal session host should source bitmap host selection overlays from a projected session selection color so Ayu palette updates stay consistent across local overlays and presenter-rendered frames"
+    );
+    assert!(
+        host_source.contains("in property <color> session-scrollbar-track:")
+            && host_source.contains("background: root.session-scrollbar-track;"),
+        "terminal session host should source bitmap host scrollbar track surfaces from the projected terminal session contract instead of a detached ThemeTokens fallback"
+    );
+    assert!(
+        host_source.contains("in property <color> session-frame-surface:")
+            && host_source.contains("in property <color> session-frame-border:")
+            && host_source.contains("border-color: root.session-frame-border;")
+            && host_source.contains("background: root.session-frame-surface;"),
+        "terminal session host should source its frame chrome from projected terminal session colors so fallback and live shells share the same Ayu neighborhood"
     );
     assert!(
         bootstrap_source.contains(

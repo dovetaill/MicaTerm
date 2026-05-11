@@ -5,42 +5,52 @@ use mica_term::theme::{ThemeMode, ThemeVariant};
 use std::fs;
 
 #[test]
-fn dark_theme_maps_terminal_palette_to_premium_default_graphite() {
+fn dark_theme_maps_terminal_palette_to_ayu_dark() {
     let preset = preset_for_theme(ThemeMode::Dark, ThemeVariant::PremiumDefault);
 
-    assert_eq!(preset.name, "Mica Graphite");
-    assert_eq!(preset.background, 0x0c_141c);
-    assert_eq!(preset.foreground, 0xe3_eaf2);
-    assert_eq!(preset.cursor_bg, 0xdc_e6f3);
-    assert_eq!(preset.cursor_fg, 0x0c_141c);
-    assert_eq!(preset.scrollbar_thumb, (0x53, 0x62, 0x74));
-    assert_eq!(preset.scrollbar_thumb_active, (0x66, 0x78, 0x8e));
-    assert_eq!(preset.split, (0x31, 0x3d, 0x4b));
-    assert_eq!(preset.ansi[4], (0x7d, 0x9b, 0xc2));
+    assert_eq!(preset.name, "Ayu Dark");
+    assert_eq!(preset.background, 0x0a_0e14);
+    assert_eq!(preset.foreground, 0xb3_b1ad);
+    assert_eq!(preset.viewport_bg_top, 0x0a_0e14);
+    assert_eq!(preset.viewport_bg_bottom, 0x0a_0e14);
+    assert_eq!(preset.cursor_bg, 0xe6_b450);
+    assert_eq!(preset.cursor_fg, 0x0a_0e14);
+    assert_eq!(preset.selection_bg, (0x25, 0x33, 0x40, 0.85));
+    assert_eq!(preset.ansi[0], (0x01, 0x06, 0x0e));
+    assert_eq!(preset.ansi[7], (0xc7, 0xc7, 0xc7));
+    assert_eq!(preset.ansi[8], (0x68, 0x68, 0x68));
+    assert_eq!(preset.ansi[15], (0xff, 0xff, 0xff));
 }
 
 #[test]
-fn light_theme_maps_terminal_palette_to_premium_default_canvas() {
+fn light_theme_maps_terminal_palette_to_ayu_light() {
     let preset = preset_for_theme(ThemeMode::Light, ThemeVariant::PremiumDefault);
 
-    assert_eq!(preset.name, "Mica Canvas");
-    assert_eq!(preset.background, 0xf8_fafc);
-    assert_eq!(preset.foreground, 0x26_3240);
-    assert_eq!(preset.cursor_bg, 0x2c_3948);
-    assert_eq!(preset.cursor_fg, 0xf8_fafc);
-    assert_eq!(preset.scrollbar_thumb, (0xb7, 0xc3, 0xd0));
-    assert_eq!(preset.scrollbar_thumb_active, (0x9f, 0xaf, 0xbe));
-    assert_eq!(preset.split, (0xc7, 0xd2, 0xde));
-    assert_eq!(preset.ansi[4], (0x5b, 0x80, 0xae));
+    assert_eq!(preset.name, "Ayu Light");
+    assert_eq!(preset.background, 0xfa_fafa);
+    assert_eq!(preset.foreground, 0x5c_6166);
+    assert_eq!(preset.viewport_bg_top, 0xfa_fafa);
+    assert_eq!(preset.viewport_bg_bottom, 0xfa_fafa);
+    assert_eq!(preset.cursor_bg, 0xff_aa33);
+    assert_eq!(preset.cursor_fg, 0xfa_fafa);
+    assert_eq!(preset.selection_bg, (0x55, 0xb4, 0xd4, 0.22));
+    assert_eq!(preset.ansi[0], (0x00, 0x00, 0x00));
+    assert_eq!(preset.ansi[7], (0xc7, 0xc7, 0xc7));
+    assert_eq!(preset.ansi[8], (0x68, 0x68, 0x68));
+    assert_eq!(preset.ansi[15], (0xd1, 0xd1, 0xd1));
 }
 
 #[test]
-fn default_theme_mode_wrapper_still_points_at_premium_default() {
+fn default_theme_mode_wrapper_points_at_ayu_default() {
     let wrapped = preset_for_theme_mode(ThemeMode::Dark);
     let explicit = preset_for_theme(ThemeMode::Dark, ThemeVariant::PremiumDefault);
 
+    assert_eq!(wrapped.name, "Ayu Dark");
     assert_eq!(wrapped.background, explicit.background);
     assert_eq!(wrapped.foreground, explicit.foreground);
+    assert_eq!(wrapped.cursor_bg, explicit.cursor_bg);
+    assert_eq!(wrapped.cursor_fg, explicit.cursor_fg);
+    assert_eq!(wrapped.selection_bg, explicit.selection_bg);
 }
 
 #[test]
@@ -97,7 +107,7 @@ fn slint_terminal_tokens_match_shared_no_frame_defaults() {
             hex_rgb(dark_preset.foreground),
             hex_rgb(light_preset.foreground),
         )),
-        "Slint no-frame terminal foreground tokens should match the shared Mica Graphite/Canvas defaults used by the Rust fallback preset projection"
+        "Slint no-frame terminal foreground tokens should match the shared Ayu default terminal preset used by the Rust fallback projection"
     );
     assert!(
         tokens.contains(&format!(
@@ -105,7 +115,7 @@ fn slint_terminal_tokens_match_shared_no_frame_defaults() {
             hex_rgb(dark_preset.background),
             hex_rgb(light_preset.background),
         )) || tokens.contains("terminal-default-bg: terminal-canvas-surface;"),
-        "Slint no-frame terminal background tokens should match the shared Mica Graphite/Canvas defaults used by the Rust fallback preset projection"
+        "Slint no-frame terminal background tokens should match the shared Ayu default terminal preset used by the Rust fallback projection"
     );
     assert!(
         tokens.contains(&format!(
@@ -118,6 +128,38 @@ fn slint_terminal_tokens_match_shared_no_frame_defaults() {
             hex_rgb(light_preset.cursor_bg),
         )),
         "Slint cursor tokens should stay aligned with the terminal fallback preset so no-frame terminal states do not drift from the live terminal palette"
+    );
+    assert!(
+        tokens.contains(&format!(
+            "terminal-selection-surface: dark-mode ? {} : {};",
+            hex_rgba(dark_preset.selection_bg),
+            hex_rgba(light_preset.selection_bg),
+        )),
+        "Slint selection tokens should stay aligned with the shared Ayu preset so bitmap host overlays do not drift from Rust-side selection colors"
+    );
+    assert!(
+        tokens.contains(&format!(
+            "terminal-scrollbar-track-surface: dark-mode ? {} : {};",
+            hex_rgb_tuple(dark_preset.scrollbar_track),
+            hex_rgb_tuple(light_preset.scrollbar_track),
+        )) && tokens.contains(&format!(
+            "terminal-scrollbar-thumb-surface: dark-mode ? {} : {};",
+            hex_rgb_tuple(dark_preset.scrollbar_thumb),
+            hex_rgb_tuple(light_preset.scrollbar_thumb),
+        )) && tokens.contains(&format!(
+            "terminal-scrollbar-thumb-active-surface: dark-mode ? {} : {};",
+            hex_rgb_tuple(dark_preset.scrollbar_thumb_active),
+            hex_rgb_tuple(light_preset.scrollbar_thumb_active),
+        )),
+        "Slint scrollbar chrome tokens should stay aligned with the shared Ayu preset so no-frame terminal states do not drift from the live shell chrome palette"
+    );
+    assert!(
+        tokens.contains(&format!(
+            "terminal-frame-background: dark-mode ? {} : {};",
+            hex_rgb_tuple(dark_preset.split),
+            hex_rgb_tuple(light_preset.split),
+        )),
+        "Slint terminal frame tokens should stay aligned with the shared Ayu preset so workspace chrome does not drift from the terminal split/frame palette"
     );
     assert!(
         !tokens.contains("terminal-jump-to-latest"),
@@ -178,4 +220,13 @@ fn terminal_adjacent_shell_chrome_contracts_match_shared_preset_values() {
 
 fn hex_rgb(value: u32) -> String {
     format!("#{:06x}", value)
+}
+
+fn hex_rgb_tuple((red, green, blue): (u8, u8, u8)) -> String {
+    format!("#{:02x}{:02x}{:02x}", red, green, blue)
+}
+
+fn hex_rgba((red, green, blue, alpha): (u8, u8, u8, f32)) -> String {
+    let alpha = (alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!("#{:02x}{:02x}{:02x}{:02x}", red, green, blue, alpha)
 }

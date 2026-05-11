@@ -326,8 +326,12 @@ export component AppWindow inherits Window {
     in-out property <color> workspace-session-cursor-bg: ThemeTokens.terminal-cursor-bg;
     in-out property <color> workspace-session-default-fg: ThemeTokens.terminal-default-fg;
     in-out property <color> workspace-session-default-bg: ThemeTokens.terminal-default-bg;
+    in-out property <color> workspace-session-selection-surface: ThemeTokens.terminal-selection-surface;
+    in-out property <color> workspace-session-scrollbar-track: ThemeTokens.terminal-scrollbar-track-surface;
     in-out property <color> workspace-session-scrollbar-thumb: ThemeTokens.terminal-scrollbar-thumb-surface;
     in-out property <color> workspace-session-scrollbar-thumb-active: ThemeTokens.terminal-scrollbar-thumb-active-surface;
+    in-out property <color> workspace-session-frame-surface: ThemeTokens.terminal-frame-background;
+    in-out property <color> workspace-session-frame-border: ThemeTokens.divider-subtle;
     in-out property <bool> workspace-session-mouse-grabbed: false;
     in-out property <bool> workspace-session-link-hovered: false;
     in-out property <bool> workspace-session-link-armed: false;
@@ -1003,8 +1007,12 @@ export component AppWindow inherits Window {
                         workspace-session-cursor-bg: root.workspace-session-cursor-bg;
                         workspace-session-default-fg: root.workspace-session-default-fg;
                         workspace-session-default-bg: root.workspace-session-default-bg;
+                        workspace-session-selection-surface: root.workspace-session-selection-surface;
+                        workspace-session-scrollbar-track: root.workspace-session-scrollbar-track;
                         workspace-session-scrollbar-thumb: root.workspace-session-scrollbar-thumb;
                         workspace-session-scrollbar-thumb-active: root.workspace-session-scrollbar-thumb-active;
+                        workspace-session-frame-surface: root.workspace-session-frame-surface;
+                        workspace-session-frame-border: root.workspace-session-frame-border;
                         workspace-session-mouse-grabbed: root.workspace-session-mouse-grabbed;
                         workspace-session-link-hovered: root.workspace-session-link-hovered;
                         workspace-session-link-armed: root.workspace-session-link-armed;

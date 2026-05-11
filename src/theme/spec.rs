@@ -229,8 +229,10 @@ pub struct ThemeTerminalPaletteSpec {
     pub cursor_fg: u32,
     pub selection_rgb: u32,
     pub selection_alpha: f32,
+    pub scrollbar_track: u32,
     pub scrollbar_thumb: u32,
     pub scrollbar_thumb_active: u32,
+    pub frame_bg: u32,
     pub split: u32,
     pub ansi: [u32; 16],
 }
@@ -241,12 +243,12 @@ pub const TERMINAL_ROW_BANDING_ENABLED: bool = false;
 pub const TERMINAL_ROW_BANDING_ALPHA: f32 = 0.0;
 #[allow(dead_code)]
 pub const TERMINAL_BG_GRAIN_ALPHA: f32 = 0.0;
-pub const TERMINAL_BG_BASE_DARK: u32 = 0x0c_141c;
-pub const TERMINAL_BG_GRADIENT_TOP_DARK: u32 = 0x10_1924;
-pub const TERMINAL_BG_GRADIENT_BOTTOM_DARK: u32 = 0x0c_141c;
-pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xf8_fafc;
-pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xfb_fcfd;
-pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xf6_f8fb;
+pub const TERMINAL_BG_BASE_DARK: u32 = 0x0a_0e14;
+pub const TERMINAL_BG_GRADIENT_TOP_DARK: u32 = 0x0a_0e14;
+pub const TERMINAL_BG_GRADIENT_BOTTOM_DARK: u32 = 0x0a_0e14;
+pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xfa_fafa;
+pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xfa_fafa;
+pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xfa_fafa;
 
 pub fn app_theme_spec(mode: ThemeMode, variant: ThemeVariant) -> AppThemeSpec {
     match variant {
@@ -274,8 +276,10 @@ pub fn terminal_palette_spec_for(
         cursor_fg: spec.terminal.cursor.foreground,
         selection_rgb: spec.terminal.selection.rgb,
         selection_alpha: spec.terminal.selection.alpha,
+        scrollbar_track: spec.terminal.scrollbar.track,
         scrollbar_thumb: spec.terminal.scrollbar.thumb,
         scrollbar_thumb_active: spec.terminal.scrollbar.thumb_active,
+        frame_bg: spec.shell.terminal_frame_background,
         split: spec.shell.border,
         ansi: spec.terminal.ansi,
     }
@@ -422,55 +426,55 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
             mode,
             shell: premium_shell_dark(),
             terminal: TerminalTheme {
-                name: "Mica Graphite",
+                name: "Ayu Dark",
                 background: TerminalBackgroundTheme {
                     base: TERMINAL_BG_BASE_DARK,
                     gradient_top: TERMINAL_BG_GRADIENT_TOP_DARK,
                     gradient_bottom: TERMINAL_BG_GRADIENT_BOTTOM_DARK,
                 },
                 foreground: TerminalForegroundTheme {
-                    default: 0xe3_eaf2,
-                    soft: 0xc8_d1dc,
-                    dim: 0x94_a1b2,
-                    inactive: 0xbc_c6d2,
+                    default: 0xb3_b1ad,
+                    soft: 0x99_a1a8,
+                    dim: 0x5c_6773,
+                    inactive: 0x82_8c99,
                 },
                 cursor: TerminalCursorTheme {
-                    background: 0xdc_e6f3,
+                    background: 0xe6_b450,
                     foreground: TERMINAL_BG_BASE_DARK,
                 },
                 selection: TerminalOverlayTheme {
-                    rgb: 0x6c_88ae,
-                    alpha: 0.26,
+                    rgb: 0x25_3340,
+                    alpha: 0.85,
                 },
                 search_match: TerminalOverlayTheme {
-                    rgb: 0x7b_6840,
-                    alpha: 0.18,
+                    rgb: 0x4c_4126,
+                    alpha: 0.34,
                 },
                 current_search_match: TerminalOverlayTheme {
-                    rgb: 0x8e_79b8,
-                    alpha: 0.27,
+                    rgb: 0x6b_5300,
+                    alpha: 0.36,
                 },
                 scrollbar: TerminalScrollbarTheme {
-                    track: 0x1b_232c,
-                    thumb: 0x53_6274,
-                    thumb_active: 0x66_788e,
+                    track: 0x11_151c,
+                    thumb: 0x33_404a,
+                    thumb_active: 0x47_5866,
                 },
                 ansi: [
-                    0x4a_5260, 0xc3_7a86, 0x86_b48f, 0xc6_a56a, 0x7d_9bc2, 0xa7_8cbf, 0x78_afae,
-                    0xc8_d1dc, 0x66_7180, 0xd6_949f, 0x9b_c6a4, 0xd8_ba83, 0x94_aed0, 0xb7_9ccb,
-                    0x8e_c0c0, 0xe7_edf4,
+                    0x01_060e, 0xea_6c73, 0x91_b362, 0xf9_af4f, 0x53_bdfa, 0xfa_e994, 0x90_e1c6,
+                    0xc7_c7c7, 0x68_6868, 0xf0_7178, 0xc2_d94c, 0xff_b454, 0x59_c2ff, 0xff_ee99,
+                    0x95_e6cb, 0xff_ffff,
                 ],
             },
             decoration: DecorationTheme {
-                success: 0x7f_b08d,
-                warning: 0xc9_a86a,
-                error: 0xc9_8a94,
-                info: 0x7d_9bc2,
-                running: 0x7b_96b8,
+                success: 0x91_b362,
+                warning: 0xff_b454,
+                error: 0xf0_7178,
+                info: 0x59_c2ff,
+                running: 0xe6_b450,
             },
             semantic: SemanticHighlightTheme {
-                input_command: 0x7d_9bc2,
-                output_accent: 0x89_a9cf,
+                input_command: 0x59_c2ff,
+                output_accent: 0x95_e6cb,
             },
         },
         ThemeMode::Light => AppThemeSpec {
@@ -480,55 +484,55 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
             mode,
             shell: premium_shell_light(),
             terminal: TerminalTheme {
-                name: "Mica Canvas",
+                name: "Ayu Light",
                 background: TerminalBackgroundTheme {
                     base: TERMINAL_BG_BASE_LIGHT,
                     gradient_top: TERMINAL_BG_GRADIENT_TOP_LIGHT,
                     gradient_bottom: TERMINAL_BG_GRADIENT_BOTTOM_LIGHT,
                 },
                 foreground: TerminalForegroundTheme {
-                    default: 0x26_3240,
-                    soft: 0x4b_596a,
-                    dim: 0x75_8395,
-                    inactive: 0x5f_6e80,
+                    default: 0x5c_6166,
+                    soft: 0x6c_7680,
+                    dim: 0x82_8c99,
+                    inactive: 0x6b_7480,
                 },
                 cursor: TerminalCursorTheme {
-                    background: 0x2c_3948,
+                    background: 0xff_aa33,
                     foreground: TERMINAL_BG_BASE_LIGHT,
                 },
                 selection: TerminalOverlayTheme {
-                    rgb: 0x7f_9bc2,
-                    alpha: 0.20,
+                    rgb: 0x55_b4d4,
+                    alpha: 0.22,
                 },
                 search_match: TerminalOverlayTheme {
-                    rgb: 0xd8_c79a,
-                    alpha: 0.32,
+                    rgb: 0xf8_dfa0,
+                    alpha: 0.34,
                 },
                 current_search_match: TerminalOverlayTheme {
-                    rgb: 0xa9_8dda,
-                    alpha: 0.32,
+                    rgb: 0xff_aa33,
+                    alpha: 0.28,
                 },
                 scrollbar: TerminalScrollbarTheme {
-                    track: 0xe7_ebf0,
-                    thumb: 0xb7_c3d0,
-                    thumb_active: 0x9f_afbe,
+                    track: 0xe6_e9ef,
+                    thumb: 0xc7_ccd4,
+                    thumb_active: 0xb6_bdc8,
                 },
                 ansi: [
-                    0x5a_6573, 0xb8_6470, 0x5f_8d69, 0x9d_7c41, 0x5b_80ae, 0x8f_73aa, 0x4e_9090,
-                    0xaa_b5c1, 0x73_8090, 0xc7_7a85, 0x76_9e7e, 0xb0_8d53, 0x72_95bf, 0xa2_86bb,
-                    0x68_a4a3, 0xd5_dce4,
+                    0x00_0000, 0xea_6c6d, 0x6c_bf43, 0xec_a944, 0x31_99e1, 0x9e_75c7, 0x46_ba94,
+                    0xc7_c7c7, 0x68_6868, 0xf0_7171, 0x86_b300, 0xf2_ae49, 0x39_9ee6, 0xa3_7acc,
+                    0x4c_bf99, 0xd1_d1d1,
                 ],
             },
             decoration: DecorationTheme {
-                success: 0x5e_8a68,
-                warning: 0x9b_7a3c,
-                error: 0xa5_5c67,
-                info: 0x5e_81ae,
-                running: 0x6b_85a9,
+                success: 0x86_b300,
+                warning: 0xf2_ae49,
+                error: 0xf0_7171,
+                info: 0x39_9ee6,
+                running: 0xff_aa33,
             },
             semantic: SemanticHighlightTheme {
-                input_command: 0x5b_80ae,
-                output_accent: 0x50_77a7,
+                input_command: 0x39_9ee6,
+                output_accent: 0x55_b4d4,
             },
         },
     }
@@ -663,9 +667,9 @@ fn premium_shell_dark() -> ShellChromeTheme {
         sidebar_background: 0x18_212b,
         sidebar_panel_background: 0x1b_2430,
         right_panel_background: 0x1c_2431,
-        terminal_frame_background: 0x10_1824,
+        terminal_frame_background: 0x11_151c,
         separator: 0x26_303b,
-        border: 0x31_3d4b,
+        border: 0x11_151c,
         hairline: 0x3a_4857,
         text_primary: 0xe6_ecf3,
         text_secondary: 0xba_c4d0,
@@ -692,9 +696,9 @@ fn premium_shell_light() -> ShellChromeTheme {
         sidebar_background: 0xeb_f0f5,
         sidebar_panel_background: 0xf1_f5f9,
         right_panel_background: 0xf3_f6fa,
-        terminal_frame_background: 0xed_f2f6,
+        terminal_frame_background: 0xe6_e9ef,
         separator: 0xd8_e0e8,
-        border: 0xc7_d2de,
+        border: 0xe6_e9ef,
         hairline: 0xb7_c4d1,
         text_primary: 0x24_303d,
         text_secondary: 0x49_586a,

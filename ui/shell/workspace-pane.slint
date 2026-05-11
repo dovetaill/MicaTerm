@@ -50,8 +50,12 @@ export component WorkspacePane inherits Rectangle {
     in property <color> workspace-session-cursor-bg: ThemeTokens.terminal-cursor-bg;
     in property <color> workspace-session-default-fg: ThemeTokens.terminal-default-fg;
     in property <color> workspace-session-default-bg: ThemeTokens.terminal-default-bg;
+    in property <color> workspace-session-selection-surface: ThemeTokens.terminal-selection-surface;
+    in property <color> workspace-session-scrollbar-track: ThemeTokens.terminal-scrollbar-track-surface;
     in property <color> workspace-session-scrollbar-thumb: ThemeTokens.terminal-scrollbar-thumb-surface;
     in property <color> workspace-session-scrollbar-thumb-active: ThemeTokens.terminal-scrollbar-thumb-active-surface;
+    in property <color> workspace-session-frame-surface: ThemeTokens.terminal-frame-background;
+    in property <color> workspace-session-frame-border: ThemeTokens.divider-subtle;
     in property <bool> workspace-session-mouse-grabbed: false;
     in property <bool> workspace-session-link-hovered: false;
     in property <bool> workspace-session-link-armed: false;
@@ -123,7 +127,7 @@ export component WorkspacePane inherits Rectangle {
 
     horizontal-stretch: 1;
     min-width: 0px;
-    background: ThemeTokens.terminal-frame-background;
+    background: root.workspace-session-frame-surface;
 
     VerticalLayout {
         width: 100%;
@@ -230,8 +234,12 @@ export component WorkspacePane inherits Rectangle {
                 session-cursor-bg: root.workspace-session-cursor-bg;
                 session-default-fg: root.workspace-session-default-fg;
                 session-default-bg: root.workspace-session-default-bg;
+                session-selection-surface: root.workspace-session-selection-surface;
+                session-scrollbar-track: root.workspace-session-scrollbar-track;
                 session-scrollbar-thumb: root.workspace-session-scrollbar-thumb;
                 session-scrollbar-thumb-active: root.workspace-session-scrollbar-thumb-active;
+                session-frame-surface: root.workspace-session-frame-surface;
+                session-frame-border: root.workspace-session-frame-border;
                 session-mouse-grabbed: root.workspace-session-mouse-grabbed;
                 link-hovered: root.workspace-session-link-hovered;
                 link-armed: root.workspace-session-link-armed;

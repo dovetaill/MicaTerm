@@ -153,6 +153,10 @@ fn shell_terminal_tokens_stay_synced_to_theme_backed_terminal_palette_contract()
         "terminal-cursor-fg",
         "terminal-cursor-bg",
         "terminal-selection-surface",
+        "terminal-scrollbar-track-surface",
+        "terminal-scrollbar-thumb-surface",
+        "terminal-scrollbar-thumb-active-surface",
+        "terminal-frame-background",
     ] {
         assert!(
             tokens.contains(token),
@@ -185,6 +189,27 @@ fn shell_terminal_tokens_stay_synced_to_theme_backed_terminal_palette_contract()
     );
     assert!(
         terminal_host.contains("ThemeTokens.terminal-selection-surface"),
-        "TerminalSessionHost should render selection overlays from ThemeTokens so shell-adjacent terminal chrome stays in sync with the active Catppuccin preset"
+        "TerminalSessionHost should keep a boot-time selection token default so the shell can start in sync before Rust projects the active terminal preset"
+    );
+    assert!(
+        app_window.contains("workspace-session-selection-surface")
+            && app_window.contains("workspace-session-scrollbar-track")
+            && app_window.contains("workspace-session-frame-surface")
+            && app_window.contains("workspace-session-frame-border"),
+        "AppWindow should store projected terminal selection, scrollbar-track, and frame colors so Rust can override boot defaults with the active terminal preset"
+    );
+    assert!(
+        workspace_pane.contains("workspace-session-selection-surface")
+            && workspace_pane.contains("workspace-session-scrollbar-track")
+            && workspace_pane.contains("workspace-session-frame-surface")
+            && workspace_pane.contains("workspace-session-frame-border"),
+        "WorkspacePane should thread projected terminal selection, scrollbar-track, and frame colors through to TerminalSessionHost"
+    );
+    assert!(
+        terminal_host.contains("session-selection-surface")
+            && terminal_host.contains("session-scrollbar-track")
+            && terminal_host.contains("session-frame-surface")
+            && terminal_host.contains("session-frame-border"),
+        "TerminalSessionHost should consume projected terminal selection, scrollbar-track, and frame colors instead of hard-coding a detached shell ladder"
     );
 }

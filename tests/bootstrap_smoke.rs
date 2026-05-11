@@ -11384,7 +11384,7 @@ fn bootstrap_projects_terminal_canvas_palette_into_window_properties() {
 }
 
 #[test]
-fn bootstrap_projects_dark_terminal_cursor_as_light_grey() {
+fn bootstrap_projects_dark_terminal_cursor_from_ayu_preset() {
     let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
     let app = AppWindow::new().unwrap();
@@ -11396,7 +11396,7 @@ fn bootstrap_projects_dark_terminal_cursor_as_light_grey() {
 
     assert_eq!(
         app.get_workspace_session_cursor_bg().as_argb_encoded(),
-        0xff00_0000 | preset_for_theme_mode(ThemeMode::Dark).cursor_bg
+        0xffe6_b450
     );
 }
 
@@ -11426,63 +11426,105 @@ fn toggling_theme_without_active_terminal_surface_refreshes_fallback_palette() {
     );
 
     let light = preset_for_theme_mode(ThemeMode::Light);
+    assert_eq!(light.name, "Ayu Light");
     assert_eq!(
         app.get_workspace_session_default_fg().as_argb_encoded(),
-        0xff00_0000 | light.foreground,
-        "without an active terminal surface bootstrap should project the light fallback terminal foreground from the Catppuccin preset"
+        0xff5c_6166,
+        "without an active terminal surface bootstrap should project the light fallback terminal foreground from the Ayu preset"
     );
     assert_eq!(
         app.get_workspace_session_default_bg().as_argb_encoded(),
-        0xff00_0000 | light.background,
-        "without an active terminal surface bootstrap should project the light fallback terminal background from the Catppuccin preset"
+        0xfffa_fafa,
+        "without an active terminal surface bootstrap should project the light fallback terminal background from the Ayu preset"
+    );
+    assert_eq!(
+        app.get_workspace_session_cursor_fg().as_argb_encoded(),
+        0xfffa_fafa,
+        "without an active terminal surface bootstrap should keep the light fallback cursor foreground aligned with the Ayu preset"
+    );
+    assert_eq!(
+        app.get_workspace_session_cursor_bg().as_argb_encoded(),
+        0xffff_aa33,
+        "without an active terminal surface bootstrap should keep the light fallback cursor background aligned with the Ayu preset"
     );
 
     app.invoke_toggle_theme_mode_requested();
 
     let dark = preset_for_theme_mode(ThemeMode::Dark);
+    assert_eq!(dark.name, "Ayu Dark");
     assert_eq!(
         app.get_workspace_session_default_fg().as_argb_encoded(),
-        0xff00_0000 | dark.foreground,
+        0xffb3_b1ad,
         "toggling theme without an active terminal surface should refresh the fallback terminal foreground instead of leaving the previous preset latched"
     );
     assert_eq!(
         app.get_workspace_session_default_bg().as_argb_encoded(),
-        0xff00_0000 | dark.background,
+        0xff0a_0e14,
         "toggling theme without an active terminal surface should refresh the fallback terminal background instead of leaving the previous preset latched"
+    );
+    assert_eq!(
+        app.get_workspace_session_cursor_fg().as_argb_encoded(),
+        0xff0a_0e14,
+        "toggling theme without an active terminal surface should refresh the fallback cursor foreground too"
+    );
+    assert_eq!(
+        app.get_workspace_session_cursor_bg().as_argb_encoded(),
+        0xffe6_b450,
+        "toggling theme without an active terminal surface should refresh the fallback cursor background too"
     );
 
     let _ = std::fs::remove_file(temp_path);
 }
 
 #[test]
-fn no_surface_terminal_projection_uses_catppuccin_defaults_and_tracks_theme_toggle() {
+fn no_surface_terminal_projection_uses_ayu_defaults_and_tracks_theme_toggle() {
     let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
     let app = AppWindow::new().unwrap();
     bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
 
     let dark_preset = preset_for_theme_mode(ThemeMode::Dark);
+    assert_eq!(dark_preset.name, "Ayu Dark");
     assert_eq!(
         app.get_workspace_session_default_fg().as_argb_encoded(),
-        0xff00_0000 | dark_preset.foreground
+        0xffb3_b1ad
     );
     assert_eq!(
         app.get_workspace_session_default_bg().as_argb_encoded(),
-        0xff00_0000 | dark_preset.background
+        0xff0a_0e14
+    );
+    assert_eq!(
+        app.get_workspace_session_cursor_fg().as_argb_encoded(),
+        0xff0a_0e14
+    );
+    assert_eq!(
+        app.get_workspace_session_cursor_bg().as_argb_encoded(),
+        0xffe6_b450
     );
 
     app.invoke_toggle_theme_mode_requested();
 
     let light_preset = preset_for_theme_mode(ThemeMode::Light);
+    assert_eq!(light_preset.name, "Ayu Light");
     assert_eq!(
         app.get_workspace_session_default_fg().as_argb_encoded(),
-        0xff00_0000 | light_preset.foreground,
-        "when no terminal surface is active the fallback terminal projection should still use the Catppuccin light foreground after a theme toggle"
+        0xff5c_6166,
+        "when no terminal surface is active the fallback terminal projection should still use the Ayu light foreground after a theme toggle"
     );
     assert_eq!(
         app.get_workspace_session_default_bg().as_argb_encoded(),
-        0xff00_0000 | light_preset.background,
-        "when no terminal surface is active the fallback terminal projection should still use the Catppuccin light background after a theme toggle"
+        0xfffa_fafa,
+        "when no terminal surface is active the fallback terminal projection should still use the Ayu light background after a theme toggle"
+    );
+    assert_eq!(
+        app.get_workspace_session_cursor_fg().as_argb_encoded(),
+        0xfffa_fafa,
+        "when no terminal surface is active the fallback cursor foreground should still use the Ayu light preset after a theme toggle"
+    );
+    assert_eq!(
+        app.get_workspace_session_cursor_bg().as_argb_encoded(),
+        0xffff_aa33,
+        "when no terminal surface is active the fallback cursor background should still use the Ayu light preset after a theme toggle"
     );
 }
 
@@ -11524,8 +11566,12 @@ fn bootstrap_projects_terminal_shell_chrome_contract_from_theme_preset() {
 
     assert!(
         bootstrap_source.contains("set_workspace_session_scrollbar_thumb(")
-            && bootstrap_source.contains("set_workspace_session_scrollbar_thumb_active("),
-        "bootstrap should publish terminal scrollbar thumb colors through the workspace session contract so fallback and live shell chrome stay on the same Catppuccin preset source"
+            && bootstrap_source.contains("set_workspace_session_scrollbar_thumb_active(")
+            && bootstrap_source.contains("set_workspace_session_selection_surface(")
+            && bootstrap_source.contains("set_workspace_session_scrollbar_track(")
+            && bootstrap_source.contains("set_workspace_session_frame_surface(")
+            && bootstrap_source.contains("set_workspace_session_frame_border("),
+        "bootstrap should publish terminal selection, scrollbar, and frame colors through the workspace session contract so fallback and live shell chrome stay on the same Ayu preset source"
     );
     assert!(
         !bootstrap_source.contains("set_workspace_session_jump_to_latest"),
@@ -11534,12 +11580,20 @@ fn bootstrap_projects_terminal_shell_chrome_contract_from_theme_preset() {
     assert!(
         app_window_source.contains("workspace-session-scrollbar-thumb")
             && app_window_source.contains("workspace-session-scrollbar-thumb-active")
+            && app_window_source.contains("workspace-session-selection-surface")
+            && app_window_source.contains("workspace-session-scrollbar-track")
+            && app_window_source.contains("workspace-session-frame-surface")
+            && app_window_source.contains("workspace-session-frame-border")
             && !app_window_source.contains("workspace-session-jump-to-latest"),
-        "AppWindow should surface terminal shell chrome colors as first-class workspace session properties so Rust can project the Catppuccin preset into the shell host"
+        "AppWindow should surface terminal shell chrome colors as first-class workspace session properties so Rust can project the Ayu preset into the shell host"
     );
     assert!(
         workspace_pane_source.contains("workspace-session-scrollbar-thumb")
             && workspace_pane_source.contains("workspace-session-scrollbar-thumb-active")
+            && workspace_pane_source.contains("workspace-session-selection-surface")
+            && workspace_pane_source.contains("workspace-session-scrollbar-track")
+            && workspace_pane_source.contains("workspace-session-frame-surface")
+            && workspace_pane_source.contains("workspace-session-frame-border")
             && !workspace_pane_source.contains("workspace-session-jump-to-latest"),
         "WorkspacePane should thread the terminal shell chrome properties through to TerminalSessionHost instead of letting that chrome drift back to generic shell tokens"
     );
@@ -11611,7 +11665,7 @@ fn bootstrap_tracks_active_surface_idle_before_terminal_cache_shrink() {
 }
 
 #[test]
-fn no_surface_terminal_shell_chrome_tracks_catppuccin_theme_toggle() {
+fn no_surface_terminal_shell_chrome_tracks_ayu_theme_toggle() {
     let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
     let app = AppWindow::new().unwrap();
@@ -11636,13 +11690,13 @@ fn no_surface_terminal_shell_chrome_tracks_catppuccin_theme_toggle() {
         app.get_workspace_session_scrollbar_thumb()
             .as_argb_encoded(),
         0xff00_0000 | rgb_tuple_to_hex(light_preset.scrollbar_thumb),
-        "without an active terminal surface the terminal scrollbar thumb should still refresh to the light Catppuccin shell chrome palette after a theme toggle"
+        "without an active terminal surface the terminal scrollbar thumb should still refresh to the light Ayu shell chrome palette after a theme toggle"
     );
     assert_eq!(
         app.get_workspace_session_scrollbar_thumb_active()
             .as_argb_encoded(),
         0xff00_0000 | rgb_tuple_to_hex(light_preset.scrollbar_thumb_active),
-        "without an active terminal surface the terminal scrollbar hover thumb should still refresh to the light Catppuccin shell chrome palette after a theme toggle"
+        "without an active terminal surface the terminal scrollbar hover thumb should still refresh to the light Ayu shell chrome palette after a theme toggle"
     );
 }
 

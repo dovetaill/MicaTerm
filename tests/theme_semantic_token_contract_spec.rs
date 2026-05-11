@@ -54,13 +54,13 @@ fn premium_default_tokens_encode_the_new_calm_surface_ladder() {
     );
     assert!(
         tokens.contains(
-            "out property <brush> terminal-frame-background: dark-mode ? #101824 : #edf2f6;"
+            "out property <brush> terminal-frame-background: dark-mode ? #11151c : #e6e9ef;"
         ),
-        "terminal frame should sit one step behind the terminal canvas so the work surface stays visually dominant"
+        "terminal frame should use the Ayu terminal neighborhood chrome instead of the older graphite/canvas ladder"
     );
     assert!(
-        tokens.contains("out property <brush> terminal-default-fg: dark-mode ? #e3eaf2 : #263240;"),
-        "terminal defaults should move off pure white / pure black to stay comfortable over long sessions"
+        tokens.contains("out property <brush> terminal-default-fg: dark-mode ? #b3b1ad : #5c6166;"),
+        "terminal defaults should read as Ayu off-white and cool gray instead of the older premium ladder"
     );
     assert!(
         tokens.contains(
@@ -105,8 +105,8 @@ fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
         sidebar.contains("ThemeTokens.sidebar-background")
             && assets_sidebar.contains("ThemeTokens.sidebar-panel-background")
             && right_panel.contains("ThemeTokens.right-panel-background")
-            && workspace.contains("ThemeTokens.terminal-frame-background"),
-        "shell chrome layers should explicitly consume the sidebar / panel / terminal frame ladder"
+            && workspace.contains("workspace-session-frame-surface"),
+        "shell chrome layers should explicitly consume the sidebar / panel ladder while workspace terminal chrome comes from the projected session frame surface"
     );
     assert!(
         active_tab.contains("ThemeTokens.tab-active-surface")
@@ -141,8 +141,11 @@ fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
         "status pill should use its own semantic pill tokens instead of a generic panel background"
     );
     assert!(
-        terminal_host.contains("ThemeTokens.panel-surface"),
-        "terminal host chrome should use the shared panel surface token rather than a generic control fill"
+        terminal_host.contains("session-frame-surface")
+            && terminal_host.contains("session-frame-border")
+            && terminal_host.contains("session-selection-surface")
+            && terminal_host.contains("session-scrollbar-track"),
+        "terminal host chrome should use projected session-scoped frame, selection, and scrollbar-track colors rather than a detached shell token ladder"
     );
     assert!(
         sidebar.contains("Click to collapse, drag to resize")
@@ -155,13 +158,13 @@ fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
         theme_spec.contains("pub const TERMINAL_ROW_BANDING_ENABLED: bool = false;")
             && theme_spec.contains("pub const TERMINAL_ROW_BANDING_ALPHA: f32 = 0.0;")
             && theme_spec.contains("pub const TERMINAL_BG_GRAIN_ALPHA: f32 = 0.0;")
-            && theme_spec.contains("pub const TERMINAL_BG_BASE_DARK: u32 = 0x0c_141c;")
-            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_TOP_DARK: u32 = 0x10_1924;")
-            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_BOTTOM_DARK: u32 = 0x0c_141c;")
-            && theme_spec.contains("pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xf8_fafc;")
-            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xfb_fcfd;")
-            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xf6_f8fb;"),
-        "terminal palette spec should expose the shared calm viewport background constants, disable legacy row banding/grain, and keep soft dark/light gradient endpoints explicit"
+            && theme_spec.contains("pub const TERMINAL_BG_BASE_DARK: u32 = 0x0a_0e14;")
+            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_TOP_DARK: u32 = 0x0a_0e14;")
+            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_BOTTOM_DARK: u32 = 0x0a_0e14;")
+            && theme_spec.contains("pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xfa_fafa;")
+            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xfa_fafa;")
+            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xfa_fafa;"),
+        "terminal palette spec should expose the shared Ayu viewport background constants, disable legacy row banding/grain, and keep the default viewport backgrounds flat across renderers"
     );
     assert!(
         !fs::read_to_string("ui/theme/tokens.slint")
