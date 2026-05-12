@@ -23,6 +23,19 @@ fn dark_theme_maps_terminal_palette_to_ayu_dark() {
 }
 
 #[test]
+fn terminal_background_constants_follow_the_ayu_migration_targets() {
+    let dark = preset_for_theme(ThemeMode::Dark, ThemeVariant::PremiumDefault);
+    let light = preset_for_theme(ThemeMode::Light, ThemeVariant::PremiumDefault);
+
+    assert_eq!(dark.background, 0x0a_0e14);
+    assert_eq!(dark.viewport_bg_top, 0x0a_0e14);
+    assert_eq!(dark.viewport_bg_bottom, 0x0a_0e14);
+    assert_eq!(light.background, 0xf8_f9fa);
+    assert_eq!(light.viewport_bg_top, 0xf8_f9fa);
+    assert_eq!(light.viewport_bg_bottom, 0xf8_f9fa);
+}
+
+#[test]
 fn light_theme_maps_terminal_palette_to_ayu_light() {
     let preset = preset_for_theme(ThemeMode::Light, ThemeVariant::PremiumDefault);
 

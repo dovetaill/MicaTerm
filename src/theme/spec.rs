@@ -246,9 +246,9 @@ pub const TERMINAL_BG_GRAIN_ALPHA: f32 = 0.0;
 pub const TERMINAL_BG_BASE_DARK: u32 = 0x0a_0e14;
 pub const TERMINAL_BG_GRADIENT_TOP_DARK: u32 = 0x0a_0e14;
 pub const TERMINAL_BG_GRADIENT_BOTTOM_DARK: u32 = 0x0a_0e14;
-pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xfa_fafa;
-pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xfa_fafa;
-pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xfa_fafa;
+pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xf8_f9fa;
+pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xf8_f9fa;
+pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xf8_f9fa;
 
 pub fn app_theme_spec(mode: ThemeMode, variant: ThemeVariant) -> AppThemeSpec {
     match variant {
