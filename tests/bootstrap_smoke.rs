@@ -11434,12 +11434,12 @@ fn toggling_theme_without_active_terminal_surface_refreshes_fallback_palette() {
     );
     assert_eq!(
         app.get_workspace_session_default_bg().as_argb_encoded(),
-        0xfffa_fafa,
+        0xfff8_f9fa,
         "without an active terminal surface bootstrap should project the light fallback terminal background from the Ayu preset"
     );
     assert_eq!(
         app.get_workspace_session_cursor_fg().as_argb_encoded(),
-        0xfffa_fafa,
+        0xfff8_f9fa,
         "without an active terminal surface bootstrap should keep the light fallback cursor foreground aligned with the Ayu preset"
     );
     assert_eq!(
@@ -11454,7 +11454,7 @@ fn toggling_theme_without_active_terminal_surface_refreshes_fallback_palette() {
     assert_eq!(dark.name, "Ayu Dark");
     assert_eq!(
         app.get_workspace_session_default_fg().as_argb_encoded(),
-        0xffb3_b1ad,
+        0xffc5_c1b8,
         "toggling theme without an active terminal surface should refresh the fallback terminal foreground instead of leaving the previous preset latched"
     );
     assert_eq!(
@@ -11487,7 +11487,7 @@ fn no_surface_terminal_projection_uses_ayu_defaults_and_tracks_theme_toggle() {
     assert_eq!(dark_preset.name, "Ayu Dark");
     assert_eq!(
         app.get_workspace_session_default_fg().as_argb_encoded(),
-        0xffb3_b1ad
+        0xffc5_c1b8
     );
     assert_eq!(
         app.get_workspace_session_default_bg().as_argb_encoded(),
@@ -11513,12 +11513,12 @@ fn no_surface_terminal_projection_uses_ayu_defaults_and_tracks_theme_toggle() {
     );
     assert_eq!(
         app.get_workspace_session_default_bg().as_argb_encoded(),
-        0xfffa_fafa,
+        0xfff8_f9fa,
         "when no terminal surface is active the fallback terminal projection should still use the Ayu light background after a theme toggle"
     );
     assert_eq!(
         app.get_workspace_session_cursor_fg().as_argb_encoded(),
-        0xfffa_fafa,
+        0xfff8_f9fa,
         "when no terminal surface is active the fallback cursor foreground should still use the Ayu light preset after a theme toggle"
     );
     assert_eq!(

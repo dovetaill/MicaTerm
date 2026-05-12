@@ -47,19 +47,20 @@ fn semantic_theme_tokens_cover_shell_hierarchy_and_states() {
 #[test]
 fn premium_default_tokens_encode_the_new_calm_surface_ladder() {
     let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
+    let theme_spec = fs::read_to_string("src/theme/spec.rs").expect("read theme spec");
 
     assert!(
-        tokens.contains("out property <brush> titlebar-background: dark-mode ? #181f27 : #f7f9fc;"),
+        tokens.contains("out property <brush> titlebar-background: dark-mode ? #10151d : #eef2f5;"),
         "titlebar should use a dedicated calm surface rather than sharing the app sheet"
     );
     assert!(
         tokens.contains(
-            "out property <brush> terminal-frame-background: dark-mode ? #11151c : #e6e9ef;"
+            "out property <brush> terminal-frame-background: dark-mode ? #141b24 : #fafafa;"
         ),
-        "terminal frame should use the Ayu terminal neighborhood chrome instead of the older graphite/canvas ladder"
+        "terminal frame should use the Ayu terminal neighborhood chrome instead of the older detached shell ladder"
     );
     assert!(
-        tokens.contains("out property <brush> terminal-default-fg: dark-mode ? #b3b1ad : #5c6166;"),
+        tokens.contains("out property <brush> terminal-default-fg: dark-mode ? #c5c1b8 : #5c6166;"),
         "terminal defaults should read as Ayu off-white and cool gray instead of the older premium ladder"
     );
     assert!(
@@ -67,6 +68,12 @@ fn premium_default_tokens_encode_the_new_calm_surface_ladder() {
             "out property <brush> sidebar-item-selected-background: dark-mode ? #293846 : #dce6f2;"
         ),
         "selected sidebar items should use a low-saturation filled state instead of a hard control button fill"
+    );
+    assert!(
+        !theme_spec.contains("Catppuccin")
+            && !theme_spec.contains("Graphite")
+            && !theme_spec.contains("Canvas"),
+        "default-theme wording should stop using retired palette names"
     );
 }
 
