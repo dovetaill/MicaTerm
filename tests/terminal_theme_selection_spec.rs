@@ -10,12 +10,12 @@ fn dark_theme_maps_terminal_palette_to_ayu_dark() {
 
     assert_eq!(preset.name, "Ayu Dark");
     assert_eq!(preset.background, 0x0a_0e14);
-    assert_eq!(preset.foreground, 0xb3_b1ad);
+    assert_eq!(preset.foreground, 0xc5_c1b8);
     assert_eq!(preset.viewport_bg_top, 0x0a_0e14);
     assert_eq!(preset.viewport_bg_bottom, 0x0a_0e14);
     assert_eq!(preset.cursor_bg, 0xe6_b450);
     assert_eq!(preset.cursor_fg, 0x0a_0e14);
-    assert_eq!(preset.selection_bg, (0x25, 0x33, 0x40, 0.85));
+    assert_eq!(preset.selection_bg, (0x2a, 0x35, 0x41, 0.78));
     assert_eq!(preset.ansi[0], (0x01, 0x06, 0x0e));
     assert_eq!(preset.ansi[7], (0xc7, 0xc7, 0xc7));
     assert_eq!(preset.ansi[8], (0x68, 0x68, 0x68));
@@ -27,13 +27,13 @@ fn light_theme_maps_terminal_palette_to_ayu_light() {
     let preset = preset_for_theme(ThemeMode::Light, ThemeVariant::PremiumDefault);
 
     assert_eq!(preset.name, "Ayu Light");
-    assert_eq!(preset.background, 0xfa_fafa);
+    assert_eq!(preset.background, 0xf8_f9fa);
     assert_eq!(preset.foreground, 0x5c_6166);
-    assert_eq!(preset.viewport_bg_top, 0xfa_fafa);
-    assert_eq!(preset.viewport_bg_bottom, 0xfa_fafa);
+    assert_eq!(preset.viewport_bg_top, 0xf8_f9fa);
+    assert_eq!(preset.viewport_bg_bottom, 0xf8_f9fa);
     assert_eq!(preset.cursor_bg, 0xff_aa33);
-    assert_eq!(preset.cursor_fg, 0xfa_fafa);
-    assert_eq!(preset.selection_bg, (0x55, 0xb4, 0xd4, 0.22));
+    assert_eq!(preset.cursor_fg, 0xf8_f9fa);
+    assert_eq!(preset.selection_bg, (0x55, 0xb4, 0xd4, 0.20));
     assert_eq!(preset.ansi[0], (0x00, 0x00, 0x00));
     assert_eq!(preset.ansi[7], (0xc7, 0xc7, 0xc7));
     assert_eq!(preset.ansi[8], (0x68, 0x68, 0x68));
