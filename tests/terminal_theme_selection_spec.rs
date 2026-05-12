@@ -16,6 +16,9 @@ fn dark_theme_maps_terminal_palette_to_ayu_dark() {
     assert_eq!(preset.cursor_bg, 0xe6_b450);
     assert_eq!(preset.cursor_fg, 0x0a_0e14);
     assert_eq!(preset.selection_bg, (0x2a, 0x35, 0x41, 0.78));
+    assert_eq!(preset.scrollbar_track, (0x11, 0x18, 0x21));
+    assert_eq!(preset.scrollbar_thumb, (0x2f, 0x39, 0x44));
+    assert_eq!(preset.scrollbar_thumb_active, (0x3c, 0x48, 0x56));
     assert_eq!(preset.ansi[0], (0x01, 0x06, 0x0e));
     assert_eq!(preset.ansi[7], (0xc7, 0xc7, 0xc7));
     assert_eq!(preset.ansi[8], (0x68, 0x68, 0x68));
@@ -47,6 +50,9 @@ fn light_theme_maps_terminal_palette_to_ayu_light() {
     assert_eq!(preset.cursor_bg, 0xff_aa33);
     assert_eq!(preset.cursor_fg, 0xf8_f9fa);
     assert_eq!(preset.selection_bg, (0x55, 0xb4, 0xd4, 0.20));
+    assert_eq!(preset.scrollbar_track, (0xf0, 0xf3, 0xf6));
+    assert_eq!(preset.scrollbar_thumb, (0xd1, 0xd7, 0xde));
+    assert_eq!(preset.scrollbar_thumb_active, (0xc1, 0xc8, 0xd1));
     assert_eq!(preset.ansi[0], (0x00, 0x00, 0x00));
     assert_eq!(preset.ansi[7], (0xc7, 0xc7, 0xc7));
     assert_eq!(preset.ansi[8], (0x68, 0x68, 0x68));

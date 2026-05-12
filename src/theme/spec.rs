@@ -433,7 +433,7 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
                     gradient_bottom: TERMINAL_BG_GRADIENT_BOTTOM_DARK,
                 },
                 foreground: TerminalForegroundTheme {
-                    default: 0xb3_b1ad,
+                    default: 0xc5_c1b8,
                     soft: 0x99_a1a8,
                     dim: 0x5c_6773,
                     inactive: 0x82_8c99,
@@ -443,8 +443,8 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
                     foreground: TERMINAL_BG_BASE_DARK,
                 },
                 selection: TerminalOverlayTheme {
-                    rgb: 0x25_3340,
-                    alpha: 0.85,
+                    rgb: 0x2a_3541,
+                    alpha: 0.78,
                 },
                 search_match: TerminalOverlayTheme {
                     rgb: 0x4c_4126,
@@ -455,9 +455,9 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
                     alpha: 0.36,
                 },
                 scrollbar: TerminalScrollbarTheme {
-                    track: 0x11_151c,
-                    thumb: 0x33_404a,
-                    thumb_active: 0x47_5866,
+                    track: 0x11_1821,
+                    thumb: 0x2f_3944,
+                    thumb_active: 0x3c_4856,
                 },
                 ansi: [
                     0x01_060e, 0xea_6c73, 0x91_b362, 0xf9_af4f, 0x53_bdfa, 0xfa_e994, 0x90_e1c6,
@@ -502,7 +502,7 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
                 },
                 selection: TerminalOverlayTheme {
                     rgb: 0x55_b4d4,
-                    alpha: 0.22,
+                    alpha: 0.20,
                 },
                 search_match: TerminalOverlayTheme {
                     rgb: 0xf8_dfa0,
@@ -513,9 +513,9 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
                     alpha: 0.28,
                 },
                 scrollbar: TerminalScrollbarTheme {
-                    track: 0xe6_e9ef,
-                    thumb: 0xc7_ccd4,
-                    thumb_active: 0xb6_bdc8,
+                    track: 0xf0_f3f6,
+                    thumb: 0xd1_d7de,
+                    thumb_active: 0xc1_c8d1,
                 },
                 ansi: [
                     0x00_0000, 0xea_6c6d, 0x6c_bf43, 0xec_a944, 0x31_99e1, 0x9e_75c7, 0x46_ba94,
