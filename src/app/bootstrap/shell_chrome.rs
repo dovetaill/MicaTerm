@@ -391,6 +391,14 @@ pub(super) fn sync_top_status_bar_state(
     effects: &dyn PlatformWindowEffects,
 ) {
     sync_theme_and_window_effects(window, state, effects);
+    sync_shell_runtime_palette(
+        window,
+        if state.theme_variant == ThemeVariant::PremiumDefault {
+            projected_theme_for_mode(state.theme_mode)
+        } else {
+            projected_theme_for(state.theme_mode, state.theme_variant)
+        },
+    );
     window.set_show_right_panel(state.show_right_panel);
     window.set_workspace_focus_mode(state.workspace_focus_mode());
     window.set_transfer_center_open(state.transfer_center_open());
@@ -804,7 +812,7 @@ pub(super) fn bind_shell_chrome_callbacks(
                 );
             }
         }
-        sync_theme_and_window_effects(&window, &state, effects_ref.as_ref());
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         save_ui_preferences(&store_ref, &state);
     });
 

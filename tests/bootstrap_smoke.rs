@@ -61,7 +61,7 @@ use mica_term::app::ssh::runtime::{
 use mica_term::app::ssh::session_manager::{
     EnhancementPolicy, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher,
 };
-use mica_term::app::terminal_theme::{preset_for_theme, preset_for_theme_mode};
+use mica_term::app::terminal_theme::{preset_for_theme, preset_for_theme_mode, projected_theme_for_mode};
 use mica_term::app::vault::bootstrap::{
     LocalVaultBootstrapState, load_local_vault_bootstrap_state, load_runtime_vault_key,
     save_local_vault_bootstrap_state,
@@ -211,6 +211,93 @@ fn bootstrap_source_exposes_runtime_shell_palette_publish_helper() {
             && bootstrap_source.contains("preset.terminal.frame_bg")
             && bootstrap_source.contains("preset.terminal.split"),
         "terminal session chrome helper should read terminal host colors from the combined projected preset instead of a detached terminal-only struct"
+    );
+}
+
+#[test]
+fn no_surface_shell_palette_uses_ayu_defaults_and_tracks_theme_toggle() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+
+    let dark = projected_theme_for_mode(ThemeMode::Dark);
+    assert_eq!(
+        app.get_shell_titlebar_background().as_argb_encoded(),
+        0xff00_0000 | dark.titlebar_background
+    );
+    assert_eq!(
+        app.get_shell_sidebar_background().as_argb_encoded(),
+        0xff00_0000 | dark.sidebar_background
+    );
+    assert_eq!(
+        app.get_shell_right_panel_background().as_argb_encoded(),
+        0xff00_0000 | dark.right_panel_background
+    );
+    assert_eq!(
+        app.get_shell_text_primary().as_argb_encoded(),
+        0xff00_0000 | dark.text_primary
+    );
+    assert_eq!(
+        app.get_shell_accent().as_argb_encoded(),
+        0xff00_0000 | dark.accent
+    );
+
+    app.invoke_toggle_theme_mode_requested();
+
+    let light = projected_theme_for_mode(ThemeMode::Light);
+    assert_eq!(
+        app.get_shell_titlebar_background().as_argb_encoded(),
+        0xff00_0000 | light.titlebar_background,
+        "without an active terminal surface the runtime shell titlebar color should refresh to the light Ayu shell palette after a theme toggle"
+    );
+    assert_eq!(
+        app.get_shell_sidebar_background().as_argb_encoded(),
+        0xff00_0000 | light.sidebar_background,
+        "without an active terminal surface the runtime shell sidebar color should refresh to the light Ayu shell palette after a theme toggle"
+    );
+    assert_eq!(
+        app.get_shell_right_panel_background().as_argb_encoded(),
+        0xff00_0000 | light.right_panel_background,
+        "without an active terminal surface the runtime shell right panel color should refresh to the light Ayu shell palette after a theme toggle"
+    );
+    assert_eq!(
+        app.get_shell_text_primary().as_argb_encoded(),
+        0xff00_0000 | light.text_primary,
+        "without an active terminal surface the runtime shell text hierarchy should refresh to the light Ayu shell palette after a theme toggle"
+    );
+    assert_eq!(
+        app.get_shell_accent().as_argb_encoded(),
+        0xff00_0000 | light.accent,
+        "without an active terminal surface the runtime shell accent should refresh to the light Ayu shell palette after a theme toggle"
+    );
+}
+
+#[test]
+fn shell_chrome_sync_routes_theme_toggle_and_resync_through_runtime_shell_palette() {
+    let shell_chrome_source =
+        fs::read_to_string("src/app/bootstrap/shell_chrome.rs").expect("read shell chrome");
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        shell_chrome_source.contains("pub(super) fn sync_top_status_bar_state(")
+            && shell_chrome_source.contains("sync_shell_runtime_palette("),
+        "top status bar sync should publish the runtime shell palette so initial bind and shell chrome refresh paths stay on the active projected Ayu family"
+    );
+    assert!(
+        shell_chrome_source.contains("window.on_toggle_theme_mode_requested(move || {")
+            && shell_chrome_source.contains("sync_top_status_bar_state(&window, &state, effects_ref.as_ref());"),
+        "theme mode toggles should route through the same top-status runtime shell palette sync instead of only updating dark-mode window effects"
+    );
+    assert!(
+        shell_chrome_source.contains("window.on_settings_modal_theme_variant_changed(move |value| {")
+            && shell_chrome_source.contains("sync_workspace_session_state_with_manager("),
+        "theme variant changes should continue to refresh terminal session state after publishing the runtime shell palette"
+    );
+    assert!(
+        bootstrap_source.contains("sync_shell_state(")
+            && bootstrap_source.contains("shell_chrome::sync_top_status_bar_state(window, state, effects);"),
+        "initial bootstrap bind should still enter the shared top-status sync path so runtime shell palette publishing happens on first window setup"
     );
 }
 
