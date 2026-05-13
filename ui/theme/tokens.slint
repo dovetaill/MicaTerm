@@ -3,6 +3,7 @@
 export global ThemeTokens {
     in property <bool> dark-mode: true;
 
+    // Boot-time parity snapshot only: Rust publishes the live runtime shell and terminal palette.
     out property <brush> titlebar-background: dark-mode ? #10151d : #eef2f5;
     out property <brush> tabbar-background: dark-mode ? #10151d : #eef2f5;
     out property <brush> sidebar-background: dark-mode ? #10151d : #eef2f5;

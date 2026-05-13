@@ -102,6 +102,24 @@ fn boot_time_shell_tokens_match_approved_ayu_defaults() {
 }
 
 #[test]
+fn theme_tokens_remain_a_boot_time_parity_snapshot_only() {
+    let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
+
+    assert!(
+        tokens.contains(
+            "// Boot-time parity snapshot only: Rust publishes the live runtime shell and terminal palette."
+        ),
+        "theme token file should explicitly document that it is only a boot-time parity snapshot, not a second live Ayu runtime system"
+    );
+    assert!(
+        !tokens.contains("shell-app-background")
+            && !tokens.contains("shell-titlebar-background")
+            && !tokens.contains("workspace-session-frame-surface"),
+        "theme token file should stay a static boot snapshot instead of growing a parallel runtime property system"
+    );
+}
+
+#[test]
 fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
     let titlebar = fs::read_to_string("ui/shell/titlebar.slint").expect("read titlebar");
     let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
