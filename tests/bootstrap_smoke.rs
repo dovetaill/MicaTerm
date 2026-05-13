@@ -117,6 +117,37 @@ fn rgb_tuple_to_hex((red, green, blue): (u8, u8, u8)) -> u32 {
 }
 
 #[test]
+fn terminal_theme_source_exposes_projected_theme_wrapper_for_shell_palette() {
+    let terminal_theme_source =
+        fs::read_to_string("src/app/terminal_theme.rs").expect("read terminal theme");
+
+    assert!(
+        terminal_theme_source.contains("pub struct ProjectedThemePreset"),
+        "terminal theme projection should expose a combined runtime preset wrapper for shell and terminal colors"
+    );
+    assert!(
+        terminal_theme_source.contains("pub terminal: TerminalThemePreset")
+            && terminal_theme_source.contains("pub app_background: u32")
+            && terminal_theme_source.contains("pub titlebar_background: u32")
+            && terminal_theme_source.contains("pub sidebar_background: u32")
+            && terminal_theme_source.contains("pub right_panel_background: u32")
+            && terminal_theme_source.contains("pub text_primary: u32")
+            && terminal_theme_source.contains("pub accent: u32")
+            && terminal_theme_source.contains("pub sidebar_item_selected_border: u32"),
+        "projected theme wrapper should carry the runtime shell-neighborhood fields alongside the terminal preset"
+    );
+    assert!(
+        terminal_theme_source.contains("pub fn projected_theme_for(")
+            && terminal_theme_source.contains("pub fn projected_theme_for_mode("),
+        "terminal theme projection should expose explicit helpers for variant-aware and default-mode runtime shell palette lookup"
+    );
+    assert!(
+        terminal_theme_source.contains("app_theme_spec(theme_mode, variant)"),
+        "projected theme lookup should derive shell and terminal colors from the shared app theme spec instead of inventing a detached second shell palette"
+    );
+}
+
+#[test]
 fn bootstrap_sftp_source_routes_browser_loads_through_async_dispatcher_contract() {
     let bootstrap_sftp =
         fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
