@@ -78,6 +78,30 @@ fn premium_default_tokens_encode_the_new_calm_surface_ladder() {
 }
 
 #[test]
+fn boot_time_shell_tokens_match_approved_ayu_defaults() {
+    let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
+
+    for expected in [
+        "out property <brush> titlebar-background: dark-mode ? #10151d : #eef2f5;",
+        "out property <brush> tabbar-background: dark-mode ? #10151d : #eef2f5;",
+        "out property <brush> sidebar-background: dark-mode ? #10151d : #eef2f5;",
+        "out property <brush> sidebar-panel-background: dark-mode ? #111821 : #f0f3f6;",
+        "out property <brush> right-panel-background: dark-mode ? #111821 : #f0f3f6;",
+        "out property <brush> terminal-frame-background: dark-mode ? #141b24 : #fafafa;",
+        "out property <brush> separator: dark-mode ? #1b2530 : #d8dee6;",
+        "out property <brush> text-primary: dark-mode ? #c5c1b8 : #5c6166;",
+        "out property <brush> text-secondary: dark-mode ? #9aa4ae : #7a838c;",
+        "out property <brush> text-muted: dark-mode ? #7d8790 : #8a939c;",
+        "out property <brush> accent: dark-mode ? #e6b450 : #ffaa33;",
+    ] {
+        assert!(
+            tokens.contains(expected),
+            "boot-time shell token `{expected}` should match the approved Ayu shell neighborhood defaults before runtime projection takes over"
+        );
+    }
+}
+
+#[test]
 fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
     let titlebar = fs::read_to_string("ui/shell/titlebar.slint").expect("read titlebar");
     let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
