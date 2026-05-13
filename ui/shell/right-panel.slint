@@ -50,6 +50,14 @@ export component RightPanel inherits Rectangle {
     in property <bool> transfer-center-pinned: false;
     in property <bool> sftp-queue-drawer-open: false;
     in property <bool> sftp-panel-drop-target-active: false;
+    in property <color> shell-right-panel-background: ThemeTokens.right-panel-background;
+    in property <color> shell-separator: ThemeTokens.separator;
+    in property <color> shell-border: ThemeTokens.divider-subtle;
+    in property <color> shell-text-primary: ThemeTokens.text-primary;
+    in property <color> shell-text-secondary: ThemeTokens.text-secondary;
+    in property <color> shell-text-muted: ThemeTokens.text-muted;
+    in property <color> shell-accent: ThemeTokens.accent;
+    in property <color> shell-focus-ring: ThemeTokens.focus-ring;
     out property <length> layout-radius: root.border-radius;
     out property <length> layout-border-width: root.border-width;
     out property <length> sftp-drop-target-x: table-card.x;

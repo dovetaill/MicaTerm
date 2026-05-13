@@ -797,6 +797,14 @@ export component AppWindow inherits Window {
                 is-window-maximized: root.is-window-maximized;
                 is-window-active: root.is-window-active;
                 is-window-always-on-top: root.is-window-always-on-top;
+                shell-titlebar-background: root.shell-titlebar-background;
+                shell-separator: root.shell-separator;
+                shell-border: root.shell-border;
+                shell-text-primary: root.shell-text-primary;
+                shell-text-secondary: root.shell-text-secondary;
+                shell-text-muted: root.shell-text-muted;
+                shell-text-inactive: root.shell-text-inactive;
+                shell-accent: root.shell-accent;
 
                 drag-requested => {
                     root.drag-requested();
@@ -899,6 +907,18 @@ export component AppWindow inherits Window {
                         console-asset-items: root.console-asset-items;
                         snippet-asset-items: root.snippet-asset-items;
                         keychain-asset-items: root.keychain-asset-items;
+                        shell-sidebar-background: root.shell-sidebar-background;
+                        shell-sidebar-panel-background: root.shell-sidebar-panel-background;
+                        shell-separator: root.shell-separator;
+                        shell-border: root.shell-border;
+                        shell-text-primary: root.shell-text-primary;
+                        shell-text-secondary: root.shell-text-secondary;
+                        shell-text-muted: root.shell-text-muted;
+                        shell-accent: root.shell-accent;
+                        shell-focus-ring: root.shell-focus-ring;
+                        shell-sidebar-item-hover: root.shell-sidebar-item-hover;
+                        shell-sidebar-item-selected: root.shell-sidebar-item-selected;
+                        shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
 
                         toggle-assets-sidebar-requested => {
                             root.toggle-assets-sidebar-requested();
@@ -1058,6 +1078,19 @@ export component AppWindow inherits Window {
                         workspace-session-selection-end-col <=> root.workspace-session-selection-end-col;
                         workspace-session-context-menu-open <=> root.workspace-session-context-menu-open;
                         workspace-tab-context-menu-open: root.workspace-tab-context-menu-open;
+                        shell-tabbar-background: root.shell-tabbar-background;
+                        shell-titlebar-background: root.shell-titlebar-background;
+                        shell-separator: root.shell-separator;
+                        shell-border: root.shell-border;
+                        shell-hairline: root.shell-hairline;
+                        shell-text-primary: root.shell-text-primary;
+                        shell-text-secondary: root.shell-text-secondary;
+                        shell-text-inactive: root.shell-text-inactive;
+                        shell-accent: root.shell-accent;
+                        shell-tab-active: root.shell-tab-active;
+                        shell-tab-inactive: root.shell-tab-inactive;
+                        shell-tab-hover: root.shell-tab-hover;
+                        shell-tab-active-indicator: root.shell-tab-active-indicator;
 
                         workspace-tab-selected(tab-id) => {
                             root.workspace-tab-selected(tab-id);
@@ -1201,6 +1234,14 @@ export component AppWindow inherits Window {
                         transfer-center-pinned: root.transfer-center-pinned;
                         sftp-queue-drawer-open: root.sftp-queue-drawer-open;
                         sftp-panel-drop-target-active: root.sftp-panel-drop-target-active;
+                        shell-right-panel-background: root.shell-right-panel-background;
+                        shell-separator: root.shell-separator;
+                        shell-border: root.shell-border;
+                        shell-text-primary: root.shell-text-primary;
+                        shell-text-secondary: root.shell-text-secondary;
+                        shell-text-muted: root.shell-text-muted;
+                        shell-accent: root.shell-accent;
+                        shell-focus-ring: root.shell-focus-ring;
 
                         sftp-panel-back-requested => {
                             root.sftp-panel-back-requested();

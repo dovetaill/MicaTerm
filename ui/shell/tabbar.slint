@@ -15,6 +15,19 @@ export struct WorkspaceTabItem {
 export component TabBar inherits Rectangle {
     in property <[WorkspaceTabItem]> items: [];
     in property <bool> suppress-hover-tooltip: false;
+    in property <color> shell-tabbar-background: ThemeTokens.tabbar-background;
+    in property <color> shell-titlebar-background: ThemeTokens.titlebar-background;
+    in property <color> shell-separator: ThemeTokens.separator;
+    in property <color> shell-border: ThemeTokens.divider-subtle;
+    in property <color> shell-hairline: ThemeTokens.hairline;
+    in property <color> shell-text-primary: ThemeTokens.text-primary;
+    in property <color> shell-text-secondary: ThemeTokens.text-secondary;
+    in property <color> shell-text-inactive: ThemeTokens.text-muted;
+    in property <color> shell-accent: ThemeTokens.accent;
+    in property <color> shell-tab-active: ThemeTokens.tab-active-surface;
+    in property <color> shell-tab-inactive: ThemeTokens.tab-inactive-surface;
+    in property <color> shell-tab-hover: ThemeTokens.tab-hover-surface;
+    in property <color> shell-tab-active-indicator: ThemeTokens.tab-active-indicator;
     callback tab-selected(string);
     callback tab-close-requested(string);
     callback tab-reorder-requested(string, int);

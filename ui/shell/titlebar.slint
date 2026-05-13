@@ -28,6 +28,14 @@ export component Titlebar inherits Rectangle {
     in property <string> active-session-host: "";
     in property <string> active-session-status-label: "";
     in property <string> active-session-summary-tooltip: "";
+    in property <color> shell-titlebar-background: ThemeTokens.titlebar-background;
+    in property <color> shell-separator: ThemeTokens.separator;
+    in property <color> shell-border: ThemeTokens.divider-subtle;
+    in property <color> shell-text-primary: ThemeTokens.text-primary;
+    in property <color> shell-text-secondary: ThemeTokens.text-secondary;
+    in property <color> shell-text-muted: ThemeTokens.text-muted;
+    in property <color> shell-text-inactive: ThemeTokens.text-muted;
+    in property <color> shell-accent: ThemeTokens.accent;
 
     private property <image> navigation-icon: @image-url("../../assets/icons/fluent/navigation-24-regular.svg");
     private property <image> header-logotype: @image-url("../../assets/icons/mica-term-header-logotype.svg");

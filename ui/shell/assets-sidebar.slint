@@ -41,6 +41,17 @@ export component AssetsSidebar inherits Rectangle {
     in property <[ConsoleAssetItem]> console-asset-items: [];
     in property <[ConsoleAssetItem]> snippet-asset-items: [];
     in property <[ConsoleAssetItem]> keychain-asset-items: [];
+    in property <color> shell-sidebar-panel-background: ThemeTokens.sidebar-panel-background;
+    in property <color> shell-separator: ThemeTokens.separator;
+    in property <color> shell-border: ThemeTokens.divider-subtle;
+    in property <color> shell-text-primary: ThemeTokens.text-primary;
+    in property <color> shell-text-secondary: ThemeTokens.text-secondary;
+    in property <color> shell-text-muted: ThemeTokens.text-muted;
+    in property <color> shell-accent: ThemeTokens.accent;
+    in property <color> shell-focus-ring: ThemeTokens.focus-ring;
+    in property <color> shell-sidebar-item-hover: ThemeTokens.sidebar-item-hover-background;
+    in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;
+    in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;
     out property <length> search-row-height: search-row-host.height;
     out property <length> create-menu-anchor-x: create-button.absolute-position.x;
     out property <length> create-menu-anchor-y: create-button.absolute-position.y;

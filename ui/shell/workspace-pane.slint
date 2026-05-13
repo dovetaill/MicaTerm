@@ -78,6 +78,19 @@ export component WorkspacePane inherits Rectangle {
     in-out property <int> workspace-session-selection-end-col: -1;
     in-out property <bool> workspace-session-context-menu-open: false;
     in property <bool> workspace-tab-context-menu-open: false;
+    in property <color> shell-tabbar-background: ThemeTokens.tabbar-background;
+    in property <color> shell-titlebar-background: ThemeTokens.titlebar-background;
+    in property <color> shell-separator: ThemeTokens.separator;
+    in property <color> shell-border: ThemeTokens.divider-subtle;
+    in property <color> shell-hairline: ThemeTokens.hairline;
+    in property <color> shell-text-primary: ThemeTokens.text-primary;
+    in property <color> shell-text-secondary: ThemeTokens.text-secondary;
+    in property <color> shell-text-inactive: ThemeTokens.text-muted;
+    in property <color> shell-accent: ThemeTokens.accent;
+    in property <color> shell-tab-active: ThemeTokens.tab-active-surface;
+    in property <color> shell-tab-inactive: ThemeTokens.tab-inactive-surface;
+    in property <color> shell-tab-hover: ThemeTokens.tab-hover-surface;
+    in property <color> shell-tab-active-indicator: ThemeTokens.tab-active-indicator;
     out property <length> layout-workspace-session-native-surface-x:
         content-host.x + session-host.native-surface-x;
     out property <length> layout-workspace-session-native-surface-y:
@@ -140,6 +153,19 @@ export component WorkspacePane inherits Rectangle {
             items: root.workspace-tab-items;
             suppress-hover-tooltip: root.workspace-tab-context-menu-open
                 || root.workspace-session-context-menu-open;
+            shell-tabbar-background: root.shell-tabbar-background;
+            shell-titlebar-background: root.shell-titlebar-background;
+            shell-separator: root.shell-separator;
+            shell-border: root.shell-border;
+            shell-hairline: root.shell-hairline;
+            shell-text-primary: root.shell-text-primary;
+            shell-text-secondary: root.shell-text-secondary;
+            shell-text-inactive: root.shell-text-inactive;
+            shell-accent: root.shell-accent;
+            shell-tab-active: root.shell-tab-active;
+            shell-tab-inactive: root.shell-tab-inactive;
+            shell-tab-hover: root.shell-tab-hover;
+            shell-tab-active-indicator: root.shell-tab-active-indicator;
 
             tab-selected(tab-id) => {
                 root.workspace-tab-selected(tab-id);
