@@ -175,6 +175,46 @@ fn terminal_theme_helpers_route_through_the_projected_runtime_preset() {
 }
 
 #[test]
+fn bootstrap_source_exposes_runtime_shell_palette_publish_helper() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let app_window_source = fs::read_to_string("ui/app-window.slint").expect("read app window");
+
+    assert!(
+        app_window_source.contains("in-out property <color> shell-app-background: ThemeTokens.window-surface;")
+            && app_window_source.contains("in-out property <color> shell-titlebar-background: ThemeTokens.titlebar-background;")
+            && app_window_source.contains("in-out property <color> shell-tabbar-background: ThemeTokens.tabbar-background;")
+            && app_window_source.contains("in-out property <color> shell-sidebar-background: ThemeTokens.sidebar-background;")
+            && app_window_source.contains("in-out property <color> shell-sidebar-panel-background: ThemeTokens.sidebar-panel-background;")
+            && app_window_source.contains("in-out property <color> shell-right-panel-background: ThemeTokens.right-panel-background;")
+            && app_window_source.contains("in-out property <color> shell-text-primary: ThemeTokens.text-primary;")
+            && app_window_source.contains("in-out property <color> shell-accent: ThemeTokens.accent;"),
+        "AppWindow should declare first-class runtime shell palette properties before bootstrap publishes the active Ayu shell-neighborhood colors"
+    );
+    assert!(
+        bootstrap_source.contains("fn sync_shell_runtime_palette(window: &AppWindow, preset: ProjectedThemePreset)")
+            && bootstrap_source.contains("window.set_shell_app_background(")
+            && bootstrap_source.contains("window.set_shell_titlebar_background(")
+            && bootstrap_source.contains("window.set_shell_tabbar_background(")
+            && bootstrap_source.contains("window.set_shell_sidebar_background(")
+            && bootstrap_source.contains("window.set_shell_sidebar_panel_background(")
+            && bootstrap_source.contains("window.set_shell_right_panel_background(")
+            && bootstrap_source.contains("window.set_shell_text_primary(")
+            && bootstrap_source.contains("window.set_shell_accent("),
+        "bootstrap should expose a dedicated runtime shell palette publish helper so the active Ayu shell-neighborhood colors can be pushed into AppWindow setters"
+    );
+    assert!(
+        bootstrap_source.contains("fn sync_workspace_terminal_shell_chrome(window: &AppWindow, preset: ProjectedThemePreset)")
+            && bootstrap_source.contains("preset.terminal.selection_bg")
+            && bootstrap_source.contains("preset.terminal.scrollbar_track")
+            && bootstrap_source.contains("preset.terminal.scrollbar_thumb")
+            && bootstrap_source.contains("preset.terminal.scrollbar_thumb_active")
+            && bootstrap_source.contains("preset.terminal.frame_bg")
+            && bootstrap_source.contains("preset.terminal.split"),
+        "terminal session chrome helper should read terminal host colors from the combined projected preset instead of a detached terminal-only struct"
+    );
+}
+
+#[test]
 fn bootstrap_sftp_source_routes_browser_loads_through_async_dispatcher_contract() {
     let bootstrap_sftp =
         fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
