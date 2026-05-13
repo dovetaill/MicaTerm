@@ -83,9 +83,9 @@ export component AssetsSidebar inherits Rectangle {
     width: expanded ? root.expanded-width : 0px;
     visible: expanded;
     clip: true;
-    background: ThemeTokens.sidebar-panel-background;
+    background: root.shell-sidebar-panel-background;
     border-width: 1px;
-    border-color: ThemeTokens.divider-subtle;
+    border-color: root.shell-border;
 
     VerticalLayout {
         spacing: 0px;
@@ -104,7 +104,7 @@ export component AssetsSidebar inherits Rectangle {
                 Text {
                     text: "Assets";
                     font-family: AppTypography.ui-font-family;
-                    color: ThemeTokens.text-primary;
+                    color: root.shell-text-primary;
                     font-size: 14px;
                     font-weight: AppTypography.ui-font-weight-regular;
                     letter-spacing: 0px;
@@ -204,7 +204,7 @@ export component AssetsSidebar inherits Rectangle {
                 y: parent.height - 1px;
                 width: parent.width - 24px;
                 height: 1px;
-                background: ThemeTokens.divider-subtle;
+                background: root.shell-border;
             }
         }
 
@@ -271,14 +271,14 @@ export component AssetsSidebar inherits Rectangle {
                     Text {
                         width: parent.width;
                         text: "No assets yet";
-                        color: ThemeTokens.text-primary;
+                        color: root.shell-text-primary;
                         horizontal-alignment: center;
                     }
 
                     Text {
                         width: parent.width;
                         text: "Right-click or use Create to add a folder or SSH connection.";
-                        color: ThemeTokens.text-secondary;
+                        color: root.shell-text-secondary;
                         horizontal-alignment: center;
                         wrap: word-wrap;
                     }
@@ -311,6 +311,12 @@ export component AssetsSidebar inherits Rectangle {
                         disclosure-state: item.disclosure_state;
                         path-hint: item.path_hint;
                         compact-flat-mode: item.compact_flat_mode;
+                        shell-focus-ring: root.shell-focus-ring;
+                        shell-text-primary: root.shell-text-primary;
+                        shell-text-secondary: root.shell-text-secondary;
+                        shell-sidebar-item-hover: root.shell-sidebar-item-hover;
+                        shell-sidebar-item-selected: root.shell-sidebar-item-selected;
+                        shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
 
                         selected-requested(item-id) => {
                             root.asset-selected(item-id);
@@ -390,14 +396,14 @@ export component AssetsSidebar inherits Rectangle {
                     Text {
                         width: parent.width;
                         text: "No snippets yet";
-                        color: ThemeTokens.text-primary;
+                        color: root.shell-text-primary;
                         horizontal-alignment: center;
                     }
 
                     Text {
                         width: parent.width;
                         text: "Use Create to add a snippet or package.";
-                        color: ThemeTokens.text-secondary;
+                        color: root.shell-text-secondary;
                         horizontal-alignment: center;
                         wrap: word-wrap;
                     }
@@ -430,6 +436,12 @@ export component AssetsSidebar inherits Rectangle {
                         disclosure-state: item.disclosure_state;
                         path-hint: item.path_hint;
                         compact-flat-mode: item.compact_flat_mode;
+                        shell-focus-ring: root.shell-focus-ring;
+                        shell-text-primary: root.shell-text-primary;
+                        shell-text-secondary: root.shell-text-secondary;
+                        shell-sidebar-item-hover: root.shell-sidebar-item-hover;
+                        shell-sidebar-item-selected: root.shell-sidebar-item-selected;
+                        shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
 
                         selected-requested(item-id) => {
                             root.asset-selected(item-id);
@@ -509,14 +521,14 @@ export component AssetsSidebar inherits Rectangle {
                     Text {
                         width: parent.width;
                         text: "No keychain items yet";
-                        color: ThemeTokens.text-primary;
+                        color: root.shell-text-primary;
                         horizontal-alignment: center;
                     }
 
                     Text {
                         width: parent.width;
                         text: "Use Create to add a folder, identity, or SSH key.";
-                        color: ThemeTokens.text-secondary;
+                        color: root.shell-text-secondary;
                         horizontal-alignment: center;
                         wrap: word-wrap;
                     }
@@ -549,6 +561,12 @@ export component AssetsSidebar inherits Rectangle {
                         disclosure-state: item.disclosure_state;
                         path-hint: item.path_hint;
                         compact-flat-mode: item.compact_flat_mode;
+                        shell-focus-ring: root.shell-focus-ring;
+                        shell-text-primary: root.shell-text-primary;
+                        shell-text-secondary: root.shell-text-secondary;
+                        shell-sidebar-item-hover: root.shell-sidebar-item-hover;
+                        shell-sidebar-item-selected: root.shell-sidebar-item-selected;
+                        shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
 
                         selected-requested(item-id) => {
                             root.asset-selected(item-id);

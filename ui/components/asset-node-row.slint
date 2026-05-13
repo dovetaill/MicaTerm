@@ -13,6 +13,12 @@ export component AssetNodeRow inherits Rectangle {
     in property <bool> expanded: false;
     in property <bool> selected: false;
     in property <bool> focused: false;
+    in property <color> shell-focus-ring: ThemeTokens.focus-ring;
+    in property <color> shell-text-primary: ThemeTokens.text-primary;
+    in property <color> shell-text-secondary: ThemeTokens.text-secondary;
+    in property <color> shell-sidebar-item-hover: ThemeTokens.sidebar-item-hover-background;
+    in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;
+    in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;
     callback selected-requested(string);
     callback activated-requested(string);
     callback toggle-expanded-requested(string);
@@ -56,16 +62,16 @@ export component AssetNodeRow inherits Rectangle {
     border-radius: 8px;
     border-width: root.focused || root.selected ? 1px : 0px;
     border-color: root.focused
-        ? ThemeTokens.focus-ring
+        ? root.shell-focus-ring
         : root.selected
-            ? ThemeTokens.sidebar-item-selected-border
+            ? root.shell-sidebar-item-selected-border
             : transparent;
     background: touch.pressed
-        ? ThemeTokens.sidebar-item-selected-background
+        ? root.shell-sidebar-item-selected
         : root.selected
-            ? ThemeTokens.sidebar-item-selected-background
+            ? root.shell-sidebar-item-selected
             : touch.has-hover
-                ? ThemeTokens.sidebar-item-hover-background
+                ? root.shell-sidebar-item-hover
                 : transparent;
 
     Rectangle {
@@ -82,7 +88,7 @@ export component AssetNodeRow inherits Rectangle {
             height: 12px;
             source: root.disclosure-icon;
             image-fit: contain;
-            colorize: root.selected || touch.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
+            colorize: root.selected || touch.has-hover ? root.shell-text-primary : root.shell-text-secondary;
             opacity: root.disclosure-state == "expanded" ? 0.96 : 0.72;
         }
 
@@ -105,7 +111,7 @@ export component AssetNodeRow inherits Rectangle {
         height: 16px;
         source: root.kind-icon;
         image-fit: contain;
-        colorize: root.selected || touch.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
+        colorize: root.selected || touch.has-hover ? root.shell-text-primary : root.shell-text-secondary;
     }
 
     Text {
@@ -117,7 +123,7 @@ export component AssetNodeRow inherits Rectangle {
         font-family: AppTypography.ui-font-family;
         font-size: AppTypography.ui-font-size-caption;
         font-weight: AppTypography.ui-font-weight-regular;
-        color: ThemeTokens.text-primary;
+        color: root.shell-text-primary;
         vertical-alignment: center;
     }
 
@@ -129,7 +135,7 @@ export component AssetNodeRow inherits Rectangle {
         text: root.path-hint;
         font-family: AppTypography.ui-font-family;
         font-weight: AppTypography.ui-font-weight-regular;
-        color: ThemeTokens.text-secondary;
+        color: root.shell-text-secondary;
         font-size: AppTypography.ui-font-size-caption;
         horizontal-alignment: right;
         vertical-alignment: center;

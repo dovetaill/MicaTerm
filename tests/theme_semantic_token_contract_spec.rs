@@ -259,6 +259,105 @@ fn runtime_shell_palette_properties_are_threaded_through_the_window_tree() {
 }
 
 #[test]
+fn runtime_shell_palette_consumers_switch_from_tokens_to_live_props() {
+    let titlebar = fs::read_to_string("ui/shell/titlebar.slint").expect("read titlebar");
+    let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
+    let active_tab = fs::read_to_string("ui/components/active-tab.slint").expect("read active tab");
+    let sidebar = fs::read_to_string("ui/shell/sidebar.slint").expect("read sidebar");
+    let assets_sidebar =
+        fs::read_to_string("ui/shell/assets-sidebar.slint").expect("read assets sidebar");
+    let sidebar_button =
+        fs::read_to_string("ui/components/sidebar-nav-button.slint").expect("read sidebar button");
+    let asset_row =
+        fs::read_to_string("ui/components/asset-node-row.slint").expect("read asset row");
+    let right_panel = fs::read_to_string("ui/shell/right-panel.slint").expect("read right panel");
+    let workspace = fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace");
+
+    assert!(
+        titlebar.contains("background: root.shell-titlebar-background;")
+            && titlebar.contains("border-color: root.shell-border;")
+            && titlebar.contains("colorize: root.shell-text-primary;")
+            && titlebar.contains("color: root.shell-text-primary;")
+            && titlebar.contains("color: root.shell-text-secondary;")
+            && !titlebar.contains("\n    background: ThemeTokens.titlebar-background;\n"),
+        "titlebar should consume the live runtime shell palette for its active background and text hierarchy instead of detached titlebar tokens"
+    );
+    assert!(
+        tabbar.contains("background: root.shell-tabbar-background;")
+            && tabbar.contains("background: root.shell-titlebar-background;")
+            && tabbar.contains("border-color: root.shell-border;")
+            && tabbar.contains("? root.shell-tab-inactive")
+            && tabbar.contains("colorize: new-tab-touch.has-hover ? root.shell-text-primary : root.shell-text-secondary;")
+            && tabbar.contains("shell-tab-active: root.shell-tab-active;")
+            && !tabbar.contains("\n    background: ThemeTokens.tabbar-background;\n"),
+        "tabbar should switch its active shell surfaces to runtime shell props and forward the tab ladder into ActiveTab"
+    );
+    assert!(
+        active_tab.contains("in property <color> shell-tab-active: ThemeTokens.tab-active-surface;")
+            && active_tab.contains("in property <color> shell-tab-hover: ThemeTokens.tab-hover-surface;")
+            && active_tab.contains("in property <color> shell-text-primary: ThemeTokens.text-primary;")
+            && active_tab.contains("background: root.drag-active")
+            && active_tab.contains("? root.shell-tab-active")
+            && active_tab.contains("? root.shell-tab-hover")
+            && active_tab.contains("background: root.shell-tab-active-indicator;")
+            && active_tab.contains("color: root.active || root.drag-active ? root.shell-text-primary : root.shell-text-secondary;"),
+        "active tabs should render tab surfaces, active indicator, and text hierarchy from runtime shell props"
+    );
+    assert!(
+        sidebar.contains("background: root.shell-sidebar-background;")
+            && sidebar.contains("border-color: root.shell-border;")
+            && sidebar.contains("background: root.shell-border;")
+            && sidebar.contains("shell-sidebar-item-selected: root.shell-sidebar-item-selected;")
+            && sidebar.contains("shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;"),
+        "sidebar should switch its shell surfaces and forward item-state runtime props into activity buttons and the assets panel"
+    );
+    assert!(
+        sidebar_button.contains("in property <color> shell-sidebar-item-hover: ThemeTokens.sidebar-item-hover-background;")
+            && sidebar_button.contains("in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;")
+            && sidebar_button.contains("in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;")
+            && sidebar_button.contains("border-color: root.active ? root.shell-sidebar-item-selected-border : root.shell-border;")
+            && sidebar_button.contains("? root.shell-sidebar-item-selected")
+            && sidebar_button.contains("? root.shell-sidebar-item-hover")
+            && sidebar_button.contains("colorize: root.active || touch.has-hover ? root.shell-text-primary : root.shell-text-secondary;"),
+        "sidebar activity buttons should use runtime sidebar selected and hover state colors instead of detached ThemeTokens"
+    );
+    assert!(
+        assets_sidebar.contains("background: root.shell-sidebar-panel-background;")
+            && assets_sidebar.contains("border-color: root.shell-border;")
+            && assets_sidebar.contains("color: root.shell-text-primary;")
+            && assets_sidebar.contains("color: root.shell-text-secondary;")
+            && assets_sidebar.contains("shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;")
+            && !assets_sidebar.contains("\n    background: ThemeTokens.sidebar-panel-background;\n"),
+        "assets sidebar should consume the live runtime shell palette for its raised panel and text hierarchy"
+    );
+    assert!(
+        asset_row.contains("in property <color> shell-focus-ring: ThemeTokens.focus-ring;")
+            && asset_row.contains("in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;")
+            && asset_row.contains("in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;")
+            && asset_row.contains("? root.shell-focus-ring")
+            && asset_row.contains("? root.shell-sidebar-item-selected-border")
+            && asset_row.contains("? root.shell-sidebar-item-selected")
+            && asset_row.contains("? root.shell-sidebar-item-hover")
+            && asset_row.contains("color: root.shell-text-primary;")
+            && asset_row.contains("color: root.shell-text-secondary;"),
+        "asset rows should render selected, hover, focus, and text colors from runtime sidebar props"
+    );
+    assert!(
+        right_panel.contains("background: root.shell-right-panel-background;")
+            && right_panel.contains("background: root.shell-border;")
+            && right_panel.contains("border-color: root.shell-border;")
+            && right_panel.contains("color: root.shell-text-primary;")
+            && right_panel.contains("color: root.shell-text-secondary;")
+            && !right_panel.contains("\n    background: ThemeTokens.right-panel-background;\n"),
+        "right panel should switch its active shell surfaces and text hierarchy to the runtime shell palette"
+    );
+    assert!(
+        workspace.contains("background: root.workspace-session-frame-surface;"),
+        "workspace shell frame should continue to use the projected session frame surface around the terminal host"
+    );
+}
+
+#[test]
 fn welcome_shell_copy_uses_token_colors_instead_of_opacity_fades() {
     let welcome = fs::read_to_string("ui/welcome/welcome-view.slint").expect("read welcome view");
     let quick_launch =
