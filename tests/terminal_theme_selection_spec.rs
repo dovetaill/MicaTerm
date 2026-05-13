@@ -175,8 +175,8 @@ fn slint_terminal_tokens_match_shared_no_frame_defaults() {
     assert!(
         tokens.contains(&format!(
             "terminal-frame-background: dark-mode ? {} : {};",
-            hex_rgb_tuple(dark_preset.split),
-            hex_rgb_tuple(light_preset.split),
+            hex_rgb(dark_preset.frame_bg),
+            hex_rgb(light_preset.frame_bg),
         )),
         "Slint terminal frame tokens should stay aligned with the shared Ayu preset so workspace chrome does not drift from the terminal split/frame palette"
     );
