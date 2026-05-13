@@ -2,7 +2,7 @@
 
 use wezterm_term::color::{ColorPalette, RgbColor, SrgbaTuple};
 
-use crate::theme::{ThemeMode, ThemeVariant, app_theme_spec, terminal_palette_spec, terminal_palette_spec_for};
+use crate::theme::{ThemeMode, ThemeVariant, app_theme_spec};
 
 #[derive(Debug, Clone, Copy)]
 pub struct TerminalThemePreset {
@@ -92,36 +92,12 @@ fn terminal_preset_from_app_spec(
     }
 }
 
-fn preset_from_spec(theme_mode: ThemeMode, variant: ThemeVariant) -> TerminalThemePreset {
-    let spec = if variant == ThemeVariant::PremiumDefault {
-        terminal_palette_spec(theme_mode)
-    } else {
-        terminal_palette_spec_for(theme_mode, variant)
-    };
-    TerminalThemePreset {
-        name: spec.name,
-        background: spec.default_bg,
-        foreground: spec.default_fg,
-        viewport_bg_top: spec.row_bg_even,
-        viewport_bg_bottom: spec.row_bg_odd,
-        cursor_bg: spec.cursor_bg,
-        cursor_fg: spec.cursor_fg,
-        selection_bg: rgba_components(spec.selection_rgb, spec.selection_alpha),
-        scrollbar_track: rgb_components(spec.scrollbar_track),
-        ansi: spec.ansi.map(rgb_components),
-        frame_bg: spec.frame_bg,
-        scrollbar_thumb: rgb_components(spec.scrollbar_thumb),
-        scrollbar_thumb_active: rgb_components(spec.scrollbar_thumb_active),
-        split: rgb_components(spec.split),
-    }
-}
-
 pub fn preset_for_theme(theme_mode: ThemeMode, variant: ThemeVariant) -> TerminalThemePreset {
-    preset_from_spec(theme_mode, variant)
+    projected_theme_for(theme_mode, variant).terminal
 }
 
 pub fn preset_for_theme_mode(theme_mode: ThemeMode) -> TerminalThemePreset {
-    preset_for_theme(theme_mode, ThemeVariant::PremiumDefault)
+    projected_theme_for_mode(theme_mode).terminal
 }
 
 pub fn projected_theme_for(theme_mode: ThemeMode, variant: ThemeVariant) -> ProjectedThemePreset {

@@ -148,6 +148,33 @@ fn terminal_theme_source_exposes_projected_theme_wrapper_for_shell_palette() {
 }
 
 #[test]
+fn terminal_theme_helpers_route_through_the_projected_runtime_preset() {
+    let terminal_theme_source =
+        fs::read_to_string("src/app/terminal_theme.rs").expect("read terminal theme");
+
+    assert!(
+        terminal_theme_source.contains("pub fn preset_for_theme(theme_mode: ThemeMode, variant: ThemeVariant) -> TerminalThemePreset")
+            && terminal_theme_source.contains("projected_theme_for(theme_mode, variant).terminal"),
+        "preset_for_theme should stay available for renderer callers but now delegate through the combined projected runtime preset"
+    );
+    assert!(
+        terminal_theme_source.contains("pub fn preset_for_theme_mode(theme_mode: ThemeMode) -> TerminalThemePreset")
+            && terminal_theme_source.contains("projected_theme_for_mode(theme_mode).terminal"),
+        "preset_for_theme_mode should keep the default-mode helper entrypoint while sharing the same projected runtime preset chain"
+    );
+    assert!(
+        terminal_theme_source.contains("pub fn palette_for_theme(theme_mode: ThemeMode, variant: ThemeVariant) -> ColorPalette")
+            && terminal_theme_source.contains("preset_for_theme(theme_mode, variant).to_color_palette()"),
+        "palette_for_theme should keep building the renderer palette from the retained preset helper instead of bypassing that contract"
+    );
+    assert!(
+        terminal_theme_source.contains("pub fn selection_overlay_rgba_for(theme_mode: ThemeMode, variant: ThemeVariant) -> u32")
+            && terminal_theme_source.contains("let preset = preset_for_theme(theme_mode, variant);"),
+        "selection_overlay_rgba_for should keep reusing the retained preset helper so terminal overlay colors stay on one projection path"
+    );
+}
+
+#[test]
 fn bootstrap_sftp_source_routes_browser_loads_through_async_dispatcher_contract() {
     let bootstrap_sftp =
         fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
