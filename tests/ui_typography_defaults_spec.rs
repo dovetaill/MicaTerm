@@ -148,7 +148,7 @@ fn weak_small_text_hotspots_stop_relying_on_tiny_sizes_and_low_opacity() {
     assert!(
         asset_row.contains("text: root.path-hint;")
             && asset_row.contains("font-weight: AppTypography.ui-font-weight-regular;")
-            && asset_row.contains("color: ThemeTokens.text-secondary;"),
+            && asset_row.contains("color: root.shell-text-secondary;"),
         "asset row helper text should use JetBrains Maple Mono Regular so sidebar metadata stops reading heavier than the surrounding Windows shell copy"
     );
 

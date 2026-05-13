@@ -160,7 +160,7 @@ fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
     assert!(
         active_tab.contains("ThemeTokens.tab-active-surface")
             && active_tab.contains("ThemeTokens.tab-hover-surface")
-            && active_tab.contains("ThemeTokens.tab-active-line")
+            && active_tab.contains("ThemeTokens.tab-active-indicator")
             && active_tab.contains("ThemeTokens.text-secondary"),
         "active tabs should use the calmer tab token family instead of reading like raised buttons"
     );
@@ -210,9 +210,9 @@ fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
             && theme_spec.contains("pub const TERMINAL_BG_BASE_DARK: u32 = 0x0a_0e14;")
             && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_TOP_DARK: u32 = 0x0a_0e14;")
             && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_BOTTOM_DARK: u32 = 0x0a_0e14;")
-            && theme_spec.contains("pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xfa_fafa;")
-            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xfa_fafa;")
-            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xfa_fafa;"),
+            && theme_spec.contains("pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xf8_f9fa;")
+            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xf8_f9fa;")
+            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xf8_f9fa;"),
         "terminal palette spec should expose the shared Ayu viewport background constants, disable legacy row banding/grain, and keep the default viewport backgrounds flat across renderers"
     );
     assert!(

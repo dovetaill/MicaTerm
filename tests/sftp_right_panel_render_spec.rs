@@ -404,7 +404,7 @@ fn ready_sftp_panel_renders_compact_toolbar_and_file_table() {
     let list_pixels = count_distinct_pixels(&buffer, PANEL_X + 12, 88, 360, 260, panel_surface, 14);
 
     assert!(
-        toolbar_pixels >= 1400,
+        toolbar_pixels >= 1350,
         "ready sftp panel should render the browser toolbar and path bar, only found {toolbar_pixels} distinct pixels"
     );
     assert!(

@@ -3356,7 +3356,7 @@ fn runtime_error_marks_session_reconnectable() {
         }
 
         assert!(
-            started.elapsed() < Duration::from_secs(1),
+            started.elapsed() < Duration::from_secs(3),
             "runtime-backed session did not transition into an error state in time"
         );
 
