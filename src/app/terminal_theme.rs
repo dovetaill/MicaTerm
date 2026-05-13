@@ -71,9 +71,7 @@ impl TerminalThemePreset {
     }
 }
 
-fn terminal_preset_from_app_spec(
-    spec: crate::theme::AppThemeSpec,
-) -> TerminalThemePreset {
+fn terminal_preset_from_app_spec(spec: crate::theme::AppThemeSpec) -> TerminalThemePreset {
     TerminalThemePreset {
         name: spec.terminal.name,
         background: spec.terminal.background.base,

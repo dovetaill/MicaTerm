@@ -61,7 +61,9 @@ use mica_term::app::ssh::runtime::{
 use mica_term::app::ssh::session_manager::{
     EnhancementPolicy, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher,
 };
-use mica_term::app::terminal_theme::{preset_for_theme, preset_for_theme_mode, projected_theme_for_mode};
+use mica_term::app::terminal_theme::{
+    preset_for_theme, preset_for_theme_mode, projected_theme_for_mode,
+};
 use mica_term::app::vault::bootstrap::{
     LocalVaultBootstrapState, load_local_vault_bootstrap_state, load_runtime_vault_key,
     save_local_vault_bootstrap_state,
@@ -158,18 +160,22 @@ fn terminal_theme_helpers_route_through_the_projected_runtime_preset() {
         "preset_for_theme should stay available for renderer callers but now delegate through the combined projected runtime preset"
     );
     assert!(
-        terminal_theme_source.contains("pub fn preset_for_theme_mode(theme_mode: ThemeMode) -> TerminalThemePreset")
+        terminal_theme_source
+            .contains("pub fn preset_for_theme_mode(theme_mode: ThemeMode) -> TerminalThemePreset")
             && terminal_theme_source.contains("projected_theme_for_mode(theme_mode).terminal"),
         "preset_for_theme_mode should keep the default-mode helper entrypoint while sharing the same projected runtime preset chain"
     );
     assert!(
-        terminal_theme_source.contains("pub fn palette_for_theme(theme_mode: ThemeMode, variant: ThemeVariant) -> ColorPalette")
-            && terminal_theme_source.contains("preset_for_theme(theme_mode, variant).to_color_palette()"),
+        terminal_theme_source.contains(
+            "pub fn palette_for_theme(theme_mode: ThemeMode, variant: ThemeVariant) -> ColorPalette"
+        ) && terminal_theme_source
+            .contains("preset_for_theme(theme_mode, variant).to_color_palette()"),
         "palette_for_theme should keep building the renderer palette from the retained preset helper instead of bypassing that contract"
     );
     assert!(
-        terminal_theme_source.contains("pub fn selection_overlay_rgba_for(theme_mode: ThemeMode, variant: ThemeVariant) -> u32")
-            && terminal_theme_source.contains("let preset = preset_for_theme(theme_mode, variant);"),
+        terminal_theme_source.contains(
+            "pub fn selection_overlay_rgba_for(theme_mode: ThemeMode, variant: ThemeVariant) -> u32"
+        ) && terminal_theme_source.contains("let preset = preset_for_theme(theme_mode, variant);"),
         "selection_overlay_rgba_for should keep reusing the retained preset helper so terminal overlay colors stay on one projection path"
     );
 }
@@ -191,8 +197,9 @@ fn bootstrap_source_exposes_runtime_shell_palette_publish_helper() {
         "AppWindow should declare first-class runtime shell palette properties before bootstrap publishes the active Ayu shell-neighborhood colors"
     );
     assert!(
-        bootstrap_source.contains("fn sync_shell_runtime_palette(window: &AppWindow, preset: ProjectedThemePreset)")
-            && bootstrap_source.contains("window.set_shell_app_background(")
+        bootstrap_source.contains(
+            "fn sync_shell_runtime_palette(window: &AppWindow, preset: ProjectedThemePreset)"
+        ) && bootstrap_source.contains("window.set_shell_app_background(")
             && bootstrap_source.contains("window.set_shell_titlebar_background(")
             && bootstrap_source.contains("window.set_shell_tabbar_background(")
             && bootstrap_source.contains("window.set_shell_sidebar_background(")
@@ -286,17 +293,20 @@ fn shell_chrome_sync_routes_theme_toggle_and_resync_through_runtime_shell_palett
     );
     assert!(
         shell_chrome_source.contains("window.on_toggle_theme_mode_requested(move || {")
-            && shell_chrome_source.contains("sync_top_status_bar_state(&window, &state, effects_ref.as_ref());"),
+            && shell_chrome_source
+                .contains("sync_top_status_bar_state(&window, &state, effects_ref.as_ref());"),
         "theme mode toggles should route through the same top-status runtime shell palette sync instead of only updating dark-mode window effects"
     );
     assert!(
-        shell_chrome_source.contains("window.on_settings_modal_theme_variant_changed(move |value| {")
+        shell_chrome_source
+            .contains("window.on_settings_modal_theme_variant_changed(move |value| {")
             && shell_chrome_source.contains("sync_workspace_session_state_with_manager("),
         "theme variant changes should continue to refresh terminal session state after publishing the runtime shell palette"
     );
     assert!(
         bootstrap_source.contains("sync_shell_state(")
-            && bootstrap_source.contains("shell_chrome::sync_top_status_bar_state(window, state, effects);"),
+            && bootstrap_source
+                .contains("shell_chrome::sync_top_status_bar_state(window, state, effects);"),
         "initial bootstrap bind should still enter the shared top-status sync path so runtime shell palette publishing happens on first window setup"
     );
 }

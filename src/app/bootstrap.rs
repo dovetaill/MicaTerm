@@ -2302,20 +2302,14 @@ fn sync_shell_runtime_palette(window: &AppWindow, preset: ProjectedThemePreset) 
     window.set_shell_border(slint_color_from_rgba(0xff00_0000 | preset.border));
     window.set_shell_hairline(slint_color_from_rgba(0xff00_0000 | preset.hairline));
     window.set_shell_text_primary(slint_color_from_rgba(0xff00_0000 | preset.text_primary));
-    window.set_shell_text_secondary(slint_color_from_rgba(
-        0xff00_0000 | preset.text_secondary,
-    ));
+    window.set_shell_text_secondary(slint_color_from_rgba(0xff00_0000 | preset.text_secondary));
     window.set_shell_text_muted(slint_color_from_rgba(0xff00_0000 | preset.text_muted));
-    window.set_shell_text_inactive(slint_color_from_rgba(
-        0xff00_0000 | preset.text_inactive,
-    ));
+    window.set_shell_text_inactive(slint_color_from_rgba(0xff00_0000 | preset.text_inactive));
     window.set_shell_accent(slint_color_from_rgba(0xff00_0000 | preset.accent));
     window.set_shell_link_accent(slint_color_from_rgba(0xff00_0000 | preset.link_accent));
     window.set_shell_focus_ring(slint_color_from_rgba(0xff00_0000 | preset.focus_ring));
     window.set_shell_tab_active(slint_color_from_rgba(0xff00_0000 | preset.tab_active));
-    window.set_shell_tab_inactive(slint_color_from_rgba(
-        0xff00_0000 | preset.tab_inactive,
-    ));
+    window.set_shell_tab_inactive(slint_color_from_rgba(0xff00_0000 | preset.tab_inactive));
     window.set_shell_tab_hover(slint_color_from_rgba(0xff00_0000 | preset.tab_hover));
     window.set_shell_tab_active_indicator(slint_color_from_rgba(
         0xff00_0000 | preset.tab_active_indicator,
@@ -2344,10 +2338,9 @@ fn sync_workspace_terminal_shell_chrome(window: &AppWindow, preset: ProjectedThe
     window.set_workspace_session_scrollbar_thumb_active(slint_color_from_rgba(
         terminal_rgb_to_rgba(preset.terminal.scrollbar_thumb_active),
     ));
-    window
-        .set_workspace_session_frame_surface(slint_color_from_rgba(
-            0xff00_0000 | preset.terminal.frame_bg,
-        ));
+    window.set_workspace_session_frame_surface(slint_color_from_rgba(
+        0xff00_0000 | preset.terminal.frame_bg,
+    ));
     window.set_workspace_session_frame_border(slint_color_from_rgba(terminal_rgb_to_rgba(
         preset.terminal.split,
     )));

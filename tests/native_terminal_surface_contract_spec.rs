@@ -382,8 +382,9 @@ fn terminal_host_terminal_chrome_stays_session_scoped_across_workspace_wiring() 
     );
 
     assert!(
-        host_source.contains("// Terminal frame, selection, and scrollbar colors stay session-scoped runtime values.")
-            && host_source.contains("in property <color> session-selection-surface:")
+        host_source.contains(
+            "// Terminal frame, selection, and scrollbar colors stay session-scoped runtime values."
+        ) && host_source.contains("in property <color> session-selection-surface:")
             && host_source.contains("in property <color> session-scrollbar-track:")
             && host_source.contains("in property <color> session-scrollbar-thumb:")
             && host_source.contains("in property <color> session-scrollbar-thumb-active:")

@@ -235,8 +235,9 @@ fn runtime_shell_palette_properties_are_threaded_through_the_window_tree() {
     let workspace = fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace");
 
     assert!(
-        titlebar.contains("in property <color> shell-titlebar-background: ThemeTokens.titlebar-background;")
-            && titlebar.contains("in property <color> shell-text-primary: ThemeTokens.text-primary;")
+        titlebar.contains(
+            "in property <color> shell-titlebar-background: ThemeTokens.titlebar-background;"
+        ) && titlebar.contains("in property <color> shell-text-primary: ThemeTokens.text-primary;")
             && titlebar.contains("in property <color> shell-accent: ThemeTokens.accent;"),
         "titlebar should declare runtime shell palette inputs before its active surfaces switch away from ThemeTokens"
     );
@@ -247,14 +248,20 @@ fn runtime_shell_palette_properties_are_threaded_through_the_window_tree() {
         "app window should pass the projected titlebar shell palette into Titlebar"
     );
     assert!(
-        tabbar.contains("in property <color> shell-tabbar-background: ThemeTokens.tabbar-background;")
-            && tabbar.contains("in property <color> shell-tab-active: ThemeTokens.tab-active-surface;")
-            && tabbar.contains("in property <color> shell-tab-active-indicator: ThemeTokens.tab-active-indicator;"),
+        tabbar.contains(
+            "in property <color> shell-tabbar-background: ThemeTokens.tabbar-background;"
+        ) && tabbar
+            .contains("in property <color> shell-tab-active: ThemeTokens.tab-active-surface;")
+            && tabbar.contains(
+                "in property <color> shell-tab-active-indicator: ThemeTokens.tab-active-indicator;"
+            ),
         "tabbar should expose runtime shell palette inputs for the projected tab ladder"
     );
     assert!(
-        workspace.contains("in property <color> shell-tabbar-background: ThemeTokens.tabbar-background;")
-            && workspace.contains("in property <color> shell-tab-active: ThemeTokens.tab-active-surface;")
+        workspace.contains(
+            "in property <color> shell-tabbar-background: ThemeTokens.tabbar-background;"
+        ) && workspace
+            .contains("in property <color> shell-tab-active: ThemeTokens.tab-active-surface;")
             && workspace.contains("shell-tabbar-background: root.shell-tabbar-background;")
             && workspace.contains("shell-tab-active: root.shell-tab-active;")
             && workspace.contains("shell-tab-active-indicator: root.shell-tab-active-indicator;"),
@@ -282,13 +289,18 @@ fn runtime_shell_palette_properties_are_threaded_through_the_window_tree() {
     );
     assert!(
         app_window.contains("shell-sidebar-background: root.shell-sidebar-background;")
-            && app_window.contains("shell-sidebar-panel-background: root.shell-sidebar-panel-background;")
-            && app_window.contains("shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;"),
+            && app_window
+                .contains("shell-sidebar-panel-background: root.shell-sidebar-panel-background;")
+            && app_window.contains(
+                "shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;"
+            ),
         "app window should pass the projected sidebar palette into Sidebar"
     );
     assert!(
-        right_panel.contains("in property <color> shell-right-panel-background: ThemeTokens.right-panel-background;")
-            && right_panel.contains("in property <color> shell-text-primary: ThemeTokens.text-primary;")
+        right_panel.contains(
+            "in property <color> shell-right-panel-background: ThemeTokens.right-panel-background;"
+        ) && right_panel
+            .contains("in property <color> shell-text-primary: ThemeTokens.text-primary;")
             && right_panel.contains("in property <color> shell-accent: ThemeTokens.accent;"),
         "right panel should expose runtime shell palette inputs before switching its live surfaces"
     );
@@ -350,7 +362,9 @@ fn runtime_shell_palette_consumers_switch_from_tokens_to_live_props() {
             && sidebar.contains("border-color: root.shell-border;")
             && sidebar.contains("background: root.shell-border;")
             && sidebar.contains("shell-sidebar-item-selected: root.shell-sidebar-item-selected;")
-            && sidebar.contains("shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;"),
+            && sidebar.contains(
+                "shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;"
+            ),
         "sidebar should switch its shell surfaces and forward item-state runtime props into activity buttons and the assets panel"
     );
     assert!(
@@ -368,8 +382,11 @@ fn runtime_shell_palette_consumers_switch_from_tokens_to_live_props() {
             && assets_sidebar.contains("border-color: root.shell-border;")
             && assets_sidebar.contains("color: root.shell-text-primary;")
             && assets_sidebar.contains("color: root.shell-text-secondary;")
-            && assets_sidebar.contains("shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;")
-            && !assets_sidebar.contains("\n    background: ThemeTokens.sidebar-panel-background;\n"),
+            && assets_sidebar.contains(
+                "shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;"
+            )
+            && !assets_sidebar
+                .contains("\n    background: ThemeTokens.sidebar-panel-background;\n"),
         "assets sidebar should consume the live runtime shell palette for its raised panel and text hierarchy"
     );
     assert!(
