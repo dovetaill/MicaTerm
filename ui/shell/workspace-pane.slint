@@ -260,6 +260,7 @@ export component WorkspacePane inherits Rectangle {
                 session-cursor-bg: root.workspace-session-cursor-bg;
                 session-default-fg: root.workspace-session-default-fg;
                 session-default-bg: root.workspace-session-default-bg;
+                // Keep the live terminal host on session-scoped runtime chrome so shell palette props cannot split the renderer path.
                 session-selection-surface: root.workspace-session-selection-surface;
                 session-scrollbar-track: root.workspace-session-scrollbar-track;
                 session-scrollbar-thumb: root.workspace-session-scrollbar-thumb;
