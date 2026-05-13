@@ -187,6 +187,66 @@ fn slint_terminal_tokens_match_shared_no_frame_defaults() {
 }
 
 #[test]
+fn boot_time_terminal_tokens_match_approved_ayu_defaults() {
+    let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
+    let dark_preset = preset_for_theme(ThemeMode::Dark, ThemeVariant::PremiumDefault);
+    let light_preset = preset_for_theme(ThemeMode::Light, ThemeVariant::PremiumDefault);
+
+    assert!(
+        tokens.contains(&format!(
+            "terminal-canvas-surface: dark-mode ? {} : {};",
+            hex_rgb(dark_preset.background),
+            hex_rgb(light_preset.background),
+        )),
+        "boot-time terminal canvas tokens should match the approved Ayu dark/light viewport backgrounds before Rust publishes the runtime palette"
+    );
+    assert!(
+        tokens.contains(&format!(
+            "terminal-default-fg: dark-mode ? {} : {};",
+            hex_rgb(dark_preset.foreground),
+            hex_rgb(light_preset.foreground),
+        )),
+        "boot-time terminal foreground tokens should match the approved Ayu dark/light defaults before runtime projection takes over"
+    );
+    assert!(
+        tokens.contains(&format!(
+            "terminal-cursor-fg: dark-mode ? {} : {};",
+            hex_rgb(dark_preset.cursor_fg),
+            hex_rgb(light_preset.cursor_fg),
+        )) && tokens.contains(&format!(
+            "terminal-cursor-bg: dark-mode ? {} : {};",
+            hex_rgb(dark_preset.cursor_bg),
+            hex_rgb(light_preset.cursor_bg),
+        )),
+        "boot-time cursor tokens should match the approved Ayu dark/light cursor colors before runtime projection takes over"
+    );
+    assert!(
+        tokens.contains(&format!(
+            "terminal-selection-surface: dark-mode ? {} : {};",
+            hex_rgba(dark_preset.selection_bg),
+            hex_rgba(light_preset.selection_bg),
+        )),
+        "boot-time selection tokens should match the approved Ayu dark/light overlay colors before runtime projection takes over"
+    );
+    assert!(
+        tokens.contains(&format!(
+            "terminal-scrollbar-track-surface: dark-mode ? {} : {};",
+            hex_rgb_tuple(dark_preset.scrollbar_track),
+            hex_rgb_tuple(light_preset.scrollbar_track),
+        )) && tokens.contains(&format!(
+            "terminal-scrollbar-thumb-surface: dark-mode ? {} : {};",
+            hex_rgb_tuple(dark_preset.scrollbar_thumb),
+            hex_rgb_tuple(light_preset.scrollbar_thumb),
+        )) && tokens.contains(&format!(
+            "terminal-scrollbar-thumb-active-surface: dark-mode ? {} : {};",
+            hex_rgb_tuple(dark_preset.scrollbar_thumb_active),
+            hex_rgb_tuple(light_preset.scrollbar_thumb_active),
+        )),
+        "boot-time scrollbar tokens should match the approved Ayu dark/light terminal chrome before runtime projection takes over"
+    );
+}
+
+#[test]
 fn terminal_session_host_reads_terminal_shell_chrome_from_session_properties() {
     let host_source =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
