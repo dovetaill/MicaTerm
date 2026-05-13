@@ -845,7 +845,7 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
     let workspace_surface_projection_block = block_between(
         &bootstrap_source,
         "if let Some(surface) = state.active_workspace_terminal_surface() {",
-        "\n    } else {\n        let preset = terminal_theme_preset;",
+        "\n    } else {\n        let preset = terminal_theme_preset.terminal;",
     );
     assert!(
         workspace_surface_projection_block.contains("let mut next_render_mode = None;"),
@@ -965,7 +965,7 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
     );
     let no_surface_block = block_between(
         &bootstrap_source,
-        "\n    } else {\n        let preset = terminal_theme_preset;",
+        "\n    } else {\n        let preset = terminal_theme_preset.terminal;",
         "\n    }\n}\n\nfn sync_workspace_tabs(",
     );
     let no_surface_clear = no_surface_block
