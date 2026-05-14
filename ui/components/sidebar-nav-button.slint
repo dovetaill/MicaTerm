@@ -39,15 +39,22 @@ export component SidebarNavButton inherits Rectangle {
     width: 36px;
     height: 36px;
     border-radius: 10px;
-    border-width: root.active || touch.has-hover ? 1px : 0px;
-    border-color: root.active ? root.shell-sidebar-item-selected-border : root.shell-border;
-    background: touch.pressed
-        ? ThemeTokens.control-pressed-surface
-        : root.active
-            ? root.shell-sidebar-item-selected
-            : touch.has-hover
-                ? root.shell-sidebar-item-hover
-                : transparent;
+    border-width: 0px;
+    background: touch.pressed || root.active
+        ? root.shell-sidebar-item-selected
+        : touch.has-hover
+            ? root.shell-sidebar-item-hover
+            : transparent;
+
+    active-rail := Rectangle {
+        x: 5px;
+        y: 8px;
+        width: 2px;
+        height: parent.height - 16px;
+        border-radius: 1px;
+        background: root.shell-sidebar-item-selected-border;
+        opacity: root.active ? 1 : 0;
+    }
 
     if (root.displayed-icon.width > 0 && root.displayed-icon.height > 0) : Image {
         x: (parent.width - self.width) / 2;
