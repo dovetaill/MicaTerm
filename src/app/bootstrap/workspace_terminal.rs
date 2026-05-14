@@ -778,12 +778,12 @@ pub(super) fn forward_active_workspace_copy_selection(
     }
 }
 
-pub(super) fn normalized_paste_newlines(text: &str) -> String {
+pub(super) fn normalize_workspace_paste_text(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 pub(super) fn workspace_paste_logical_line_count(text: &str) -> usize {
-    let normalized = normalized_paste_newlines(text);
+    let normalized = normalize_workspace_paste_text(text);
     let trimmed = normalized.trim_end_matches('\n');
     if trimmed.is_empty() {
         return usize::from(!text.is_empty());
@@ -796,7 +796,7 @@ pub(super) fn workspace_paste_prompt_mode(
     state: &ShellViewModel,
     text: &str,
 ) -> Option<WorkspacePastePromptMode> {
-    let normalized = normalized_paste_newlines(text);
+    let normalized = normalize_workspace_paste_text(text);
     let logical_line_count = workspace_paste_logical_line_count(text);
     if normalized.chars().count() >= WORKSPACE_PASTE_EDITOR_CHAR_THRESHOLD {
         return Some(WorkspacePastePromptMode::Editor);
@@ -867,6 +867,7 @@ pub(super) fn forward_active_workspace_paste(
         );
         return WorkspacePasteRequestOutcome::Ignored;
     };
+    let text = normalize_workspace_paste_text(&text);
 
     if let Some(prompt_mode) = workspace_paste_prompt_mode(state, &text) {
         tracing::info!(

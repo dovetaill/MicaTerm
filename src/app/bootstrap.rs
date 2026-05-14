@@ -7342,7 +7342,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             return;
         }
         let text = if matches!(pending.prompt_mode, WorkspacePastePromptMode::Editor) {
-            draft_text
+            workspace_terminal::normalize_workspace_paste_text(&draft_text)
         } else {
             pending.text.clone()
         };
@@ -10326,6 +10326,27 @@ mod tests {
                 "echo hello\rwhoami"
             ),
             Some(WorkspacePastePromptMode::Confirm)
+        );
+    }
+
+    #[test]
+    fn workspace_paste_newline_normalizer_preserves_lf_input_and_intentional_blank_lines() {
+        let lf_only = "sudo apt update && \\\n  sudo apt install -y curl && \\\n  echo done\n";
+        assert_eq!(
+            workspace_terminal::normalize_workspace_paste_text(lf_only),
+            lf_only
+        );
+
+        assert_eq!(
+            workspace_terminal::normalize_workspace_paste_text("\\\r\nnext"),
+            "\\\nnext"
+        );
+        assert!(
+            !workspace_terminal::normalize_workspace_paste_text("\\\r\nnext").contains("\\\n\n")
+        );
+        assert_eq!(
+            workspace_terminal::normalize_workspace_paste_text("echo one\r\n\r\necho two\r\n"),
+            "echo one\n\necho two\n"
         );
     }
 

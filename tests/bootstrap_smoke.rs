@@ -9952,6 +9952,57 @@ fn workspace_terminal_multiline_paste_warning_skips_bracketed_paste_sessions() {
 }
 
 #[test]
+fn workspace_terminal_multiline_paste_warning_normalizes_crlf_line_continuations() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+        let state = KeyboardMatrixState::default();
+        let app = AppWindow::new().unwrap();
+        bind_with_launcher(
+            &app,
+            None,
+            Arc::new(
+                KeyboardMatrixLauncher::new(state.clone()).with_bracketed_paste_enabled(false),
+            ),
+        );
+
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.into());
+        settle_terminal_projection();
+
+        let raw = "sudo apt update && \\\r\n  sudo apt install -y curl && \\\r\n  echo done\r\n";
+        let normalized = "sudo apt update && \\\n  sudo apt install -y curl && \\\n  echo done\n";
+        i_slint_backend_selector::with_platform(|platform| {
+            platform.set_clipboard_text(raw, slint::platform::Clipboard::DefaultClipboard);
+            Ok(())
+        })
+        .expect("seed CRLF multiline clipboard");
+
+        app.invoke_workspace_session_paste_requested();
+        settle_terminal_projection();
+
+        assert!(app.get_workspace_paste_warning_modal_open());
+        assert!(!app.get_workspace_paste_warning_editor_mode());
+        assert_eq!(app.get_workspace_paste_warning_line_count(), 3);
+        assert_eq!(app.get_workspace_paste_warning_text(), normalized);
+        assert!(
+            !app.get_workspace_paste_warning_text().contains("\\\n\n"),
+            "CRLF line continuation should not render or store an extra blank line in the warning modal"
+        );
+        assert!(
+            state.take_paste_inputs().is_empty(),
+            "confirm-mode warning should defer the terminal paste until the user approves"
+        );
+
+        app.invoke_workspace_paste_warning_confirm_requested();
+        settle_terminal_projection();
+
+        assert!(!app.get_workspace_paste_warning_modal_open());
+        assert_eq!(state.take_paste_inputs(), vec![normalized.to_string()]);
+    });
+}
+
+#[test]
 fn workspace_terminal_long_multiline_paste_opens_editor_and_sends_edited_text() {
     run_with_large_test_stack(|| {
         let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
@@ -10011,6 +10062,56 @@ fn workspace_terminal_long_multiline_paste_opens_editor_and_sends_edited_text() 
                 .as_str(),
             "paste one\ntwo\nfour"
         );
+    });
+}
+
+#[test]
+fn workspace_terminal_editor_paste_warning_normalizes_crlf_before_send() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+        let state = KeyboardMatrixState::default();
+        let app = AppWindow::new().unwrap();
+        bind_with_launcher(
+            &app,
+            None,
+            Arc::new(
+                KeyboardMatrixLauncher::new(state.clone()).with_bracketed_paste_enabled(false),
+            ),
+        );
+
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.into());
+        settle_terminal_projection();
+
+        let raw = "export A=1 && \\\r\n  export B=2 && \\\r\n  export C=3 && \\\r\n  echo done\r\n";
+        let normalized = "export A=1 && \\\n  export B=2 && \\\n  export C=3 && \\\n  echo done\n";
+        i_slint_backend_selector::with_platform(|platform| {
+            platform.set_clipboard_text(raw, slint::platform::Clipboard::DefaultClipboard);
+            Ok(())
+        })
+        .expect("seed CRLF editor clipboard");
+
+        app.invoke_workspace_session_paste_requested();
+        settle_terminal_projection();
+
+        assert!(app.get_workspace_paste_warning_modal_open());
+        assert!(app.get_workspace_paste_warning_editor_mode());
+        assert_eq!(app.get_workspace_paste_warning_text(), normalized);
+        assert!(
+            !app.get_workspace_paste_warning_text().contains("\\\n\n"),
+            "editor mode should receive LF-normalized content instead of a CRLF-expanded blank line"
+        );
+        assert!(
+            state.take_paste_inputs().is_empty(),
+            "editor-mode warning should defer paste until explicit confirmation"
+        );
+
+        app.invoke_workspace_paste_warning_confirm_requested();
+        settle_terminal_projection();
+
+        assert!(!app.get_workspace_paste_warning_modal_open());
+        assert_eq!(state.take_paste_inputs(), vec![normalized.to_string()]);
     });
 }
 
@@ -10118,6 +10219,42 @@ fn workspace_terminal_right_click_paste_warning_restores_immediate_text_input_af
             vec!["z".to_string()],
             "the terminal should accept immediate typing after a right-click long-paste confirm instead of dropping input until focus recovers later"
         );
+    });
+}
+
+#[test]
+fn workspace_terminal_bracketed_paste_normalizes_crlf_without_warning() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+        let state = KeyboardMatrixState::default();
+        let app = AppWindow::new().unwrap();
+        bind_with_launcher(
+            &app,
+            None,
+            Arc::new(KeyboardMatrixLauncher::new(state.clone()).with_bracketed_paste_enabled(true)),
+        );
+
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.into());
+        settle_terminal_projection();
+
+        let raw = "sudo apt update && \\\r\n  sudo apt install -y curl && \\\r\n  echo done\r\n";
+        let normalized = "sudo apt update && \\\n  sudo apt install -y curl && \\\n  echo done\n";
+        i_slint_backend_selector::with_platform(|platform| {
+            platform.set_clipboard_text(raw, slint::platform::Clipboard::DefaultClipboard);
+            Ok(())
+        })
+        .expect("seed bracketed CRLF clipboard");
+
+        app.invoke_workspace_session_paste_requested();
+        settle_terminal_projection();
+
+        assert!(
+            !app.get_workspace_paste_warning_modal_open(),
+            "bracketed paste should still skip the warning for short multiline content"
+        );
+        assert_eq!(state.take_paste_inputs(), vec![normalized.to_string()]);
     });
 }
 
