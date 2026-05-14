@@ -1,7 +1,7 @@
 use std::fs;
 
 #[test]
-fn semantic_theme_tokens_cover_shell_hierarchy_and_states() {
+fn theme_semantic_token_contract_spec_semantic_theme_tokens_cover_shell_hierarchy_and_states() {
     let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
 
     for token in [
@@ -45,7 +45,7 @@ fn semantic_theme_tokens_cover_shell_hierarchy_and_states() {
 }
 
 #[test]
-fn premium_default_tokens_encode_the_new_calm_surface_ladder() {
+fn theme_semantic_token_contract_spec_premium_default_tokens_encode_the_new_calm_surface_ladder() {
     let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
     let theme_spec = fs::read_to_string("src/theme/spec.rs").expect("read theme spec");
 
@@ -78,7 +78,7 @@ fn premium_default_tokens_encode_the_new_calm_surface_ladder() {
 }
 
 #[test]
-fn boot_time_shell_tokens_match_approved_ayu_defaults() {
+fn theme_semantic_token_contract_spec_boot_time_shell_tokens_match_approved_ayu_defaults() {
     let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
 
     for expected in [
@@ -102,7 +102,7 @@ fn boot_time_shell_tokens_match_approved_ayu_defaults() {
 }
 
 #[test]
-fn theme_tokens_remain_a_boot_time_parity_snapshot_only() {
+fn theme_semantic_token_contract_spec_theme_tokens_remain_a_boot_time_parity_snapshot_only() {
     let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
 
     assert!(
@@ -120,7 +120,7 @@ fn theme_tokens_remain_a_boot_time_parity_snapshot_only() {
 }
 
 #[test]
-fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
+fn theme_semantic_token_contract_spec_shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
     let titlebar = fs::read_to_string("ui/shell/titlebar.slint").expect("read titlebar");
     let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
     let sidebar = fs::read_to_string("ui/shell/sidebar.slint").expect("read sidebar");
@@ -224,7 +224,7 @@ fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
 }
 
 #[test]
-fn runtime_shell_palette_properties_are_threaded_through_the_window_tree() {
+fn theme_semantic_token_contract_spec_runtime_shell_palette_properties_are_threaded_through_the_window_tree() {
     let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
     let titlebar = fs::read_to_string("ui/shell/titlebar.slint").expect("read titlebar");
     let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
@@ -313,7 +313,7 @@ fn runtime_shell_palette_properties_are_threaded_through_the_window_tree() {
 }
 
 #[test]
-fn runtime_shell_palette_consumers_switch_from_tokens_to_live_props() {
+fn theme_semantic_token_contract_spec_runtime_shell_palette_consumers_switch_from_tokens_to_live_props() {
     let titlebar = fs::read_to_string("ui/shell/titlebar.slint").expect("read titlebar");
     let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
     let active_tab = fs::read_to_string("ui/components/active-tab.slint").expect("read active tab");
@@ -371,11 +371,13 @@ fn runtime_shell_palette_consumers_switch_from_tokens_to_live_props() {
         sidebar_button.contains("in property <color> shell-sidebar-item-hover: ThemeTokens.sidebar-item-hover-background;")
             && sidebar_button.contains("in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;")
             && sidebar_button.contains("in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;")
-            && sidebar_button.contains("border-color: root.active ? root.shell-sidebar-item-selected-border : root.shell-border;")
             && sidebar_button.contains("? root.shell-sidebar-item-selected")
             && sidebar_button.contains("? root.shell-sidebar-item-hover")
+            && sidebar_button.contains("active-rail := Rectangle")
+            && sidebar_button.contains("background: root.shell-sidebar-item-selected-border;")
+            && !sidebar_button.contains("border-width: root.active || touch.has-hover ? 1px : 0px;")
             && sidebar_button.contains("colorize: root.active || touch.has-hover ? root.shell-text-primary : root.shell-text-secondary;"),
-        "sidebar activity buttons should use runtime sidebar selected and hover state colors instead of detached ThemeTokens"
+        "sidebar activity buttons should use runtime sidebar selected and hover state colors, with a subtle fill plus leading accent rail instead of a full active outline box"
     );
     assert!(
         assets_sidebar.contains("background: root.shell-sidebar-panel-background;")
@@ -393,22 +395,39 @@ fn runtime_shell_palette_consumers_switch_from_tokens_to_live_props() {
         asset_row.contains("in property <color> shell-focus-ring: ThemeTokens.focus-ring;")
             && asset_row.contains("in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;")
             && asset_row.contains("in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;")
-            && asset_row.contains("? root.shell-focus-ring")
-            && asset_row.contains("? root.shell-sidebar-item-selected-border")
+            && asset_row.contains("border-width: root.focused ? 1px : 0px;")
+            && asset_row.contains("border-color: root.shell-focus-ring;")
             && asset_row.contains("? root.shell-sidebar-item-selected")
             && asset_row.contains("? root.shell-sidebar-item-hover")
+            && asset_row.contains("active-rail := Rectangle")
+            && asset_row.contains("background: root.shell-sidebar-item-selected-border;")
+            && !asset_row.contains("border-width: root.focused || root.selected ? 1px : 0px;")
             && asset_row.contains("color: root.shell-text-primary;")
             && asset_row.contains("color: root.shell-text-secondary;"),
-        "asset rows should render selected, hover, focus, and text colors from runtime sidebar props"
+        "asset rows should render selected, hover, focus, and text colors from runtime sidebar props while separating keyboard focus from selected state"
     );
     assert!(
         right_panel.contains("background: root.shell-right-panel-background;")
             && right_panel.contains("background: root.shell-border;")
             && right_panel.contains("border-color: root.shell-border;")
+            && right_panel.contains(
+                "in property <color> shell-sidebar-item-hover: ThemeTokens.sidebar-item-hover-background;"
+            )
+            && right_panel.contains(
+                "in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;"
+            )
+            && right_panel.contains(
+                "in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;"
+            )
+            && right_panel.contains("active-rail := Rectangle")
+            && right_panel.contains("background: item.selected ? root.shell-sidebar-item-selected")
+            && right_panel.contains("background: root.shell-sidebar-item-selected-border;")
             && right_panel.contains("color: root.shell-text-primary;")
             && right_panel.contains("color: root.shell-text-secondary;")
+            && !right_panel.contains("ThemeTokens.explorer-row-selected-surface")
+            && !right_panel.contains("ThemeTokens.explorer-row-hover-surface")
             && !right_panel.contains("\n    background: ThemeTokens.right-panel-background;\n"),
-        "right panel should switch its active shell surfaces and text hierarchy to the runtime shell palette"
+        "right panel should switch its active shell surfaces and row selection states to the runtime shell palette, using the same subtle fill plus accent rail direction as the sidebar tree"
     );
     assert!(
         workspace.contains("background: root.workspace-session-frame-surface;"),
@@ -417,7 +436,7 @@ fn runtime_shell_palette_consumers_switch_from_tokens_to_live_props() {
 }
 
 #[test]
-fn welcome_shell_copy_uses_token_colors_instead_of_opacity_fades() {
+fn theme_semantic_token_contract_spec_welcome_shell_copy_uses_token_colors_instead_of_opacity_fades() {
     let welcome = fs::read_to_string("ui/welcome/welcome-view.slint").expect("read welcome view");
     let quick_launch =
         fs::read_to_string("ui/welcome/quick-launch-section.slint").expect("read quick launch");
