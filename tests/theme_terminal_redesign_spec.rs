@@ -2,7 +2,7 @@ use mica_term::app::ui_preferences::UiPreferences;
 use mica_term::theme::{ThemeMode, ThemeVariant, app_theme_spec};
 
 #[test]
-fn app_theme_spec_exposes_premium_default_and_legacy_variant() {
+fn theme_terminal_redesign_spec_app_theme_spec_exposes_premium_default_and_legacy_variant() {
     let premium = app_theme_spec(ThemeMode::Dark, ThemeVariant::PremiumDefault);
     let legacy = app_theme_spec(ThemeMode::Dark, ThemeVariant::LegacyHackerGreen);
 
@@ -15,7 +15,7 @@ fn app_theme_spec_exposes_premium_default_and_legacy_variant() {
 }
 
 #[test]
-fn ui_preferences_round_trip_persists_theme_variant() {
+fn theme_terminal_redesign_spec_ui_preferences_round_trip_persists_theme_variant() {
     let prefs = UiPreferences {
         theme_variant: ThemeVariant::PremiumDefault,
         ..UiPreferences::default()
@@ -28,7 +28,7 @@ fn ui_preferences_round_trip_persists_theme_variant() {
 }
 
 #[test]
-fn premium_default_dark_theme_uses_the_approved_ayu_shell_neighborhood() {
+fn theme_terminal_redesign_spec_premium_default_dark_theme_uses_the_approved_ayu_shell_neighborhood() {
     let spec = app_theme_spec(ThemeMode::Dark, ThemeVariant::PremiumDefault);
 
     assert_eq!(spec.shell.app_background, 0x0a_0e14);
@@ -47,18 +47,18 @@ fn premium_default_dark_theme_uses_the_approved_ayu_shell_neighborhood() {
 }
 
 #[test]
-fn premium_default_light_theme_uses_the_approved_ayu_shell_neighborhood() {
+fn theme_terminal_redesign_spec_premium_default_light_theme_uses_the_approved_ayu_shell_neighborhood() {
     let spec = app_theme_spec(ThemeMode::Light, ThemeVariant::PremiumDefault);
 
-    assert_eq!(spec.shell.app_background, 0xf4_f6f8);
-    assert_eq!(spec.shell.titlebar_background, 0xee_f2f5);
-    assert_eq!(spec.shell.tabbar_background, 0xee_f2f5);
-    assert_eq!(spec.shell.sidebar_background, 0xee_f2f5);
-    assert_eq!(spec.shell.sidebar_panel_background, 0xf0_f3f6);
-    assert_eq!(spec.shell.right_panel_background, 0xf0_f3f6);
-    assert_eq!(spec.shell.terminal_frame_background, 0xfa_fafa);
-    assert_eq!(spec.shell.separator, 0xd8_dee6);
-    assert_eq!(spec.shell.border, 0xd8_dee6);
+    assert_eq!(spec.shell.app_background, 0xf8_f9fa);
+    assert_eq!(spec.shell.titlebar_background, 0xf8_f9fa);
+    assert_eq!(spec.shell.tabbar_background, 0xf8_f9fa);
+    assert_eq!(spec.shell.sidebar_background, 0xf8_f9fa);
+    assert_eq!(spec.shell.sidebar_panel_background, 0xf6_f8fa);
+    assert_eq!(spec.shell.right_panel_background, 0xf6_f8fa);
+    assert_eq!(spec.shell.terminal_frame_background, 0xfc_fcfc);
+    assert_eq!(spec.shell.separator, 0xe5_e9ef);
+    assert_eq!(spec.shell.border, 0xe5_e9ef);
     assert_eq!(spec.shell.text_primary, 0x5c_6166);
     assert_eq!(spec.shell.text_secondary, 0x7a_838c);
     assert_eq!(spec.shell.text_muted, 0x8a_939c);
@@ -66,7 +66,7 @@ fn premium_default_light_theme_uses_the_approved_ayu_shell_neighborhood() {
 }
 
 #[test]
-fn legacy_hacker_green_keeps_the_same_shell_chrome_but_swaps_terminal_palette() {
+fn theme_terminal_redesign_spec_legacy_hacker_green_keeps_the_same_shell_chrome_but_swaps_terminal_palette() {
     let premium = app_theme_spec(ThemeMode::Dark, ThemeVariant::PremiumDefault);
     let legacy = app_theme_spec(ThemeMode::Dark, ThemeVariant::LegacyHackerGreen);
 
