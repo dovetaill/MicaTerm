@@ -222,6 +222,39 @@ fn bootstrap_source_exposes_runtime_shell_palette_publish_helper() {
 }
 
 #[test]
+fn app_window_threads_sidebar_row_state_palette_into_right_panel() {
+    let app_window_source = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let right_panel_source = fs::read_to_string("ui/shell/right-panel.slint").expect("read right panel");
+    let right_panel_block = app_window_source
+        .split("right-panel := RightPanel {")
+        .nth(1)
+        .expect("right panel block");
+
+    assert!(
+        right_panel_source.contains(
+            "in property <color> shell-sidebar-item-hover: ThemeTokens.sidebar-item-hover-background;"
+        ) && right_panel_source.contains(
+            "in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;"
+        ) && right_panel_source.contains(
+            "in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;"
+        ),
+        "right panel should accept the shared runtime row-state palette so later SFTP row styling can stay on the same projected Ayu selection source"
+    );
+    assert!(
+        right_panel_block.contains("shell-right-panel-background: root.shell-right-panel-background;")
+            && right_panel_block.contains("shell-focus-ring: root.shell-focus-ring;")
+            && right_panel_block.contains("shell-sidebar-item-hover: root.shell-sidebar-item-hover;")
+            && right_panel_block.contains(
+                "shell-sidebar-item-selected: root.shell-sidebar-item-selected;"
+            )
+            && right_panel_block.contains(
+                "shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;"
+            ),
+        "app window should thread the shared runtime row-state palette into RightPanel instead of making the panel fall back to detached token defaults"
+    );
+}
+
+#[test]
 fn no_surface_shell_palette_uses_ayu_defaults_and_tracks_theme_toggle() {
     let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
