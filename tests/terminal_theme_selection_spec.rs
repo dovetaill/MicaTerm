@@ -5,7 +5,7 @@ use mica_term::theme::{ThemeMode, ThemeVariant};
 use std::fs;
 
 #[test]
-fn dark_theme_maps_terminal_palette_to_ayu_dark() {
+fn terminal_theme_dark_theme_maps_terminal_palette_to_ayu_dark() {
     let preset = preset_for_theme(ThemeMode::Dark, ThemeVariant::PremiumDefault);
 
     assert_eq!(preset.name, "Ayu Dark");
@@ -26,20 +26,22 @@ fn dark_theme_maps_terminal_palette_to_ayu_dark() {
 }
 
 #[test]
-fn terminal_background_constants_follow_the_ayu_migration_targets() {
+fn terminal_theme_background_constants_follow_the_ayu_migration_targets() {
     let dark = preset_for_theme(ThemeMode::Dark, ThemeVariant::PremiumDefault);
     let light = preset_for_theme(ThemeMode::Light, ThemeVariant::PremiumDefault);
 
     assert_eq!(dark.background, 0x0a_0e14);
+    assert_eq!(dark.foreground, 0xc5_c1b8);
     assert_eq!(dark.viewport_bg_top, 0x0a_0e14);
     assert_eq!(dark.viewport_bg_bottom, 0x0a_0e14);
+    assert_eq!(dark.cursor_bg, 0xe6_b450);
     assert_eq!(light.background, 0xf8_f9fa);
     assert_eq!(light.viewport_bg_top, 0xf8_f9fa);
     assert_eq!(light.viewport_bg_bottom, 0xf8_f9fa);
 }
 
 #[test]
-fn light_theme_maps_terminal_palette_to_ayu_light() {
+fn terminal_theme_light_theme_maps_terminal_palette_to_ayu_light() {
     let preset = preset_for_theme(ThemeMode::Light, ThemeVariant::PremiumDefault);
 
     assert_eq!(preset.name, "Ayu Light");
@@ -50,9 +52,9 @@ fn light_theme_maps_terminal_palette_to_ayu_light() {
     assert_eq!(preset.cursor_bg, 0xff_aa33);
     assert_eq!(preset.cursor_fg, 0xf8_f9fa);
     assert_eq!(preset.selection_bg, (0x55, 0xb4, 0xd4, 0.20));
-    assert_eq!(preset.scrollbar_track, (0xf0, 0xf3, 0xf6));
-    assert_eq!(preset.scrollbar_thumb, (0xd1, 0xd7, 0xde));
-    assert_eq!(preset.scrollbar_thumb_active, (0xc1, 0xc8, 0xd1));
+    assert_eq!(preset.scrollbar_track, (0xf4, 0xf6, 0xf8));
+    assert_eq!(preset.scrollbar_thumb, (0xd6, 0xdc, 0xe3));
+    assert_eq!(preset.scrollbar_thumb_active, (0xc6, 0xcd, 0xd6));
     assert_eq!(preset.ansi[0], (0x00, 0x00, 0x00));
     assert_eq!(preset.ansi[7], (0xc7, 0xc7, 0xc7));
     assert_eq!(preset.ansi[8], (0x68, 0x68, 0x68));
