@@ -60,12 +60,8 @@ export component AssetNodeRow inherits Rectangle {
 
     height: root.row-height;
     border-radius: 8px;
-    border-width: root.focused || root.selected ? 1px : 0px;
-    border-color: root.focused
-        ? root.shell-focus-ring
-        : root.selected
-            ? root.shell-sidebar-item-selected-border
-            : transparent;
+    border-width: root.focused ? 1px : 0px;
+    border-color: root.shell-focus-ring;
     background: touch.pressed
         ? root.shell-sidebar-item-selected
         : root.selected
@@ -73,6 +69,16 @@ export component AssetNodeRow inherits Rectangle {
             : touch.has-hover
                 ? root.shell-sidebar-item-hover
                 : transparent;
+
+    active-rail := Rectangle {
+        x: 0px;
+        y: 8px;
+        width: 2px;
+        height: parent.height - 16px;
+        border-radius: 1px;
+        background: root.shell-sidebar-item-selected-border;
+        opacity: root.selected ? 1 : 0;
+    }
 
     Rectangle {
         x: root.indent;
