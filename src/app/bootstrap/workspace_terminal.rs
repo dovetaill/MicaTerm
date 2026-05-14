@@ -1023,3 +1023,21 @@ pub(super) fn parse_terminal_mouse_button(value: &str) -> Option<TerminalMouseBu
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_workspace_paste_text;
+
+    #[test]
+    fn workspace_paste_normalizer_is_idempotent_and_strips_carriage_returns() {
+        let raw = "sudo apt update && \\\r\n  sudo apt install -y curl\r\n\r\necho done\r";
+        let normalized = normalize_workspace_paste_text(raw);
+
+        assert_eq!(
+            normalized,
+            "sudo apt update && \\\n  sudo apt install -y curl\n\necho done\n"
+        );
+        assert!(!normalized.contains('\r'));
+        assert_eq!(normalize_workspace_paste_text(&normalized), normalized);
+    }
+}
