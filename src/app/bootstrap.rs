@@ -107,7 +107,7 @@ use crate::app::terminal_semantic::{
     analyze_semantic_annotations_with_settings,
 };
 use crate::app::terminal_theme::{
-    TerminalThemePreset, preset_for_theme, preset_for_theme_mode, selection_overlay_rgba,
+    ProjectedThemePreset, projected_theme_for, projected_theme_for_mode, selection_overlay_rgba,
     selection_overlay_rgba_for,
 };
 #[cfg(any(target_os = "windows", test))]
@@ -2281,23 +2281,68 @@ fn terminal_rgba_to_rgba((red, green, blue, alpha): (u8, u8, u8, f32)) -> u32 {
     (alpha << 24) | (u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)
 }
 
-fn sync_workspace_terminal_shell_chrome(window: &AppWindow, preset: TerminalThemePreset) {
+fn sync_shell_runtime_palette(window: &AppWindow, preset: ProjectedThemePreset) {
+    window.set_shell_app_background(slint_color_from_rgba(0xff00_0000 | preset.app_background));
+    window.set_shell_titlebar_background(slint_color_from_rgba(
+        0xff00_0000 | preset.titlebar_background,
+    ));
+    window.set_shell_tabbar_background(slint_color_from_rgba(
+        0xff00_0000 | preset.tabbar_background,
+    ));
+    window.set_shell_sidebar_background(slint_color_from_rgba(
+        0xff00_0000 | preset.sidebar_background,
+    ));
+    window.set_shell_sidebar_panel_background(slint_color_from_rgba(
+        0xff00_0000 | preset.sidebar_panel_background,
+    ));
+    window.set_shell_right_panel_background(slint_color_from_rgba(
+        0xff00_0000 | preset.right_panel_background,
+    ));
+    window.set_shell_separator(slint_color_from_rgba(0xff00_0000 | preset.separator));
+    window.set_shell_border(slint_color_from_rgba(0xff00_0000 | preset.border));
+    window.set_shell_hairline(slint_color_from_rgba(0xff00_0000 | preset.hairline));
+    window.set_shell_text_primary(slint_color_from_rgba(0xff00_0000 | preset.text_primary));
+    window.set_shell_text_secondary(slint_color_from_rgba(0xff00_0000 | preset.text_secondary));
+    window.set_shell_text_muted(slint_color_from_rgba(0xff00_0000 | preset.text_muted));
+    window.set_shell_text_inactive(slint_color_from_rgba(0xff00_0000 | preset.text_inactive));
+    window.set_shell_accent(slint_color_from_rgba(0xff00_0000 | preset.accent));
+    window.set_shell_link_accent(slint_color_from_rgba(0xff00_0000 | preset.link_accent));
+    window.set_shell_focus_ring(slint_color_from_rgba(0xff00_0000 | preset.focus_ring));
+    window.set_shell_tab_active(slint_color_from_rgba(0xff00_0000 | preset.tab_active));
+    window.set_shell_tab_inactive(slint_color_from_rgba(0xff00_0000 | preset.tab_inactive));
+    window.set_shell_tab_hover(slint_color_from_rgba(0xff00_0000 | preset.tab_hover));
+    window.set_shell_tab_active_indicator(slint_color_from_rgba(
+        0xff00_0000 | preset.tab_active_indicator,
+    ));
+    window.set_shell_sidebar_item_hover(slint_color_from_rgba(
+        0xff00_0000 | preset.sidebar_item_hover,
+    ));
+    window.set_shell_sidebar_item_selected(slint_color_from_rgba(
+        0xff00_0000 | preset.sidebar_item_selected,
+    ));
+    window.set_shell_sidebar_item_selected_border(slint_color_from_rgba(
+        0xff00_0000 | preset.sidebar_item_selected_border,
+    ));
+}
+
+fn sync_workspace_terminal_shell_chrome(window: &AppWindow, preset: ProjectedThemePreset) {
     window.set_workspace_session_selection_surface(slint_color_from_rgba(terminal_rgba_to_rgba(
-        preset.selection_bg,
+        preset.terminal.selection_bg,
     )));
     window.set_workspace_session_scrollbar_track(slint_color_from_rgba(terminal_rgb_to_rgba(
-        preset.scrollbar_track,
+        preset.terminal.scrollbar_track,
     )));
     window.set_workspace_session_scrollbar_thumb(slint_color_from_rgba(terminal_rgb_to_rgba(
-        preset.scrollbar_thumb,
+        preset.terminal.scrollbar_thumb,
     )));
     window.set_workspace_session_scrollbar_thumb_active(slint_color_from_rgba(
-        terminal_rgb_to_rgba(preset.scrollbar_thumb_active),
+        terminal_rgb_to_rgba(preset.terminal.scrollbar_thumb_active),
     ));
-    window
-        .set_workspace_session_frame_surface(slint_color_from_rgba(0xff00_0000 | preset.frame_bg));
+    window.set_workspace_session_frame_surface(slint_color_from_rgba(
+        0xff00_0000 | preset.terminal.frame_bg,
+    ));
     window.set_workspace_session_frame_border(slint_color_from_rgba(terminal_rgb_to_rgba(
-        preset.split,
+        preset.terminal.split,
     )));
 }
 
@@ -4104,9 +4149,9 @@ fn sync_workspace_session_state_with_manager(
     sync_workspace_terminal_shell_chrome(
         window,
         if state.theme_variant == ThemeVariant::PremiumDefault {
-            preset_for_theme_mode(state.theme_mode)
+            projected_theme_for_mode(state.theme_mode)
         } else {
-            preset_for_theme(state.theme_mode, state.theme_variant)
+            projected_theme_for(state.theme_mode, state.theme_variant)
         },
     );
     sync_workspace_terminal_surface_projection_only(window, state);
@@ -4214,9 +4259,9 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
     window.set_workspace_session_cell_height(default_cell_height_px as f32 / scale_factor);
     sync_workspace_native_terminal_surface_geometry(window);
     let terminal_theme_preset = if state.theme_variant == ThemeVariant::PremiumDefault {
-        preset_for_theme_mode(state.theme_mode)
+        projected_theme_for_mode(state.theme_mode)
     } else {
-        preset_for_theme(state.theme_mode, state.theme_variant)
+        projected_theme_for(state.theme_mode, state.theme_variant)
     };
     let search_query = if state.workspace_terminal_search_open()
         && !state.workspace_terminal_search_query().trim().is_empty()
@@ -4404,7 +4449,7 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
             window.set_workspace_session_render_mode(next_render_mode.as_str().into());
         }
     } else {
-        let preset = terminal_theme_preset;
+        let preset = terminal_theme_preset.terminal;
         clear_workspace_native_cursor_blink_state();
         window.set_workspace_session_alternate_screen_active(false);
         window.set_workspace_session_rows(24);

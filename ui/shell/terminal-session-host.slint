@@ -327,6 +327,7 @@ export component TerminalSessionHost inherits Rectangle {
     in property <color> session-cursor-bg: ThemeTokens.terminal-cursor-bg;
     in property <color> session-default-fg: ThemeTokens.terminal-default-fg;
     in property <color> session-default-bg: ThemeTokens.terminal-default-bg;
+    // Terminal frame, selection, and scrollbar colors stay session-scoped runtime values.
     in property <color> session-selection-surface: ThemeTokens.terminal-selection-surface;
     in property <color> session-scrollbar-track: ThemeTokens.terminal-scrollbar-track-surface;
     in property <color> session-scrollbar-thumb: ThemeTokens.terminal-scrollbar-thumb-surface;

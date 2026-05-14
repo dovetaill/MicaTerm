@@ -41,6 +41,17 @@ export component AssetsSidebar inherits Rectangle {
     in property <[ConsoleAssetItem]> console-asset-items: [];
     in property <[ConsoleAssetItem]> snippet-asset-items: [];
     in property <[ConsoleAssetItem]> keychain-asset-items: [];
+    in property <color> shell-sidebar-panel-background: ThemeTokens.sidebar-panel-background;
+    in property <color> shell-separator: ThemeTokens.separator;
+    in property <color> shell-border: ThemeTokens.divider-subtle;
+    in property <color> shell-text-primary: ThemeTokens.text-primary;
+    in property <color> shell-text-secondary: ThemeTokens.text-secondary;
+    in property <color> shell-text-muted: ThemeTokens.text-muted;
+    in property <color> shell-accent: ThemeTokens.accent;
+    in property <color> shell-focus-ring: ThemeTokens.focus-ring;
+    in property <color> shell-sidebar-item-hover: ThemeTokens.sidebar-item-hover-background;
+    in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;
+    in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;
     out property <length> search-row-height: search-row-host.height;
     out property <length> create-menu-anchor-x: create-button.absolute-position.x;
     out property <length> create-menu-anchor-y: create-button.absolute-position.y;
@@ -72,9 +83,9 @@ export component AssetsSidebar inherits Rectangle {
     width: expanded ? root.expanded-width : 0px;
     visible: expanded;
     clip: true;
-    background: ThemeTokens.sidebar-panel-background;
+    background: root.shell-sidebar-panel-background;
     border-width: 1px;
-    border-color: ThemeTokens.divider-subtle;
+    border-color: root.shell-border;
 
     VerticalLayout {
         spacing: 0px;
@@ -93,7 +104,7 @@ export component AssetsSidebar inherits Rectangle {
                 Text {
                     text: "Assets";
                     font-family: AppTypography.ui-font-family;
-                    color: ThemeTokens.text-primary;
+                    color: root.shell-text-primary;
                     font-size: 14px;
                     font-weight: AppTypography.ui-font-weight-regular;
                     letter-spacing: 0px;
@@ -193,7 +204,7 @@ export component AssetsSidebar inherits Rectangle {
                 y: parent.height - 1px;
                 width: parent.width - 24px;
                 height: 1px;
-                background: ThemeTokens.divider-subtle;
+                background: root.shell-border;
             }
         }
 
@@ -260,14 +271,14 @@ export component AssetsSidebar inherits Rectangle {
                     Text {
                         width: parent.width;
                         text: "No assets yet";
-                        color: ThemeTokens.text-primary;
+                        color: root.shell-text-primary;
                         horizontal-alignment: center;
                     }
 
                     Text {
                         width: parent.width;
                         text: "Right-click or use Create to add a folder or SSH connection.";
-                        color: ThemeTokens.text-secondary;
+                        color: root.shell-text-secondary;
                         horizontal-alignment: center;
                         wrap: word-wrap;
                     }
@@ -300,6 +311,12 @@ export component AssetsSidebar inherits Rectangle {
                         disclosure-state: item.disclosure_state;
                         path-hint: item.path_hint;
                         compact-flat-mode: item.compact_flat_mode;
+                        shell-focus-ring: root.shell-focus-ring;
+                        shell-text-primary: root.shell-text-primary;
+                        shell-text-secondary: root.shell-text-secondary;
+                        shell-sidebar-item-hover: root.shell-sidebar-item-hover;
+                        shell-sidebar-item-selected: root.shell-sidebar-item-selected;
+                        shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
 
                         selected-requested(item-id) => {
                             root.asset-selected(item-id);
@@ -379,14 +396,14 @@ export component AssetsSidebar inherits Rectangle {
                     Text {
                         width: parent.width;
                         text: "No snippets yet";
-                        color: ThemeTokens.text-primary;
+                        color: root.shell-text-primary;
                         horizontal-alignment: center;
                     }
 
                     Text {
                         width: parent.width;
                         text: "Use Create to add a snippet or package.";
-                        color: ThemeTokens.text-secondary;
+                        color: root.shell-text-secondary;
                         horizontal-alignment: center;
                         wrap: word-wrap;
                     }
@@ -419,6 +436,12 @@ export component AssetsSidebar inherits Rectangle {
                         disclosure-state: item.disclosure_state;
                         path-hint: item.path_hint;
                         compact-flat-mode: item.compact_flat_mode;
+                        shell-focus-ring: root.shell-focus-ring;
+                        shell-text-primary: root.shell-text-primary;
+                        shell-text-secondary: root.shell-text-secondary;
+                        shell-sidebar-item-hover: root.shell-sidebar-item-hover;
+                        shell-sidebar-item-selected: root.shell-sidebar-item-selected;
+                        shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
 
                         selected-requested(item-id) => {
                             root.asset-selected(item-id);
@@ -498,14 +521,14 @@ export component AssetsSidebar inherits Rectangle {
                     Text {
                         width: parent.width;
                         text: "No keychain items yet";
-                        color: ThemeTokens.text-primary;
+                        color: root.shell-text-primary;
                         horizontal-alignment: center;
                     }
 
                     Text {
                         width: parent.width;
                         text: "Use Create to add a folder, identity, or SSH key.";
-                        color: ThemeTokens.text-secondary;
+                        color: root.shell-text-secondary;
                         horizontal-alignment: center;
                         wrap: word-wrap;
                     }
@@ -538,6 +561,12 @@ export component AssetsSidebar inherits Rectangle {
                         disclosure-state: item.disclosure_state;
                         path-hint: item.path_hint;
                         compact-flat-mode: item.compact_flat_mode;
+                        shell-focus-ring: root.shell-focus-ring;
+                        shell-text-primary: root.shell-text-primary;
+                        shell-text-secondary: root.shell-text-secondary;
+                        shell-sidebar-item-hover: root.shell-sidebar-item-hover;
+                        shell-sidebar-item-selected: root.shell-sidebar-item-selected;
+                        shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
 
                         selected-requested(item-id) => {
                             root.asset-selected(item-id);

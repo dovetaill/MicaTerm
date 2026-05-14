@@ -61,7 +61,9 @@ use mica_term::app::ssh::runtime::{
 use mica_term::app::ssh::session_manager::{
     EnhancementPolicy, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher,
 };
-use mica_term::app::terminal_theme::{preset_for_theme, preset_for_theme_mode};
+use mica_term::app::terminal_theme::{
+    preset_for_theme, preset_for_theme_mode, projected_theme_for_mode,
+};
 use mica_term::app::vault::bootstrap::{
     LocalVaultBootstrapState, load_local_vault_bootstrap_state, load_runtime_vault_key,
     save_local_vault_bootstrap_state,
@@ -114,6 +116,199 @@ fn run_on_large_stack(test_name: &str, test: fn()) {
 
 fn rgb_tuple_to_hex((red, green, blue): (u8, u8, u8)) -> u32 {
     (u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)
+}
+
+#[test]
+fn terminal_theme_source_exposes_projected_theme_wrapper_for_shell_palette() {
+    let terminal_theme_source =
+        fs::read_to_string("src/app/terminal_theme.rs").expect("read terminal theme");
+
+    assert!(
+        terminal_theme_source.contains("pub struct ProjectedThemePreset"),
+        "terminal theme projection should expose a combined runtime preset wrapper for shell and terminal colors"
+    );
+    assert!(
+        terminal_theme_source.contains("pub terminal: TerminalThemePreset")
+            && terminal_theme_source.contains("pub app_background: u32")
+            && terminal_theme_source.contains("pub titlebar_background: u32")
+            && terminal_theme_source.contains("pub sidebar_background: u32")
+            && terminal_theme_source.contains("pub right_panel_background: u32")
+            && terminal_theme_source.contains("pub text_primary: u32")
+            && terminal_theme_source.contains("pub accent: u32")
+            && terminal_theme_source.contains("pub sidebar_item_selected_border: u32"),
+        "projected theme wrapper should carry the runtime shell-neighborhood fields alongside the terminal preset"
+    );
+    assert!(
+        terminal_theme_source.contains("pub fn projected_theme_for(")
+            && terminal_theme_source.contains("pub fn projected_theme_for_mode("),
+        "terminal theme projection should expose explicit helpers for variant-aware and default-mode runtime shell palette lookup"
+    );
+    assert!(
+        terminal_theme_source.contains("app_theme_spec(theme_mode, variant)"),
+        "projected theme lookup should derive shell and terminal colors from the shared app theme spec instead of inventing a detached second shell palette"
+    );
+}
+
+#[test]
+fn terminal_theme_helpers_route_through_the_projected_runtime_preset() {
+    let terminal_theme_source =
+        fs::read_to_string("src/app/terminal_theme.rs").expect("read terminal theme");
+
+    assert!(
+        terminal_theme_source.contains("pub fn preset_for_theme(theme_mode: ThemeMode, variant: ThemeVariant) -> TerminalThemePreset")
+            && terminal_theme_source.contains("projected_theme_for(theme_mode, variant).terminal"),
+        "preset_for_theme should stay available for renderer callers but now delegate through the combined projected runtime preset"
+    );
+    assert!(
+        terminal_theme_source
+            .contains("pub fn preset_for_theme_mode(theme_mode: ThemeMode) -> TerminalThemePreset")
+            && terminal_theme_source.contains("projected_theme_for_mode(theme_mode).terminal"),
+        "preset_for_theme_mode should keep the default-mode helper entrypoint while sharing the same projected runtime preset chain"
+    );
+    assert!(
+        terminal_theme_source.contains(
+            "pub fn palette_for_theme(theme_mode: ThemeMode, variant: ThemeVariant) -> ColorPalette"
+        ) && terminal_theme_source
+            .contains("preset_for_theme(theme_mode, variant).to_color_palette()"),
+        "palette_for_theme should keep building the renderer palette from the retained preset helper instead of bypassing that contract"
+    );
+    assert!(
+        terminal_theme_source.contains(
+            "pub fn selection_overlay_rgba_for(theme_mode: ThemeMode, variant: ThemeVariant) -> u32"
+        ) && terminal_theme_source.contains("let preset = preset_for_theme(theme_mode, variant);"),
+        "selection_overlay_rgba_for should keep reusing the retained preset helper so terminal overlay colors stay on one projection path"
+    );
+}
+
+#[test]
+fn bootstrap_source_exposes_runtime_shell_palette_publish_helper() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let app_window_source = fs::read_to_string("ui/app-window.slint").expect("read app window");
+
+    assert!(
+        app_window_source.contains("in-out property <color> shell-app-background: ThemeTokens.window-surface;")
+            && app_window_source.contains("in-out property <color> shell-titlebar-background: ThemeTokens.titlebar-background;")
+            && app_window_source.contains("in-out property <color> shell-tabbar-background: ThemeTokens.tabbar-background;")
+            && app_window_source.contains("in-out property <color> shell-sidebar-background: ThemeTokens.sidebar-background;")
+            && app_window_source.contains("in-out property <color> shell-sidebar-panel-background: ThemeTokens.sidebar-panel-background;")
+            && app_window_source.contains("in-out property <color> shell-right-panel-background: ThemeTokens.right-panel-background;")
+            && app_window_source.contains("in-out property <color> shell-text-primary: ThemeTokens.text-primary;")
+            && app_window_source.contains("in-out property <color> shell-accent: ThemeTokens.accent;"),
+        "AppWindow should declare first-class runtime shell palette properties before bootstrap publishes the active Ayu shell-neighborhood colors"
+    );
+    assert!(
+        bootstrap_source.contains(
+            "fn sync_shell_runtime_palette(window: &AppWindow, preset: ProjectedThemePreset)"
+        ) && bootstrap_source.contains("window.set_shell_app_background(")
+            && bootstrap_source.contains("window.set_shell_titlebar_background(")
+            && bootstrap_source.contains("window.set_shell_tabbar_background(")
+            && bootstrap_source.contains("window.set_shell_sidebar_background(")
+            && bootstrap_source.contains("window.set_shell_sidebar_panel_background(")
+            && bootstrap_source.contains("window.set_shell_right_panel_background(")
+            && bootstrap_source.contains("window.set_shell_text_primary(")
+            && bootstrap_source.contains("window.set_shell_accent("),
+        "bootstrap should expose a dedicated runtime shell palette publish helper so the active Ayu shell-neighborhood colors can be pushed into AppWindow setters"
+    );
+    assert!(
+        bootstrap_source.contains("fn sync_workspace_terminal_shell_chrome(window: &AppWindow, preset: ProjectedThemePreset)")
+            && bootstrap_source.contains("preset.terminal.selection_bg")
+            && bootstrap_source.contains("preset.terminal.scrollbar_track")
+            && bootstrap_source.contains("preset.terminal.scrollbar_thumb")
+            && bootstrap_source.contains("preset.terminal.scrollbar_thumb_active")
+            && bootstrap_source.contains("preset.terminal.frame_bg")
+            && bootstrap_source.contains("preset.terminal.split"),
+        "terminal session chrome helper should read terminal host colors from the combined projected preset instead of a detached terminal-only struct"
+    );
+}
+
+#[test]
+fn no_surface_shell_palette_uses_ayu_defaults_and_tracks_theme_toggle() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+
+    let dark = projected_theme_for_mode(ThemeMode::Dark);
+    assert_eq!(
+        app.get_shell_titlebar_background().as_argb_encoded(),
+        0xff00_0000 | dark.titlebar_background
+    );
+    assert_eq!(
+        app.get_shell_sidebar_background().as_argb_encoded(),
+        0xff00_0000 | dark.sidebar_background
+    );
+    assert_eq!(
+        app.get_shell_right_panel_background().as_argb_encoded(),
+        0xff00_0000 | dark.right_panel_background
+    );
+    assert_eq!(
+        app.get_shell_text_primary().as_argb_encoded(),
+        0xff00_0000 | dark.text_primary
+    );
+    assert_eq!(
+        app.get_shell_accent().as_argb_encoded(),
+        0xff00_0000 | dark.accent
+    );
+
+    app.invoke_toggle_theme_mode_requested();
+
+    let light = projected_theme_for_mode(ThemeMode::Light);
+    assert_eq!(
+        app.get_shell_titlebar_background().as_argb_encoded(),
+        0xff00_0000 | light.titlebar_background,
+        "without an active terminal surface the runtime shell titlebar color should refresh to the light Ayu shell palette after a theme toggle"
+    );
+    assert_eq!(
+        app.get_shell_sidebar_background().as_argb_encoded(),
+        0xff00_0000 | light.sidebar_background,
+        "without an active terminal surface the runtime shell sidebar color should refresh to the light Ayu shell palette after a theme toggle"
+    );
+    assert_eq!(
+        app.get_shell_right_panel_background().as_argb_encoded(),
+        0xff00_0000 | light.right_panel_background,
+        "without an active terminal surface the runtime shell right panel color should refresh to the light Ayu shell palette after a theme toggle"
+    );
+    assert_eq!(
+        app.get_shell_text_primary().as_argb_encoded(),
+        0xff00_0000 | light.text_primary,
+        "without an active terminal surface the runtime shell text hierarchy should refresh to the light Ayu shell palette after a theme toggle"
+    );
+    assert_eq!(
+        app.get_shell_accent().as_argb_encoded(),
+        0xff00_0000 | light.accent,
+        "without an active terminal surface the runtime shell accent should refresh to the light Ayu shell palette after a theme toggle"
+    );
+}
+
+#[test]
+fn shell_chrome_sync_routes_theme_toggle_and_resync_through_runtime_shell_palette() {
+    let shell_chrome_source =
+        fs::read_to_string("src/app/bootstrap/shell_chrome.rs").expect("read shell chrome");
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        shell_chrome_source.contains("pub(super) fn sync_top_status_bar_state(")
+            && shell_chrome_source.contains("sync_shell_runtime_palette("),
+        "top status bar sync should publish the runtime shell palette so initial bind and shell chrome refresh paths stay on the active projected Ayu family"
+    );
+    assert!(
+        shell_chrome_source.contains("window.on_toggle_theme_mode_requested(move || {")
+            && shell_chrome_source
+                .contains("sync_top_status_bar_state(&window, &state, effects_ref.as_ref());"),
+        "theme mode toggles should route through the same top-status runtime shell palette sync instead of only updating dark-mode window effects"
+    );
+    assert!(
+        shell_chrome_source
+            .contains("window.on_settings_modal_theme_variant_changed(move |value| {")
+            && shell_chrome_source.contains("sync_workspace_session_state_with_manager("),
+        "theme variant changes should continue to refresh terminal session state after publishing the runtime shell palette"
+    );
+    assert!(
+        bootstrap_source.contains("sync_shell_state(")
+            && bootstrap_source
+                .contains("shell_chrome::sync_top_status_bar_state(window, state, effects);"),
+        "initial bootstrap bind should still enter the shared top-status sync path so runtime shell palette publishing happens on first window setup"
+    );
 }
 
 #[test]
@@ -11434,12 +11629,12 @@ fn toggling_theme_without_active_terminal_surface_refreshes_fallback_palette() {
     );
     assert_eq!(
         app.get_workspace_session_default_bg().as_argb_encoded(),
-        0xfffa_fafa,
+        0xfff8_f9fa,
         "without an active terminal surface bootstrap should project the light fallback terminal background from the Ayu preset"
     );
     assert_eq!(
         app.get_workspace_session_cursor_fg().as_argb_encoded(),
-        0xfffa_fafa,
+        0xfff8_f9fa,
         "without an active terminal surface bootstrap should keep the light fallback cursor foreground aligned with the Ayu preset"
     );
     assert_eq!(
@@ -11454,7 +11649,7 @@ fn toggling_theme_without_active_terminal_surface_refreshes_fallback_palette() {
     assert_eq!(dark.name, "Ayu Dark");
     assert_eq!(
         app.get_workspace_session_default_fg().as_argb_encoded(),
-        0xffb3_b1ad,
+        0xffc5_c1b8,
         "toggling theme without an active terminal surface should refresh the fallback terminal foreground instead of leaving the previous preset latched"
     );
     assert_eq!(
@@ -11487,7 +11682,7 @@ fn no_surface_terminal_projection_uses_ayu_defaults_and_tracks_theme_toggle() {
     assert_eq!(dark_preset.name, "Ayu Dark");
     assert_eq!(
         app.get_workspace_session_default_fg().as_argb_encoded(),
-        0xffb3_b1ad
+        0xffc5_c1b8
     );
     assert_eq!(
         app.get_workspace_session_default_bg().as_argb_encoded(),
@@ -11513,12 +11708,12 @@ fn no_surface_terminal_projection_uses_ayu_defaults_and_tracks_theme_toggle() {
     );
     assert_eq!(
         app.get_workspace_session_default_bg().as_argb_encoded(),
-        0xfffa_fafa,
+        0xfff8_f9fa,
         "when no terminal surface is active the fallback terminal projection should still use the Ayu light background after a theme toggle"
     );
     assert_eq!(
         app.get_workspace_session_cursor_fg().as_argb_encoded(),
-        0xfffa_fafa,
+        0xfff8_f9fa,
         "when no terminal surface is active the fallback cursor foreground should still use the Ayu light preset after a theme toggle"
     );
     assert_eq!(

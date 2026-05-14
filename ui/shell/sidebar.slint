@@ -31,6 +31,18 @@ export component Sidebar inherits Rectangle {
     in property <[ConsoleAssetItem]> console-asset-items: [];
     in property <[ConsoleAssetItem]> snippet-asset-items: [];
     in property <[ConsoleAssetItem]> keychain-asset-items: [];
+    in property <color> shell-sidebar-background: ThemeTokens.sidebar-background;
+    in property <color> shell-sidebar-panel-background: ThemeTokens.sidebar-panel-background;
+    in property <color> shell-separator: ThemeTokens.separator;
+    in property <color> shell-border: ThemeTokens.divider-subtle;
+    in property <color> shell-text-primary: ThemeTokens.text-primary;
+    in property <color> shell-text-secondary: ThemeTokens.text-secondary;
+    in property <color> shell-text-muted: ThemeTokens.text-muted;
+    in property <color> shell-accent: ThemeTokens.accent;
+    in property <color> shell-focus-ring: ThemeTokens.focus-ring;
+    in property <color> shell-sidebar-item-hover: ThemeTokens.sidebar-item-hover-background;
+    in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;
+    in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;
     private property <string> tooltip-text-value: "";
     private property <bool> tooltip-visible-value: false;
     private property <string> tooltip-source-id-value: "";
@@ -123,9 +135,9 @@ export component Sidebar inherits Rectangle {
 
         activity-bar := Rectangle {
             width: 44px;
-            background: ThemeTokens.sidebar-background;
+            background: root.shell-sidebar-background;
             border-width: 1px;
-            border-color: ThemeTokens.divider-subtle;
+            border-color: root.shell-border;
 
             VerticalLayout {
                 padding-top: 6px;
@@ -139,6 +151,12 @@ export component Sidebar inherits Rectangle {
                     sidebar-open: root.show-assets-sidebar;
                     tooltip-text: root.show-assets-sidebar ? "Collapse sidebar" : "Expand sidebar";
                     tooltip-source-id: "sidebar-toggle";
+                    shell-border: root.shell-border;
+                    shell-text-primary: root.shell-text-primary;
+                    shell-text-secondary: root.shell-text-secondary;
+                    shell-sidebar-item-hover: root.shell-sidebar-item-hover;
+                    shell-sidebar-item-selected: root.shell-sidebar-item-selected;
+                    shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
                     clicked(clicked-id) => {
                         root.toggle-assets-sidebar-requested();
                     }
@@ -159,7 +177,7 @@ export component Sidebar inherits Rectangle {
                 divider-line := Rectangle {
                     width: parent.width - 12px;
                     height: 1px;
-                    background: ThemeTokens.divider-subtle;
+                    background: root.shell-border;
                 }
 
                 for item in root.items : SidebarNavButton {
@@ -169,6 +187,12 @@ export component Sidebar inherits Rectangle {
                     sidebar-open: root.show-assets-sidebar;
                     tooltip-text: item.label;
                     tooltip-source-id: item.id;
+                    shell-border: root.shell-border;
+                    shell-text-primary: root.shell-text-primary;
+                    shell-text-secondary: root.shell-text-secondary;
+                    shell-sidebar-item-hover: root.shell-sidebar-item-hover;
+                    shell-sidebar-item-selected: root.shell-sidebar-item-selected;
+                    shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
                     clicked(clicked-id) => {
                         root.destination-selected(clicked-id);
                     }
@@ -208,6 +232,17 @@ export component Sidebar inherits Rectangle {
             console-asset-items: root.console-asset-items;
             snippet-asset-items: root.snippet-asset-items;
             keychain-asset-items: root.keychain-asset-items;
+            shell-sidebar-panel-background: root.shell-sidebar-panel-background;
+            shell-separator: root.shell-separator;
+            shell-border: root.shell-border;
+            shell-text-primary: root.shell-text-primary;
+            shell-text-secondary: root.shell-text-secondary;
+            shell-text-muted: root.shell-text-muted;
+            shell-accent: root.shell-accent;
+            shell-focus-ring: root.shell-focus-ring;
+            shell-sidebar-item-hover: root.shell-sidebar-item-hover;
+            shell-sidebar-item-selected: root.shell-sidebar-item-selected;
+            shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
 
             toggle-assets-search-requested => {
                 root.toggle-assets-search-requested();

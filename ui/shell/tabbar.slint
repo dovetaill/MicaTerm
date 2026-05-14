@@ -15,6 +15,19 @@ export struct WorkspaceTabItem {
 export component TabBar inherits Rectangle {
     in property <[WorkspaceTabItem]> items: [];
     in property <bool> suppress-hover-tooltip: false;
+    in property <color> shell-tabbar-background: ThemeTokens.tabbar-background;
+    in property <color> shell-titlebar-background: ThemeTokens.titlebar-background;
+    in property <color> shell-separator: ThemeTokens.separator;
+    in property <color> shell-border: ThemeTokens.divider-subtle;
+    in property <color> shell-hairline: ThemeTokens.hairline;
+    in property <color> shell-text-primary: ThemeTokens.text-primary;
+    in property <color> shell-text-secondary: ThemeTokens.text-secondary;
+    in property <color> shell-text-inactive: ThemeTokens.text-muted;
+    in property <color> shell-accent: ThemeTokens.accent;
+    in property <color> shell-tab-active: ThemeTokens.tab-active-surface;
+    in property <color> shell-tab-inactive: ThemeTokens.tab-inactive-surface;
+    in property <color> shell-tab-hover: ThemeTokens.tab-hover-surface;
+    in property <color> shell-tab-active-indicator: ThemeTokens.tab-active-indicator;
     callback tab-selected(string);
     callback tab-close-requested(string);
     callback tab-reorder-requested(string, int);
@@ -99,14 +112,14 @@ export component TabBar inherits Rectangle {
     width: 100%;
     min-width: 0px;
     height: 36px;
-    background: ThemeTokens.tabbar-background;
+    background: root.shell-tabbar-background;
     border-width: 0px;
 
     chrome-reference := Rectangle {
         width: 0px;
         height: 0px;
         visible: false;
-        background: ThemeTokens.titlebar-background;
+        background: root.shell-titlebar-background;
     }
 
     HorizontalLayout {
@@ -130,6 +143,13 @@ export component TabBar inherits Rectangle {
                 ? root.drag-preview-gap-width
                 : 0px;
             show-leading-insertion-line: root.show-reorder-preview() && root.drag-preview-slot == index;
+            shell-border: root.shell-border;
+            shell-text-primary: root.shell-text-primary;
+            shell-text-secondary: root.shell-text-secondary;
+            shell-tab-active: root.shell-tab-active;
+            shell-tab-inactive: root.shell-tab-inactive;
+            shell-tab-hover: root.shell-tab-hover;
+            shell-tab-active-indicator: root.shell-tab-active-indicator;
 
             selected => {
                 root.tab-selected(item.tab_id);
@@ -197,8 +217,8 @@ export component TabBar inherits Rectangle {
                 height: parent.height - 8px;
                 border-radius: 8px;
                 border-width: parent.width > 0px ? 1px : 0px;
-                border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.control-hover-surface;
+                border-color: root.shell-border;
+                background: root.shell-tab-hover;
                 opacity: parent.width > 0px ? 0.72 : 0;
                 visible: parent.width > 0px;
             }
@@ -209,7 +229,7 @@ export component TabBar inherits Rectangle {
                 width: 3px;
                 height: parent.height - 8px;
                 border-radius: 2px;
-                background: ThemeTokens.tab-active-line;
+                background: root.shell-tab-active-indicator;
                 opacity: parent.width > 0px ? 1 : 0;
                 visible: parent.width > 0px;
             }
@@ -221,11 +241,11 @@ export component TabBar inherits Rectangle {
             y: 3px;
             border-radius: 8px;
             border-width: new-tab-touch.has-hover ? 1px : 0px;
-            border-color: ThemeTokens.divider-subtle;
+            border-color: root.shell-border;
             background: new-tab-touch.pressed
                 ? ThemeTokens.control-pressed-surface
                 : new-tab-touch.has-hover
-                    ? ThemeTokens.tab-inactive-surface
+                    ? root.shell-tab-inactive
                     : transparent;
 
             Image {
@@ -235,7 +255,7 @@ export component TabBar inherits Rectangle {
                 height: 16px;
                 source: root.new-tab-icon;
                 image-fit: contain;
-                colorize: new-tab-touch.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
+                colorize: new-tab-touch.has-hover ? root.shell-text-primary : root.shell-text-secondary;
             }
 
             new-tab-touch := TouchArea {
@@ -259,7 +279,7 @@ export component TabBar inherits Rectangle {
                 y: parent.height - 1px;
                 width: parent.width;
                 height: 1px;
-                background: ThemeTokens.divider-subtle;
+                background: root.shell-border;
             }
         }
     }

@@ -9,6 +9,12 @@ export component SidebarNavButton inherits Rectangle {
     in property <bool> sidebar-open: true;
     in property <string> tooltip-text;
     in property <string> tooltip-source-id;
+    in property <color> shell-border: ThemeTokens.divider-subtle;
+    in property <color> shell-text-primary: ThemeTokens.text-primary;
+    in property <color> shell-text-secondary: ThemeTokens.text-secondary;
+    in property <color> shell-sidebar-item-hover: ThemeTokens.sidebar-item-hover-background;
+    in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;
+    in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;
     callback clicked(string);
     callback pointer-activity-requested();
     callback tooltip-open-requested(string, string, length, length, length);
@@ -34,13 +40,13 @@ export component SidebarNavButton inherits Rectangle {
     height: 36px;
     border-radius: 10px;
     border-width: root.active || touch.has-hover ? 1px : 0px;
-    border-color: root.active ? ThemeTokens.sidebar-item-selected-border : ThemeTokens.divider-subtle;
+    border-color: root.active ? root.shell-sidebar-item-selected-border : root.shell-border;
     background: touch.pressed
         ? ThemeTokens.control-pressed-surface
         : root.active
-            ? ThemeTokens.sidebar-item-selected-background
+            ? root.shell-sidebar-item-selected
             : touch.has-hover
-                ? ThemeTokens.sidebar-item-hover-background
+                ? root.shell-sidebar-item-hover
                 : transparent;
 
     if (root.displayed-icon.width > 0 && root.displayed-icon.height > 0) : Image {
@@ -50,7 +56,7 @@ export component SidebarNavButton inherits Rectangle {
         height: 20px;
         source <=> root.displayed-icon;
         image-fit: contain;
-        colorize: root.active || touch.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
+        colorize: root.active || touch.has-hover ? root.shell-text-primary : root.shell-text-secondary;
     }
 
     changed has-hover => {

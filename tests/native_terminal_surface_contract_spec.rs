@@ -370,6 +370,53 @@ fn workspace_and_window_sources_thread_terminal_link_affordance_contract() {
 }
 
 #[test]
+fn terminal_host_terminal_chrome_stays_session_scoped_across_workspace_wiring() {
+    let host_source =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+    let workspace_source =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+    let session_host_block = block_between(
+        &workspace_source,
+        "session-host := TerminalSessionHost {",
+        "selection-active <=> root.workspace-session-selection-active;",
+    );
+
+    assert!(
+        host_source.contains(
+            "// Terminal frame, selection, and scrollbar colors stay session-scoped runtime values."
+        ) && host_source.contains("in property <color> session-selection-surface:")
+            && host_source.contains("in property <color> session-scrollbar-track:")
+            && host_source.contains("in property <color> session-scrollbar-thumb:")
+            && host_source.contains("in property <color> session-scrollbar-thumb-active:")
+            && host_source.contains("in property <color> session-frame-surface:")
+            && host_source.contains("in property <color> session-frame-border:")
+            && !host_source.contains("in property <color> shell-selection-surface")
+            && !host_source.contains("in property <color> shell-scrollbar-track")
+            && !host_source.contains("in property <color> shell-scrollbar-thumb")
+            && !host_source.contains("in property <color> shell-scrollbar-thumb-active")
+            && !host_source.contains("in property <color> shell-frame-surface")
+            && !host_source.contains("in property <color> shell-frame-border"),
+        "terminal session host should keep frame, selection, and scrollbar colors on session-scoped runtime properties instead of introducing generic shell color inputs"
+    );
+    assert!(
+        session_host_block.contains("// Keep the live terminal host on session-scoped runtime chrome so shell palette props cannot split the renderer path.")
+            && session_host_block.contains("session-selection-surface: root.workspace-session-selection-surface;")
+            && session_host_block.contains("session-scrollbar-track: root.workspace-session-scrollbar-track;")
+            && session_host_block.contains("session-scrollbar-thumb: root.workspace-session-scrollbar-thumb;")
+            && session_host_block.contains("session-scrollbar-thumb-active: root.workspace-session-scrollbar-thumb-active;")
+            && session_host_block.contains("session-frame-surface: root.workspace-session-frame-surface;")
+            && session_host_block.contains("session-frame-border: root.workspace-session-frame-border;")
+            && !session_host_block.contains("shell-selection-surface:")
+            && !session_host_block.contains("shell-scrollbar-track:")
+            && !session_host_block.contains("shell-scrollbar-thumb:")
+            && !session_host_block.contains("shell-scrollbar-thumb-active:")
+            && !session_host_block.contains("shell-frame-surface:")
+            && !session_host_block.contains("shell-frame-border:"),
+        "workspace pane should keep forwarding the session-scoped frame, selection, and scrollbar runtime colors into TerminalSessionHost instead of swapping that wiring onto generic shell props"
+    );
+}
+
+#[test]
 fn runtime_profile_source_exposes_terminal_render_mode_contract() {
     let runtime_profile_source =
         fs::read_to_string("src/app/runtime_profile.rs").expect("read runtime profile");
@@ -798,7 +845,7 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
     let workspace_surface_projection_block = block_between(
         &bootstrap_source,
         "if let Some(surface) = state.active_workspace_terminal_surface() {",
-        "\n    } else {\n        let preset = terminal_theme_preset;",
+        "\n    } else {\n        let preset = terminal_theme_preset.terminal;",
     );
     assert!(
         workspace_surface_projection_block.contains("let mut next_render_mode = None;"),
@@ -918,7 +965,7 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
     );
     let no_surface_block = block_between(
         &bootstrap_source,
-        "\n    } else {\n        let preset = terminal_theme_preset;",
+        "\n    } else {\n        let preset = terminal_theme_preset.terminal;",
         "\n    }\n}\n\nfn sync_workspace_tabs(",
     );
     let no_surface_clear = no_surface_block

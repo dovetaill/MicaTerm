@@ -28,6 +28,14 @@ export component Titlebar inherits Rectangle {
     in property <string> active-session-host: "";
     in property <string> active-session-status-label: "";
     in property <string> active-session-summary-tooltip: "";
+    in property <color> shell-titlebar-background: ThemeTokens.titlebar-background;
+    in property <color> shell-separator: ThemeTokens.separator;
+    in property <color> shell-border: ThemeTokens.divider-subtle;
+    in property <color> shell-text-primary: ThemeTokens.text-primary;
+    in property <color> shell-text-secondary: ThemeTokens.text-secondary;
+    in property <color> shell-text-muted: ThemeTokens.text-muted;
+    in property <color> shell-text-inactive: ThemeTokens.text-muted;
+    in property <color> shell-accent: ThemeTokens.accent;
 
     private property <image> navigation-icon: @image-url("../../assets/icons/fluent/navigation-24-regular.svg");
     private property <image> header-logotype: @image-url("../../assets/icons/mica-term-header-logotype.svg");
@@ -119,10 +127,10 @@ export component Titlebar inherits Rectangle {
     callback close-requested;
 
     height: 48px;
-    background: ThemeTokens.titlebar-background;
+    background: root.shell-titlebar-background;
     border-radius: 0px;
     border-width: 0px;
-    border-color: ThemeTokens.divider-subtle;
+    border-color: root.shell-border;
 
     // Slint popups need explicit open/close orchestration so their visibility stays consistent
     // with the Rust-side view-model toggle state.
@@ -240,7 +248,7 @@ export component Titlebar inherits Rectangle {
                 height: 24px;
                 source: root.header-logotype;
                 image-fit: contain;
-                colorize: ThemeTokens.text-primary;
+                colorize: root.shell-text-primary;
             }
         }
 
@@ -284,7 +292,7 @@ export component Titlebar inherits Rectangle {
                         min-width: 0px;
                         horizontal-stretch: 3;
                         text: root.active-session-primary-summary;
-                        color: ThemeTokens.text-primary;
+                        color: root.shell-text-primary;
                         font-size: 12px;
                         font-weight: 600;
                         vertical-alignment: center;
@@ -295,7 +303,7 @@ export component Titlebar inherits Rectangle {
                         min-width: 0px;
                         horizontal-stretch: 2;
                         text: root.active-session-summary-detail;
-                        color: ThemeTokens.text-secondary;
+                        color: root.shell-text-secondary;
                         font-size: 11px;
                         vertical-alignment: center;
                         overflow: elide;
@@ -375,7 +383,7 @@ export component Titlebar inherits Rectangle {
                     width: parent.width - 54px;
                     height: parent.height;
                     text: root.transfer-summary-text;
-                    color: ThemeTokens.text-primary;
+                    color: root.shell-text-primary;
                     vertical-alignment: center;
                     font-size: 11px;
                     font-weight: 700;

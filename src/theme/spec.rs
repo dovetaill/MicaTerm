@@ -246,9 +246,9 @@ pub const TERMINAL_BG_GRAIN_ALPHA: f32 = 0.0;
 pub const TERMINAL_BG_BASE_DARK: u32 = 0x0a_0e14;
 pub const TERMINAL_BG_GRADIENT_TOP_DARK: u32 = 0x0a_0e14;
 pub const TERMINAL_BG_GRADIENT_BOTTOM_DARK: u32 = 0x0a_0e14;
-pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xfa_fafa;
-pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xfa_fafa;
-pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xfa_fafa;
+pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xf8_f9fa;
+pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xf8_f9fa;
+pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xf8_f9fa;
 
 pub fn app_theme_spec(mode: ThemeMode, variant: ThemeVariant) -> AppThemeSpec {
     match variant {
@@ -433,7 +433,7 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
                     gradient_bottom: TERMINAL_BG_GRADIENT_BOTTOM_DARK,
                 },
                 foreground: TerminalForegroundTheme {
-                    default: 0xb3_b1ad,
+                    default: 0xc5_c1b8,
                     soft: 0x99_a1a8,
                     dim: 0x5c_6773,
                     inactive: 0x82_8c99,
@@ -443,8 +443,8 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
                     foreground: TERMINAL_BG_BASE_DARK,
                 },
                 selection: TerminalOverlayTheme {
-                    rgb: 0x25_3340,
-                    alpha: 0.85,
+                    rgb: 0x2a_3541,
+                    alpha: 0.78,
                 },
                 search_match: TerminalOverlayTheme {
                     rgb: 0x4c_4126,
@@ -455,9 +455,9 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
                     alpha: 0.36,
                 },
                 scrollbar: TerminalScrollbarTheme {
-                    track: 0x11_151c,
-                    thumb: 0x33_404a,
-                    thumb_active: 0x47_5866,
+                    track: 0x11_1821,
+                    thumb: 0x2f_3944,
+                    thumb_active: 0x3c_4856,
                 },
                 ansi: [
                     0x01_060e, 0xea_6c73, 0x91_b362, 0xf9_af4f, 0x53_bdfa, 0xfa_e994, 0x90_e1c6,
@@ -502,7 +502,7 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
                 },
                 selection: TerminalOverlayTheme {
                     rgb: 0x55_b4d4,
-                    alpha: 0.22,
+                    alpha: 0.20,
                 },
                 search_match: TerminalOverlayTheme {
                     rgb: 0xf8_dfa0,
@@ -513,9 +513,9 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
                     alpha: 0.28,
                 },
                 scrollbar: TerminalScrollbarTheme {
-                    track: 0xe6_e9ef,
-                    thumb: 0xc7_ccd4,
-                    thumb_active: 0xb6_bdc8,
+                    track: 0xf0_f3f6,
+                    thumb: 0xd1_d7de,
+                    thumb_active: 0xc1_c8d1,
                 },
                 ansi: [
                     0x00_0000, 0xea_6c6d, 0x6c_bf43, 0xec_a944, 0x31_99e1, 0x9e_75c7, 0x46_ba94,
@@ -661,59 +661,59 @@ fn legacy_hacker_green_spec(mode: ThemeMode) -> AppThemeSpec {
 
 fn premium_shell_dark() -> ShellChromeTheme {
     ShellChromeTheme {
-        app_background: 0x14_1b23,
-        titlebar_background: 0x18_1f27,
-        tabbar_background: 0x1a_222c,
-        sidebar_background: 0x18_212b,
-        sidebar_panel_background: 0x1b_2430,
-        right_panel_background: 0x1c_2431,
-        terminal_frame_background: 0x11_151c,
-        separator: 0x26_303b,
-        border: 0x11_151c,
-        hairline: 0x3a_4857,
-        text_primary: 0xe6_ecf3,
-        text_secondary: 0xba_c4d0,
-        text_muted: 0x8d_9aa9,
-        text_inactive: 0x76_8296,
-        accent: 0x6f_8fb7,
-        link_accent: 0x89_a9cf,
-        focus_ring: 0x7d_9bc2,
-        tab_active: 0x22_3040,
-        tab_inactive: 0x1a_222c,
-        tab_hover: 0x20_2b38,
-        tab_active_indicator: 0x7a_97bc,
-        sidebar_item_hover: 0x22_303d,
-        sidebar_item_selected: 0x29_3846,
-        sidebar_item_selected_border: 0x6c_88ae,
+        app_background: 0x0a_0e14,
+        titlebar_background: 0x10_151d,
+        tabbar_background: 0x10_151d,
+        sidebar_background: 0x10_151d,
+        sidebar_panel_background: 0x11_1821,
+        right_panel_background: 0x11_1821,
+        terminal_frame_background: 0x14_1b24,
+        separator: 0x1b_2530,
+        border: 0x1b_2530,
+        hairline: 0x1b_2530,
+        text_primary: 0xc5_c1b8,
+        text_secondary: 0x9a_a4ae,
+        text_muted: 0x7d_8790,
+        text_inactive: 0x7d_8790,
+        accent: 0xe6_b450,
+        link_accent: 0xe6_b450,
+        focus_ring: 0xe6_b450,
+        tab_active: 0x14_1b24,
+        tab_inactive: 0x10_151d,
+        tab_hover: 0x11_1821,
+        tab_active_indicator: 0xe6_b450,
+        sidebar_item_hover: 0x11_1821,
+        sidebar_item_selected: 0x14_1b24,
+        sidebar_item_selected_border: 0xe6_b450,
     }
 }
 
 fn premium_shell_light() -> ShellChromeTheme {
     ShellChromeTheme {
-        app_background: 0xf2_f5f8,
-        titlebar_background: 0xf7_f9fc,
-        tabbar_background: 0xee_f2f7,
-        sidebar_background: 0xeb_f0f5,
-        sidebar_panel_background: 0xf1_f5f9,
-        right_panel_background: 0xf3_f6fa,
-        terminal_frame_background: 0xe6_e9ef,
-        separator: 0xd8_e0e8,
-        border: 0xe6_e9ef,
-        hairline: 0xb7_c4d1,
-        text_primary: 0x24_303d,
-        text_secondary: 0x49_586a,
-        text_muted: 0x67_7789,
-        text_inactive: 0x7b_8a9c,
-        accent: 0x58_7daa,
-        link_accent: 0x50_77a7,
-        focus_ring: 0x7e_9ec5,
-        tab_active: 0xff_ffff,
-        tab_inactive: 0xee_f2f7,
-        tab_hover: 0xe8_edf4,
-        tab_active_indicator: 0x63_88b4,
-        sidebar_item_hover: 0xe4_ebf3,
-        sidebar_item_selected: 0xdc_e6f2,
-        sidebar_item_selected_border: 0x8e_a3bb,
+        app_background: 0xf4_f6f8,
+        titlebar_background: 0xee_f2f5,
+        tabbar_background: 0xee_f2f5,
+        sidebar_background: 0xee_f2f5,
+        sidebar_panel_background: 0xf0_f3f6,
+        right_panel_background: 0xf0_f3f6,
+        terminal_frame_background: 0xfa_fafa,
+        separator: 0xd8_dee6,
+        border: 0xd8_dee6,
+        hairline: 0xd8_dee6,
+        text_primary: 0x5c_6166,
+        text_secondary: 0x7a_838c,
+        text_muted: 0x8a_939c,
+        text_inactive: 0x8a_939c,
+        accent: 0xff_aa33,
+        link_accent: 0xff_aa33,
+        focus_ring: 0xff_aa33,
+        tab_active: 0xfa_fafa,
+        tab_inactive: 0xee_f2f5,
+        tab_hover: 0xf0_f3f6,
+        tab_active_indicator: 0xff_aa33,
+        sidebar_item_hover: 0xf0_f3f6,
+        sidebar_item_selected: 0xfa_fafa,
+        sidebar_item_selected_border: 0xff_aa33,
     }
 }
 

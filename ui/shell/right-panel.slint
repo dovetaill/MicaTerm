@@ -50,6 +50,14 @@ export component RightPanel inherits Rectangle {
     in property <bool> transfer-center-pinned: false;
     in property <bool> sftp-queue-drawer-open: false;
     in property <bool> sftp-panel-drop-target-active: false;
+    in property <color> shell-right-panel-background: ThemeTokens.right-panel-background;
+    in property <color> shell-separator: ThemeTokens.separator;
+    in property <color> shell-border: ThemeTokens.divider-subtle;
+    in property <color> shell-text-primary: ThemeTokens.text-primary;
+    in property <color> shell-text-secondary: ThemeTokens.text-secondary;
+    in property <color> shell-text-muted: ThemeTokens.text-muted;
+    in property <color> shell-accent: ThemeTokens.accent;
+    in property <color> shell-focus-ring: ThemeTokens.focus-ring;
     out property <length> layout-radius: root.border-radius;
     out property <length> layout-border-width: root.border-width;
     out property <length> sftp-drop-target-x: table-card.x;
@@ -214,7 +222,7 @@ export component RightPanel inherits Rectangle {
     width: root.expanded ? root.expanded-width : 0px;
     visible: root.expanded;
     clip: true;
-    background: ThemeTokens.right-panel-background;
+    background: root.shell-right-panel-background;
     border-radius: 0px;
     border-width: 0px;
     border-color: transparent;
@@ -224,7 +232,7 @@ export component RightPanel inherits Rectangle {
         y: 0px;
         width: 1px;
         height: parent.height;
-        background: ThemeTokens.divider-strong;
+        background: root.shell-border;
     }
 
     edge-handle := Rectangle {
@@ -294,15 +302,15 @@ export component RightPanel inherits Rectangle {
             height: 74px;
             border-radius: 12px;
             border-width: 1px;
-            border-color: ThemeTokens.divider-subtle;
-            background: ThemeTokens.workspace-surface;
+            border-color: root.shell-border;
+            background: root.shell-right-panel-background;
 
             Rectangle {
                 x: 12px;
                 y: 37px;
                 width: parent.width - 24px;
                 height: 1px;
-                background: ThemeTokens.divider-subtle;
+                background: root.shell-border;
             }
 
             connection-badge := Rectangle {
@@ -324,7 +332,7 @@ export component RightPanel inherits Rectangle {
                     font-family: AppTypography.ui-font-family;
                     font-size: AppTypography.ui-font-size-caption;
                     font-weight: AppTypography.ui-font-weight-semibold;
-                    color: ThemeTokens.text-secondary;
+                    color: root.shell-text-secondary;
                     vertical-alignment: center;
                     overflow: elide;
                 }
@@ -441,9 +449,9 @@ export component RightPanel inherits Rectangle {
                     vertical-alignment: center;
                     text: root.sftp-panel-path;
                     enabled: root.sftp-panel-actions-enabled;
-                    color: ThemeTokens.text-primary;
-                    selection-background-color: ThemeTokens.accent;
-                    selection-foreground-color: ThemeTokens.text-primary;
+                    color: root.shell-text-primary;
+                    selection-background-color: root.shell-accent;
+                    selection-foreground-color: root.shell-text-primary;
 
                     key-pressed(event) => {
                         if (event.text == Key.Return) {
@@ -478,7 +486,7 @@ export component RightPanel inherits Rectangle {
                         font-family: AppTypography.ui-font-family;
                         font-size: AppTypography.ui-font-size-caption;
                         font-weight: AppTypography.ui-font-weight-regular;
-                        color: ThemeTokens.text-primary;
+                        color: root.shell-text-primary;
                         vertical-alignment: center;
                         overflow: elide;
                     }
@@ -504,7 +512,7 @@ export component RightPanel inherits Rectangle {
             border-radius: 0px;
             border-width: 0px;
             border-color: transparent;
-            background: ThemeTokens.workspace-surface;
+            background: root.shell-right-panel-background;
             clip: true;
 
             if root.sftp-panel-drop-target-active : drop-overlay := Rectangle {
@@ -535,7 +543,7 @@ export component RightPanel inherits Rectangle {
                     width: parent.width - 40px;
                     height: parent.height;
                     text: "Drop files to upload";
-                    color: ThemeTokens.text-primary;
+                    color: root.shell-text-primary;
                     font-size: 13px;
                     font-weight: 700;
                     horizontal-alignment: center;

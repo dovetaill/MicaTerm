@@ -23,6 +23,13 @@ export component ActiveTab inherits Rectangle {
 
     in property <length> min-chip-width: 120px;
     in property <length> max-chip-width: 220px;
+    in property <color> shell-border: ThemeTokens.divider-subtle;
+    in property <color> shell-text-primary: ThemeTokens.text-primary;
+    in property <color> shell-text-secondary: ThemeTokens.text-secondary;
+    in property <color> shell-tab-active: ThemeTokens.tab-active-surface;
+    in property <color> shell-tab-inactive: ThemeTokens.tab-inactive-surface;
+    in property <color> shell-tab-hover: ThemeTokens.tab-hover-surface;
+    in property <color> shell-tab-active-indicator: ThemeTokens.tab-active-indicator;
     private property <image> close-icon: @image-url("../../assets/icons/fluent/dismiss-20-regular.svg");
     private property <length> close-zone-width: 28px;
     private property <length> reorder-threshold: 6px;
@@ -72,8 +79,8 @@ export component ActiveTab inherits Rectangle {
         height: parent.height - 8px;
         border-radius: 8px;
         border-width: root.leading-gap-width > 0px ? 1px : 0px;
-        border-color: ThemeTokens.divider-subtle;
-        background: ThemeTokens.control-hover-surface;
+        border-color: root.shell-border;
+        background: root.shell-tab-hover;
         opacity: root.leading-gap-width > 0px ? 0.72 : 0;
         visible: root.leading-gap-width > 0px;
         animate width { duration: 140ms; easing: ease-out; }
@@ -86,7 +93,7 @@ export component ActiveTab inherits Rectangle {
         width: 3px;
         height: parent.height - 8px;
         border-radius: 2px;
-        background: ThemeTokens.tab-active-line;
+        background: root.shell-tab-active-indicator;
         opacity: root.show-leading-insertion-line ? 1 : 0;
         visible: root.show-leading-insertion-line;
         animate x { duration: 140ms; easing: ease-out; }
@@ -100,15 +107,15 @@ export component ActiveTab inherits Rectangle {
         height: parent.height;
         border-radius: 10px;
         border-width: root.drag-active ? 1px : 0px;
-        border-color: root.drag-active ? ThemeTokens.divider-strong : transparent;
+        border-color: root.drag-active ? root.shell-border : transparent;
         background: root.drag-active
-            ? ThemeTokens.tab-active-surface
+            ? root.shell-tab-active
             : root.active
-                ? ThemeTokens.tab-active-surface
+                ? root.shell-tab-active
                 : (content-hit-target.pressed || close-hit-target.pressed)
                     ? ThemeTokens.control-pressed-surface
                     : root.has-hover
-                        ? ThemeTokens.tab-hover-surface
+                        ? root.shell-tab-hover
                         : transparent;
         clip: true;
         opacity: root.drag-active ? 0.98 : 1;
@@ -136,7 +143,7 @@ export component ActiveTab inherits Rectangle {
             width: parent.width - 20px;
             height: 2px;
             border-radius: 1px;
-            background: ThemeTokens.tab-active-line;
+            background: root.shell-tab-active-indicator;
             visible: root.active && !root.drag-active;
         }
 
@@ -145,7 +152,7 @@ export component ActiveTab inherits Rectangle {
             y: parent.height - 1px;
             width: parent.width;
             height: 1px;
-            background: root.active || root.drag-active ? transparent : ThemeTokens.divider-subtle;
+            background: root.active || root.drag-active ? transparent : root.shell-border;
         }
 
         trailing-divider := Rectangle {
@@ -155,7 +162,7 @@ export component ActiveTab inherits Rectangle {
             height: parent.height - 16px;
             background: root.active || root.has-hover || root.drag-active
                 ? transparent
-                : ThemeTokens.divider-subtle;
+                : root.shell-border;
         }
 
         close-button := Rectangle {
@@ -178,7 +185,7 @@ export component ActiveTab inherits Rectangle {
                 height: 14px;
                 source <=> root.close-icon;
                 image-fit: contain;
-                colorize: close-hit-target.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
+                colorize: close-hit-target.has-hover ? root.shell-text-primary : root.shell-text-secondary;
             }
         }
 
@@ -189,7 +196,7 @@ export component ActiveTab inherits Rectangle {
             height: parent.height;
             text: root.title;
             font-family: AppTypography.ui-font-family;
-            color: root.active || root.drag-active ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
+            color: root.active || root.drag-active ? root.shell-text-primary : root.shell-text-secondary;
             font-size: AppTypography.ui-font-size-body;
             font-weight: AppTypography.ui-font-weight-regular;
             letter-spacing: 0px;

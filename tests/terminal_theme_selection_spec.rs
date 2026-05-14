@@ -10,12 +10,15 @@ fn dark_theme_maps_terminal_palette_to_ayu_dark() {
 
     assert_eq!(preset.name, "Ayu Dark");
     assert_eq!(preset.background, 0x0a_0e14);
-    assert_eq!(preset.foreground, 0xb3_b1ad);
+    assert_eq!(preset.foreground, 0xc5_c1b8);
     assert_eq!(preset.viewport_bg_top, 0x0a_0e14);
     assert_eq!(preset.viewport_bg_bottom, 0x0a_0e14);
     assert_eq!(preset.cursor_bg, 0xe6_b450);
     assert_eq!(preset.cursor_fg, 0x0a_0e14);
-    assert_eq!(preset.selection_bg, (0x25, 0x33, 0x40, 0.85));
+    assert_eq!(preset.selection_bg, (0x2a, 0x35, 0x41, 0.78));
+    assert_eq!(preset.scrollbar_track, (0x11, 0x18, 0x21));
+    assert_eq!(preset.scrollbar_thumb, (0x2f, 0x39, 0x44));
+    assert_eq!(preset.scrollbar_thumb_active, (0x3c, 0x48, 0x56));
     assert_eq!(preset.ansi[0], (0x01, 0x06, 0x0e));
     assert_eq!(preset.ansi[7], (0xc7, 0xc7, 0xc7));
     assert_eq!(preset.ansi[8], (0x68, 0x68, 0x68));
@@ -23,17 +26,33 @@ fn dark_theme_maps_terminal_palette_to_ayu_dark() {
 }
 
 #[test]
+fn terminal_background_constants_follow_the_ayu_migration_targets() {
+    let dark = preset_for_theme(ThemeMode::Dark, ThemeVariant::PremiumDefault);
+    let light = preset_for_theme(ThemeMode::Light, ThemeVariant::PremiumDefault);
+
+    assert_eq!(dark.background, 0x0a_0e14);
+    assert_eq!(dark.viewport_bg_top, 0x0a_0e14);
+    assert_eq!(dark.viewport_bg_bottom, 0x0a_0e14);
+    assert_eq!(light.background, 0xf8_f9fa);
+    assert_eq!(light.viewport_bg_top, 0xf8_f9fa);
+    assert_eq!(light.viewport_bg_bottom, 0xf8_f9fa);
+}
+
+#[test]
 fn light_theme_maps_terminal_palette_to_ayu_light() {
     let preset = preset_for_theme(ThemeMode::Light, ThemeVariant::PremiumDefault);
 
     assert_eq!(preset.name, "Ayu Light");
-    assert_eq!(preset.background, 0xfa_fafa);
+    assert_eq!(preset.background, 0xf8_f9fa);
     assert_eq!(preset.foreground, 0x5c_6166);
-    assert_eq!(preset.viewport_bg_top, 0xfa_fafa);
-    assert_eq!(preset.viewport_bg_bottom, 0xfa_fafa);
+    assert_eq!(preset.viewport_bg_top, 0xf8_f9fa);
+    assert_eq!(preset.viewport_bg_bottom, 0xf8_f9fa);
     assert_eq!(preset.cursor_bg, 0xff_aa33);
-    assert_eq!(preset.cursor_fg, 0xfa_fafa);
-    assert_eq!(preset.selection_bg, (0x55, 0xb4, 0xd4, 0.22));
+    assert_eq!(preset.cursor_fg, 0xf8_f9fa);
+    assert_eq!(preset.selection_bg, (0x55, 0xb4, 0xd4, 0.20));
+    assert_eq!(preset.scrollbar_track, (0xf0, 0xf3, 0xf6));
+    assert_eq!(preset.scrollbar_thumb, (0xd1, 0xd7, 0xde));
+    assert_eq!(preset.scrollbar_thumb_active, (0xc1, 0xc8, 0xd1));
     assert_eq!(preset.ansi[0], (0x00, 0x00, 0x00));
     assert_eq!(preset.ansi[7], (0xc7, 0xc7, 0xc7));
     assert_eq!(preset.ansi[8], (0x68, 0x68, 0x68));
@@ -156,14 +175,74 @@ fn slint_terminal_tokens_match_shared_no_frame_defaults() {
     assert!(
         tokens.contains(&format!(
             "terminal-frame-background: dark-mode ? {} : {};",
-            hex_rgb_tuple(dark_preset.split),
-            hex_rgb_tuple(light_preset.split),
+            hex_rgb(dark_preset.frame_bg),
+            hex_rgb(light_preset.frame_bg),
         )),
         "Slint terminal frame tokens should stay aligned with the shared Ayu preset so workspace chrome does not drift from the terminal split/frame palette"
     );
     assert!(
         !tokens.contains("terminal-jump-to-latest"),
         "terminal fallback tokens should not keep styling for a removed jump-to-latest pill"
+    );
+}
+
+#[test]
+fn boot_time_terminal_tokens_match_approved_ayu_defaults() {
+    let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
+    let dark_preset = preset_for_theme(ThemeMode::Dark, ThemeVariant::PremiumDefault);
+    let light_preset = preset_for_theme(ThemeMode::Light, ThemeVariant::PremiumDefault);
+
+    assert!(
+        tokens.contains(&format!(
+            "terminal-canvas-surface: dark-mode ? {} : {};",
+            hex_rgb(dark_preset.background),
+            hex_rgb(light_preset.background),
+        )),
+        "boot-time terminal canvas tokens should match the approved Ayu dark/light viewport backgrounds before Rust publishes the runtime palette"
+    );
+    assert!(
+        tokens.contains(&format!(
+            "terminal-default-fg: dark-mode ? {} : {};",
+            hex_rgb(dark_preset.foreground),
+            hex_rgb(light_preset.foreground),
+        )),
+        "boot-time terminal foreground tokens should match the approved Ayu dark/light defaults before runtime projection takes over"
+    );
+    assert!(
+        tokens.contains(&format!(
+            "terminal-cursor-fg: dark-mode ? {} : {};",
+            hex_rgb(dark_preset.cursor_fg),
+            hex_rgb(light_preset.cursor_fg),
+        )) && tokens.contains(&format!(
+            "terminal-cursor-bg: dark-mode ? {} : {};",
+            hex_rgb(dark_preset.cursor_bg),
+            hex_rgb(light_preset.cursor_bg),
+        )),
+        "boot-time cursor tokens should match the approved Ayu dark/light cursor colors before runtime projection takes over"
+    );
+    assert!(
+        tokens.contains(&format!(
+            "terminal-selection-surface: dark-mode ? {} : {};",
+            hex_rgba(dark_preset.selection_bg),
+            hex_rgba(light_preset.selection_bg),
+        )),
+        "boot-time selection tokens should match the approved Ayu dark/light overlay colors before runtime projection takes over"
+    );
+    assert!(
+        tokens.contains(&format!(
+            "terminal-scrollbar-track-surface: dark-mode ? {} : {};",
+            hex_rgb_tuple(dark_preset.scrollbar_track),
+            hex_rgb_tuple(light_preset.scrollbar_track),
+        )) && tokens.contains(&format!(
+            "terminal-scrollbar-thumb-surface: dark-mode ? {} : {};",
+            hex_rgb_tuple(dark_preset.scrollbar_thumb),
+            hex_rgb_tuple(light_preset.scrollbar_thumb),
+        )) && tokens.contains(&format!(
+            "terminal-scrollbar-thumb-active-surface: dark-mode ? {} : {};",
+            hex_rgb_tuple(dark_preset.scrollbar_thumb_active),
+            hex_rgb_tuple(light_preset.scrollbar_thumb_active),
+        )),
+        "boot-time scrollbar tokens should match the approved Ayu dark/light terminal chrome before runtime projection takes over"
     );
 }
 
