@@ -513,9 +513,9 @@ fn premium_default_spec(mode: ThemeMode) -> AppThemeSpec {
                     alpha: 0.28,
                 },
                 scrollbar: TerminalScrollbarTheme {
-                    track: 0xf0_f3f6,
-                    thumb: 0xd1_d7de,
-                    thumb_active: 0xc1_c8d1,
+                    track: 0xf4_f6f8,
+                    thumb: 0xd6_dce3,
+                    thumb_active: 0xc6_cdd6,
                 },
                 ansi: [
                     0x00_0000, 0xea_6c6d, 0x6c_bf43, 0xec_a944, 0x31_99e1, 0x9e_75c7, 0x46_ba94,
