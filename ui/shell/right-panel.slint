@@ -755,9 +755,19 @@ export component RightPanel inherits Rectangle {
                         for item in root.sftp-panel-items : Rectangle {
                             width: parent.width;
                             height: 44px;
-                            background: item.selected ? ThemeTokens.explorer-row-selected-surface
-                                : row-touch.has-hover ? ThemeTokens.explorer-row-hover-surface
+                            background: item.selected ? root.shell-sidebar-item-selected
+                                : row-touch.has-hover ? root.shell-sidebar-item-hover
                                 : transparent;
+
+                            active-rail := Rectangle {
+                                x: 0px;
+                                y: 8px;
+                                width: 2px;
+                                height: parent.height - 16px;
+                                border-radius: 1px;
+                                background: root.shell-sidebar-item-selected-border;
+                                opacity: item.selected ? 1 : 0;
+                            }
 
                             Rectangle {
                                 x: 12px;
@@ -785,18 +795,18 @@ export component RightPanel inherits Rectangle {
                                 colorize: item.kind == "directory"
                                     ? ThemeTokens.status-busy-accent
                                     : item.kind == "parent-directory"
-                                        ? ThemeTokens.text-muted
+                                        ? root.shell-text-muted
                                         : item.kind == "symlink"
                                             ? ThemeTokens.link-accent
                                             : item.kind == "archive"
-                                                ? ThemeTokens.accent
+                                                ? root.shell-accent
                                                 : item.kind == "image"
                                                     ? ThemeTokens.status-error-accent
                                                     : item.kind == "config"
-                                                        ? ThemeTokens.text-muted
+                                                        ? root.shell-text-muted
                                                         : item.kind == "executable"
                                                             ? ThemeTokens.status-success-accent
-                                        : ThemeTokens.text-secondary;
+                                        : root.shell-text-secondary;
                             }
 
                             Text {
@@ -805,7 +815,7 @@ export component RightPanel inherits Rectangle {
                                 width: parent.width - 52px;
                                 height: 18px;
                                 text: item.name;
-                                color: ThemeTokens.text-primary;
+                                color: root.shell-text-primary;
                                 font-size: 12px;
                                 font-weight: item.selected ? 700 : 500;
                                 vertical-alignment: center;
@@ -818,7 +828,7 @@ export component RightPanel inherits Rectangle {
                                 width: parent.width - 52px;
                                 height: 16px;
                                 text: item.meta_label;
-                                color: ThemeTokens.text-secondary;
+                                color: root.shell-text-secondary;
                                 font-size: 11px;
                                 vertical-alignment: center;
                                 overflow: elide;
