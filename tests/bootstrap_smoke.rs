@@ -224,7 +224,8 @@ fn bootstrap_source_exposes_runtime_shell_palette_publish_helper() {
 #[test]
 fn app_window_threads_sidebar_row_state_palette_into_right_panel() {
     let app_window_source = fs::read_to_string("ui/app-window.slint").expect("read app window");
-    let right_panel_source = fs::read_to_string("ui/shell/right-panel.slint").expect("read right panel");
+    let right_panel_source =
+        fs::read_to_string("ui/shell/right-panel.slint").expect("read right panel");
     let right_panel_block = app_window_source
         .split("right-panel := RightPanel {")
         .nth(1)
@@ -241,12 +242,13 @@ fn app_window_threads_sidebar_row_state_palette_into_right_panel() {
         "right panel should accept the shared runtime row-state palette so later SFTP row styling can stay on the same projected Ayu selection source"
     );
     assert!(
-        right_panel_block.contains("shell-right-panel-background: root.shell-right-panel-background;")
+        right_panel_block
+            .contains("shell-right-panel-background: root.shell-right-panel-background;")
             && right_panel_block.contains("shell-focus-ring: root.shell-focus-ring;")
-            && right_panel_block.contains("shell-sidebar-item-hover: root.shell-sidebar-item-hover;")
-            && right_panel_block.contains(
-                "shell-sidebar-item-selected: root.shell-sidebar-item-selected;"
-            )
+            && right_panel_block
+                .contains("shell-sidebar-item-hover: root.shell-sidebar-item-hover;")
+            && right_panel_block
+                .contains("shell-sidebar-item-selected: root.shell-sidebar-item-selected;")
             && right_panel_block.contains(
                 "shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;"
             ),

@@ -129,7 +129,8 @@ fn theme_semantic_token_contract_spec_theme_tokens_remain_a_boot_time_parity_sna
 }
 
 #[test]
-fn theme_semantic_token_contract_spec_shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
+fn theme_semantic_token_contract_spec_shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills()
+ {
     let titlebar = fs::read_to_string("ui/shell/titlebar.slint").expect("read titlebar");
     let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
     let sidebar = fs::read_to_string("ui/shell/sidebar.slint").expect("read sidebar");
@@ -233,7 +234,8 @@ fn theme_semantic_token_contract_spec_shell_chrome_consumes_semantic_tokens_for_
 }
 
 #[test]
-fn theme_semantic_token_contract_spec_runtime_shell_palette_properties_are_threaded_through_the_window_tree() {
+fn theme_semantic_token_contract_spec_runtime_shell_palette_properties_are_threaded_through_the_window_tree()
+ {
     let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
     let titlebar = fs::read_to_string("ui/shell/titlebar.slint").expect("read titlebar");
     let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
@@ -322,7 +324,8 @@ fn theme_semantic_token_contract_spec_runtime_shell_palette_properties_are_threa
 }
 
 #[test]
-fn theme_semantic_token_contract_spec_runtime_shell_palette_consumers_switch_from_tokens_to_live_props() {
+fn theme_semantic_token_contract_spec_runtime_shell_palette_consumers_switch_from_tokens_to_live_props()
+ {
     let titlebar = fs::read_to_string("ui/shell/titlebar.slint").expect("read titlebar");
     let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
     let active_tab = fs::read_to_string("ui/components/active-tab.slint").expect("read active tab");
@@ -448,7 +451,8 @@ fn theme_semantic_token_contract_spec_runtime_shell_palette_consumers_switch_fro
 }
 
 #[test]
-fn theme_semantic_token_contract_spec_welcome_shell_copy_uses_token_colors_instead_of_opacity_fades() {
+fn theme_semantic_token_contract_spec_welcome_shell_copy_uses_token_colors_instead_of_opacity_fades()
+ {
     let welcome = fs::read_to_string("ui/welcome/welcome-view.slint").expect("read welcome view");
     let quick_launch =
         fs::read_to_string("ui/welcome/quick-launch-section.slint").expect("read quick launch");

@@ -28,7 +28,8 @@ fn theme_terminal_redesign_spec_ui_preferences_round_trip_persists_theme_variant
 }
 
 #[test]
-fn theme_terminal_redesign_spec_premium_default_dark_theme_uses_the_approved_ayu_shell_neighborhood() {
+fn theme_terminal_redesign_spec_premium_default_dark_theme_uses_the_approved_ayu_shell_neighborhood()
+ {
     let spec = app_theme_spec(ThemeMode::Dark, ThemeVariant::PremiumDefault);
 
     assert_eq!(spec.shell.app_background, 0x0a_0e14);
@@ -47,7 +48,8 @@ fn theme_terminal_redesign_spec_premium_default_dark_theme_uses_the_approved_ayu
 }
 
 #[test]
-fn theme_terminal_redesign_spec_premium_default_light_theme_uses_the_approved_ayu_shell_neighborhood() {
+fn theme_terminal_redesign_spec_premium_default_light_theme_uses_the_approved_ayu_shell_neighborhood()
+ {
     let spec = app_theme_spec(ThemeMode::Light, ThemeVariant::PremiumDefault);
 
     assert_eq!(spec.shell.app_background, 0xf8_f9fa);
@@ -66,7 +68,8 @@ fn theme_terminal_redesign_spec_premium_default_light_theme_uses_the_approved_ay
 }
 
 #[test]
-fn theme_terminal_redesign_spec_legacy_hacker_green_keeps_the_same_shell_chrome_but_swaps_terminal_palette() {
+fn theme_terminal_redesign_spec_legacy_hacker_green_keeps_the_same_shell_chrome_but_swaps_terminal_palette()
+ {
     let premium = app_theme_spec(ThemeMode::Dark, ThemeVariant::PremiumDefault);
     let legacy = app_theme_spec(ThemeMode::Dark, ThemeVariant::LegacyHackerGreen);
 
