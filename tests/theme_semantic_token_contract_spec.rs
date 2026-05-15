@@ -50,14 +50,14 @@ fn theme_semantic_token_contract_spec_premium_default_tokens_encode_the_new_calm
     let theme_spec = fs::read_to_string("src/theme/spec.rs").expect("read theme spec");
 
     assert!(
-        tokens.contains("out property <brush> titlebar-background: dark-mode ? #10151d : #eef2f5;"),
-        "titlebar should use a dedicated calm surface rather than sharing the app sheet"
+        tokens.contains("out property <brush> titlebar-background: dark-mode ? #10151d : #f8f9fa;"),
+        "titlebar should stay aligned with the refined unified Ayu sheet instead of the older cooler light slab"
     );
     assert!(
         tokens.contains(
-            "out property <brush> terminal-frame-background: dark-mode ? #141b24 : #fafafa;"
+            "out property <brush> terminal-frame-background: dark-mode ? #141b24 : #fcfcfc;"
         ),
-        "terminal frame should use the Ayu terminal neighborhood chrome instead of the older detached shell ladder"
+        "terminal frame should use the refined raised Ayu chrome instead of the older brighter fallback slab"
     );
     assert!(
         tokens.contains("out property <brush> terminal-default-fg: dark-mode ? #c5c1b8 : #5c6166;"),
@@ -65,9 +65,9 @@ fn theme_semantic_token_contract_spec_premium_default_tokens_encode_the_new_calm
     );
     assert!(
         tokens.contains(
-            "out property <brush> sidebar-item-selected-background: dark-mode ? #293846 : #dce6f2;"
+            "out property <brush> sidebar-item-selected-background: dark-mode ? #141b24 : #fafafa;"
         ),
-        "selected sidebar items should use a low-saturation filled state instead of a hard control button fill"
+        "selected sidebar items should use the refined subtle Ayu fill instead of the older boxed control treatment"
     );
     assert!(
         !theme_spec.contains("Catppuccin")
@@ -82,17 +82,26 @@ fn theme_semantic_token_contract_spec_boot_time_shell_tokens_match_approved_ayu_
     let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
 
     for expected in [
-        "out property <brush> titlebar-background: dark-mode ? #10151d : #eef2f5;",
-        "out property <brush> tabbar-background: dark-mode ? #10151d : #eef2f5;",
-        "out property <brush> sidebar-background: dark-mode ? #10151d : #eef2f5;",
-        "out property <brush> sidebar-panel-background: dark-mode ? #111821 : #f0f3f6;",
-        "out property <brush> right-panel-background: dark-mode ? #111821 : #f0f3f6;",
-        "out property <brush> terminal-frame-background: dark-mode ? #141b24 : #fafafa;",
-        "out property <brush> separator: dark-mode ? #1b2530 : #d8dee6;",
+        "out property <brush> titlebar-background: dark-mode ? #10151d : #f8f9fa;",
+        "out property <brush> tabbar-background: dark-mode ? #10151d : #f8f9fa;",
+        "out property <brush> sidebar-background: dark-mode ? #10151d : #f8f9fa;",
+        "out property <brush> sidebar-panel-background: dark-mode ? #111821 : #f6f8fa;",
+        "out property <brush> right-panel-background: dark-mode ? #111821 : #f6f8fa;",
+        "out property <brush> terminal-frame-background: dark-mode ? #141b24 : #fcfcfc;",
+        "out property <brush> separator: dark-mode ? #1b2530 : #e5e9ef;",
+        "out property <brush> hairline: dark-mode ? #1b2530 : #e5e9ef;",
         "out property <brush> text-primary: dark-mode ? #c5c1b8 : #5c6166;",
         "out property <brush> text-secondary: dark-mode ? #9aa4ae : #7a838c;",
         "out property <brush> text-muted: dark-mode ? #7d8790 : #8a939c;",
         "out property <brush> accent: dark-mode ? #e6b450 : #ffaa33;",
+        "out property <brush> link-accent: dark-mode ? #e6b450 : #ffaa33;",
+        "out property <brush> focus-ring: dark-mode ? #e6b450 : #ffaa33;",
+        "out property <brush> tab-active-surface: dark-mode ? #141b24 : #fcfcfc;",
+        "out property <brush> tab-hover-surface: dark-mode ? #111821 : #f6f8fa;",
+        "out property <brush> tab-active-line: dark-mode ? #e6b450 : #ffaa33;",
+        "out property <brush> sidebar-item-hover-background: dark-mode ? #111821 : #f0f3f6;",
+        "out property <brush> sidebar-item-selected-background: dark-mode ? #141b24 : #fafafa;",
+        "out property <brush> sidebar-item-selected-border: dark-mode ? #e6b450 : #ffaa33;",
     ] {
         assert!(
             tokens.contains(expected),

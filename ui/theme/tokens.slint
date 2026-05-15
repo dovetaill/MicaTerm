@@ -4,33 +4,33 @@ export global ThemeTokens {
     in property <bool> dark-mode: true;
 
     // Boot-time parity snapshot only: Rust publishes the live runtime shell and terminal palette.
-    out property <brush> titlebar-background: dark-mode ? #10151d : #eef2f5;
-    out property <brush> tabbar-background: dark-mode ? #10151d : #eef2f5;
-    out property <brush> sidebar-background: dark-mode ? #10151d : #eef2f5;
-    out property <brush> sidebar-panel-background: dark-mode ? #111821 : #f0f3f6;
-    out property <brush> right-panel-background: dark-mode ? #111821 : #f0f3f6;
-    out property <brush> terminal-frame-background: dark-mode ? #141b24 : #fafafa;
-    out property <brush> separator: dark-mode ? #1b2530 : #d8dee6;
-    out property <brush> hairline: dark-mode ? #ffffff22 : #1c273324;
+    out property <brush> titlebar-background: dark-mode ? #10151d : #f8f9fa;
+    out property <brush> tabbar-background: dark-mode ? #10151d : #f8f9fa;
+    out property <brush> sidebar-background: dark-mode ? #10151d : #f8f9fa;
+    out property <brush> sidebar-panel-background: dark-mode ? #111821 : #f6f8fa;
+    out property <brush> right-panel-background: dark-mode ? #111821 : #f6f8fa;
+    out property <brush> terminal-frame-background: dark-mode ? #141b24 : #fcfcfc;
+    out property <brush> separator: dark-mode ? #1b2530 : #e5e9ef;
+    out property <brush> hairline: dark-mode ? #1b2530 : #e5e9ef;
 
     out property <brush> accent: dark-mode ? #e6b450 : #ffaa33;
-    out property <brush> link-accent: dark-mode ? #89a9cf : #5077a7;
-    out property <brush> focus-ring: dark-mode ? #7d9bc2 : #7e9ec5;
+    out property <brush> link-accent: dark-mode ? #e6b450 : #ffaa33;
+    out property <brush> focus-ring: dark-mode ? #e6b450 : #ffaa33;
 
     out property <brush> text-primary: dark-mode ? #c5c1b8 : #5c6166;
     out property <brush> text-secondary: dark-mode ? #9aa4ae : #7a838c;
     out property <brush> text-muted: dark-mode ? #7d8790 : #8a939c;
-    out property <brush> text-inactive: dark-mode ? #768296 : #7b8a9c;
+    out property <brush> text-inactive: dark-mode ? #7d8790 : #8a939c;
 
     out property <brush> window-surface: dark-mode ? #141b23 : #f2f5f8;
     out property <brush> titlebar-surface: titlebar-background;
     out property <brush> activity-surface: sidebar-background;
     out property <brush> assets-surface: sidebar-panel-background;
     out property <brush> tabbar-surface: tabbar-background;
-    out property <brush> tab-active-surface: dark-mode ? #223040 : #ffffff;
+    out property <brush> tab-active-surface: dark-mode ? #141b24 : #fcfcfc;
     out property <brush> tab-inactive-surface: tabbar-background;
-    out property <brush> tab-hover-surface: dark-mode ? #202b38 : #e8edf4;
-    out property <brush> tab-active-line: dark-mode ? #7a97bc : #6388b4;
+    out property <brush> tab-hover-surface: dark-mode ? #111821 : #f6f8fa;
+    out property <brush> tab-active-line: dark-mode ? #e6b450 : #ffaa33;
     out property <brush> tab-active-indicator: tab-active-line;
     out property <brush> workspace-surface: terminal-frame-background;
     out property <brush> panel-surface: right-panel-background;
@@ -93,9 +93,9 @@ export global ThemeTokens {
     out property <length> modal-header-height: 58px;
     out property <length> modal-footer-min-height: 72px;
 
-    out property <brush> sidebar-item-hover-background: dark-mode ? #22303d : #e4ebf3;
-    out property <brush> sidebar-item-selected-background: dark-mode ? #293846 : #dce6f2;
-    out property <brush> sidebar-item-selected-border: dark-mode ? #6c88ae55 : #6e8cb333;
+    out property <brush> sidebar-item-hover-background: dark-mode ? #111821 : #f0f3f6;
+    out property <brush> sidebar-item-selected-background: dark-mode ? #141b24 : #fafafa;
+    out property <brush> sidebar-item-selected-border: dark-mode ? #e6b450 : #ffaa33;
     out property <brush> sidebar-hover-surface: sidebar-item-hover-background;
     out property <brush> sidebar-selected-surface: sidebar-item-selected-background;
     out property <brush> explorer-row-hover-surface: sidebar-item-hover-background;
@@ -181,7 +181,7 @@ export global ThemeTokens {
     out property <brush> terminal-cursor-fg: dark-mode ? #0a0e14 : #f8f9fa;
     out property <brush> terminal-cursor-bg: dark-mode ? #e6b450 : #ffaa33;
     out property <brush> terminal-selection-surface: dark-mode ? #2a3541c7 : #55b4d433;
-    out property <brush> terminal-scrollbar-track-surface: dark-mode ? #111821 : #f0f3f6;
-    out property <brush> terminal-scrollbar-thumb-surface: dark-mode ? #2f3944 : #d1d7de;
-    out property <brush> terminal-scrollbar-thumb-active-surface: dark-mode ? #3c4856 : #c1c8d1;
+    out property <brush> terminal-scrollbar-track-surface: dark-mode ? #111821 : #f4f6f8;
+    out property <brush> terminal-scrollbar-thumb-surface: dark-mode ? #2f3944 : #d6dce3;
+    out property <brush> terminal-scrollbar-thumb-active-surface: dark-mode ? #3c4856 : #c6cdd6;
 }
