@@ -422,10 +422,13 @@ fn theme_semantic_token_contract_spec_runtime_shell_palette_consumers_switch_fro
             && right_panel.contains("active-rail := Rectangle")
             && right_panel.contains("background: item.selected ? root.shell-sidebar-item-selected")
             && right_panel.contains("background: root.shell-sidebar-item-selected-border;")
+            && right_panel.contains("background: root.shell-separator;")
             && right_panel.contains("color: root.shell-text-primary;")
             && right_panel.contains("color: root.shell-text-secondary;")
             && !right_panel.contains("ThemeTokens.explorer-row-selected-surface")
             && !right_panel.contains("ThemeTokens.explorer-row-hover-surface")
+            && !right_panel.contains("background: ThemeTokens.divider-subtle;")
+            && !right_panel.contains("border-color: ThemeTokens.divider-subtle;")
             && !right_panel.contains("\n    background: ThemeTokens.right-panel-background;\n"),
         "right panel should switch its active shell surfaces and row selection states to the runtime shell palette, using the same subtle fill plus accent rail direction as the sidebar tree"
     );

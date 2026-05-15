@@ -313,7 +313,7 @@ export component RightPanel inherits Rectangle {
                 y: 37px;
                 width: parent.width - 24px;
                 height: 1px;
-                background: root.shell-border;
+                background: root.shell-separator;
             }
 
             connection-badge := Rectangle {
@@ -603,7 +603,7 @@ export component RightPanel inherits Rectangle {
                     height: min(128px, parent.height - 116px);
                     border-radius: 0px;
                     border-width: 1px;
-                    border-color: ThemeTokens.divider-subtle;
+                    border-color: root.shell-separator;
                     background: ThemeTokens.control-hover-surface;
 
                     Text {
@@ -664,7 +664,7 @@ export component RightPanel inherits Rectangle {
                     height: 28px;
                     border-radius: 8px;
                     border-width: 1px;
-                    border-color: ThemeTokens.divider-subtle;
+                    border-color: root.shell-separator;
                     background: ThemeTokens.control-active-surface;
 
                     Text {
@@ -774,7 +774,7 @@ export component RightPanel inherits Rectangle {
                                 y: parent.height - 1px;
                                 width: parent.width - 24px;
                                 height: 1px;
-                                background: ThemeTokens.divider-subtle;
+                                background: root.shell-separator;
                             }
 
                             Image {
