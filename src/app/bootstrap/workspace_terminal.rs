@@ -46,7 +46,17 @@ pub(super) fn sync_workspace_projection_from_manager(
                 .unwrap_or_else(|| WorkspaceTab::from_session(&handle));
             if let Some(existing) = existing {
                 claimed_manager_tab_ids.insert(existing.tab_id.clone());
-                projected.connection_profile = existing.connection_profile;
+                projected.connection_profile = existing
+                    .connection_profile
+                    .as_ref()
+                    .and_then(super::cloneable_workspace_tab_connection_profile);
+            }
+            if projected.connection_profile.is_none() && !projected.asset_id.is_empty() {
+                projected.connection_profile = super::runtime_cloneable_profile_for_saved_asset(
+                    state,
+                    projected.asset_id.as_str(),
+                )
+                .ok();
             }
             projected
         })

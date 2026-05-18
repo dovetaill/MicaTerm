@@ -8206,6 +8206,86 @@ fn workspace_tab_menu_tooltip_and_close_all_follow_session_first_contract() {
 }
 
 #[test]
+fn workspace_tab_clone_connection_clones_inactive_saved_ssh_tab_into_new_session() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+        let app = AppWindow::new().unwrap();
+        bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+
+        let prod_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+        app.invoke_asset_activated(prod_id.into());
+        settle_terminal_projection();
+        let prod_tab_id = app.get_active_workspace_session_id().to_string();
+
+        app.invoke_workspace_new_tab_requested();
+        assert_eq!(
+            app.get_active_workspace_session_id().as_str(),
+            "workspace-launcher"
+        );
+
+        app.invoke_workspace_tab_context_menu_requested(prod_tab_id.clone().into(), 168.0, 96.0);
+        assert!(app.get_workspace_tab_context_menu_open());
+        assert!(app.get_workspace_tab_context_menu_clone_connection_enabled());
+        assert_eq!(
+            app.get_active_workspace_session_id().as_str(),
+            "workspace-launcher",
+            "opening the context menu on an inactive tab must not switch away from the launcher"
+        );
+
+        app.invoke_workspace_tab_context_menu_action_invoked("clone-connection".into());
+        settle_terminal_projection();
+
+        let items = app.get_workspace_tab_items();
+        assert_eq!(items.row_count(), 3, "clone should open a second SSH tab");
+
+        let titles = (0..items.row_count())
+            .filter_map(|index| items.row_data(index).map(|row| row.title.to_string()))
+            .collect::<Vec<_>>();
+        assert!(
+            titles.iter().any(|title| title == "New Tab"),
+            "the previously active launcher tab should remain open; titles={titles:?}"
+        );
+        assert!(
+            titles
+                .iter()
+                .filter(|title| title.starts_with("Prod Bastion"))
+                .count()
+                >= 2,
+            "cloning Prod should create a second Prod-derived tab"
+        );
+
+        let active_rows = (0..items.row_count())
+            .filter_map(|index| items.row_data(index))
+            .filter(|row| row.active)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            active_rows.len(),
+            1,
+            "exactly one workspace tab should be active"
+        );
+        assert!(
+            active_rows[0].title.as_str().starts_with("Prod Bastion"),
+            "right-click clone should target the anchored inactive tab, not the active launcher tab"
+        );
+
+        let active_session_id = app.get_active_workspace_session_id().to_string();
+        assert_ne!(active_session_id, prod_tab_id);
+        assert!(
+            active_session_id != "workspace-launcher",
+            "cloning should activate the new SSH session tab"
+        );
+
+        let prod_row = (0..items.row_count())
+            .filter_map(|index| items.row_data(index))
+            .find(|row| row.tab_id.as_str() == prod_tab_id)
+            .expect("original Prod tab");
+        assert_eq!(prod_row.state.as_str(), "connected");
+    });
+}
+
+#[test]
 fn launcher_quick_launch_connect_restores_native_terminal_surface_rect() {
     run_with_large_test_stack(|| {
         let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();

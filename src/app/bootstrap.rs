@@ -840,6 +840,52 @@ fn runtime_profile_for_saved_asset(
     runtime_ready_profile(state, profile_for_saved_asset(state, asset_id)?)
 }
 
+fn workspace_tab_proxy_profile_is_safe(proxy: &ConnectionProxyProfile) -> bool {
+    match proxy {
+        ConnectionProxyProfile::None | ConnectionProxyProfile::SshAsset { .. } => true,
+        ConnectionProxyProfile::Socks5 { password, .. }
+        | ConnectionProxyProfile::Http { password, .. } => password.is_none(),
+    }
+}
+
+fn workspace_tab_resolved_proxy_hop_is_safe(hop: &ResolvedProxyHop) -> bool {
+    match hop {
+        ResolvedProxyHop::Socks5 { password, .. } | ResolvedProxyHop::Http { password, .. } => {
+            password.is_none()
+        }
+        ResolvedProxyHop::Ssh(upstream) => workspace_tab_connection_profile_is_safe(upstream),
+    }
+}
+
+fn workspace_tab_connection_profile_is_safe(profile: &ConnectionProfile) -> bool {
+    profile.password.is_none()
+        && profile.private_key_content.is_none()
+        && profile.passphrase.is_none()
+        && workspace_tab_proxy_profile_is_safe(&profile.proxy)
+        && profile
+            .resolved_proxy_hops
+            .iter()
+            .all(workspace_tab_resolved_proxy_hop_is_safe)
+}
+
+pub(super) fn cloneable_workspace_tab_connection_profile(
+    profile: &ConnectionProfile,
+) -> Option<ConnectionProfile> {
+    workspace_tab_connection_profile_is_safe(profile).then(|| profile.clone())
+}
+
+pub(super) fn runtime_cloneable_profile_for_saved_asset(
+    state: &ShellViewModel,
+    asset_id: &str,
+) -> anyhow::Result<ConnectionProfile> {
+    let profile = runtime_profile_for_saved_asset(state, asset_id)?;
+    cloneable_workspace_tab_connection_profile(&profile).ok_or_else(|| {
+        anyhow!(
+            "saved ssh asset `{asset_id}` resolved unsafe inline secrets for workspace tab state"
+        )
+    })
+}
+
 fn validate_saved_modal_profile(state: &ShellViewModel, asset_id: &str) -> anyhow::Result<()> {
     let _ = runtime_profile_for_saved_asset(state, asset_id)?;
     Ok(())
@@ -1448,14 +1494,20 @@ fn merge_workspace_tab_into_tabs(state: &mut ShellViewModel, mut next_tab: Works
     state.set_workspace_tabs(tabs);
 }
 
-fn merge_session_handle_into_tabs(state: &mut ShellViewModel, handle: &SessionHandle) {
+fn merge_session_handle_into_tabs(
+    state: &mut ShellViewModel,
+    handle: &SessionHandle,
+    connection_profile: Option<ConnectionProfile>,
+) {
     let mut tabs = state.workspace_tabs().to_vec();
     if let Some(existing) = tabs
         .iter_mut()
         .find(|tab| tab.session_id == handle.session_id.to_string())
     {
         let tab_id = existing.tab_id.clone();
-        *existing = WorkspaceTab::from_session_with_tab_id(handle, tab_id);
+        let mut next = WorkspaceTab::from_session_with_tab_id(handle, tab_id);
+        next.connection_profile = connection_profile;
+        *existing = next;
     } else if let Some(existing) = tabs.iter_mut().find(|tab| {
         tab.kind == crate::shell::tabs::WorkspaceTabKind::Terminal
             && tab.session_id.is_empty()
@@ -1463,9 +1515,13 @@ fn merge_session_handle_into_tabs(state: &mut ShellViewModel, handle: &SessionHa
             && tab.asset_id == handle.asset_id
     }) {
         let tab_id = existing.tab_id.clone();
-        *existing = WorkspaceTab::from_session_with_tab_id(handle, tab_id);
+        let mut next = WorkspaceTab::from_session_with_tab_id(handle, tab_id);
+        next.connection_profile = connection_profile;
+        *existing = next;
     } else {
-        tabs.push(WorkspaceTab::from_session(handle));
+        let mut next = WorkspaceTab::from_session(handle);
+        next.connection_profile = connection_profile;
+        tabs.push(next);
     }
 
     state.set_workspace_tabs(tabs);
@@ -1559,9 +1615,10 @@ fn open_session_with_profile(
     profile: ConnectionProfile,
     mode: OpenSessionMode,
 ) -> anyhow::Result<()> {
+    let workspace_profile = cloneable_workspace_tab_connection_profile(&profile);
     let handle = bridge.manager.open_session(profile, mode)?;
     let is_new_connecting_attempt = handle.state == SessionState::Connecting;
-    merge_session_handle_into_tabs(state, &handle);
+    merge_session_handle_into_tabs(state, &handle, workspace_profile);
     if !is_new_connecting_attempt {
         let _ = workspace_terminal::sync_workspace_projection_from_manager(state, &bridge.manager);
     }
@@ -1584,7 +1641,7 @@ fn show_failed_session_tab(
         profile.host.clone(),
         profile.port,
         message.into(),
-        Some(profile.clone()),
+        cloneable_workspace_tab_connection_profile(profile),
     );
     merge_workspace_tab_into_tabs(state, tab);
 }
@@ -1595,7 +1652,8 @@ fn show_failed_saved_asset_tab(
     message: impl Into<String>,
 ) {
     let message = message.into();
-    let (title, username, host, port, connection_profile) = match (
+    let connection_profile = runtime_cloneable_profile_for_saved_asset(state, asset_id).ok();
+    let (title, username, host, port) = match (
         state.console_asset_tree().node(asset_id),
         state.console_asset_tree().ssh_connection_spec(asset_id),
     ) {
@@ -1605,24 +1663,15 @@ fn show_failed_saved_asset_tab(
             } else {
                 spec.port.trim().parse::<u16>().unwrap_or(22)
             };
-            let profile =
-                ConnectionProfile::from_saved_asset(asset_id, node.title.as_str(), spec).ok();
             (
                 node.title.clone(),
                 spec.user.trim().to_string(),
                 spec.host.trim().to_string(),
                 port,
-                profile,
             )
         }
-        (Some(node), None) => (node.title.clone(), String::new(), String::new(), 0, None),
-        _ => (
-            "SSH Connection".into(),
-            String::new(),
-            String::new(),
-            0,
-            None,
-        ),
+        (Some(node), None) => (node.title.clone(), String::new(), String::new(), 0),
+        _ => ("SSH Connection".into(), String::new(), String::new(), 0),
     };
 
     let tab = WorkspaceTab::terminal_error(
@@ -2209,6 +2258,55 @@ fn reconnect_workspace_tab_by_id(
 
     if restore_active_after_reconnect && let Some(active_tab_id) = active_before.as_deref() {
         let _ = state.activate_workspace_tab(active_tab_id);
+    }
+
+    Ok(true)
+}
+
+fn resolve_workspace_tab_clone_profile(
+    state: &ShellViewModel,
+    tab_id: &str,
+) -> anyhow::Result<ConnectionProfile> {
+    if let Some(profile) = state.workspace_tab_connection_profile(tab_id) {
+        return Ok(profile);
+    }
+
+    let asset_id = state
+        .workspace_tab_saved_ssh_asset_id(tab_id)
+        .with_context(|| format!("workspace tab `{tab_id}` has no saved SSH asset metadata"))?;
+    runtime_cloneable_profile_for_saved_asset(state, asset_id.as_str())
+}
+
+fn clone_workspace_tab_by_id(
+    state: &mut ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+    tab_id: &str,
+) -> anyhow::Result<bool> {
+    let Some(bridge) = bridge else {
+        state.set_context_menu_feedback("SSH session bridge is unavailable.");
+        return Ok(false);
+    };
+
+    let profile = match resolve_workspace_tab_clone_profile(state, tab_id) {
+        Ok(profile) => profile,
+        Err(err) => {
+            tracing::error!(
+                target: "app.ssh",
+                tab_id,
+                error = %err,
+                "failed to resolve workspace tab clone profile"
+            );
+            state.set_context_menu_feedback(format!("Failed to clone connection: {err}"));
+            return Ok(false);
+        }
+    };
+
+    if let Err(err) =
+        open_session_with_profile(state, bridge, profile.clone(), OpenSessionMode::ForceNewTab)
+    {
+        show_failed_session_tab(state, &profile, err.to_string());
+        state.set_context_menu_feedback(format!("Failed to clone connection: {err}"));
+        return Err(err);
     }
 
     Ok(true)
@@ -7643,11 +7741,50 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 }
             }
             "clone-connection" => {
-                tracing::debug!(
-                    target: "app.ssh",
-                    tab_id = anchor_tab_id.as_str(),
-                    "clone connection is disabled until a dedicated new-window host is available"
-                );
+                match clone_workspace_tab_by_id(
+                    &mut state,
+                    session_bridge_ref.as_deref(),
+                    anchor_tab_id.as_str(),
+                ) {
+                    Ok(true) => {
+                        sync_workspace_tabs_with_manager(
+                            &window,
+                            &state,
+                            &mut workspace_follow_tracker_ref.borrow_mut(),
+                            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+                        );
+                        shell_chrome::sync_top_status_bar_state(
+                            &window,
+                            &state,
+                            effects_ref.as_ref(),
+                        );
+                        sftp::sync_right_panel_state(&window, &mut state);
+                        assets_keychain::sync_assets_context_menu_state(&window, &state);
+                    }
+                    Ok(false) => {
+                        assets_keychain::sync_assets_context_menu_state(&window, &state);
+                    }
+                    Err(err) => {
+                        tracing::error!(
+                            target: "app.ssh",
+                            tab_id = anchor_tab_id.as_str(),
+                            error = %err,
+                            "failed to clone workspace tab connection"
+                        );
+                        sync_workspace_tabs_with_manager(
+                            &window,
+                            &state,
+                            &mut workspace_follow_tracker_ref.borrow_mut(),
+                            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+                        );
+                        shell_chrome::sync_top_status_bar_state(
+                            &window,
+                            &state,
+                            effects_ref.as_ref(),
+                        );
+                        assets_keychain::sync_assets_context_menu_state(&window, &state);
+                    }
+                }
             }
             _ => {}
         }
@@ -9092,6 +9229,154 @@ mod tests {
     }
 
     #[test]
+    fn workspace_projection_restores_clone_profile_from_saved_asset_metadata() {
+        let runtime = tokio::runtime::Runtime::new().expect("create tokio runtime");
+        let manager =
+            SessionManager::new_with_launcher(runtime.handle().clone(), Arc::new(NoopLauncher));
+        let mut tree = crate::shell::assets::AssetTree::new();
+        let asset_id = tree.insert_root_with_payload(
+            crate::shell::assets::ConsoleAssetKind::SshConnection,
+            "Prod Bastion",
+            crate::shell::assets::AssetNodePayload::SshConnection(
+                crate::shell::assets::AssetSshConnectionSpec {
+                    host: "10.0.0.12".into(),
+                    user: "ops".into(),
+                    port: "22".into(),
+                    auth_method: "password".into(),
+                    credential_ref: Some("ssh/saved-secrets/asset-prod".into()),
+                    ..crate::shell::assets::AssetSshConnectionSpec::default()
+                },
+            ),
+        );
+        manager
+            .open_session(
+                sample_profile(asset_id.as_str()),
+                OpenSessionMode::ForceNewTab,
+            )
+            .expect("open session");
+
+        let mut state = ShellViewModel::default();
+        state.replace_console_asset_tree(tree);
+
+        let delta =
+            workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
+
+        assert!(delta.tabs_changed);
+        let tab = state
+            .workspace_tabs()
+            .first()
+            .expect("projected workspace tab");
+        let profile = tab
+            .connection_profile
+            .as_ref()
+            .expect("saved SSH asset should repopulate a cloneable profile");
+        assert_eq!(profile.asset_id.as_deref(), Some(asset_id.as_str()));
+        assert_eq!(
+            profile.credential_ref.as_deref(),
+            Some("ssh/saved-secrets/asset-prod")
+        );
+        assert!(
+            profile.password.is_none()
+                && profile.private_key_content.is_none()
+                && profile.passphrase.is_none(),
+            "workspace projection must not copy raw SSH secrets into tab state"
+        );
+    }
+
+    #[test]
+    fn clone_connection_uses_saved_asset_metadata_when_tab_profile_is_missing() {
+        let runtime = tokio::runtime::Runtime::new().expect("create tokio runtime");
+        let manager = SessionManager::new_with_launcher(
+            runtime.handle().clone(),
+            Arc::new(SequencedSurfaceLauncher),
+        );
+        let bridge = ShellSessionBridge {
+            manager: manager.clone(),
+            terminal_defaults: TerminalRuntimeDefaults::default(),
+        };
+        let mut tree = crate::shell::assets::AssetTree::new();
+        let asset_id = tree.insert_root_with_payload(
+            crate::shell::assets::ConsoleAssetKind::SshConnection,
+            "Prod Bastion",
+            crate::shell::assets::AssetNodePayload::SshConnection(
+                crate::shell::assets::AssetSshConnectionSpec {
+                    host: "10.0.0.12".into(),
+                    user: "ops".into(),
+                    port: "22".into(),
+                    auth_method: "password".into(),
+                    credential_ref: Some("ssh/saved-secrets/asset-prod".into()),
+                    ..crate::shell::assets::AssetSshConnectionSpec::default()
+                },
+            ),
+        );
+        let original = manager
+            .open_session(
+                sample_profile(asset_id.as_str()),
+                OpenSessionMode::ForceNewTab,
+            )
+            .expect("open original session");
+        runtime.block_on(async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        });
+
+        let mut state = ShellViewModel::default();
+        state.replace_console_asset_tree(tree);
+        let _ = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
+        let _ = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
+        let tab_id = state.workspace_tabs()[0].tab_id.clone();
+
+        let mut tabs = state.workspace_tabs().to_vec();
+        tabs[0].connection_profile = None;
+        state.set_workspace_tabs(tabs);
+
+        assert!(
+            clone_workspace_tab_by_id(&mut state, Some(&bridge), tab_id.as_str())
+                .expect("clone connection should succeed")
+        );
+
+        runtime.block_on(async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        });
+        let _ = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
+        let _ = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
+
+        let sessions = manager.ordered_sessions();
+        assert_eq!(
+            sessions.len(),
+            2,
+            "clone should create a second manager session"
+        );
+        assert_ne!(sessions[0].session_id, sessions[1].session_id);
+        assert_eq!(sessions[0].asset_id.as_str(), sessions[1].asset_id.as_str());
+        assert_eq!(sessions[0].asset_id.as_str(), asset_id.as_str());
+
+        assert_eq!(state.workspace_tabs().len(), 2);
+        let original_tab = state
+            .workspace_tabs()
+            .iter()
+            .find(|tab| tab.session_id == original.session_id.to_string())
+            .expect("original tab");
+        assert_eq!(original_tab.state, "connected");
+
+        let cloned_tab = state
+            .workspace_tabs()
+            .iter()
+            .find(|tab| tab.session_id != original.session_id.to_string())
+            .expect("cloned tab");
+        assert_eq!(cloned_tab.asset_id.as_str(), asset_id.as_str());
+        let cloned_profile = cloned_tab
+            .connection_profile
+            .as_ref()
+            .expect("cloned tab should carry safe clone metadata");
+        assert_eq!(cloned_profile.asset_id.as_deref(), Some(asset_id.as_str()));
+        assert!(
+            cloned_profile.password.is_none()
+                && cloned_profile.private_key_content.is_none()
+                && cloned_profile.passphrase.is_none()
+        );
+    }
+
+    #[test]
     fn workspace_tab_from_session_projects_structured_metadata() {
         let session_id = Uuid::new_v4();
         let tab = WorkspaceTab::from_session(&SessionHandle {
@@ -9306,6 +9591,7 @@ mod tests {
                 can_reconnect: true,
                 enhanced_session_state: EnhancedSessionState::Enhanced,
             },
+            Some(profile),
         );
 
         assert_eq!(

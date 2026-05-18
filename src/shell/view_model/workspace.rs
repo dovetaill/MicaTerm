@@ -3,6 +3,7 @@
 use super::*;
 use crate::app::ssh::profile::ConnectionProfile;
 use crate::app::terminal_semantic::count_search_query_matches_in_lines;
+use crate::shell::tabs::WorkspaceTabKind;
 
 impl ShellViewModel {
     pub fn active_workspace_tab_id(&self) -> Option<&str> {
@@ -109,6 +110,25 @@ impl ShellViewModel {
     pub fn workspace_tab_connection_profile(&self, tab_id: &str) -> Option<ConnectionProfile> {
         self.workspace_tab_by_id(tab_id)
             .and_then(|tab| tab.connection_profile.clone())
+    }
+
+    pub fn workspace_tab_saved_ssh_asset_id(&self, tab_id: &str) -> Option<String> {
+        let tab = self.workspace_tab_by_id(tab_id)?;
+        if tab.kind != WorkspaceTabKind::Terminal {
+            return None;
+        }
+
+        let asset_id = tab.asset_id.trim();
+        if asset_id.is_empty() {
+            return None;
+        }
+
+        (self.console_asset_tree.kind(asset_id) == Some(ConsoleAssetKind::SshConnection)
+            && self
+                .console_asset_tree
+                .ssh_connection_spec(asset_id)
+                .is_some())
+        .then(|| asset_id.to_string())
     }
 
     pub fn workspace_tab_close_plan(
@@ -309,16 +329,11 @@ impl ShellViewModel {
     }
 
     pub fn workspace_tab_can_clone_connection(&self, tab_id: &str) -> bool {
-        self.workspace_tab_clone_window_supported
-            && self
-                .workspace_tab_by_id(tab_id)
-                .map(WorkspaceTab::can_clone_connection)
-                .unwrap_or(false)
-    }
-
-    pub fn set_workspace_tab_clone_window_supported(&mut self, supported: bool) {
-        self.workspace_tab_clone_window_supported = supported;
-        self.sync_workspace_tab_context_menu_after_tab_change();
+        self.workspace_tab_by_id(tab_id).is_some_and(|tab| {
+            tab.kind == WorkspaceTabKind::Terminal
+                && (tab.can_clone_connection()
+                    || self.workspace_tab_saved_ssh_asset_id(tab_id).is_some())
+        })
     }
 
     pub fn active_workspace_session_enhanced_state(&self) -> &str {
@@ -818,14 +833,28 @@ impl ShellViewModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::ssh::profile::{ConnectionProfile, ConnectionProxyProfile, SshAuthMethod};
+    use crate::shell::assets::{
+        AssetNodePayload, AssetSshConnectionSpec, AssetTree, ConsoleAssetKind,
+    };
     use crate::shell::tabs::WorkspaceTabKind;
 
     fn terminal_tab(tab_id: &str, label: &str, state: &str) -> WorkspaceTab {
+        terminal_tab_with_metadata(tab_id, label, state, format!("asset-{tab_id}"), None)
+    }
+
+    fn terminal_tab_with_metadata(
+        tab_id: &str,
+        label: &str,
+        state: &str,
+        asset_id: String,
+        connection_profile: Option<ConnectionProfile>,
+    ) -> WorkspaceTab {
         WorkspaceTab {
             tab_id: tab_id.into(),
             session_id: tab_id.into(),
             file_browser_session_id: String::new(),
-            asset_id: format!("asset-{tab_id}"),
+            asset_id,
             display_name: label.into(),
             host: format!("{tab_id}.example.com"),
             username: "ops".into(),
@@ -838,9 +867,46 @@ mod tests {
             error_detail: String::new(),
             active: false,
             kind: WorkspaceTabKind::Terminal,
-            reconnectable: matches!(state, "disconnected" | "error"),
-            connection_profile: None,
+            reconnectable: matches!(state, "disconnected" | "error")
+                || connection_profile.is_some(),
+            connection_profile,
         }
+    }
+
+    fn safe_connection_profile(asset_id: &str) -> ConnectionProfile {
+        ConnectionProfile {
+            asset_id: Some(asset_id.into()),
+            name: "Prod Bastion".into(),
+            host: "10.0.0.12".into(),
+            user: "ops".into(),
+            port: 22,
+            auth_method: SshAuthMethod::Password,
+            credential_ref: Some(format!("ssh/saved-secrets/{asset_id}")),
+            private_key_path: None,
+            password: None,
+            private_key_content: None,
+            passphrase: None,
+            proxy: ConnectionProxyProfile::None,
+            resolved_proxy_hops: Vec::new(),
+            remark: String::new(),
+        }
+    }
+
+    fn saved_ssh_tree_with_asset(title: &str) -> (AssetTree, String) {
+        let mut tree = AssetTree::new();
+        let asset_id = tree.insert_root_with_payload(
+            ConsoleAssetKind::SshConnection,
+            title,
+            AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+                host: "10.0.0.12".into(),
+                user: "ops".into(),
+                port: "22".into(),
+                auth_method: "password".into(),
+                credential_ref: Some("ssh/saved-secrets/prod".into()),
+                ..AssetSshConnectionSpec::default()
+            }),
+        );
+        (tree, asset_id)
     }
 
     #[test]
@@ -883,6 +949,83 @@ mod tests {
         let last_menu = state.workspace_tab_context_menu_state();
         assert!(last_menu.close_left_enabled);
         assert!(!last_menu.close_right_enabled);
+    }
+
+    #[test]
+    fn workspace_tab_context_menu_enables_clone_for_connected_terminal_with_profile() {
+        let mut state = ShellViewModel::default();
+        state.set_workspace_tabs(vec![terminal_tab_with_metadata(
+            "tab-a",
+            "Prod",
+            "connected",
+            "asset-prod".into(),
+            Some(safe_connection_profile("asset-prod")),
+        )]);
+
+        assert!(state.open_workspace_tab_context_menu("tab-a", 128.0, 48.0));
+        assert!(
+            state
+                .workspace_tab_context_menu_state()
+                .clone_connection_enabled
+        );
+    }
+
+    #[test]
+    fn workspace_tab_context_menu_enables_clone_for_saved_asset_without_cached_profile() {
+        let mut state = ShellViewModel::default();
+        let (tree, asset_id) = saved_ssh_tree_with_asset("Prod Bastion");
+        state.replace_console_asset_tree(tree);
+        state.set_workspace_tabs(vec![terminal_tab_with_metadata(
+            "tab-a",
+            "Prod",
+            "connected",
+            asset_id,
+            None,
+        )]);
+
+        assert!(state.open_workspace_tab_context_menu("tab-a", 128.0, 48.0));
+        assert!(
+            state
+                .workspace_tab_context_menu_state()
+                .clone_connection_enabled
+        );
+    }
+
+    #[test]
+    fn workspace_tab_context_menu_disables_clone_without_saved_or_runtime_metadata() {
+        let mut state = ShellViewModel::default();
+        let mut synthetic = terminal_tab_with_metadata(
+            "tab-terminal",
+            "Scratch",
+            "connected",
+            "session:temporary".into(),
+            None,
+        );
+        synthetic.reconnectable = false;
+        state.set_workspace_tabs(vec![
+            synthetic,
+            WorkspaceTab::sftp("tab-sftp", "browser-1", "Browser"),
+            WorkspaceTab::launcher(),
+        ]);
+
+        assert!(state.open_workspace_tab_context_menu("tab-terminal", 20.0, 12.0));
+        assert!(
+            !state
+                .workspace_tab_context_menu_state()
+                .clone_connection_enabled
+        );
+        assert!(state.open_workspace_tab_context_menu("tab-sftp", 20.0, 12.0));
+        assert!(
+            !state
+                .workspace_tab_context_menu_state()
+                .clone_connection_enabled
+        );
+        assert!(state.open_workspace_tab_context_menu("workspace-launcher", 20.0, 12.0));
+        assert!(
+            !state
+                .workspace_tab_context_menu_state()
+                .clone_connection_enabled
+        );
     }
 
     #[test]
