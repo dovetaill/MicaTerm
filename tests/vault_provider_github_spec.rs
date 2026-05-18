@@ -54,6 +54,12 @@ fn sample_github_git_repo_remote() -> BootstrapRemoteConfig {
             host_kind: GitHostKind::GitHub,
             remote_url: "https://github.com/octo-org/mica-vault.git".into(),
             branch: "main".into(),
+            base_url: Some("https://github.com".into()),
+            api_base_url: Some("https://api.github.com".into()),
+            namespace: Some("octo-org".into()),
+            repository: Some("mica-vault".into()),
+            root_path: Some(".mica-term-sync".into()),
+            display_name: Some("octo-org/mica-vault".into()),
         },
         credential_ref: Some("vault/bootstrap/remote-github-primary".into()),
         auth_kind: ProviderAuthKind::Pat,
@@ -62,14 +68,14 @@ fn sample_github_git_repo_remote() -> BootstrapRemoteConfig {
 }
 
 struct FakeGitHubRepositoryMetadataSource {
-    next_result: Mutex<Result<GitRepositoryMetadata>>,
+    next_result: Mutex<Option<Result<GitRepositoryMetadata>>>,
     recorded_auth: Mutex<Vec<Option<String>>>,
 }
 
 impl FakeGitHubRepositoryMetadataSource {
     fn returning(result: Result<GitRepositoryMetadata>) -> Self {
         Self {
-            next_result: Mutex::new(result),
+            next_result: Mutex::new(Some(result)),
             recorded_auth: Mutex::new(Vec::new()),
         }
     }
@@ -88,7 +94,8 @@ impl GitRepositoryMetadataSource for FakeGitHubRepositoryMetadataSource {
         self.next_result
             .lock()
             .map_err(|_| anyhow!("metadata result lock poisoned"))?
-            .clone()
+            .take()
+            .ok_or_else(|| anyhow!("missing repository metadata result"))?
     }
 }
 
@@ -323,12 +330,11 @@ fn github_provider_prune_revisions_older_than_keep_latest_limit() {
 #[test]
 fn github_public_repo_is_rejected() {
     let remote = sample_github_git_repo_remote();
-    let source = FakeGitHubRepositoryMetadataSource::returning(Ok(
-        sample_github_repository_metadata(
+    let source =
+        FakeGitHubRepositoryMetadataSource::returning(Ok(sample_github_repository_metadata(
             GitRepositoryVisibility::Public,
             GitRepositoryWritePermission::Writable,
-        ),
-    ));
+        )));
 
     let err = validate_remote_for_sync(&remote, &source, Some("github-pat"))
         .expect_err("public github repository must be rejected");
@@ -342,12 +348,11 @@ fn github_public_repo_is_rejected() {
 #[test]
 fn github_private_repo_is_accepted_when_writable() {
     let remote = sample_github_git_repo_remote();
-    let source = FakeGitHubRepositoryMetadataSource::returning(Ok(
-        sample_github_repository_metadata(
+    let source =
+        FakeGitHubRepositoryMetadataSource::returning(Ok(sample_github_repository_metadata(
             GitRepositoryVisibility::Private,
             GitRepositoryWritePermission::Writable,
-        ),
-    ));
+        )));
 
     let metadata = validate_remote_for_sync(&remote, &source, Some("github-pat"))
         .expect("private writable github repository should be accepted");
@@ -358,7 +363,11 @@ fn github_private_repo_is_accepted_when_writable() {
         GitRepositoryWritePermission::Writable
     );
     assert_eq!(
-        source.recorded_auth.lock().expect("lock recorded auth").as_slice(),
+        source
+            .recorded_auth
+            .lock()
+            .expect("lock recorded auth")
+            .as_slice(),
         &[Some("github-pat".into())]
     );
 }
@@ -366,31 +375,26 @@ fn github_private_repo_is_accepted_when_writable() {
 #[test]
 fn github_private_repo_without_push_permission_is_rejected() {
     let remote = sample_github_git_repo_remote();
-    let source = FakeGitHubRepositoryMetadataSource::returning(Ok(
-        sample_github_repository_metadata(
+    let source =
+        FakeGitHubRepositoryMetadataSource::returning(Ok(sample_github_repository_metadata(
             GitRepositoryVisibility::Private,
             GitRepositoryWritePermission::ReadOnly,
-        ),
-    ));
+        )));
 
     let err = validate_remote_for_sync(&remote, &source, Some("github-pat"))
         .expect_err("github repository without push permission must be rejected");
 
-    assert!(
-        err.to_string().contains("write"),
-        "unexpected error: {err}"
-    );
+    assert!(err.to_string().contains("write"), "unexpected error: {err}");
 }
 
 #[test]
 fn github_unknown_visibility_fails_closed() {
     let remote = sample_github_git_repo_remote();
-    let source = FakeGitHubRepositoryMetadataSource::returning(Ok(
-        sample_github_repository_metadata(
+    let source =
+        FakeGitHubRepositoryMetadataSource::returning(Ok(sample_github_repository_metadata(
             GitRepositoryVisibility::Unknown,
             GitRepositoryWritePermission::Writable,
-        ),
-    ));
+        )));
 
     let err = validate_remote_for_sync(&remote, &source, Some("github-pat"))
         .expect_err("unknown github visibility must fail closed");

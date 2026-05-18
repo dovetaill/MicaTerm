@@ -42,6 +42,12 @@ fn sample_gitee_git_repo_remote() -> BootstrapRemoteConfig {
             host_kind: GitHostKind::Gitee,
             remote_url: "https://gitee.com/octo-org/mica-vault.git".into(),
             branch: "main".into(),
+            base_url: Some("https://gitee.com".into()),
+            api_base_url: Some("https://gitee.com/api/v5".into()),
+            namespace: Some("octo-org".into()),
+            repository: Some("mica-vault".into()),
+            root_path: Some(".mica-term-sync".into()),
+            display_name: Some("octo-org/mica-vault".into()),
         },
         credential_ref: Some("vault/bootstrap/remote-gitee-primary".into()),
         auth_kind: ProviderAuthKind::Pat,
@@ -50,13 +56,13 @@ fn sample_gitee_git_repo_remote() -> BootstrapRemoteConfig {
 }
 
 struct FakeGiteeRepositoryMetadataSource {
-    next_result: Mutex<Result<GitRepositoryMetadata>>,
+    next_result: Mutex<Option<Result<GitRepositoryMetadata>>>,
 }
 
 impl FakeGiteeRepositoryMetadataSource {
     fn returning(result: Result<GitRepositoryMetadata>) -> Self {
         Self {
-            next_result: Mutex::new(result),
+            next_result: Mutex::new(Some(result)),
         }
     }
 }
@@ -70,7 +76,8 @@ impl GitRepositoryMetadataSource for FakeGiteeRepositoryMetadataSource {
         self.next_result
             .lock()
             .map_err(|_| anyhow!("metadata result lock poisoned"))?
-            .clone()
+            .take()
+            .ok_or_else(|| anyhow!("missing repository metadata result"))?
     }
 }
 
@@ -600,12 +607,11 @@ fn gitee_provider_is_retained_for_payload_io_but_not_formal_primary() {
 #[test]
 fn gitee_public_repo_is_rejected() {
     let remote = sample_gitee_git_repo_remote();
-    let source = FakeGiteeRepositoryMetadataSource::returning(Ok(
-        sample_gitee_repository_metadata(
+    let source =
+        FakeGiteeRepositoryMetadataSource::returning(Ok(sample_gitee_repository_metadata(
             GitRepositoryVisibility::Public,
             GitRepositoryWritePermission::Writable,
-        ),
-    ));
+        )));
 
     let err = validate_remote_for_sync(&remote, &source, Some("gitee-pat"))
         .expect_err("public gitee repository must be rejected");
@@ -619,12 +625,11 @@ fn gitee_public_repo_is_rejected() {
 #[test]
 fn gitee_private_repo_is_accepted_when_writable() {
     let remote = sample_gitee_git_repo_remote();
-    let source = FakeGiteeRepositoryMetadataSource::returning(Ok(
-        sample_gitee_repository_metadata(
+    let source =
+        FakeGiteeRepositoryMetadataSource::returning(Ok(sample_gitee_repository_metadata(
             GitRepositoryVisibility::Private,
             GitRepositoryWritePermission::Writable,
-        ),
-    ));
+        )));
 
     let metadata = validate_remote_for_sync(&remote, &source, Some("gitee-pat"))
         .expect("private writable gitee repository should be accepted");

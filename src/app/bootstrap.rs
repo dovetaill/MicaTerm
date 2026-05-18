@@ -5011,6 +5011,7 @@ fn hydrate_sync_modal_draft(
             host_kind: _,
             remote_url,
             branch,
+            ..
         } = &remote.locator
     {
         let credentials = load_git_repo_credential_material(
@@ -5070,6 +5071,12 @@ fn build_sync_bundle_from_modal(
             host_kind: GitHostKind::Gitee,
             remote_url: git_remote_url.into(),
             branch: git_branch.into(),
+            base_url: None,
+            api_base_url: None,
+            namespace: None,
+            repository: None,
+            root_path: None,
+            display_name: None,
         },
         credential_ref: Some(bootstrap_provider_credential_ref(sync_settings_remote_id(
             RemoteRole::Primary,

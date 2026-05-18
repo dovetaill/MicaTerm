@@ -115,6 +115,12 @@ fn sample_remote(
             host_kind,
             remote_url,
             branch: "main".into(),
+            base_url: None,
+            api_base_url: None,
+            namespace: None,
+            repository: None,
+            root_path: None,
+            display_name: None,
         },
         credential_ref,
         auth_kind,
@@ -184,14 +190,14 @@ fn sample_provider(remote: &BootstrapRemoteConfig, cache_dir: PathBuf) -> GitRep
 
 struct CountingRepositoryMetadataSource {
     fetch_count: Mutex<usize>,
-    next_result: Mutex<Result<GitRepositoryMetadata>>,
+    next_result: Mutex<Option<Result<GitRepositoryMetadata>>>,
 }
 
 impl CountingRepositoryMetadataSource {
     fn returning(result: Result<GitRepositoryMetadata>) -> Self {
         Self {
             fetch_count: Mutex::new(0),
-            next_result: Mutex::new(result),
+            next_result: Mutex::new(Some(result)),
         }
     }
 
@@ -210,7 +216,8 @@ impl GitRepositoryMetadataSource for CountingRepositoryMetadataSource {
         self.next_result
             .lock()
             .map_err(|_| anyhow!("metadata result lock poisoned"))?
-            .clone()
+            .take()
+            .ok_or_else(|| anyhow!("missing repository metadata result"))?
     }
 }
 
@@ -228,7 +235,7 @@ fn sample_repository_metadata(
 }
 
 #[test]
-fn git_repo_remote_round_trip_preserves_branch_and_auth_mode() {
+fn git_repo_remote_round_trip_preserves_branch_auth_and_repository_coordinates() {
     let remote = BootstrapRemoteConfig {
         remote_id: "remote-primary".into(),
         role: RemoteRole::Primary,
@@ -237,6 +244,12 @@ fn git_repo_remote_round_trip_preserves_branch_and_auth_mode() {
             host_kind: GitHostKind::Gitee,
             remote_url: "git@gitee.com:demo/mica-vault.git".into(),
             branch: "mica-vault".into(),
+            base_url: Some("https://gitee.com".into()),
+            api_base_url: Some("https://gitee.com/api/v5".into()),
+            namespace: Some("demo".into()),
+            repository: Some("mica-vault".into()),
+            root_path: Some(".mica-term-sync".into()),
+            display_name: Some("Demo Vault".into()),
         },
         credential_ref: Some("vault/bootstrap/remote-primary".into()),
         auth_kind: ProviderAuthKind::SshKey,
@@ -253,10 +266,69 @@ fn git_repo_remote_round_trip_preserves_branch_and_auth_mode() {
             host_kind,
             remote_url,
             branch,
+            base_url,
+            api_base_url,
+            namespace,
+            repository,
+            root_path,
+            display_name,
         } => {
             assert_eq!(host_kind, GitHostKind::Gitee);
             assert_eq!(remote_url, "git@gitee.com:demo/mica-vault.git");
             assert_eq!(branch, "mica-vault");
+            assert_eq!(base_url.as_deref(), Some("https://gitee.com"));
+            assert_eq!(api_base_url.as_deref(), Some("https://gitee.com/api/v5"));
+            assert_eq!(namespace.as_deref(), Some("demo"));
+            assert_eq!(repository.as_deref(), Some("mica-vault"));
+            assert_eq!(root_path.as_deref(), Some(".mica-term-sync"));
+            assert_eq!(display_name.as_deref(), Some("Demo Vault"));
+        }
+        other => panic!("unexpected locator: {other:?}"),
+    }
+}
+
+#[test]
+fn legacy_git_repo_remote_locator_deserializes_without_repository_coordinates() {
+    let encoded = serde_json::json!({
+        "remote_id": "remote-primary",
+        "role": "primary",
+        "provider": "git-repo",
+        "locator": {
+            "git-repo": {
+                "host_kind": "git-hub",
+                "remote_url": "https://github.com/demo/mica-vault.git",
+                "branch": "main"
+            }
+        },
+        "credential_ref": "vault/bootstrap/remote-primary",
+        "auth_kind": "pat",
+        "last_health": null
+    });
+
+    let decoded: BootstrapRemoteConfig =
+        serde_json::from_value(encoded).expect("deserialize legacy git repo remote");
+
+    match decoded.locator {
+        BootstrapRemoteLocator::GitRepo {
+            host_kind,
+            remote_url,
+            branch,
+            base_url,
+            api_base_url,
+            namespace,
+            repository,
+            root_path,
+            display_name,
+        } => {
+            assert_eq!(host_kind, GitHostKind::GitHub);
+            assert_eq!(remote_url, "https://github.com/demo/mica-vault.git");
+            assert_eq!(branch, "main");
+            assert_eq!(base_url, None);
+            assert_eq!(api_base_url, None);
+            assert_eq!(namespace, None);
+            assert_eq!(repository, None);
+            assert_eq!(root_path, None);
+            assert_eq!(display_name, None);
         }
         other => panic!("unexpected locator: {other:?}"),
     }
@@ -272,6 +344,12 @@ fn git_repo_remote_supports_https_credentials_contract() {
             host_kind: GitHostKind::Gitee,
             remote_url: "https://gitee.com/demo/mica-vault.git".into(),
             branch: "main".into(),
+            base_url: Some("https://gitee.com".into()),
+            api_base_url: Some("https://gitee.com/api/v5".into()),
+            namespace: Some("demo".into()),
+            repository: Some("mica-vault".into()),
+            root_path: Some(".mica-term-sync".into()),
+            display_name: Some("demo/mica-vault".into()),
         },
         credential_ref: Some("vault/bootstrap/remote-primary".into()),
         auth_kind: ProviderAuthKind::HttpsCredentials,

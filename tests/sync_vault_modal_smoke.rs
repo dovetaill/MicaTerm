@@ -447,6 +447,7 @@ fn sync_settings_primary_action_persists_primary_target_and_creates_local_vault(
             host_kind,
             remote_url,
             branch,
+            ..
         } => {
             assert_eq!(*host_kind, GitHostKind::Gitee);
             assert_eq!(remote_url, "https://gitee.com/demo/mica-vault.git");

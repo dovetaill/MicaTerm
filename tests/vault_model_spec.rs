@@ -438,6 +438,12 @@ fn bootstrap_bundle_roundtrip_preserves_git_repo_locator_and_dual_auth_kinds() {
                     host_kind: GitHostKind::Gitee,
                     remote_url: "https://gitee.com/demo/mica-vault.git".into(),
                     branch: "mica-vault".into(),
+                    base_url: None,
+                    api_base_url: None,
+                    namespace: None,
+                    repository: None,
+                    root_path: None,
+                    display_name: None,
                 },
                 credential_ref: Some("vault/bootstrap/remote-primary".into()),
                 auth_kind: ProviderAuthKind::HttpsCredentials,
@@ -451,6 +457,12 @@ fn bootstrap_bundle_roundtrip_preserves_git_repo_locator_and_dual_auth_kinds() {
                     host_kind: GitHostKind::Gitee,
                     remote_url: "git@gitee.com:demo/mica-vault.git".into(),
                     branch: "mirror".into(),
+                    base_url: None,
+                    api_base_url: None,
+                    namespace: None,
+                    repository: None,
+                    root_path: None,
+                    display_name: None,
                 },
                 credential_ref: Some("vault/bootstrap/remote-mirror".into()),
                 auth_kind: ProviderAuthKind::SshKey,
@@ -486,6 +498,7 @@ fn bootstrap_bundle_roundtrip_preserves_git_repo_locator_and_dual_auth_kinds() {
             host_kind,
             remote_url,
             branch,
+            ..
         } => {
             assert_eq!(*host_kind, GitHostKind::Gitee);
             assert_eq!(remote_url, "https://gitee.com/demo/mica-vault.git");

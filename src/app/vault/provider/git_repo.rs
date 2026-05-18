@@ -28,12 +28,39 @@ const SNAPSHOT_FILE_NAME: &str = "vault-snapshot.bin";
 const COMMITTER_NAME: &str = "Mica Term Vault";
 const COMMITTER_EMAIL: &str = "vault@mica-term.local";
 
+pub use crate::app::vault::model::{
+    GitRemoteSafetyStatus, GitRepositoryVisibility, GitRepositoryWritePermission,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitRepositoryMetadata {
+    pub canonical_id: String,
+    pub display_name: String,
+    pub visibility: GitRepositoryVisibility,
+    pub write_permission: GitRepositoryWritePermission,
+    pub default_branch: Option<String>,
+}
+
+pub trait GitRepositoryMetadataSource: Send + Sync {
+    fn fetch_repository_metadata(
+        &self,
+        remote: &BootstrapRemoteConfig,
+        access_token: Option<&str>,
+    ) -> Result<GitRepositoryMetadata>;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitRepoProviderConfig {
     pub remote_id: String,
     pub host_kind: GitHostKind,
     pub remote_url: String,
     pub branch: String,
+    pub base_url: Option<String>,
+    pub api_base_url: Option<String>,
+    pub namespace: Option<String>,
+    pub repository: Option<String>,
+    pub root_path: Option<String>,
+    pub display_name: Option<String>,
     pub cache_dir: PathBuf,
     pub auth: GitTransportAuthPlan,
 }
@@ -66,6 +93,12 @@ impl GitRepoProviderConfig {
             host_kind,
             remote_url,
             branch,
+            base_url,
+            api_base_url,
+            namespace,
+            repository,
+            root_path,
+            display_name,
         } = &remote.locator
         else {
             return Err(anyhow!(
@@ -103,9 +136,92 @@ impl GitRepoProviderConfig {
             host_kind: *host_kind,
             remote_url: remote_url.clone(),
             branch: branch.clone(),
+            base_url: base_url.clone(),
+            api_base_url: api_base_url.clone(),
+            namespace: namespace.clone(),
+            repository: repository.clone(),
+            root_path: root_path.clone(),
+            display_name: display_name.clone(),
             cache_dir,
             auth,
         })
+    }
+}
+
+pub fn fetch_repository_metadata(
+    remote: &BootstrapRemoteConfig,
+    source: &dyn GitRepositoryMetadataSource,
+    access_token: Option<&str>,
+) -> Result<GitRepositoryMetadata> {
+    ensure!(
+        remote.provider == ProviderKind::GitRepo,
+        "bootstrap remote `{}` is not a Git repository sync remote",
+        remote.remote_id
+    );
+    let BootstrapRemoteLocator::GitRepo { .. } = &remote.locator else {
+        return Err(anyhow!(
+            "bootstrap remote `{}` is missing a Git repo locator",
+            remote.remote_id
+        ));
+    };
+
+    source.fetch_repository_metadata(remote, access_token)
+}
+
+pub fn ensure_private_repository(metadata: &GitRepositoryMetadata) -> Result<()> {
+    match metadata.visibility {
+        GitRepositoryVisibility::Private => Ok(()),
+        GitRepositoryVisibility::Internal => Err(anyhow!(
+            "remote repository `{}` is internal; only private repositories may enable sync",
+            metadata.display_name
+        )),
+        GitRepositoryVisibility::Public => Err(anyhow!(
+            "remote repository `{}` must stay private before sync can be enabled",
+            metadata.display_name
+        )),
+        GitRepositoryVisibility::Unknown => Err(anyhow!(
+            "remote repository visibility could not be confirmed; refusing to enable sync without verified private visibility"
+        )),
+    }
+}
+
+pub fn ensure_writable(metadata: &GitRepositoryMetadata) -> Result<()> {
+    match metadata.write_permission {
+        GitRepositoryWritePermission::Writable => Ok(()),
+        GitRepositoryWritePermission::ReadOnly => Err(anyhow!(
+            "remote repository `{}` does not grant write permission with the supplied token",
+            metadata.display_name
+        )),
+        GitRepositoryWritePermission::Unknown => Err(anyhow!(
+            "remote repository write permission could not be confirmed; refusing to enable sync"
+        )),
+    }
+}
+
+pub fn validate_remote_for_sync(
+    remote: &BootstrapRemoteConfig,
+    source: &dyn GitRepositoryMetadataSource,
+    access_token: Option<&str>,
+) -> Result<GitRepositoryMetadata> {
+    let metadata = fetch_repository_metadata(remote, source, access_token)?;
+    ensure_private_repository(&metadata)?;
+    ensure_writable(&metadata)?;
+    Ok(metadata)
+}
+
+pub fn validate_remote_for_push(
+    remote: &BootstrapRemoteConfig,
+    safety_status: GitRemoteSafetyStatus,
+    source: &dyn GitRepositoryMetadataSource,
+    access_token: Option<&str>,
+) -> Result<GitRepositoryMetadata> {
+    match safety_status {
+        GitRemoteSafetyStatus::Paused => Err(anyhow!(
+            "remote sync is paused until the repository is revalidated as private and writable"
+        )),
+        GitRemoteSafetyStatus::Safe
+        | GitRemoteSafetyStatus::Unknown
+        | GitRemoteSafetyStatus::Stale => validate_remote_for_sync(remote, source, access_token),
     }
 }
 

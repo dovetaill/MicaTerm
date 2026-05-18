@@ -336,6 +336,35 @@ pub enum GitHostKind {
     Generic,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum GitRepositoryVisibility {
+    Private,
+    Public,
+    Internal,
+    #[default]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum GitRepositoryWritePermission {
+    Writable,
+    ReadOnly,
+    #[default]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum GitRemoteSafetyStatus {
+    Safe,
+    #[default]
+    Unknown,
+    Stale,
+    Paused,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GiteeRemoteDraft {
     #[serde(default)]
@@ -432,6 +461,18 @@ pub enum BootstrapRemoteLocator {
         host_kind: GitHostKind,
         remote_url: String,
         branch: String,
+        #[serde(default)]
+        base_url: Option<String>,
+        #[serde(default)]
+        api_base_url: Option<String>,
+        #[serde(default)]
+        namespace: Option<String>,
+        #[serde(default)]
+        repository: Option<String>,
+        #[serde(default)]
+        root_path: Option<String>,
+        #[serde(default)]
+        display_name: Option<String>,
     },
     GiteeGist {
         gist_id: String,

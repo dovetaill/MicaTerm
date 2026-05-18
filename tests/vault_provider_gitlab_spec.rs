@@ -39,6 +39,12 @@ fn sample_gitlab_git_repo_remote() -> BootstrapRemoteConfig {
             host_kind: GitHostKind::GitLab,
             remote_url: "https://gitlab.example.internal/platform/mica-vault.git".into(),
             branch: "main".into(),
+            base_url: Some("https://gitlab.example.internal".into()),
+            api_base_url: Some("https://gitlab.example.internal/api/v4".into()),
+            namespace: Some("platform".into()),
+            repository: Some("mica-vault".into()),
+            root_path: Some(".mica-term-sync".into()),
+            display_name: Some("platform/mica-vault".into()),
         },
         credential_ref: Some("vault/bootstrap/remote-gitlab-primary".into()),
         auth_kind: ProviderAuthKind::Pat,
@@ -47,13 +53,13 @@ fn sample_gitlab_git_repo_remote() -> BootstrapRemoteConfig {
 }
 
 struct FakeGitLabRepositoryMetadataSource {
-    next_result: Mutex<Result<GitRepositoryMetadata>>,
+    next_result: Mutex<Option<Result<GitRepositoryMetadata>>>,
 }
 
 impl FakeGitLabRepositoryMetadataSource {
     fn returning(result: Result<GitRepositoryMetadata>) -> Self {
         Self {
-            next_result: Mutex::new(result),
+            next_result: Mutex::new(Some(result)),
         }
     }
 }
@@ -67,7 +73,8 @@ impl GitRepositoryMetadataSource for FakeGitLabRepositoryMetadataSource {
         self.next_result
             .lock()
             .map_err(|_| anyhow!("metadata result lock poisoned"))?
-            .clone()
+            .take()
+            .ok_or_else(|| anyhow!("missing repository metadata result"))?
     }
 }
 
@@ -140,12 +147,11 @@ fn gitlab_provider_capabilities_report_bundled_transport_without_strict_cas() {
 #[test]
 fn gitlab_public_repo_is_rejected() {
     let remote = sample_gitlab_git_repo_remote();
-    let source = FakeGitLabRepositoryMetadataSource::returning(Ok(
-        sample_gitlab_repository_metadata(
+    let source =
+        FakeGitLabRepositoryMetadataSource::returning(Ok(sample_gitlab_repository_metadata(
             GitRepositoryVisibility::Public,
             GitRepositoryWritePermission::Writable,
-        ),
-    ));
+        )));
 
     let err = validate_remote_for_sync(&remote, &source, Some("gitlab-pat"))
         .expect_err("public gitlab repository must be rejected");
@@ -159,12 +165,11 @@ fn gitlab_public_repo_is_rejected() {
 #[test]
 fn gitlab_internal_repo_is_rejected() {
     let remote = sample_gitlab_git_repo_remote();
-    let source = FakeGitLabRepositoryMetadataSource::returning(Ok(
-        sample_gitlab_repository_metadata(
+    let source =
+        FakeGitLabRepositoryMetadataSource::returning(Ok(sample_gitlab_repository_metadata(
             GitRepositoryVisibility::Internal,
             GitRepositoryWritePermission::Writable,
-        ),
-    ));
+        )));
 
     let err = validate_remote_for_sync(&remote, &source, Some("gitlab-pat"))
         .expect_err("internal gitlab repository must be rejected");
@@ -178,12 +183,11 @@ fn gitlab_internal_repo_is_rejected() {
 #[test]
 fn gitlab_private_repo_is_accepted_when_writable() {
     let remote = sample_gitlab_git_repo_remote();
-    let source = FakeGitLabRepositoryMetadataSource::returning(Ok(
-        sample_gitlab_repository_metadata(
+    let source =
+        FakeGitLabRepositoryMetadataSource::returning(Ok(sample_gitlab_repository_metadata(
             GitRepositoryVisibility::Private,
             GitRepositoryWritePermission::Writable,
-        ),
-    ));
+        )));
 
     let metadata = validate_remote_for_sync(&remote, &source, Some("gitlab-pat"))
         .expect("private writable gitlab repository should be accepted");
