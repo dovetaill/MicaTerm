@@ -4,10 +4,14 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Result, anyhow};
 
 use mica_term::app::vault::model::{
-    BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind, CompressionKind, KdfConfig,
-    PackLayout, ProviderAuthKind, ProviderKind, RemoteRole, VaultHead,
+    BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind, CompressionKind, GitHostKind,
+    KdfConfig, PackLayout, ProviderAuthKind, ProviderKind, RemoteRole, VaultHead,
 };
 use mica_term::app::vault::provider::VaultProvider;
+use mica_term::app::vault::provider::git_repo::{
+    GitRepositoryMetadata, GitRepositoryMetadataSource, GitRepositoryVisibility,
+    GitRepositoryWritePermission, validate_remote_for_sync,
+};
 use mica_term::app::vault::provider::github_gist::{
     GitHubGistApi, GitHubGistAuth, GitHubGistDocument, GitHubGistFile, GitHubGistProvider,
     GitHubGistProviderConfig, GitHubGistUpdateRequest,
@@ -38,6 +42,66 @@ fn sample_pat_remote() -> BootstrapRemoteConfig {
         credential_ref: Some("vault/bootstrap/github-pat".into()),
         auth_kind: ProviderAuthKind::Pat,
         last_health: None,
+    }
+}
+
+fn sample_github_git_repo_remote() -> BootstrapRemoteConfig {
+    BootstrapRemoteConfig {
+        remote_id: "remote-github-primary".into(),
+        role: RemoteRole::Primary,
+        provider: ProviderKind::GitRepo,
+        locator: BootstrapRemoteLocator::GitRepo {
+            host_kind: GitHostKind::GitHub,
+            remote_url: "https://github.com/octo-org/mica-vault.git".into(),
+            branch: "main".into(),
+        },
+        credential_ref: Some("vault/bootstrap/remote-github-primary".into()),
+        auth_kind: ProviderAuthKind::Pat,
+        last_health: None,
+    }
+}
+
+struct FakeGitHubRepositoryMetadataSource {
+    next_result: Mutex<Result<GitRepositoryMetadata>>,
+    recorded_auth: Mutex<Vec<Option<String>>>,
+}
+
+impl FakeGitHubRepositoryMetadataSource {
+    fn returning(result: Result<GitRepositoryMetadata>) -> Self {
+        Self {
+            next_result: Mutex::new(result),
+            recorded_auth: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl GitRepositoryMetadataSource for FakeGitHubRepositoryMetadataSource {
+    fn fetch_repository_metadata(
+        &self,
+        _remote: &BootstrapRemoteConfig,
+        access_token: Option<&str>,
+    ) -> Result<GitRepositoryMetadata> {
+        self.recorded_auth
+            .lock()
+            .map_err(|_| anyhow!("recorded auth lock poisoned"))?
+            .push(access_token.map(ToOwned::to_owned));
+        self.next_result
+            .lock()
+            .map_err(|_| anyhow!("metadata result lock poisoned"))?
+            .clone()
+    }
+}
+
+fn sample_github_repository_metadata(
+    visibility: GitRepositoryVisibility,
+    write_permission: GitRepositoryWritePermission,
+) -> GitRepositoryMetadata {
+    GitRepositoryMetadata {
+        canonical_id: "octo-org/mica-vault".into(),
+        display_name: "octo-org/mica-vault".into(),
+        visibility,
+        write_permission,
+        default_branch: Some("main".into()),
     }
 }
 
@@ -253,5 +317,86 @@ fn github_provider_prune_revisions_older_than_keep_latest_limit() {
             "vault-rev-0002-manifest.bin".to_string(),
             "vault-rev-0002-pack-0000.bin".to_string(),
         ]
+    );
+}
+
+#[test]
+fn github_public_repo_is_rejected() {
+    let remote = sample_github_git_repo_remote();
+    let source = FakeGitHubRepositoryMetadataSource::returning(Ok(
+        sample_github_repository_metadata(
+            GitRepositoryVisibility::Public,
+            GitRepositoryWritePermission::Writable,
+        ),
+    ));
+
+    let err = validate_remote_for_sync(&remote, &source, Some("github-pat"))
+        .expect_err("public github repository must be rejected");
+
+    assert!(
+        err.to_string().contains("private"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn github_private_repo_is_accepted_when_writable() {
+    let remote = sample_github_git_repo_remote();
+    let source = FakeGitHubRepositoryMetadataSource::returning(Ok(
+        sample_github_repository_metadata(
+            GitRepositoryVisibility::Private,
+            GitRepositoryWritePermission::Writable,
+        ),
+    ));
+
+    let metadata = validate_remote_for_sync(&remote, &source, Some("github-pat"))
+        .expect("private writable github repository should be accepted");
+
+    assert_eq!(metadata.visibility, GitRepositoryVisibility::Private);
+    assert_eq!(
+        metadata.write_permission,
+        GitRepositoryWritePermission::Writable
+    );
+    assert_eq!(
+        source.recorded_auth.lock().expect("lock recorded auth").as_slice(),
+        &[Some("github-pat".into())]
+    );
+}
+
+#[test]
+fn github_private_repo_without_push_permission_is_rejected() {
+    let remote = sample_github_git_repo_remote();
+    let source = FakeGitHubRepositoryMetadataSource::returning(Ok(
+        sample_github_repository_metadata(
+            GitRepositoryVisibility::Private,
+            GitRepositoryWritePermission::ReadOnly,
+        ),
+    ));
+
+    let err = validate_remote_for_sync(&remote, &source, Some("github-pat"))
+        .expect_err("github repository without push permission must be rejected");
+
+    assert!(
+        err.to_string().contains("write"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn github_unknown_visibility_fails_closed() {
+    let remote = sample_github_git_repo_remote();
+    let source = FakeGitHubRepositoryMetadataSource::returning(Ok(
+        sample_github_repository_metadata(
+            GitRepositoryVisibility::Unknown,
+            GitRepositoryWritePermission::Writable,
+        ),
+    ));
+
+    let err = validate_remote_for_sync(&remote, &source, Some("github-pat"))
+        .expect_err("unknown github visibility must fail closed");
+
+    assert!(
+        err.to_string().contains("visibility"),
+        "unexpected error: {err}"
     );
 }

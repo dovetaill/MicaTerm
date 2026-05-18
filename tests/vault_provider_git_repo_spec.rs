@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
+use anyhow::{Result, anyhow};
 use git2::Repository;
 use mica_term::app::vault::auth::git::{
     GitTransportAuthPlan, build_https_auth_plan, build_ssh_auth_plan,
@@ -14,7 +15,9 @@ use mica_term::app::vault::model::{
     VaultHead, VaultManifest, VaultSnapshot,
 };
 use mica_term::app::vault::provider::git_repo::{
-    GitRepoProvider, GitRepoProviderConfig, validate_first_release_git_host,
+    GitRemoteSafetyStatus, GitRepoProvider, GitRepoProviderConfig, GitRepositoryMetadata,
+    GitRepositoryMetadataSource, GitRepositoryVisibility, GitRepositoryWritePermission,
+    validate_first_release_git_host, validate_remote_for_push,
 };
 use mica_term::app::vault::provider::{
     ProviderWriteRequest, VaultProvider, attach_snapshot_recovery_metadata,
@@ -177,6 +180,51 @@ fn sample_provider(remote: &BootstrapRemoteConfig, cache_dir: PathBuf) -> GitRep
             .expect("build git repo config"),
     )
     .expect("build git repo provider")
+}
+
+struct CountingRepositoryMetadataSource {
+    fetch_count: Mutex<usize>,
+    next_result: Mutex<Result<GitRepositoryMetadata>>,
+}
+
+impl CountingRepositoryMetadataSource {
+    fn returning(result: Result<GitRepositoryMetadata>) -> Self {
+        Self {
+            fetch_count: Mutex::new(0),
+            next_result: Mutex::new(result),
+        }
+    }
+
+    fn fetch_count(&self) -> usize {
+        *self.fetch_count.lock().expect("lock fetch count")
+    }
+}
+
+impl GitRepositoryMetadataSource for CountingRepositoryMetadataSource {
+    fn fetch_repository_metadata(
+        &self,
+        _remote: &BootstrapRemoteConfig,
+        _access_token: Option<&str>,
+    ) -> Result<GitRepositoryMetadata> {
+        *self.fetch_count.lock().expect("lock fetch count") += 1;
+        self.next_result
+            .lock()
+            .map_err(|_| anyhow!("metadata result lock poisoned"))?
+            .clone()
+    }
+}
+
+fn sample_repository_metadata(
+    visibility: GitRepositoryVisibility,
+    write_permission: GitRepositoryWritePermission,
+) -> GitRepositoryMetadata {
+    GitRepositoryMetadata {
+        canonical_id: "demo/mica-vault".into(),
+        display_name: "demo/mica-vault".into(),
+        visibility,
+        write_permission,
+        default_branch: Some("main".into()),
+    }
 }
 
 #[test]
@@ -398,4 +446,32 @@ fn first_release_git_host_validation_rejects_non_gitee_hosts() {
         .expect_err("non-gitee hosts should stay hidden in first release");
 
     assert!(err.to_string().contains("first release"));
+}
+
+#[test]
+fn configured_remote_revalidated_before_push_if_safety_status_stale() {
+    let remote = sample_remote(
+        "https://github.com/demo/mica-vault.git".into(),
+        ProviderAuthKind::Pat,
+        Some("vault/bootstrap/remote-primary".into()),
+        GitHostKind::GitHub,
+    );
+    let source = CountingRepositoryMetadataSource::returning(Ok(sample_repository_metadata(
+        GitRepositoryVisibility::Public,
+        GitRepositoryWritePermission::Writable,
+    )));
+
+    let err = validate_remote_for_push(
+        &remote,
+        GitRemoteSafetyStatus::Stale,
+        &source,
+        Some("github-pat"),
+    )
+    .expect_err("stale safety status should force push-time revalidation");
+
+    assert_eq!(source.fetch_count(), 1);
+    assert!(
+        err.to_string().contains("private"),
+        "unexpected error: {err}"
+    );
 }
