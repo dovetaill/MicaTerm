@@ -170,7 +170,7 @@ fn semantic_surface_tokens_lock_the_approved_dual_theme_values() {
     let content = std::fs::read_to_string("ui/theme/tokens.slint").unwrap();
 
     for line in [
-        "out property <brush> window-surface: dark-mode ? #141b23 : #f2f5f8;",
+        "out property <brush> window-surface: dark-mode ? #0a0e14 : #f8f9fa;",
         "out property <brush> titlebar-surface: titlebar-background;",
         "out property <brush> activity-surface: sidebar-background;",
         "out property <brush> assets-surface: sidebar-panel-background;",

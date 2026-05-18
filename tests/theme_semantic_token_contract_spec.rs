@@ -22,6 +22,10 @@ fn theme_semantic_token_contract_spec_semantic_theme_tokens_cover_shell_hierarch
         "out property <brush> sidebar-item-hover-background:",
         "out property <brush> sidebar-item-selected-background:",
         "out property <brush> sidebar-item-selected-border:",
+        "out property <brush> sidebar-item-focus-border:",
+        "out property <brush> panel-scrollbar-track:",
+        "out property <brush> panel-scrollbar-thumb:",
+        "out property <brush> panel-scrollbar-thumb-active:",
         "out property <brush> sidebar-hover-surface:",
         "out property <brush> sidebar-selected-surface:",
         "out property <brush> panel-surface:",
@@ -55,7 +59,7 @@ fn theme_semantic_token_contract_spec_premium_default_tokens_encode_the_new_calm
     );
     assert!(
         tokens.contains(
-            "out property <brush> terminal-frame-background: dark-mode ? #141b24 : #fcfcfc;"
+            "out property <brush> terminal-frame-background: dark-mode ? #141b24 : #f4f6f8;"
         ),
         "terminal frame should use the refined raised Ayu chrome instead of the older brighter fallback slab"
     );
@@ -65,7 +69,7 @@ fn theme_semantic_token_contract_spec_premium_default_tokens_encode_the_new_calm
     );
     assert!(
         tokens.contains(
-            "out property <brush> sidebar-item-selected-background: dark-mode ? #141b24 : #fafafa;"
+            "out property <brush> sidebar-item-selected-background: dark-mode ? #141b24 : #fff7ea;"
         ),
         "selected sidebar items should use the refined subtle Ayu fill instead of the older boxed control treatment"
     );
@@ -85,11 +89,11 @@ fn theme_semantic_token_contract_spec_boot_time_shell_tokens_match_approved_ayu_
         "out property <brush> titlebar-background: dark-mode ? #10151d : #f8f9fa;",
         "out property <brush> tabbar-background: dark-mode ? #10151d : #f8f9fa;",
         "out property <brush> sidebar-background: dark-mode ? #10151d : #f8f9fa;",
-        "out property <brush> sidebar-panel-background: dark-mode ? #111821 : #f6f8fa;",
-        "out property <brush> right-panel-background: dark-mode ? #111821 : #f6f8fa;",
-        "out property <brush> terminal-frame-background: dark-mode ? #141b24 : #fcfcfc;",
-        "out property <brush> separator: dark-mode ? #1b2530 : #e5e9ef;",
-        "out property <brush> hairline: dark-mode ? #1b2530 : #e5e9ef;",
+        "out property <brush> sidebar-panel-background: dark-mode ? #111821 : #f4f6f8;",
+        "out property <brush> right-panel-background: dark-mode ? #111821 : #f4f6f8;",
+        "out property <brush> terminal-frame-background: dark-mode ? #141b24 : #f4f6f8;",
+        "out property <brush> separator: dark-mode ? #18212b : #e5e9ef;",
+        "out property <brush> hairline: dark-mode ? #1b2530 : #e1e6ec;",
         "out property <brush> text-primary: dark-mode ? #c5c1b8 : #5c6166;",
         "out property <brush> text-secondary: dark-mode ? #9aa4ae : #7a838c;",
         "out property <brush> text-muted: dark-mode ? #7d8790 : #8a939c;",
@@ -99,9 +103,13 @@ fn theme_semantic_token_contract_spec_boot_time_shell_tokens_match_approved_ayu_
         "out property <brush> tab-active-surface: dark-mode ? #141b24 : #fcfcfc;",
         "out property <brush> tab-hover-surface: dark-mode ? #111821 : #f6f8fa;",
         "out property <brush> tab-active-line: dark-mode ? #e6b450 : #ffaa33;",
-        "out property <brush> sidebar-item-hover-background: dark-mode ? #111821 : #f0f3f6;",
-        "out property <brush> sidebar-item-selected-background: dark-mode ? #141b24 : #fafafa;",
+        "out property <brush> sidebar-item-hover-background: dark-mode ? #111821 : #eef2f5;",
+        "out property <brush> sidebar-item-selected-background: dark-mode ? #141b24 : #fff7ea;",
         "out property <brush> sidebar-item-selected-border: dark-mode ? #e6b450 : #ffaa33;",
+        "out property <brush> sidebar-item-focus-border: dark-mode ? #1b2530 : #e5e9ef;",
+        "out property <brush> panel-scrollbar-track: dark-mode ? #111821 : #f4f6f8;",
+        "out property <brush> panel-scrollbar-thumb: dark-mode ? #2f3944 : #d6dce3;",
+        "out property <brush> panel-scrollbar-thumb-active: dark-mode ? #3c4856 : #c6cdd6;",
     ] {
         assert!(
             tokens.contains(expected),
@@ -220,9 +228,9 @@ fn theme_semantic_token_contract_spec_shell_chrome_consumes_semantic_tokens_for_
             && theme_spec.contains("pub const TERMINAL_BG_BASE_DARK: u32 = 0x0a_0e14;")
             && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_TOP_DARK: u32 = 0x0a_0e14;")
             && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_BOTTOM_DARK: u32 = 0x0a_0e14;")
-            && theme_spec.contains("pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xf8_f9fa;")
-            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xf8_f9fa;")
-            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xf8_f9fa;"),
+            && theme_spec.contains("pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xf7_f8fa;")
+            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xf7_f8fa;")
+            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xf7_f8fa;"),
         "terminal palette spec should expose the shared Ayu viewport background constants, disable legacy row banding/grain, and keep the default viewport backgrounds flat across renderers"
     );
     assert!(
@@ -288,6 +296,7 @@ fn theme_semantic_token_contract_spec_runtime_shell_palette_properties_are_threa
         sidebar.contains("in property <color> shell-sidebar-background: ThemeTokens.sidebar-background;")
             && sidebar.contains("in property <color> shell-sidebar-panel-background: ThemeTokens.sidebar-panel-background;")
             && sidebar.contains("in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;")
+            && sidebar.contains("in property <color> shell-sidebar-item-focus-border: ThemeTokens.sidebar-item-focus-border;")
             && sidebar.contains("shell-sidebar-panel-background: root.shell-sidebar-panel-background;")
             && sidebar.contains("shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;"),
         "sidebar should accept the runtime sidebar palette and forward the panel and selected-state colors into AssetsSidebar"
@@ -295,7 +304,8 @@ fn theme_semantic_token_contract_spec_runtime_shell_palette_properties_are_threa
     assert!(
         assets_sidebar.contains("in property <color> shell-sidebar-panel-background: ThemeTokens.sidebar-panel-background;")
             && assets_sidebar.contains("in property <color> shell-text-primary: ThemeTokens.text-primary;")
-            && assets_sidebar.contains("in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;"),
+            && assets_sidebar.contains("in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;")
+            && assets_sidebar.contains("in property <color> shell-sidebar-item-focus-border: ThemeTokens.sidebar-item-focus-border;"),
         "assets sidebar should declare runtime shell palette inputs for its raised panel and item states"
     );
     assert!(
@@ -304,7 +314,9 @@ fn theme_semantic_token_contract_spec_runtime_shell_palette_properties_are_threa
                 .contains("shell-sidebar-panel-background: root.shell-sidebar-panel-background;")
             && app_window.contains(
                 "shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;"
-            ),
+            )
+            && app_window
+                .contains("shell-sidebar-item-focus-border: root.shell-sidebar-item-focus-border;"),
         "app window should pass the projected sidebar palette into Sidebar"
     );
     assert!(
@@ -312,7 +324,16 @@ fn theme_semantic_token_contract_spec_runtime_shell_palette_properties_are_threa
             "in property <color> shell-right-panel-background: ThemeTokens.right-panel-background;"
         ) && right_panel
             .contains("in property <color> shell-text-primary: ThemeTokens.text-primary;")
-            && right_panel.contains("in property <color> shell-accent: ThemeTokens.accent;"),
+            && right_panel.contains("in property <color> shell-accent: ThemeTokens.accent;")
+            && right_panel.contains(
+                "in property <color> shell-panel-scrollbar-track: ThemeTokens.panel-scrollbar-track;"
+            )
+            && right_panel.contains(
+                "in property <color> shell-panel-scrollbar-thumb: ThemeTokens.panel-scrollbar-thumb;"
+            )
+            && right_panel.contains(
+                "in property <color> shell-panel-scrollbar-thumb-active: ThemeTokens.panel-scrollbar-thumb-active;"
+            ),
         "right panel should expose runtime shell palette inputs before switching its live surfaces"
     );
     assert!(
@@ -371,8 +392,8 @@ fn theme_semantic_token_contract_spec_runtime_shell_palette_consumers_switch_fro
     );
     assert!(
         sidebar.contains("background: root.shell-sidebar-background;")
-            && sidebar.contains("border-color: root.shell-border;")
-            && sidebar.contains("background: root.shell-border;")
+            && sidebar.contains("background: root.shell-separator;")
+            && sidebar.contains("shell-separator: root.shell-separator;")
             && sidebar.contains("shell-sidebar-item-selected: root.shell-sidebar-item-selected;")
             && sidebar.contains(
                 "shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;"
@@ -393,12 +414,14 @@ fn theme_semantic_token_contract_spec_runtime_shell_palette_consumers_switch_fro
     );
     assert!(
         assets_sidebar.contains("background: root.shell-sidebar-panel-background;")
-            && assets_sidebar.contains("border-color: root.shell-border;")
+            && assets_sidebar.contains("background: root.shell-separator;")
             && assets_sidebar.contains("color: root.shell-text-primary;")
             && assets_sidebar.contains("color: root.shell-text-secondary;")
             && assets_sidebar.contains(
                 "shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;"
             )
+            && assets_sidebar
+                .contains("shell-sidebar-item-focus-border: root.shell-sidebar-item-focus-border;")
             && !assets_sidebar
                 .contains("\n    background: ThemeTokens.sidebar-panel-background;\n"),
         "assets sidebar should consume the live runtime shell palette for its raised panel and text hierarchy"
@@ -407,20 +430,23 @@ fn theme_semantic_token_contract_spec_runtime_shell_palette_consumers_switch_fro
         asset_row.contains("in property <color> shell-focus-ring: ThemeTokens.focus-ring;")
             && asset_row.contains("in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;")
             && asset_row.contains("in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;")
-            && asset_row.contains("border-width: root.focused ? 1px : 0px;")
-            && asset_row.contains("border-color: root.shell-focus-ring;")
+            && asset_row.contains(
+                "in property <color> shell-sidebar-item-focus-border: ThemeTokens.sidebar-item-focus-border;"
+            )
+            && asset_row.contains("border-width: root.focused && !root.selected ? 1px : 0px;")
+            && asset_row.contains("border-color: root.shell-sidebar-item-focus-border;")
             && asset_row.contains("? root.shell-sidebar-item-selected")
             && asset_row.contains("? root.shell-sidebar-item-hover")
             && asset_row.contains("active-rail := Rectangle")
             && asset_row.contains("background: root.shell-sidebar-item-selected-border;")
-            && !asset_row.contains("border-width: root.focused || root.selected ? 1px : 0px;")
+            && !asset_row.contains("border-color: root.shell-focus-ring;")
             && asset_row.contains("color: root.shell-text-primary;")
             && asset_row.contains("color: root.shell-text-secondary;"),
-        "asset rows should render selected, hover, focus, and text colors from runtime sidebar props while separating keyboard focus from selected state"
+        "asset rows should render selected, hover, focus, and text colors from runtime sidebar props while keeping keyboard focus lower-contrast than the selected accent rail"
     );
     assert!(
         right_panel.contains("background: root.shell-right-panel-background;")
-            && right_panel.contains("background: root.shell-border;")
+            && right_panel.contains("background: root.shell-separator;")
             && right_panel.contains("border-color: root.shell-border;")
             && right_panel.contains(
                 "in property <color> shell-sidebar-item-hover: ThemeTokens.sidebar-item-hover-background;"
@@ -435,6 +461,10 @@ fn theme_semantic_token_contract_spec_runtime_shell_palette_consumers_switch_fro
             && right_panel.contains("background: item.selected ? root.shell-sidebar-item-selected")
             && right_panel.contains("background: root.shell-sidebar-item-selected-border;")
             && right_panel.contains("background: root.shell-separator;")
+            && right_panel.contains("vertical-scrollbar-policy: always-off;")
+            && right_panel.contains("background: root.shell-panel-scrollbar-track;")
+            && right_panel.contains("? root.shell-panel-scrollbar-thumb-active")
+            && right_panel.contains(": root.shell-panel-scrollbar-thumb;")
             && right_panel.contains("color: root.shell-text-primary;")
             && right_panel.contains("color: root.shell-text-secondary;")
             && !right_panel.contains("ThemeTokens.explorer-row-selected-surface")

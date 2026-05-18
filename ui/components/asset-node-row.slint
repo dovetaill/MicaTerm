@@ -19,6 +19,7 @@ export component AssetNodeRow inherits Rectangle {
     in property <color> shell-sidebar-item-hover: ThemeTokens.sidebar-item-hover-background;
     in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;
     in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;
+    in property <color> shell-sidebar-item-focus-border: ThemeTokens.sidebar-item-focus-border;
     callback selected-requested(string);
     callback activated-requested(string);
     callback toggle-expanded-requested(string);
@@ -60,8 +61,8 @@ export component AssetNodeRow inherits Rectangle {
 
     height: root.row-height;
     border-radius: 8px;
-    border-width: root.focused ? 1px : 0px;
-    border-color: root.shell-focus-ring;
+    border-width: root.focused && !root.selected ? 1px : 0px;
+    border-color: root.shell-sidebar-item-focus-border;
     background: touch.pressed
         ? root.shell-sidebar-item-selected
         : root.selected

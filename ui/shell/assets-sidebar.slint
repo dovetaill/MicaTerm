@@ -42,6 +42,7 @@ export component AssetsSidebar inherits Rectangle {
     in property <[ConsoleAssetItem]> snippet-asset-items: [];
     in property <[ConsoleAssetItem]> keychain-asset-items: [];
     in property <color> shell-sidebar-panel-background: ThemeTokens.sidebar-panel-background;
+    in property <color> shell-separator: ThemeTokens.separator;
     in property <color> shell-border: ThemeTokens.divider-subtle;
     in property <color> shell-text-primary: ThemeTokens.text-primary;
     in property <color> shell-text-secondary: ThemeTokens.text-secondary;
@@ -49,6 +50,7 @@ export component AssetsSidebar inherits Rectangle {
     in property <color> shell-sidebar-item-hover: ThemeTokens.sidebar-item-hover-background;
     in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;
     in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;
+    in property <color> shell-sidebar-item-focus-border: ThemeTokens.sidebar-item-focus-border;
     out property <length> search-row-height: search-row-host.height;
     out property <length> create-menu-anchor-x: create-button.absolute-position.x;
     out property <length> create-menu-anchor-y: create-button.absolute-position.y;
@@ -81,8 +83,7 @@ export component AssetsSidebar inherits Rectangle {
     visible: expanded;
     clip: true;
     background: root.shell-sidebar-panel-background;
-    border-width: 1px;
-    border-color: root.shell-border;
+    border-width: 0px;
 
     VerticalLayout {
         spacing: 0px;
@@ -201,7 +202,7 @@ export component AssetsSidebar inherits Rectangle {
                 y: parent.height - 1px;
                 width: parent.width - 24px;
                 height: 1px;
-                background: root.shell-border;
+                background: root.shell-separator;
             }
         }
 
@@ -314,6 +315,7 @@ export component AssetsSidebar inherits Rectangle {
                         shell-sidebar-item-hover: root.shell-sidebar-item-hover;
                         shell-sidebar-item-selected: root.shell-sidebar-item-selected;
                         shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
+                        shell-sidebar-item-focus-border: root.shell-sidebar-item-focus-border;
 
                         selected-requested(item-id) => {
                             root.asset-selected(item-id);
@@ -439,6 +441,7 @@ export component AssetsSidebar inherits Rectangle {
                         shell-sidebar-item-hover: root.shell-sidebar-item-hover;
                         shell-sidebar-item-selected: root.shell-sidebar-item-selected;
                         shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
+                        shell-sidebar-item-focus-border: root.shell-sidebar-item-focus-border;
 
                         selected-requested(item-id) => {
                             root.asset-selected(item-id);
@@ -564,6 +567,7 @@ export component AssetsSidebar inherits Rectangle {
                         shell-sidebar-item-hover: root.shell-sidebar-item-hover;
                         shell-sidebar-item-selected: root.shell-sidebar-item-selected;
                         shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
+                        shell-sidebar-item-focus-border: root.shell-sidebar-item-focus-border;
 
                         selected-requested(item-id) => {
                             root.asset-selected(item-id);
@@ -610,5 +614,13 @@ export component AssetsSidebar inherits Rectangle {
                 }
             }
         }
+    }
+
+    Rectangle {
+        x: parent.width - 1px;
+        y: 0px;
+        width: 1px;
+        height: parent.height;
+        background: root.shell-separator;
     }
 }

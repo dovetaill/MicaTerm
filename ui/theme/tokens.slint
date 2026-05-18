@@ -7,11 +7,11 @@ export global ThemeTokens {
     out property <brush> titlebar-background: dark-mode ? #10151d : #f8f9fa;
     out property <brush> tabbar-background: dark-mode ? #10151d : #f8f9fa;
     out property <brush> sidebar-background: dark-mode ? #10151d : #f8f9fa;
-    out property <brush> sidebar-panel-background: dark-mode ? #111821 : #f6f8fa;
-    out property <brush> right-panel-background: dark-mode ? #111821 : #f6f8fa;
-    out property <brush> terminal-frame-background: dark-mode ? #141b24 : #fcfcfc;
-    out property <brush> separator: dark-mode ? #1b2530 : #e5e9ef;
-    out property <brush> hairline: dark-mode ? #1b2530 : #e5e9ef;
+    out property <brush> sidebar-panel-background: dark-mode ? #111821 : #f4f6f8;
+    out property <brush> right-panel-background: dark-mode ? #111821 : #f4f6f8;
+    out property <brush> terminal-frame-background: dark-mode ? #141b24 : #f4f6f8;
+    out property <brush> separator: dark-mode ? #18212b : #e5e9ef;
+    out property <brush> hairline: dark-mode ? #1b2530 : #e1e6ec;
 
     out property <brush> accent: dark-mode ? #e6b450 : #ffaa33;
     out property <brush> link-accent: dark-mode ? #e6b450 : #ffaa33;
@@ -22,7 +22,7 @@ export global ThemeTokens {
     out property <brush> text-muted: dark-mode ? #7d8790 : #8a939c;
     out property <brush> text-inactive: dark-mode ? #7d8790 : #8a939c;
 
-    out property <brush> window-surface: dark-mode ? #141b23 : #f2f5f8;
+    out property <brush> window-surface: dark-mode ? #0a0e14 : #f8f9fa;
     out property <brush> titlebar-surface: titlebar-background;
     out property <brush> activity-surface: sidebar-background;
     out property <brush> assets-surface: sidebar-panel-background;
@@ -93,9 +93,13 @@ export global ThemeTokens {
     out property <length> modal-header-height: 58px;
     out property <length> modal-footer-min-height: 72px;
 
-    out property <brush> sidebar-item-hover-background: dark-mode ? #111821 : #f0f3f6;
-    out property <brush> sidebar-item-selected-background: dark-mode ? #141b24 : #fafafa;
+    out property <brush> sidebar-item-hover-background: dark-mode ? #111821 : #eef2f5;
+    out property <brush> sidebar-item-selected-background: dark-mode ? #141b24 : #fff7ea;
     out property <brush> sidebar-item-selected-border: dark-mode ? #e6b450 : #ffaa33;
+    out property <brush> sidebar-item-focus-border: dark-mode ? #1b2530 : #e5e9ef;
+    out property <brush> panel-scrollbar-track: dark-mode ? #111821 : #f4f6f8;
+    out property <brush> panel-scrollbar-thumb: dark-mode ? #2f3944 : #d6dce3;
+    out property <brush> panel-scrollbar-thumb-active: dark-mode ? #3c4856 : #c6cdd6;
     out property <brush> sidebar-hover-surface: sidebar-item-hover-background;
     out property <brush> sidebar-selected-surface: sidebar-item-selected-background;
     out property <brush> explorer-row-hover-surface: sidebar-item-hover-background;
@@ -173,12 +177,12 @@ export global ThemeTokens {
     out property <length> ssh-status-field-radius: 12px;
     out property <length> ssh-status-hop-radius: 15px;
 
-    out property <brush> terminal-canvas-surface: dark-mode ? #0a0e14 : #f8f9fa;
+    out property <brush> terminal-canvas-surface: dark-mode ? #0a0e14 : #f7f8fa;
     out property <brush> terminal-default-fg: dark-mode ? #c5c1b8 : #5c6166;
     out property <brush> terminal-soft-fg: dark-mode ? #99a1a8 : #6c7680;
     out property <brush> terminal-dim-fg: dark-mode ? #5c6773 : #828c99;
     out property <brush> terminal-default-bg: terminal-canvas-surface;
-    out property <brush> terminal-cursor-fg: dark-mode ? #0a0e14 : #f8f9fa;
+    out property <brush> terminal-cursor-fg: dark-mode ? #0a0e14 : #f7f8fa;
     out property <brush> terminal-cursor-bg: dark-mode ? #e6b450 : #ffaa33;
     out property <brush> terminal-selection-surface: dark-mode ? #2a3541c7 : #55b4d433;
     out property <brush> terminal-scrollbar-track-surface: dark-mode ? #111821 : #f4f6f8;

@@ -333,6 +333,10 @@ export component AppWindow inherits Window {
     in-out property <color> shell-sidebar-item-hover: ThemeTokens.sidebar-item-hover-background;
     in-out property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;
     in-out property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;
+    in-out property <color> shell-sidebar-item-focus-border: ThemeTokens.sidebar-item-focus-border;
+    in-out property <color> shell-panel-scrollbar-track: ThemeTokens.panel-scrollbar-track;
+    in-out property <color> shell-panel-scrollbar-thumb: ThemeTokens.panel-scrollbar-thumb;
+    in-out property <color> shell-panel-scrollbar-thumb-active: ThemeTokens.panel-scrollbar-thumb-active;
     in-out property <image> workspace-session-surface-image;
     in-out property <int> workspace-session-native-frame-token: 0;
     in-out property <int> workspace-session-rows: 24;
@@ -761,8 +765,8 @@ export component AppWindow inherits Window {
         height: root.height;
         border-radius: 0px;
         border-width: 1px;
-        border-color: ThemeTokens.divider-subtle;
-        background: ThemeTokens.window-surface;
+        border-color: root.shell-hairline;
+        background: root.shell-app-background;
 
         chrome-host := Rectangle {
             width: parent.width;
@@ -909,6 +913,7 @@ export component AppWindow inherits Window {
                         keychain-asset-items: root.keychain-asset-items;
                         shell-sidebar-background: root.shell-sidebar-background;
                         shell-sidebar-panel-background: root.shell-sidebar-panel-background;
+                        shell-separator: root.shell-separator;
                         shell-border: root.shell-border;
                         shell-text-primary: root.shell-text-primary;
                         shell-text-secondary: root.shell-text-secondary;
@@ -916,6 +921,7 @@ export component AppWindow inherits Window {
                         shell-sidebar-item-hover: root.shell-sidebar-item-hover;
                         shell-sidebar-item-selected: root.shell-sidebar-item-selected;
                         shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
+                        shell-sidebar-item-focus-border: root.shell-sidebar-item-focus-border;
 
                         toggle-assets-sidebar-requested => {
                             root.toggle-assets-sidebar-requested();
@@ -1242,6 +1248,9 @@ export component AppWindow inherits Window {
                         shell-sidebar-item-hover: root.shell-sidebar-item-hover;
                         shell-sidebar-item-selected: root.shell-sidebar-item-selected;
                         shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
+                        shell-panel-scrollbar-track: root.shell-panel-scrollbar-track;
+                        shell-panel-scrollbar-thumb: root.shell-panel-scrollbar-thumb;
+                        shell-panel-scrollbar-thumb-active: root.shell-panel-scrollbar-thumb-active;
 
                         sftp-panel-back-requested => {
                             root.sftp-panel-back-requested();

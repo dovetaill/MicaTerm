@@ -238,8 +238,14 @@ fn app_window_threads_sidebar_row_state_palette_into_right_panel() {
             "in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;"
         ) && right_panel_source.contains(
             "in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;"
+        ) && right_panel_source.contains(
+            "in property <color> shell-panel-scrollbar-track: ThemeTokens.panel-scrollbar-track;"
+        ) && right_panel_source.contains(
+            "in property <color> shell-panel-scrollbar-thumb: ThemeTokens.panel-scrollbar-thumb;"
+        ) && right_panel_source.contains(
+            "in property <color> shell-panel-scrollbar-thumb-active: ThemeTokens.panel-scrollbar-thumb-active;"
         ),
-        "right panel should accept the shared runtime row-state palette so later SFTP row styling can stay on the same projected Ayu selection source"
+        "right panel should accept the shared runtime row-state and panel-scrollbar palette so SFTP list chrome stays on the same projected Ayu source"
     );
     assert!(
         right_panel_block
@@ -251,8 +257,15 @@ fn app_window_threads_sidebar_row_state_palette_into_right_panel() {
                 .contains("shell-sidebar-item-selected: root.shell-sidebar-item-selected;")
             && right_panel_block.contains(
                 "shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;"
+            )
+            && right_panel_block
+                .contains("shell-panel-scrollbar-track: root.shell-panel-scrollbar-track;")
+            && right_panel_block
+                .contains("shell-panel-scrollbar-thumb: root.shell-panel-scrollbar-thumb;")
+            && right_panel_block.contains(
+                "shell-panel-scrollbar-thumb-active: root.shell-panel-scrollbar-thumb-active;"
             ),
-        "app window should thread the shared runtime row-state palette into RightPanel instead of making the panel fall back to detached token defaults"
+        "app window should thread the shared runtime row-state and panel-scrollbar palette into RightPanel instead of making the panel fall back to detached token defaults"
     );
 }
 
@@ -8095,8 +8108,10 @@ fn workspace_tab_reorder_callback_preserves_active_session_and_ui_order() {
         let app = AppWindow::new().unwrap();
         bind_with_fake_sessions(&app, None);
 
-        let prod_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
-        let stage_id = create_root_ssh(&app, "Stage Bastion", "10.0.0.22");
+        create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        create_root_ssh(&app, "Stage Bastion", "10.0.0.22");
+        let prod_id = find_console_asset_id(&app, "Prod Bastion");
+        let stage_id = find_console_asset_id(&app, "Stage Bastion");
 
         app.invoke_asset_activated(prod_id.into());
         settle_terminal_projection();
@@ -11881,12 +11896,12 @@ fn toggling_theme_without_active_terminal_surface_refreshes_fallback_palette() {
     );
     assert_eq!(
         app.get_workspace_session_default_bg().as_argb_encoded(),
-        0xfff8_f9fa,
+        0xfff7_f8fa,
         "without an active terminal surface bootstrap should project the light fallback terminal background from the Ayu preset"
     );
     assert_eq!(
         app.get_workspace_session_cursor_fg().as_argb_encoded(),
-        0xfff8_f9fa,
+        0xfff7_f8fa,
         "without an active terminal surface bootstrap should keep the light fallback cursor foreground aligned with the Ayu preset"
     );
     assert_eq!(
@@ -11960,12 +11975,12 @@ fn no_surface_terminal_projection_uses_ayu_defaults_and_tracks_theme_toggle() {
     );
     assert_eq!(
         app.get_workspace_session_default_bg().as_argb_encoded(),
-        0xfff8_f9fa,
+        0xfff7_f8fa,
         "when no terminal surface is active the fallback terminal projection should still use the Ayu light background after a theme toggle"
     );
     assert_eq!(
         app.get_workspace_session_cursor_fg().as_argb_encoded(),
-        0xfff8_f9fa,
+        0xfff7_f8fa,
         "when no terminal surface is active the fallback cursor foreground should still use the Ayu light preset after a theme toggle"
     );
     assert_eq!(

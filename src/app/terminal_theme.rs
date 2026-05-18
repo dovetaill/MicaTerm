@@ -48,6 +48,10 @@ pub struct ProjectedThemePreset {
     pub sidebar_item_hover: u32,
     pub sidebar_item_selected: u32,
     pub sidebar_item_selected_border: u32,
+    pub sidebar_item_focus_border: u32,
+    pub panel_scrollbar_track: u32,
+    pub panel_scrollbar_thumb: u32,
+    pub panel_scrollbar_thumb_active: u32,
 }
 
 impl TerminalThemePreset {
@@ -125,6 +129,10 @@ pub fn projected_theme_for(theme_mode: ThemeMode, variant: ThemeVariant) -> Proj
         sidebar_item_hover: spec.shell.sidebar_item_hover,
         sidebar_item_selected: spec.shell.sidebar_item_selected,
         sidebar_item_selected_border: spec.shell.sidebar_item_selected_border,
+        sidebar_item_focus_border: spec.shell.sidebar_item_focus_border,
+        panel_scrollbar_track: spec.shell.panel_scrollbar_track,
+        panel_scrollbar_thumb: spec.shell.panel_scrollbar_thumb,
+        panel_scrollbar_thumb_active: spec.shell.panel_scrollbar_thumb_active,
     }
 }
 

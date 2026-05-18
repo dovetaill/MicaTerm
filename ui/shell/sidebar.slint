@@ -33,6 +33,7 @@ export component Sidebar inherits Rectangle {
     in property <[ConsoleAssetItem]> keychain-asset-items: [];
     in property <color> shell-sidebar-background: ThemeTokens.sidebar-background;
     in property <color> shell-sidebar-panel-background: ThemeTokens.sidebar-panel-background;
+    in property <color> shell-separator: ThemeTokens.separator;
     in property <color> shell-border: ThemeTokens.divider-subtle;
     in property <color> shell-text-primary: ThemeTokens.text-primary;
     in property <color> shell-text-secondary: ThemeTokens.text-secondary;
@@ -40,6 +41,7 @@ export component Sidebar inherits Rectangle {
     in property <color> shell-sidebar-item-hover: ThemeTokens.sidebar-item-hover-background;
     in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;
     in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;
+    in property <color> shell-sidebar-item-focus-border: ThemeTokens.sidebar-item-focus-border;
     private property <string> tooltip-text-value: "";
     private property <bool> tooltip-visible-value: false;
     private property <string> tooltip-source-id-value: "";
@@ -133,8 +135,7 @@ export component Sidebar inherits Rectangle {
         activity-bar := Rectangle {
             width: 44px;
             background: root.shell-sidebar-background;
-            border-width: 1px;
-            border-color: root.shell-border;
+            border-width: 0px;
 
             VerticalLayout {
                 padding-top: 6px;
@@ -173,7 +174,7 @@ export component Sidebar inherits Rectangle {
                 divider-line := Rectangle {
                     width: parent.width - 12px;
                     height: 1px;
-                    background: root.shell-border;
+                    background: root.shell-separator;
                 }
 
                 for item in root.items : SidebarNavButton {
@@ -205,6 +206,14 @@ export component Sidebar inherits Rectangle {
                     }
                 }
             }
+
+            Rectangle {
+                x: parent.width - 1px;
+                y: 0px;
+                width: 1px;
+                height: parent.height;
+                background: root.shell-separator;
+            }
         }
 
         assets-sidebar := AssetsSidebar {
@@ -228,6 +237,7 @@ export component Sidebar inherits Rectangle {
             snippet-asset-items: root.snippet-asset-items;
             keychain-asset-items: root.keychain-asset-items;
             shell-sidebar-panel-background: root.shell-sidebar-panel-background;
+            shell-separator: root.shell-separator;
             shell-border: root.shell-border;
             shell-text-primary: root.shell-text-primary;
             shell-text-secondary: root.shell-text-secondary;
@@ -235,6 +245,7 @@ export component Sidebar inherits Rectangle {
             shell-sidebar-item-hover: root.shell-sidebar-item-hover;
             shell-sidebar-item-selected: root.shell-sidebar-item-selected;
             shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
+            shell-sidebar-item-focus-border: root.shell-sidebar-item-focus-border;
 
             toggle-assets-search-requested => {
                 root.toggle-assets-search-requested();

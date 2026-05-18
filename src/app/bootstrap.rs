@@ -2421,6 +2421,18 @@ fn sync_shell_runtime_palette(window: &AppWindow, preset: ProjectedThemePreset) 
     window.set_shell_sidebar_item_selected_border(slint_color_from_rgba(
         0xff00_0000 | preset.sidebar_item_selected_border,
     ));
+    window.set_shell_sidebar_item_focus_border(slint_color_from_rgba(
+        0xff00_0000 | preset.sidebar_item_focus_border,
+    ));
+    window.set_shell_panel_scrollbar_track(slint_color_from_rgba(
+        0xff00_0000 | preset.panel_scrollbar_track,
+    ));
+    window.set_shell_panel_scrollbar_thumb(slint_color_from_rgba(
+        0xff00_0000 | preset.panel_scrollbar_thumb,
+    ));
+    window.set_shell_panel_scrollbar_thumb_active(slint_color_from_rgba(
+        0xff00_0000 | preset.panel_scrollbar_thumb_active,
+    ));
 }
 
 fn sync_workspace_terminal_shell_chrome(window: &AppWindow, preset: ProjectedThemePreset) {

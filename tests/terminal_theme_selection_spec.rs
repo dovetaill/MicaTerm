@@ -35,9 +35,9 @@ fn terminal_theme_background_constants_follow_the_ayu_migration_targets() {
     assert_eq!(dark.viewport_bg_top, 0x0a_0e14);
     assert_eq!(dark.viewport_bg_bottom, 0x0a_0e14);
     assert_eq!(dark.cursor_bg, 0xe6_b450);
-    assert_eq!(light.background, 0xf8_f9fa);
-    assert_eq!(light.viewport_bg_top, 0xf8_f9fa);
-    assert_eq!(light.viewport_bg_bottom, 0xf8_f9fa);
+    assert_eq!(light.background, 0xf7_f8fa);
+    assert_eq!(light.viewport_bg_top, 0xf7_f8fa);
+    assert_eq!(light.viewport_bg_bottom, 0xf7_f8fa);
 }
 
 #[test]
@@ -45,12 +45,12 @@ fn terminal_theme_light_theme_maps_terminal_palette_to_ayu_light() {
     let preset = preset_for_theme(ThemeMode::Light, ThemeVariant::PremiumDefault);
 
     assert_eq!(preset.name, "Ayu Light");
-    assert_eq!(preset.background, 0xf8_f9fa);
+    assert_eq!(preset.background, 0xf7_f8fa);
     assert_eq!(preset.foreground, 0x5c_6166);
-    assert_eq!(preset.viewport_bg_top, 0xf8_f9fa);
-    assert_eq!(preset.viewport_bg_bottom, 0xf8_f9fa);
+    assert_eq!(preset.viewport_bg_top, 0xf7_f8fa);
+    assert_eq!(preset.viewport_bg_bottom, 0xf7_f8fa);
     assert_eq!(preset.cursor_bg, 0xff_aa33);
-    assert_eq!(preset.cursor_fg, 0xf8_f9fa);
+    assert_eq!(preset.cursor_fg, 0xf7_f8fa);
     assert_eq!(preset.selection_bg, (0x55, 0xb4, 0xd4, 0.20));
     assert_eq!(preset.scrollbar_track, (0xf4, 0xf6, 0xf8));
     assert_eq!(preset.scrollbar_thumb, (0xd6, 0xdc, 0xe3));
@@ -268,6 +268,29 @@ fn terminal_session_host_reads_terminal_shell_chrome_from_session_properties() {
             && !host_source.contains("jump-to-latest-requested();"),
         "terminal session host should stop exposing jump-to-latest shell chrome after removing that affordance"
     );
+}
+
+#[test]
+fn projected_shell_palette_keeps_selected_focus_and_panel_scrollbar_semantics_on_one_runtime_path()
+{
+    let projection_source =
+        fs::read_to_string("src/app/terminal_theme.rs").expect("read terminal theme");
+
+    for field in [
+        "pub sidebar_item_focus_border: u32,",
+        "pub panel_scrollbar_track: u32,",
+        "pub panel_scrollbar_thumb: u32,",
+        "pub panel_scrollbar_thumb_active: u32,",
+        "sidebar_item_focus_border: spec.shell.sidebar_item_focus_border,",
+        "panel_scrollbar_track: spec.shell.panel_scrollbar_track,",
+        "panel_scrollbar_thumb: spec.shell.panel_scrollbar_thumb,",
+        "panel_scrollbar_thumb_active: spec.shell.panel_scrollbar_thumb_active,",
+    ] {
+        assert!(
+            projection_source.contains(field),
+            "projected theme preset should carry `{field}` so selected/focus rows and shell panel scrollbars stay on the shared runtime palette path"
+        );
+    }
 }
 
 #[test]

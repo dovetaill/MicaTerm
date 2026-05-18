@@ -140,6 +140,10 @@ pub struct ShellChromeTheme {
     pub sidebar_item_hover: u32,
     pub sidebar_item_selected: u32,
     pub sidebar_item_selected_border: u32,
+    pub sidebar_item_focus_border: u32,
+    pub panel_scrollbar_track: u32,
+    pub panel_scrollbar_thumb: u32,
+    pub panel_scrollbar_thumb_active: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -246,9 +250,9 @@ pub const TERMINAL_BG_GRAIN_ALPHA: f32 = 0.0;
 pub const TERMINAL_BG_BASE_DARK: u32 = 0x0a_0e14;
 pub const TERMINAL_BG_GRADIENT_TOP_DARK: u32 = 0x0a_0e14;
 pub const TERMINAL_BG_GRADIENT_BOTTOM_DARK: u32 = 0x0a_0e14;
-pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xf8_f9fa;
-pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xf8_f9fa;
-pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xf8_f9fa;
+pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xf7_f8fa;
+pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xf7_f8fa;
+pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xf7_f8fa;
 
 pub fn app_theme_spec(mode: ThemeMode, variant: ThemeVariant) -> AppThemeSpec {
     match variant {
@@ -280,7 +284,7 @@ pub fn terminal_palette_spec_for(
         scrollbar_thumb: spec.terminal.scrollbar.thumb,
         scrollbar_thumb_active: spec.terminal.scrollbar.thumb_active,
         frame_bg: spec.shell.terminal_frame_background,
-        split: spec.shell.border,
+        split: spec.shell.separator,
         ansi: spec.terminal.ansi,
     }
 }
@@ -668,7 +672,7 @@ fn premium_shell_dark() -> ShellChromeTheme {
         sidebar_panel_background: 0x11_1821,
         right_panel_background: 0x11_1821,
         terminal_frame_background: 0x14_1b24,
-        separator: 0x1b_2530,
+        separator: 0x18_212b,
         border: 0x1b_2530,
         hairline: 0x1b_2530,
         text_primary: 0xc5_c1b8,
@@ -685,6 +689,10 @@ fn premium_shell_dark() -> ShellChromeTheme {
         sidebar_item_hover: 0x11_1821,
         sidebar_item_selected: 0x14_1b24,
         sidebar_item_selected_border: 0xe6_b450,
+        sidebar_item_focus_border: 0x1b_2530,
+        panel_scrollbar_track: 0x11_1821,
+        panel_scrollbar_thumb: 0x2f_3944,
+        panel_scrollbar_thumb_active: 0x3c_4856,
     }
 }
 
@@ -694,12 +702,12 @@ fn premium_shell_light() -> ShellChromeTheme {
         titlebar_background: 0xf8_f9fa,
         tabbar_background: 0xf8_f9fa,
         sidebar_background: 0xf8_f9fa,
-        sidebar_panel_background: 0xf6_f8fa,
-        right_panel_background: 0xf6_f8fa,
-        terminal_frame_background: 0xfc_fcfc,
+        sidebar_panel_background: 0xf4_f6f8,
+        right_panel_background: 0xf4_f6f8,
+        terminal_frame_background: 0xf4_f6f8,
         separator: 0xe5_e9ef,
-        border: 0xe5_e9ef,
-        hairline: 0xe5_e9ef,
+        border: 0xe1_e6ec,
+        hairline: 0xe1_e6ec,
         text_primary: 0x5c_6166,
         text_secondary: 0x7a_838c,
         text_muted: 0x8a_939c,
@@ -711,9 +719,13 @@ fn premium_shell_light() -> ShellChromeTheme {
         tab_inactive: 0xf8_f9fa,
         tab_hover: 0xf6_f8fa,
         tab_active_indicator: 0xff_aa33,
-        sidebar_item_hover: 0xf0_f3f6,
-        sidebar_item_selected: 0xfa_fafa,
+        sidebar_item_hover: 0xee_f2f5,
+        sidebar_item_selected: 0xff_f7ea,
         sidebar_item_selected_border: 0xff_aa33,
+        sidebar_item_focus_border: 0xe5_e9ef,
+        panel_scrollbar_track: 0xf4_f6f8,
+        panel_scrollbar_thumb: 0xd6_dce3,
+        panel_scrollbar_thumb_active: 0xc6_cdd6,
     }
 }
 

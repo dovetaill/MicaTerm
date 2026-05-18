@@ -61,6 +61,9 @@ export component RightPanel inherits Rectangle {
     in property <color> shell-sidebar-item-hover: ThemeTokens.sidebar-item-hover-background;
     in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;
     in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;
+    in property <color> shell-panel-scrollbar-track: ThemeTokens.panel-scrollbar-track;
+    in property <color> shell-panel-scrollbar-thumb: ThemeTokens.panel-scrollbar-thumb;
+    in property <color> shell-panel-scrollbar-thumb-active: ThemeTokens.panel-scrollbar-thumb-active;
     out property <length> layout-radius: root.border-radius;
     out property <length> layout-border-width: root.border-width;
     out property <length> sftp-drop-target-x: table-card.x;
@@ -82,6 +85,8 @@ export component RightPanel inherits Rectangle {
     out property <length> tooltip-anchor-y <=> root.tooltip-anchor-y-value;
     out property <length> tooltip-anchor-width <=> root.tooltip-anchor-width-value;
     in-out property <length> sftp-list-viewport-x: 0px;
+    in-out property <length> sftp-list-viewport-y: 0px;
+    private property <length> sftp-list-visible-height: 0px;
     private property <image> arrow-hook-up-left-icon: @image-url("../../assets/icons/fluent/arrow-hook-up-left-20-regular.svg");
     private property <image> arrow-sync-icon: @image-url("../../assets/icons/fluent/arrow-sync-20-regular.svg");
     private property <image> expand-icon: @image-url("../../assets/icons/fluent/panel-right-expand-20-regular.svg");
@@ -235,7 +240,7 @@ export component RightPanel inherits Rectangle {
         y: 0px;
         width: 1px;
         height: parent.height;
-        background: root.shell-border;
+        background: root.shell-separator;
     }
 
     edge-handle := Rectangle {
@@ -698,10 +703,13 @@ export component RightPanel inherits Rectangle {
                 height: parent.height - root.sftp-status-row-height;
                 viewport-width: scroll-body.width;
                 viewport-height: scroll-body.height;
+                viewport-y <=> root.sftp-list-viewport-y;
                 mouse-drag-pan-enabled: false;
+                vertical-scrollbar-policy: always-off;
                 horizontal-scrollbar-policy: always-off;
 
                 init => {
+                    root.sftp-list-visible-height = self.visible-height;
                     root.sftp-panel-viewport-changed(self.viewport-y, self.visible-height);
                 }
 
@@ -710,6 +718,7 @@ export component RightPanel inherits Rectangle {
                 }
 
                 changed visible-height => {
+                    root.sftp-list-visible-height = self.visible-height;
                     root.sftp-panel-viewport-changed(self.viewport-y, self.visible-height);
                 }
 
@@ -868,6 +877,94 @@ export component RightPanel inherits Rectangle {
                         width: parent.width;
                         height: root.sftp-panel-bottom-spacer-height;
                         background: transparent;
+                    }
+                }
+            }
+
+            if root.sftp-panel-mode != "empty" : panel-scrollbar := Rectangle {
+                private property <length> track-width: 6px;
+                private property <length> content-height: max(root.sftp-list-visible-height, root.sftp-panel-total-content-height);
+                private property <length> viewport-height: max(0px, root.sftp-list-visible-height);
+                private property <length> scroll-maximum: max(0px, self.content-height - self.viewport-height);
+                private property <length> scroll-offset: max(0px, min(self.scroll-maximum, -root.sftp-list-viewport-y));
+                private property <length> thumb-height: self.scroll-maximum <= 0px
+                    ? self.viewport-height
+                    : max(28px, self.height * (self.viewport-height / self.content-height));
+                private property <length> thumb-y: self.scroll-maximum <= 0px || self.height <= self.thumb-height
+                    ? 0px
+                    : (self.height - self.thumb-height) * (self.scroll-offset / self.scroll-maximum);
+                private property <bool> visible-scrollbar: self.scroll-maximum > 0px;
+                private property <bool> thumb-drag-active: false;
+
+                function scroll-ratio-for-track-position(pointer-y: length) -> float {
+                    let available = self.height - self.thumb-height;
+                    if available <= 0px {
+                        return 0;
+                    }
+                    let clamped = max(0px, min(available, pointer-y));
+                    return clamped / available;
+                }
+
+                function set-scroll-ratio(ratio: float) {
+                    if self.scroll-maximum <= 0px {
+                        root.sftp-list-viewport-y = 0px;
+                        return;
+                    }
+                    let clamped = min(1, max(0, ratio));
+                    root.sftp-list-viewport-y = -(self.scroll-maximum * clamped);
+                }
+
+                x: parent.width - self.track-width - 6px;
+                y: root.sftp-status-row-height + 6px;
+                width: self.track-width;
+                height: max(0px, root.sftp-list-visible-height - 12px);
+                border-radius: self.width / 2;
+                background: root.shell-panel-scrollbar-track;
+                visible: self.visible-scrollbar;
+                opacity: 0.96;
+
+                track-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+
+                    pointer-event(event) => {
+                        if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                            panel-scrollbar.set-scroll-ratio(
+                                panel-scrollbar.scroll-ratio-for-track-position(
+                                    self.mouse-y - panel-scrollbar.thumb-height / 2,
+                                ),
+                            );
+                        }
+                    }
+                }
+
+                thumb := Rectangle {
+                    x: 0px;
+                    y: parent.thumb-y;
+                    width: parent.width;
+                    height: parent.thumb-height;
+                    border-radius: self.width / 2;
+                    background: thumb-touch.has-hover || parent.thumb-drag-active
+                        ? root.shell-panel-scrollbar-thumb-active
+                        : root.shell-panel-scrollbar-thumb;
+
+                    thumb-touch := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+
+                        pointer-event(event) => {
+                            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                                panel-scrollbar.thumb-drag-active = true;
+                            } else if event.kind == PointerEventKind.move && panel-scrollbar.thumb-drag-active {
+                                panel-scrollbar.set-scroll-ratio(
+                                    panel-scrollbar.scroll-ratio-for-track-position(
+                                        thumb.y + self.mouse-y - panel-scrollbar.thumb-height / 2,
+                                    ),
+                                );
+                            } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                                panel-scrollbar.thumb-drag-active = false;
+                            }
+                        }
                     }
                 }
             }
