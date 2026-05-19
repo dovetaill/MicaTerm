@@ -1,13 +1,14 @@
 //! Basic bootstrap helper coverage for the binary entrypoint.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::fs;
 use std::future::Future;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::task::{Context, Poll};
@@ -75,10 +76,14 @@ use mica_term::app::vault::crypto::{
 use mica_term::app::vault::device_identity::load_or_create_device_id;
 use mica_term::app::vault::model::{
     BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind, CompressionKind,
-    KdfConfig, PackLayout, PackRef, ProviderAuthKind, ProviderKind, RemoteRole,
+    GitRemoteSafetyStatus, GitRepositoryVisibility, GitRepositoryWritePermission, KdfConfig,
+    PackLayout, PackRef, ProviderAuthKind, ProviderKind, RemoteRole,
     SnapshotSyncPreferences, VaultAssetPayload, VaultHead, VaultManifest,
 };
 use mica_term::app::vault::provider::mock::MockVaultProvider;
+use mica_term::app::vault::provider::git_repo::{
+    GitRepositoryMetadata, GitRepositoryMetadataSource,
+};
 use mica_term::app::vault::provider::{ProviderCapabilities, ProviderRevision, VaultProvider};
 use mica_term::app::vault::recovery::{RecoverySource, load_recovery_snapshots};
 use mica_term::app::vault::snapshot::export_vault_snapshot;
@@ -1196,6 +1201,40 @@ impl VaultProviderFactory for AnyVaultProviderFactory {
             .get(&remote.remote_id)
             .cloned()
             .ok_or_else(|| anyhow!("missing mock vault provider `{}`", remote.remote_id))
+    }
+}
+
+#[derive(Debug)]
+struct QueueGitRepositoryMetadataSource {
+    results: Mutex<VecDeque<Result<GitRepositoryMetadata>>>,
+    fetch_count: AtomicUsize,
+}
+
+impl QueueGitRepositoryMetadataSource {
+    fn new(results: impl IntoIterator<Item = Result<GitRepositoryMetadata>>) -> Self {
+        Self {
+            results: Mutex::new(results.into_iter().collect()),
+            fetch_count: AtomicUsize::new(0),
+        }
+    }
+
+    fn fetch_count(&self) -> usize {
+        self.fetch_count.load(Ordering::SeqCst)
+    }
+}
+
+impl GitRepositoryMetadataSource for QueueGitRepositoryMetadataSource {
+    fn fetch_repository_metadata(
+        &self,
+        _remote: &BootstrapRemoteConfig,
+        _access_token: Option<&str>,
+    ) -> Result<GitRepositoryMetadata> {
+        self.fetch_count.fetch_add(1, Ordering::SeqCst);
+        self.results
+            .lock()
+            .expect("lock queued metadata results")
+            .pop_front()
+            .unwrap_or_else(|| Err(anyhow!("missing queued metadata result")))
     }
 }
 
@@ -3778,6 +3817,40 @@ fn sample_bootstrap_bundle_with_primary_and_mirror() -> BootstrapBundle {
     }
 }
 
+fn sample_git_repository_metadata(
+    display_name: &str,
+    visibility: GitRepositoryVisibility,
+    write_permission: GitRepositoryWritePermission,
+) -> GitRepositoryMetadata {
+    GitRepositoryMetadata {
+        canonical_id: display_name.into(),
+        display_name: display_name.into(),
+        visibility,
+        write_permission,
+        default_branch: Some("main".into()),
+    }
+}
+
+fn configure_private_git_repo_sync(app: &AppWindow) {
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_draft_changed("git-provider-kind".into(), "github".into());
+    app.invoke_sync_modal_draft_changed("git-base-url".into(), "https://github.com".into());
+    app.invoke_sync_modal_draft_changed("git-api-base-url".into(), "https://api.github.com".into());
+    app.invoke_sync_modal_draft_changed("git-namespace".into(), "demo".into());
+    app.invoke_sync_modal_draft_changed("git-repository".into(), "mica-vault".into());
+    app.invoke_sync_modal_draft_changed("git-root-path".into(), ".mica-term-sync".into());
+    app.invoke_sync_modal_draft_changed("git-branch".into(), "main".into());
+    app.invoke_sync_modal_draft_changed("git-https-username".into(), "demo-user".into());
+    app.invoke_sync_modal_draft_changed("git-pat".into(), "pat-private".into());
+    app.invoke_sync_modal_validate_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        app.get_sync_modal_validation_state().as_str() == "success"
+    });
+    app.invoke_sync_modal_draft_changed("master-password".into(), "vault-pass".into());
+    app.invoke_sync_modal_primary_action_requested();
+    assert_eq!(app.get_sync_modal_mode().as_str(), "ready");
+}
+
 fn sample_vault_asset_tree(host: &str) -> (AssetTree, String) {
     let mut tree = AssetTree::new();
     let credential_ref = format!("ssh/saved-secrets/imported-{host}");
@@ -4456,6 +4529,7 @@ fn settings_panel_can_create_a_vault_and_persist_local_bootstrap_state() {
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -4515,6 +4589,7 @@ fn missing_local_vault_state_recovers_from_primary_remote_without_uploading_empt
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -4607,6 +4682,7 @@ fn missing_local_vault_state_with_preexisting_assets_merges_and_pushes_on_attach
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(bundle),
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -4706,6 +4782,7 @@ fn missing_local_vault_state_surfaces_legacy_remote_as_unrecoverable() {
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -4791,6 +4868,7 @@ fn unlocking_existing_vault_restores_cached_snapshot_without_loading_while_locke
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(RecordingVaultProviderFactory::default()),
             bootstrap_template: None,
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -4837,6 +4915,7 @@ fn enabling_sync_persists_runtime_vault_key_material() {
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -4877,6 +4956,7 @@ fn restart_recovers_vault_session_without_prompting_for_unlock() {
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(initial_provider_factory),
             bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -4899,6 +4979,7 @@ fn restart_recovers_vault_session_without_prompting_for_unlock() {
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(RecordingVaultProviderFactory::default()),
             bootstrap_template: None,
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -4957,6 +5038,7 @@ fn manual_sync_merges_divergent_local_and_remote_additions_before_push_body() {
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(bundle),
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -5153,6 +5235,7 @@ fn manual_sync_modal_returns_before_slow_primary_write_completes() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(bundle),
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -5214,6 +5297,7 @@ fn debounced_auto_sync_returns_before_slow_primary_write_completes() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(bundle),
+            ..VaultRuntimeOptions::default()
         },
     );
     app.invoke_open_sync_modal_requested();
@@ -5262,6 +5346,7 @@ fn unlocking_existing_vault_waits_for_a_real_mutation_before_background_sync() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(bundle),
+            ..VaultRuntimeOptions::default()
         },
     );
     create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
@@ -5303,6 +5388,7 @@ fn asset_mutation_syncs_without_auto_sync_toggle() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(bundle),
+            ..VaultRuntimeOptions::default()
         },
     );
     app.invoke_open_sync_modal_requested();
@@ -5386,6 +5472,7 @@ fn periodic_sync_pulls_remote_changes_even_without_local_dirty_state() {
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(bundle),
+            ..VaultRuntimeOptions::default()
         },
     );
     app.invoke_open_sync_modal_requested();
@@ -5481,6 +5568,7 @@ fn periodic_sync_returns_before_slow_primary_refresh_completes() {
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(bundle),
+            ..VaultRuntimeOptions::default()
         },
     );
     app.invoke_open_sync_modal_requested();
@@ -5568,6 +5656,7 @@ fn periodic_sync_conflicts_use_merge_engine_and_persist_conflict_copies_body() {
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(bundle),
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -5721,6 +5810,7 @@ fn back_to_back_mutations_share_one_debounced_auto_sync_upload() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(bundle),
+            ..VaultRuntimeOptions::default()
         },
     );
     app.invoke_open_sync_modal_requested();
@@ -5771,6 +5861,7 @@ fn periodic_auto_sync_retries_failed_dirty_changes() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(bundle),
+            ..VaultRuntimeOptions::default()
         },
     );
     app.invoke_open_sync_modal_requested();
@@ -5792,6 +5883,257 @@ fn periodic_auto_sync_retries_failed_dirty_changes() {
         1,
         "periodic sync should retry a dirty local change after the provider becomes writable again"
     );
+}
+
+#[test]
+fn private_git_repo_sync_happy_path_revalidates_before_first_push() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let temp_root = sample_vault_runtime_root("git-repo-happy-path");
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(primary.clone());
+    let metadata_source = Arc::new(QueueGitRepositoryMetadataSource::new([
+        Ok(sample_git_repository_metadata(
+            "demo/mica-vault",
+            GitRepositoryVisibility::Private,
+            GitRepositoryWritePermission::Writable,
+        )),
+        Ok(sample_git_repository_metadata(
+            "demo/mica-vault",
+            GitRepositoryVisibility::Private,
+            GitRepositoryWritePermission::Writable,
+        )),
+    ]));
+
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        Arc::new(MemoryCredentialStore::default()),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root.clone()),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: None,
+            git_repo_metadata_source: metadata_source.clone(),
+        },
+    );
+
+    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    configure_private_git_repo_sync(&app);
+
+    app.invoke_sync_modal_sync_now_requested();
+    wait_for_condition(VAULT_SYNC_WAIT_TIMEOUT, || {
+        primary.recorded_writes().len() == 1 && metadata_source.fetch_count() >= 2
+    });
+
+    let local_state =
+        load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+            .unwrap()
+            .expect("local bootstrap state after safe git sync");
+    assert_eq!(primary.recorded_writes().len(), 1);
+    assert_eq!(metadata_source.fetch_count(), 2);
+    assert_eq!(local_state.remote_safety_status, GitRemoteSafetyStatus::Safe);
+    assert_eq!(
+        local_state.bundle.primary_remote().map(|remote| remote.provider),
+        Some(ProviderKind::GitRepo)
+    );
+}
+
+#[test]
+fn remote_changed_to_public_pauses_configured_git_repo_before_push() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let temp_root = sample_vault_runtime_root("git-repo-public-pause");
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(primary.clone());
+    let metadata_source = Arc::new(QueueGitRepositoryMetadataSource::new([
+        Ok(sample_git_repository_metadata(
+            "demo/mica-vault",
+            GitRepositoryVisibility::Private,
+            GitRepositoryWritePermission::Writable,
+        )),
+        Ok(sample_git_repository_metadata(
+            "demo/mica-vault",
+            GitRepositoryVisibility::Private,
+            GitRepositoryWritePermission::Writable,
+        )),
+        Ok(sample_git_repository_metadata(
+            "demo/mica-vault",
+            GitRepositoryVisibility::Public,
+            GitRepositoryWritePermission::Writable,
+        )),
+    ]));
+
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        Arc::new(MemoryCredentialStore::default()),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root.clone()),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: None,
+            git_repo_metadata_source: metadata_source.clone(),
+        },
+    );
+
+    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    configure_private_git_repo_sync(&app);
+    app.invoke_sync_modal_sync_now_requested();
+    wait_for_condition(VAULT_SYNC_WAIT_TIMEOUT, || {
+        primary.recorded_writes().len() == 1
+    });
+    app.invoke_sync_modal_close_requested();
+
+    create_root_snippet(&app, "Deploy prod", "kubectl rollout restart deploy/api");
+    app.invoke_sync_now_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        primary.recorded_writes().len() >= 2
+            || load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+                .ok()
+                .flatten()
+                .is_some_and(|state| state.remote_safety_status == GitRemoteSafetyStatus::Paused)
+    });
+    wait_for_condition(Duration::from_secs(2), || {
+        primary.recorded_writes().len() >= 2
+            || app
+                .get_sync_modal_error_text()
+                .as_str()
+                .contains("must stay private")
+    });
+
+    let local_state =
+        load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+            .unwrap()
+            .expect("local bootstrap state after public remote rejection");
+    app.invoke_open_sync_modal_requested();
+
+    assert_eq!(primary.recorded_writes().len(), 1);
+    assert_eq!(metadata_source.fetch_count(), 3);
+    assert_eq!(local_state.remote_safety_status, GitRemoteSafetyStatus::Paused);
+    assert!(
+        local_state
+            .last_sync_error
+            .as_deref()
+            .is_some_and(|message| message.contains("must stay private")),
+        "expected public repository rejection to be persisted"
+    );
+    assert_eq!(app.get_sync_modal_mode().as_str(), "paused");
+}
+
+#[test]
+fn periodic_refresh_revalidates_paused_git_repo_before_retrying_dirty_push() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let temp_root = sample_vault_runtime_root("git-repo-periodic-revalidate");
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(primary.clone());
+    let metadata_source = Arc::new(QueueGitRepositoryMetadataSource::new([
+        Ok(sample_git_repository_metadata(
+            "demo/mica-vault",
+            GitRepositoryVisibility::Private,
+            GitRepositoryWritePermission::Writable,
+        )),
+        Ok(sample_git_repository_metadata(
+            "demo/mica-vault",
+            GitRepositoryVisibility::Private,
+            GitRepositoryWritePermission::Writable,
+        )),
+        Ok(sample_git_repository_metadata(
+            "demo/mica-vault",
+            GitRepositoryVisibility::Public,
+            GitRepositoryWritePermission::Writable,
+        )),
+        Ok(sample_git_repository_metadata(
+            "demo/mica-vault",
+            GitRepositoryVisibility::Private,
+            GitRepositoryWritePermission::Writable,
+        )),
+        Ok(sample_git_repository_metadata(
+            "demo/mica-vault",
+            GitRepositoryVisibility::Private,
+            GitRepositoryWritePermission::Writable,
+        )),
+    ]));
+
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        Arc::new(MemoryCredentialStore::default()),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root.clone()),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: None,
+            git_repo_metadata_source: metadata_source.clone(),
+        },
+    );
+
+    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    configure_private_git_repo_sync(&app);
+    app.invoke_sync_modal_sync_now_requested();
+    wait_for_condition(VAULT_SYNC_WAIT_TIMEOUT, || {
+        primary.recorded_writes().len() == 1
+    });
+    app.invoke_sync_modal_close_requested();
+
+    create_root_snippet(&app, "Deploy prod", "kubectl rollout restart deploy/api");
+    app.invoke_sync_now_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        primary.recorded_writes().len() >= 2
+            || load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+                .ok()
+                .flatten()
+                .is_some_and(|state| state.remote_safety_status == GitRemoteSafetyStatus::Paused)
+    });
+    wait_for_condition(Duration::from_secs(2), || {
+        primary.recorded_writes().len() >= 2
+            || app
+                .get_sync_modal_error_text()
+                .as_str()
+                .contains("must stay private")
+    });
+
+    let paused_state =
+        load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+            .unwrap()
+            .expect("paused local bootstrap state");
+    assert_eq!(primary.recorded_writes().len(), 1);
+    assert_eq!(paused_state.remote_safety_status, GitRemoteSafetyStatus::Paused);
+
+    settle_sync_scheduler(Duration::from_secs(121));
+    wait_for_condition(VAULT_SYNC_WAIT_TIMEOUT, || metadata_source.fetch_count() >= 4);
+
+    let revalidated_state =
+        load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+            .unwrap()
+            .expect("revalidated local bootstrap state");
+    assert_eq!(primary.recorded_writes().len(), 1);
+    assert_eq!(revalidated_state.remote_safety_status, GitRemoteSafetyStatus::Safe);
+
+    settle_sync_scheduler(Duration::from_secs(121));
+    wait_for_condition(VAULT_SYNC_WAIT_TIMEOUT, || {
+        primary.recorded_writes().len() == 2 && metadata_source.fetch_count() >= 5
+    });
+
+    let synced_state =
+        load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+            .unwrap()
+            .expect("retried local bootstrap state");
+    assert_eq!(synced_state.remote_safety_status, GitRemoteSafetyStatus::Safe);
+    assert_eq!(synced_state.current_revision.as_deref(), Some("rev-0002"));
 }
 
 #[test]
@@ -5822,6 +6164,7 @@ fn manual_vault_sync_reports_mirror_degradation_after_primary_commit() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+            ..VaultRuntimeOptions::default()
         },
     );
     create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
@@ -5873,6 +6216,7 @@ fn cleanup_failure_records_error_but_does_not_corrupt_successful_push() {
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(bundle),
+            ..VaultRuntimeOptions::default()
         },
     );
     create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
@@ -5932,6 +6276,7 @@ fn manual_vault_sync_surfaces_provider_auth_errors_in_panel_state() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+            ..VaultRuntimeOptions::default()
         },
     );
     create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
@@ -5977,6 +6322,7 @@ fn locking_vault_clears_decrypted_assets_and_secrets_from_memory() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+            ..VaultRuntimeOptions::default()
         },
     );
     let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
@@ -6028,6 +6374,7 @@ fn locking_and_unlocking_vault_round_trips_snippet_assets() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+            ..VaultRuntimeOptions::default()
         },
     );
 

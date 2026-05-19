@@ -869,6 +869,91 @@ pub(super) fn resolve_remote_for_sync(
     Ok(resolved)
 }
 
+fn git_repo_validation_access_token(remote: &BootstrapRemoteConfig) -> Result<Option<String>> {
+    if remote.provider != ProviderKind::GitRepo {
+        return Ok(None);
+    }
+
+    match remote.auth_kind {
+        ProviderAuthKind::Pat | ProviderAuthKind::HttpsCredentials => {
+            let raw = remote.credential_ref.as_deref().ok_or_else(|| {
+                anyhow!(
+                    "missing saved provider credential for remote `{}`",
+                    remote.remote_id
+                )
+            })?;
+            let credentials = parse_git_repo_credential_material(raw, remote.auth_kind);
+            let token = credentials
+                .personal_access_token
+                .if_empty_then(credentials.https_secret);
+            if token.trim().is_empty() {
+                return Err(anyhow!(
+                    "missing saved Personal Access Token for remote `{}`",
+                    remote.remote_id
+                ));
+            }
+            Ok(Some(token))
+        }
+        ProviderAuthKind::SshKey => Err(anyhow!(
+            "Git repository sync requires a Personal Access Token so repository visibility and write access can be revalidated before syncing"
+        )),
+        _ => Ok(None),
+    }
+}
+
+pub(super) fn revalidate_primary_remote_for_sync(
+    state: &mut ShellViewModel,
+    vault: &mut VaultSessionState,
+    credential_store: &dyn CredentialStore,
+    metadata_source: &dyn GitRepositoryMetadataSource,
+) -> Result<()> {
+    let Some(local_bundle) = vault
+        .local_state
+        .as_ref()
+        .map(|local_state| local_state.bundle.clone())
+    else {
+        return Ok(());
+    };
+    let Some(primary_remote) = local_bundle.primary_remote().cloned() else {
+        return Ok(());
+    };
+    if primary_remote.provider != ProviderKind::GitRepo {
+        return Ok(());
+    }
+
+    let validation_result = (|| {
+        let resolved = resolve_remote_for_sync(&primary_remote, credential_store)?;
+        let access_token = git_repo_validation_access_token(&resolved)?;
+        validate_remote_for_sync(&resolved, metadata_source, access_token.as_deref())
+    })();
+
+    match validation_result {
+        Ok(_) => {
+            let bootstrap_state_path = vault.bootstrap_state_path();
+            if let Some(local_state) = vault.local_state.as_mut() {
+                local_state.remote_safety_status = GitRemoteSafetyStatus::Safe;
+                local_state.last_sync_error = None;
+                save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
+            }
+            update_vault_panel_for_local_state(state, vault);
+            update_sync_modal_for_local_state(state, vault);
+            Ok(())
+        }
+        Err(err) => {
+            let bootstrap_state_path = vault.bootstrap_state_path();
+            if let Some(local_state) = vault.local_state.as_mut() {
+                local_state.remote_safety_status = GitRemoteSafetyStatus::Paused;
+                local_state.last_sync_error = Some(err.to_string());
+                save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
+            }
+            update_vault_panel_for_local_state(state, vault);
+            update_sync_modal_for_local_state(state, vault);
+            state.sync_modal_state_mut().error_text = err.to_string();
+            Err(err)
+        }
+    }
+}
+
 pub(super) fn build_mirror_providers(
     bundle: &BootstrapBundle,
     vault: &VaultSessionState,

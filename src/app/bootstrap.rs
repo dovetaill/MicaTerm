@@ -4951,15 +4951,22 @@ fn load_git_repo_credential_material(
         return PersistedGitRepoCredentialMaterial::default();
     };
 
-    serde_json::from_str::<PersistedGitRepoCredentialMaterial>(&raw).unwrap_or_else(|_| {
+    parse_git_repo_credential_material(&raw, auth_kind)
+}
+
+fn parse_git_repo_credential_material(
+    raw: &str,
+    auth_kind: ProviderAuthKind,
+) -> PersistedGitRepoCredentialMaterial {
+    serde_json::from_str::<PersistedGitRepoCredentialMaterial>(raw).unwrap_or_else(|_| {
         match auth_kind {
             ProviderAuthKind::SshKey => PersistedGitRepoCredentialMaterial {
-                ssh_private_key: raw,
+                ssh_private_key: raw.into(),
                 ..PersistedGitRepoCredentialMaterial::default()
             },
             _ => PersistedGitRepoCredentialMaterial {
-                https_secret: raw.clone(),
-                personal_access_token: raw,
+                https_secret: raw.into(),
+                personal_access_token: raw.into(),
                 ..PersistedGitRepoCredentialMaterial::default()
             },
         }
@@ -6491,6 +6498,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let credential_store_ref = Arc::clone(&credential_store);
         let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
         let sync_service_ref = Rc::clone(&vault_sync_service);
+        let git_repo_metadata_source_ref = Arc::clone(&git_repo_metadata_source);
         let auto_sync_timer_ref = Rc::clone(&vault_auto_sync_timer);
         let periodic_timer_keepalive = Rc::clone(&vault_periodic_sync_timer);
         let async_runtime_handle_ref = async_runtime_handle.clone();
@@ -6505,6 +6513,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             let mut state = state.borrow_mut();
             let mut vault = vault_session_ref.borrow_mut();
             let (width, height) = current_window_size(&window);
+            sync_service_ref.set_remote_safety_status(
+                vault.local_state
+                    .as_ref()
+                    .map(|local_state| local_state.remote_safety_status)
+                    .unwrap_or_default(),
+            );
             let Some(plan) = sync_service_ref.begin_trigger(
                 trigger,
                 vault_sync::vault_background_sync_ready(&vault),
@@ -6538,11 +6552,34 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 let worker_vault = (*vault).clone();
                 let credential_store = Arc::clone(&credential_store_ref);
                 let completion_tx = vault_sync_result_tx_ref.clone();
+                let metadata_source = Arc::clone(&git_repo_metadata_source_ref);
 
                 runtime_handle.spawn_blocking(move || {
                     let mut worker_state = worker_state;
                     let mut worker_vault = worker_vault;
-                    let result = if should_attempt_push {
+                    let validation_result = if plan.revalidate_remote {
+                        vault_sync::revalidate_primary_remote_for_sync(
+                            &mut worker_state,
+                            &mut worker_vault,
+                            credential_store.as_ref(),
+                            metadata_source.as_ref(),
+                        )
+                    } else {
+                        Ok(())
+                    };
+                    let result = if let Err(err) = validation_result {
+                        tracing::error!(
+                            target: "app.vault",
+                            error = %err,
+                            vault_sync_trigger = ?trigger,
+                            "vault sync remote revalidation failed in background worker"
+                        );
+                        Err(vault_sync::vault_sync_background_failure(
+                            worker_state,
+                            worker_vault,
+                            false,
+                        ))
+                    } else if should_attempt_push {
                         match vault_sync::sync_local_vault(
                             &mut worker_state,
                             &mut worker_vault,
@@ -6622,7 +6659,21 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 return;
             }
 
-            let result = if should_attempt_push {
+            let validation_result = if plan.revalidate_remote {
+                vault_sync::revalidate_primary_remote_for_sync(
+                    &mut state,
+                    &mut vault,
+                    credential_store_ref.as_ref(),
+                    git_repo_metadata_source_ref.as_ref(),
+                )
+                .map(|_| ())
+            } else {
+                Ok(())
+            };
+
+            let result = if let Err(err) = validation_result {
+                Err(err)
+            } else if should_attempt_push {
                 vault_sync::sync_local_vault(&mut state, &mut vault, credential_store_ref.as_ref())
                     .map(|_| true)
             } else if should_attempt_refresh {
