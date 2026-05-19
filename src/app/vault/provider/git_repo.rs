@@ -29,6 +29,13 @@ const DEFAULT_SYNC_ROOT_PATH: &str = ".mica-term-sync";
 const REVISIONS_DIR_NAME: &str = "revisions";
 const COMMITTER_NAME: &str = "Mica Term Vault";
 const COMMITTER_EMAIL: &str = "vault@mica-term.local";
+const GITHUB_BASE_URL: &str = "https://github.com";
+const GITHUB_API_BASE_URL: &str = "https://api.github.com";
+const GITLAB_BASE_URL: &str = "https://gitlab.com";
+const GITLAB_API_PATH: &str = "api/v4";
+const GITEE_BASE_URL: &str = "https://gitee.com";
+const GITEE_API_PATH: &str = "api/v5";
+const REQUEST_USER_AGENT: &str = "mica-term-vault-sync";
 
 pub use crate::app::vault::model::{
     GitRemoteSafetyStatus, GitRepositoryVisibility, GitRepositoryWritePermission,
@@ -50,6 +57,9 @@ pub trait GitRepositoryMetadataSource: Send + Sync {
         access_token: Option<&str>,
     ) -> Result<GitRepositoryMetadata>;
 }
+
+#[derive(Debug, Default)]
+pub struct ReqwestGitRepositoryMetadataSource;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitRepoProviderConfig {
@@ -150,6 +160,450 @@ impl GitRepoProviderConfig {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct GitHubRepositoryDocument {
+    full_name: Option<String>,
+    default_branch: Option<String>,
+    private: Option<bool>,
+    visibility: Option<String>,
+    permissions: Option<GitHubRepositoryPermissions>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubRepositoryPermissions {
+    #[serde(default)]
+    push: bool,
+    #[serde(default)]
+    admin: bool,
+    #[serde(default)]
+    maintain: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitLabProjectDocument {
+    path_with_namespace: Option<String>,
+    default_branch: Option<String>,
+    visibility: Option<String>,
+    permissions: Option<GitLabProjectPermissions>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitLabProjectPermissions {
+    project_access: Option<GitLabAccessLevel>,
+    group_access: Option<GitLabAccessLevel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitLabAccessLevel {
+    access_level: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GiteeRepositoryDocument {
+    full_name: Option<String>,
+    default_branch: Option<String>,
+    private: Option<bool>,
+    public: Option<bool>,
+    internal: Option<bool>,
+    can_push: Option<bool>,
+}
+
+impl GitRepositoryMetadataSource for ReqwestGitRepositoryMetadataSource {
+    fn fetch_repository_metadata(
+        &self,
+        remote: &BootstrapRemoteConfig,
+        access_token: Option<&str>,
+    ) -> Result<GitRepositoryMetadata> {
+        let target = resolve_repository_target(remote)?;
+        match target.host_kind {
+            GitHostKind::GitHub => self.fetch_github_metadata(&target, access_token),
+            GitHostKind::GitLab => self.fetch_gitlab_metadata(&target, access_token),
+            GitHostKind::Gitee => self.fetch_gitee_metadata(&target, access_token),
+            GitHostKind::Generic => Err(anyhow!(
+                "generic Git hosts cannot be validated for private repository sync"
+            )),
+        }
+    }
+}
+
+impl ReqwestGitRepositoryMetadataSource {
+    fn fetch_github_metadata(
+        &self,
+        target: &ResolvedGitRepositoryTarget,
+        access_token: Option<&str>,
+    ) -> Result<GitRepositoryMetadata> {
+        let mut url = reqwest::Url::parse(&target.api_base_url)
+            .context("invalid GitHub API base URL")?;
+        {
+            let mut segments = url
+                .path_segments_mut()
+                .map_err(|_| anyhow!("invalid GitHub API base URL path"))?;
+            segments.push("repos");
+            segments.push(target.namespace.as_str());
+            segments.push(target.repository.as_str());
+        }
+
+        run_git_repository_request(async move {
+            let client = reqwest::Client::new();
+            let mut request = client
+                .get(url)
+                .header(reqwest::header::USER_AGENT, REQUEST_USER_AGENT)
+                .header(
+                    reqwest::header::ACCEPT,
+                    "application/vnd.github+json",
+                );
+            if let Some(token) = access_token.filter(|token| !token.trim().is_empty()) {
+                request = request.bearer_auth(token.trim());
+            }
+
+            let response = request
+                .send()
+                .await
+                .context("failed to call GitHub repository metadata API")?;
+            let response = ensure_json_success(response, "GitHub repository metadata").await?;
+            let document = response
+                .json::<GitHubRepositoryDocument>()
+                .await
+                .context("failed to decode GitHub repository metadata response")?;
+            Ok(GitRepositoryMetadata {
+                canonical_id: document
+                    .full_name
+                    .clone()
+                    .unwrap_or_else(|| target.display_name.clone()),
+                display_name: document
+                    .full_name
+                    .clone()
+                    .unwrap_or_else(|| target.display_name.clone()),
+                visibility: github_visibility(&document),
+                write_permission: github_write_permission(&document),
+                default_branch: document.default_branch.clone(),
+            })
+        })
+    }
+
+    fn fetch_gitlab_metadata(
+        &self,
+        target: &ResolvedGitRepositoryTarget,
+        access_token: Option<&str>,
+    ) -> Result<GitRepositoryMetadata> {
+        let mut url = reqwest::Url::parse(&target.api_base_url)
+            .context("invalid GitLab API base URL")?;
+        {
+            let mut segments = url
+                .path_segments_mut()
+                .map_err(|_| anyhow!("invalid GitLab API base URL path"))?;
+            segments.push("projects");
+            segments.push(format!("{}/{}", target.namespace, target.repository).as_str());
+        }
+
+        run_git_repository_request(async move {
+            let client = reqwest::Client::new();
+            let mut request = client.get(url).header(
+                reqwest::header::USER_AGENT,
+                REQUEST_USER_AGENT,
+            );
+            if let Some(token) = access_token.filter(|token| !token.trim().is_empty()) {
+                request = request.header("PRIVATE-TOKEN", token.trim());
+            }
+
+            let response = request
+                .send()
+                .await
+                .context("failed to call GitLab repository metadata API")?;
+            let response = ensure_json_success(response, "GitLab repository metadata").await?;
+            let document = response
+                .json::<GitLabProjectDocument>()
+                .await
+                .context("failed to decode GitLab repository metadata response")?;
+            Ok(GitRepositoryMetadata {
+                canonical_id: document
+                    .path_with_namespace
+                    .clone()
+                    .unwrap_or_else(|| target.display_name.clone()),
+                display_name: document
+                    .path_with_namespace
+                    .clone()
+                    .unwrap_or_else(|| target.display_name.clone()),
+                visibility: gitlab_visibility(&document),
+                write_permission: gitlab_write_permission(&document),
+                default_branch: document.default_branch.clone(),
+            })
+        })
+    }
+
+    fn fetch_gitee_metadata(
+        &self,
+        target: &ResolvedGitRepositoryTarget,
+        access_token: Option<&str>,
+    ) -> Result<GitRepositoryMetadata> {
+        let mut url = reqwest::Url::parse(&target.api_base_url)
+            .context("invalid Gitee API base URL")?;
+        {
+            let mut segments = url
+                .path_segments_mut()
+                .map_err(|_| anyhow!("invalid Gitee API base URL path"))?;
+            segments.push("repos");
+            segments.push(target.namespace.as_str());
+            segments.push(target.repository.as_str());
+        }
+
+        run_git_repository_request(async move {
+            let client = reqwest::Client::new();
+            let mut request = client
+                .get(url)
+                .header(reqwest::header::USER_AGENT, REQUEST_USER_AGENT);
+            if let Some(token) = access_token.filter(|token| !token.trim().is_empty()) {
+                request = request.query(&[("access_token", token.trim())]);
+            }
+
+            let response = request
+                .send()
+                .await
+                .context("failed to call Gitee repository metadata API")?;
+            let response = ensure_json_success(response, "Gitee repository metadata").await?;
+            let document = response
+                .json::<GiteeRepositoryDocument>()
+                .await
+                .context("failed to decode Gitee repository metadata response")?;
+            Ok(GitRepositoryMetadata {
+                canonical_id: document
+                    .full_name
+                    .clone()
+                    .unwrap_or_else(|| target.display_name.clone()),
+                display_name: document
+                    .full_name
+                    .clone()
+                    .unwrap_or_else(|| target.display_name.clone()),
+                visibility: gitee_visibility(&document),
+                write_permission: gitee_write_permission(&document),
+                default_branch: document.default_branch.clone(),
+            })
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedGitRepositoryTarget {
+    host_kind: GitHostKind,
+    base_url: String,
+    api_base_url: String,
+    namespace: String,
+    repository: String,
+    display_name: String,
+}
+
+fn resolve_repository_target(remote: &BootstrapRemoteConfig) -> Result<ResolvedGitRepositoryTarget> {
+    let BootstrapRemoteLocator::GitRepo {
+        host_kind,
+        remote_url,
+        base_url,
+        api_base_url,
+        namespace,
+        repository,
+        display_name,
+        ..
+    } = &remote.locator
+    else {
+        return Err(anyhow!(
+            "bootstrap remote `{}` is missing a Git repo locator",
+            remote.remote_id
+        ));
+    };
+
+    let (parsed_namespace, parsed_repository) =
+        parse_namespace_and_repository(*host_kind, remote_url)?;
+    let namespace = namespace
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .or(parsed_namespace)
+        .ok_or_else(|| anyhow!("missing Git repository namespace"))?;
+    let repository = repository
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .or(parsed_repository)
+        .ok_or_else(|| anyhow!("missing Git repository name"))?;
+    let base_url = base_url
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| default_base_url(*host_kind).to_string());
+    let api_base_url = api_base_url
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| default_api_base_url(*host_kind, &base_url));
+    let display_name = display_name
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| format!("{namespace}/{repository}"));
+
+    Ok(ResolvedGitRepositoryTarget {
+        host_kind: *host_kind,
+        base_url,
+        api_base_url,
+        namespace,
+        repository,
+        display_name,
+    })
+}
+
+fn parse_namespace_and_repository(
+    host_kind: GitHostKind,
+    remote_url: &str,
+) -> Result<(Option<String>, Option<String>)> {
+    let remote_url = remote_url.trim();
+    if remote_url.is_empty() {
+        return Ok((None, None));
+    }
+
+    let path = if let Some(url) = remote_url
+        .strip_prefix("https://")
+        .or_else(|| remote_url.strip_prefix("http://"))
+    {
+        url.split_once('/').map(|(_, path)| path.to_string())
+    } else if let Some((_host, path)) = remote_url
+        .strip_prefix("git@")
+        .and_then(|value| value.split_once(':'))
+    {
+        Some(path.to_string())
+    } else {
+        None
+    };
+
+    let Some(path) = path else {
+        return Ok((None, None));
+    };
+    let trimmed = path.trim_matches('/').trim_end_matches(".git");
+    let mut segments = trimmed.split('/').collect::<Vec<_>>();
+    if segments.len() < 2 {
+        return Ok((None, None));
+    }
+    let repository = segments.pop().map(str::to_string);
+    let namespace = Some(segments.join("/"));
+
+    if matches!(host_kind, GitHostKind::Generic) {
+        return Ok((namespace, repository));
+    }
+
+    Ok((namespace, repository))
+}
+
+fn default_base_url(host_kind: GitHostKind) -> &'static str {
+    match host_kind {
+        GitHostKind::GitHub => GITHUB_BASE_URL,
+        GitHostKind::GitLab => GITLAB_BASE_URL,
+        GitHostKind::Gitee | GitHostKind::Generic => GITEE_BASE_URL,
+    }
+}
+
+fn default_api_base_url(host_kind: GitHostKind, base_url: &str) -> String {
+    match host_kind {
+        GitHostKind::GitHub => GITHUB_API_BASE_URL.into(),
+        GitHostKind::GitLab => {
+            format!("{}/{}", base_url.trim_end_matches('/'), GITLAB_API_PATH)
+        }
+        GitHostKind::Gitee | GitHostKind::Generic => {
+            format!("{}/{}", base_url.trim_end_matches('/'), GITEE_API_PATH)
+        }
+    }
+}
+
+fn github_visibility(document: &GitHubRepositoryDocument) -> GitRepositoryVisibility {
+    match document.visibility.as_deref() {
+        Some("private") => GitRepositoryVisibility::Private,
+        Some("public") => GitRepositoryVisibility::Public,
+        Some("internal") => GitRepositoryVisibility::Internal,
+        Some(_) => GitRepositoryVisibility::Unknown,
+        None => match document.private {
+            Some(true) => GitRepositoryVisibility::Private,
+            Some(false) => GitRepositoryVisibility::Public,
+            None => GitRepositoryVisibility::Unknown,
+        },
+    }
+}
+
+fn github_write_permission(document: &GitHubRepositoryDocument) -> GitRepositoryWritePermission {
+    match &document.permissions {
+        Some(permissions) if permissions.push || permissions.admin || permissions.maintain => {
+            GitRepositoryWritePermission::Writable
+        }
+        Some(_) => GitRepositoryWritePermission::ReadOnly,
+        None => GitRepositoryWritePermission::Unknown,
+    }
+}
+
+fn gitlab_visibility(document: &GitLabProjectDocument) -> GitRepositoryVisibility {
+    match document.visibility.as_deref() {
+        Some("private") => GitRepositoryVisibility::Private,
+        Some("public") => GitRepositoryVisibility::Public,
+        Some("internal") => GitRepositoryVisibility::Internal,
+        _ => GitRepositoryVisibility::Unknown,
+    }
+}
+
+fn gitlab_write_permission(document: &GitLabProjectDocument) -> GitRepositoryWritePermission {
+    let Some(permissions) = &document.permissions else {
+        return GitRepositoryWritePermission::Unknown;
+    };
+    let project_level = permissions
+        .project_access
+        .as_ref()
+        .and_then(|access| access.access_level);
+    let group_level = permissions
+        .group_access
+        .as_ref()
+        .and_then(|access| access.access_level);
+    let max_level = project_level.into_iter().chain(group_level).max();
+    match max_level {
+        Some(level) if level >= 30 => GitRepositoryWritePermission::Writable,
+        Some(_) => GitRepositoryWritePermission::ReadOnly,
+        None => GitRepositoryWritePermission::Unknown,
+    }
+}
+
+fn gitee_visibility(document: &GiteeRepositoryDocument) -> GitRepositoryVisibility {
+    if document.internal.unwrap_or(false) {
+        return GitRepositoryVisibility::Internal;
+    }
+    match (document.private, document.public) {
+        (Some(true), _) => GitRepositoryVisibility::Private,
+        (Some(false), _) | (_, Some(true)) => GitRepositoryVisibility::Public,
+        (_, Some(false)) => GitRepositoryVisibility::Private,
+        _ => GitRepositoryVisibility::Unknown,
+    }
+}
+
+fn gitee_write_permission(document: &GiteeRepositoryDocument) -> GitRepositoryWritePermission {
+    match document.can_push {
+        Some(true) => GitRepositoryWritePermission::Writable,
+        Some(false) => GitRepositoryWritePermission::ReadOnly,
+        None => GitRepositoryWritePermission::Unknown,
+    }
+}
+
+fn run_git_repository_request<T>(
+    future: impl std::future::Future<Output = Result<T>>,
+) -> Result<T> {
+    let runtime = tokio::runtime::Runtime::new()
+        .context("failed to create tokio runtime for git repository metadata request")?;
+    runtime.block_on(future)
+}
+
+async fn ensure_json_success(
+    response: reqwest::Response,
+    operation: &str,
+) -> Result<reqwest::Response> {
+    if response.status().is_success() {
+        return Ok(response);
+    }
+
+    let status = response.status();
+    let body = response.text().await.unwrap_or_else(|_| String::new());
+    if !body.trim().is_empty() {
+        return Err(anyhow!("{operation} failed with {status}: {body}"));
+    }
+
+    Err(anyhow!("{operation} failed with {status}"))
+}
+
 pub fn fetch_repository_metadata(
     remote: &BootstrapRemoteConfig,
     source: &dyn GitRepositoryMetadataSource,
@@ -228,9 +682,12 @@ pub fn validate_remote_for_push(
 }
 
 pub fn validate_first_release_git_host(host_kind: GitHostKind) -> Result<()> {
-    if host_kind != GitHostKind::Gitee {
+    if !matches!(
+        host_kind,
+        GitHostKind::Gitee | GitHostKind::GitHub | GitHostKind::GitLab
+    ) {
         return Err(anyhow!(
-            "first release only exposes Gitee Git primary remotes"
+            "only Gitee, GitHub, and GitLab Git primary remotes are supported"
         ));
     }
 

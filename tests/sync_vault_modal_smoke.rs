@@ -5,7 +5,7 @@ use std::fs;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Mutex, atomic::{AtomicUsize, Ordering}};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
@@ -22,9 +22,13 @@ use mica_term::app::vault::bootstrap::load_local_vault_bootstrap_state;
 use mica_term::app::vault::conflict_inbox::{ConflictInboxEntry, persist_conflict_entries};
 use mica_term::app::vault::model::{
     BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind, CompressionKind,
-    GitHostKind, KdfConfig, PackLayout, ProviderAuthKind, ProviderKind, RemoteRole, VaultHead,
+    GitHostKind, GitRemoteSafetyStatus, GitRepositoryVisibility, GitRepositoryWritePermission,
+    KdfConfig, PackLayout, ProviderAuthKind, ProviderKind, RemoteRole, VaultHead,
 };
 use mica_term::app::vault::provider::mock::MockVaultProvider;
+use mica_term::app::vault::provider::git_repo::{
+    GitRepositoryMetadata, GitRepositoryMetadataSource,
+};
 use mica_term::app::vault::provider::{ProviderCapabilities, VaultProvider};
 use mica_term::app::window_effects::default_platform_window_effects;
 use tokio::sync::mpsc;
@@ -138,6 +142,40 @@ impl VaultProviderFactory for AnyVaultProviderFactory {
             .cloned()
             .ok_or_else(|| anyhow!("missing mock vault provider `{}`", remote.remote_id))?;
         Ok(provider)
+    }
+}
+
+#[derive(Debug)]
+struct FakeGitRepositoryMetadataSource {
+    next_result: Mutex<Option<Result<GitRepositoryMetadata>>>,
+    fetch_count: AtomicUsize,
+}
+
+impl FakeGitRepositoryMetadataSource {
+    fn returning(result: Result<GitRepositoryMetadata>) -> Self {
+        Self {
+            next_result: Mutex::new(Some(result)),
+            fetch_count: AtomicUsize::new(0),
+        }
+    }
+
+    fn fetch_count(&self) -> usize {
+        self.fetch_count.load(Ordering::SeqCst)
+    }
+}
+
+impl GitRepositoryMetadataSource for FakeGitRepositoryMetadataSource {
+    fn fetch_repository_metadata(
+        &self,
+        _remote: &BootstrapRemoteConfig,
+        _access_token: Option<&str>,
+    ) -> Result<GitRepositoryMetadata> {
+        self.fetch_count.fetch_add(1, Ordering::SeqCst);
+        self.next_result
+            .lock()
+            .expect("lock metadata source")
+            .take()
+            .unwrap_or_else(|| Err(anyhow!("missing fake metadata response")))
     }
 }
 
@@ -274,6 +312,20 @@ fn sample_remote_head(revision: &str) -> VaultHead {
     }
 }
 
+fn sample_git_repository_metadata(
+    display_name: &str,
+    visibility: GitRepositoryVisibility,
+    write_permission: GitRepositoryWritePermission,
+) -> GitRepositoryMetadata {
+    GitRepositoryMetadata {
+        canonical_id: display_name.into(),
+        display_name: display_name.into(),
+        visibility,
+        write_permission,
+        default_branch: Some("main".into()),
+    }
+}
+
 fn bind_with_vault_runtime(
     app: &AppWindow,
     credential_store: Arc<dyn CredentialStore>,
@@ -312,6 +364,269 @@ fn sync_modal_defaults_to_not_configured_state() {
 }
 
 #[test]
+fn public_repo_validation_error_is_visible() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("public-repo-validation");
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    let metadata_source = Arc::new(FakeGitRepositoryMetadataSource::returning(Ok(
+        sample_git_repository_metadata(
+            "demo/mica-vault",
+            GitRepositoryVisibility::Public,
+            GitRepositoryWritePermission::Writable,
+        ),
+    )));
+
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        Arc::clone(&credential_store) as Arc<dyn CredentialStore>,
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root.clone()),
+            provider_factory: Arc::new(RecordingVaultProviderFactory::default()),
+            bootstrap_template: None,
+            git_repo_metadata_source: metadata_source.clone(),
+        },
+    );
+
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_draft_changed("git-provider-kind".into(), "github".into());
+    app.invoke_sync_modal_draft_changed("git-base-url".into(), "https://github.com".into());
+    app.invoke_sync_modal_draft_changed("git-namespace".into(), "demo".into());
+    app.invoke_sync_modal_draft_changed("git-repository".into(), "mica-vault".into());
+    app.invoke_sync_modal_draft_changed("git-branch".into(), "main".into());
+    app.invoke_sync_modal_draft_changed("git-https-username".into(), "demo-user".into());
+    app.invoke_sync_modal_draft_changed("git-pat".into(), "pat-public".into());
+
+    app.invoke_sync_modal_validate_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        app.get_sync_modal_validation_state().as_str() == "blocking-error"
+    });
+
+    assert_eq!(metadata_source.fetch_count(), 1);
+    assert!(
+        app.get_sync_modal_error_text()
+            .to_string()
+            .contains("must stay private")
+    );
+    assert_eq!(app.get_sync_modal_mode().as_str(), "not-configured");
+    assert_eq!(
+        credential_store
+            .get_secret("vault/bootstrap/remote-primary")
+            .expect("read credential")
+            .as_deref(),
+        None
+    );
+    assert!(!temp_root.join("vault-bootstrap-state.json").exists());
+}
+
+#[test]
+fn gitlab_internal_repo_validation_error_is_visible() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("gitlab-internal-validation");
+    let metadata_source = Arc::new(FakeGitRepositoryMetadataSource::returning(Ok(
+        sample_git_repository_metadata(
+            "group/mica-vault",
+            GitRepositoryVisibility::Internal,
+            GitRepositoryWritePermission::Writable,
+        ),
+    )));
+
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(MemoryCredentialStore::default()),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(RecordingVaultProviderFactory::default()),
+            bootstrap_template: None,
+            git_repo_metadata_source: metadata_source,
+        },
+    );
+
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_draft_changed("git-provider-kind".into(), "gitlab".into());
+    app.invoke_sync_modal_draft_changed("git-base-url".into(), "https://gitlab.example.com".into());
+    app.invoke_sync_modal_draft_changed("git-namespace".into(), "group".into());
+    app.invoke_sync_modal_draft_changed("git-repository".into(), "mica-vault".into());
+    app.invoke_sync_modal_draft_changed("git-pat".into(), "pat-internal".into());
+
+    app.invoke_sync_modal_validate_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        app.get_sync_modal_validation_state().as_str() == "blocking-error"
+    });
+
+    assert!(
+        app.get_sync_modal_error_text()
+            .to_string()
+            .contains("internal")
+    );
+}
+
+#[test]
+fn private_repo_validation_success_enables_setup() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("private-repo-validation");
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    let metadata_source = Arc::new(FakeGitRepositoryMetadataSource::returning(Ok(
+        sample_git_repository_metadata(
+            "demo/mica-vault",
+            GitRepositoryVisibility::Private,
+            GitRepositoryWritePermission::Writable,
+        ),
+    )));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    )));
+
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        Arc::clone(&credential_store) as Arc<dyn CredentialStore>,
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root.clone()),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: None,
+            git_repo_metadata_source: metadata_source,
+        },
+    );
+
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_draft_changed("git-provider-kind".into(), "github".into());
+    app.invoke_sync_modal_draft_changed("git-base-url".into(), "https://github.com".into());
+    app.invoke_sync_modal_draft_changed("git-namespace".into(), "demo".into());
+    app.invoke_sync_modal_draft_changed("git-repository".into(), "mica-vault".into());
+    app.invoke_sync_modal_draft_changed("git-root-path".into(), ".mica-term-sync".into());
+    app.invoke_sync_modal_draft_changed("git-branch".into(), "main".into());
+    app.invoke_sync_modal_draft_changed("git-https-username".into(), "demo-user".into());
+    app.invoke_sync_modal_draft_changed("git-pat".into(), "pat-private".into());
+
+    app.invoke_sync_modal_validate_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        app.get_sync_modal_validation_state().as_str() == "success"
+    });
+
+    app.invoke_sync_modal_draft_changed("master-password".into(), "vault-pass".into());
+    app.invoke_sync_modal_primary_action_requested();
+
+    let saved =
+        load_local_vault_bootstrap_state(temp_root.join("vault-bootstrap-state.json").as_path())
+            .expect("load local bootstrap state")
+            .expect("expected persisted local bootstrap state");
+    let primary = saved.bundle.primary_remote().expect("primary remote");
+    assert_eq!(primary.provider, ProviderKind::GitRepo);
+    assert_eq!(primary.auth_kind, ProviderAuthKind::Pat);
+    match &primary.locator {
+        BootstrapRemoteLocator::GitRepo {
+            host_kind,
+            base_url,
+            namespace,
+            repository,
+            branch,
+            root_path,
+            ..
+        } => {
+            assert_eq!(*host_kind, GitHostKind::GitHub);
+            assert_eq!(base_url.as_deref(), Some("https://github.com"));
+            assert_eq!(namespace.as_deref(), Some("demo"));
+            assert_eq!(repository.as_deref(), Some("mica-vault"));
+            assert_eq!(branch, "main");
+            assert_eq!(root_path.as_deref(), Some(".mica-term-sync"));
+        }
+        other => panic!("unexpected primary locator: {other:?}"),
+    }
+    assert_eq!(app.get_sync_modal_validation_state().as_str(), "success");
+    assert_eq!(app.get_sync_modal_provider_label().as_str(), "GitHub");
+}
+
+#[test]
+fn sync_modal_security_pause_state_is_visible() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("paused-sync-modal");
+    let bundle = BootstrapBundle {
+        vault_id: "vault-main".into(),
+        remotes: vec![BootstrapRemoteConfig {
+            remote_id: "remote-primary".into(),
+            role: RemoteRole::Primary,
+            provider: ProviderKind::GitRepo,
+            locator: BootstrapRemoteLocator::GitRepo {
+                host_kind: GitHostKind::GitHub,
+                remote_url: "https://github.com/demo/mica-vault.git".into(),
+                branch: "main".into(),
+                base_url: Some("https://github.com".into()),
+                api_base_url: Some("https://api.github.com".into()),
+                namespace: Some("demo".into()),
+                repository: Some("mica-vault".into()),
+                root_path: Some(".mica-term-sync".into()),
+                display_name: Some("demo/mica-vault".into()),
+            },
+            credential_ref: Some("vault/bootstrap/remote-primary".into()),
+            auth_kind: ProviderAuthKind::Pat,
+            last_health: None,
+        }],
+        ..BootstrapBundle::default()
+    };
+    mica_term::app::vault::bootstrap::save_local_vault_bootstrap_state(
+        temp_root.join("vault-bootstrap-state.json").as_path(),
+        &mica_term::app::vault::bootstrap::LocalVaultBootstrapState {
+            bundle,
+            wrapped_vault_key: "wrapped-key-prev".into(),
+            kdf: sample_remote_head("rev-0042").kdf,
+            device_id: "device-a".into(),
+            logical_revision: None,
+            transport_revision_hint: None,
+            base_revision: Some("rev-0042".into()),
+            current_revision: Some("rev-0042".into()),
+            local_snapshot_hash: Some("sha256:payload-prev".into()),
+            last_local_change_at: Some("2026-05-19T08:00:00Z".into()),
+            last_successful_push_at: Some("2026-05-19T08:00:00Z".into()),
+            last_successful_pull_at: Some("2026-05-19T08:00:00Z".into()),
+            last_sync_error: Some(
+                "remote repository `demo/mica-vault` must stay private before sync can resume"
+                    .into(),
+            ),
+            remote_safety_status: GitRemoteSafetyStatus::Paused,
+        },
+    )
+    .expect("persist paused local state");
+
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(MemoryCredentialStore::default()),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(RecordingVaultProviderFactory::default()),
+            bootstrap_template: None,
+            ..VaultRuntimeOptions::default()
+        },
+    );
+
+    app.invoke_open_sync_modal_requested();
+
+    assert_eq!(app.get_sync_modal_mode().as_str(), "paused");
+    assert!(
+        app.get_sync_modal_status_text()
+            .to_string()
+            .to_ascii_lowercase()
+            .contains("paused")
+    );
+    assert!(
+        app.get_sync_modal_error_text()
+            .to_string()
+            .contains("must stay private")
+    );
+}
+
+#[test]
 fn sync_modal_projects_persisted_conflict_summary_from_local_inbox() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -341,6 +656,7 @@ fn sync_modal_projects_persisted_conflict_summary_from_local_inbox() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(RecordingVaultProviderFactory::default()),
             bootstrap_template: Some(bundle),
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -386,6 +702,7 @@ fn first_enable_flow_requires_a_remote_before_local_vault_is_created() {
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(RecordingVaultProviderFactory::default()),
             bootstrap_template: None,
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -406,6 +723,13 @@ fn sync_settings_primary_action_persists_primary_target_and_creates_local_vault(
     i_slint_backend_testing::init_no_event_loop();
 
     let temp_root = sample_vault_runtime_root("settings-primary");
+    let metadata_source = Arc::new(FakeGitRepositoryMetadataSource::returning(Ok(
+        sample_git_repository_metadata(
+            "demo/mica-vault",
+            GitRepositoryVisibility::Private,
+            GitRepositoryWritePermission::Writable,
+        ),
+    )));
     let provider_factory = RecordingVaultProviderFactory::default();
     provider_factory.insert(Arc::new(MockVaultProvider::new(
         "remote-primary",
@@ -419,18 +743,23 @@ fn sync_settings_primary_action_persists_primary_target_and_creates_local_vault(
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: None,
+            git_repo_metadata_source: metadata_source,
         },
     );
 
     app.invoke_open_sync_modal_requested();
-    app.invoke_sync_modal_draft_changed(
-        "git-remote-url".into(),
-        "https://gitee.com/demo/mica-vault.git".into(),
-    );
+    app.invoke_sync_modal_draft_changed("git-provider-kind".into(), "gitee".into());
+    app.invoke_sync_modal_draft_changed("git-base-url".into(), "https://gitee.com".into());
+    app.invoke_sync_modal_draft_changed("git-namespace".into(), "demo".into());
+    app.invoke_sync_modal_draft_changed("git-repository".into(), "mica-vault".into());
     app.invoke_sync_modal_draft_changed("git-branch".into(), "mica-vault".into());
     app.invoke_sync_modal_draft_changed("git-auth-mode".into(), "https".into());
     app.invoke_sync_modal_draft_changed("git-https-username".into(), "demo-user".into());
-    app.invoke_sync_modal_draft_changed("git-https-secret".into(), "pat-primary-secret".into());
+    app.invoke_sync_modal_draft_changed("git-pat".into(), "pat-primary-secret".into());
+    app.invoke_sync_modal_validate_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        app.get_sync_modal_validation_state().as_str() == "success"
+    });
     app.invoke_sync_modal_draft_changed("master-password".into(), "vault-pass".into());
 
     app.invoke_sync_modal_primary_action_requested();
@@ -441,7 +770,7 @@ fn sync_settings_primary_action_persists_primary_target_and_creates_local_vault(
             .expect("expected persisted local bootstrap state");
     let primary = saved.bundle.primary_remote().expect("primary remote");
     assert_eq!(primary.provider, ProviderKind::GitRepo);
-    assert_eq!(primary.auth_kind, ProviderAuthKind::HttpsCredentials);
+    assert_eq!(primary.auth_kind, ProviderAuthKind::Pat);
     match &primary.locator {
         BootstrapRemoteLocator::GitRepo {
             host_kind,
@@ -545,6 +874,7 @@ fn sync_modal_never_enters_locked_mode_after_sync_is_enabled() {
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -587,6 +917,7 @@ fn sync_modal_master_password_visibility_resets_after_successful_submit() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -626,6 +957,7 @@ fn sync_modal_refuses_to_reinitialize_an_empty_local_state_over_an_existing_remo
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -669,6 +1001,7 @@ fn restart_with_saved_sync_configuration_does_not_require_unlock() {
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -693,6 +1026,7 @@ fn restart_with_saved_sync_configuration_does_not_require_unlock() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(restarted_provider_factory),
             bootstrap_template: None,
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -738,6 +1072,7 @@ fn sync_modal_primary_action_routes_to_sync_and_secondary_action_closes() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -787,6 +1122,7 @@ fn titlebar_sync_failure_updates_error_state_without_reopening_modal() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(bundle),
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -912,6 +1248,7 @@ fn opening_sync_settings_refreshes_primary_head_in_background() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(bundle),
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -973,6 +1310,7 @@ fn remote_head_refresh_failure_keeps_sync_settings_non_blocking() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(bundle),
+            ..VaultRuntimeOptions::default()
         },
     );
 

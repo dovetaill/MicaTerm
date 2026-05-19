@@ -22,7 +22,7 @@ pub enum GitTransportAuthPlan {
 
 pub fn git_auth_mode_for_provider_auth(auth_kind: ProviderAuthKind) -> Result<GitAuthMode> {
     match auth_kind {
-        ProviderAuthKind::HttpsCredentials => Ok(GitAuthMode::HttpsCredentials),
+        ProviderAuthKind::HttpsCredentials | ProviderAuthKind::Pat => Ok(GitAuthMode::HttpsCredentials),
         ProviderAuthKind::SshKey => Ok(GitAuthMode::SshKey),
         other => Err(anyhow!("unsupported Git auth kind `{other:?}`")),
     }

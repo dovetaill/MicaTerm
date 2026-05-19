@@ -168,6 +168,7 @@ impl TransferCenterFilter {
 pub enum SyncModalMode {
     NotConfigured,
     Ready,
+    Paused,
     SyncError,
 }
 
@@ -176,7 +177,27 @@ impl SyncModalMode {
         match self {
             Self::NotConfigured => "not-configured",
             Self::Ready => "ready",
+            Self::Paused => "paused",
             Self::SyncError => "sync-error",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncModalValidationState {
+    Idle,
+    Validating,
+    Success,
+    BlockingError,
+}
+
+impl SyncModalValidationState {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Validating => "validating",
+            Self::Success => "success",
+            Self::BlockingError => "blocking-error",
         }
     }
 }
@@ -196,11 +217,20 @@ pub struct SyncModalViewState {
     pub conflict_review_available: bool,
     pub primary_action_label: String,
     pub secondary_action_label: String,
+    pub validation_state: SyncModalValidationState,
+    pub validation_message: String,
+    pub git_provider_kind: String,
     pub git_remote_url: String,
+    pub git_base_url: String,
+    pub git_api_base_url: String,
+    pub git_namespace: String,
+    pub git_repository: String,
     pub git_branch: String,
+    pub git_root_path: String,
     pub git_auth_mode: String,
     pub git_https_username: String,
     pub git_https_secret: String,
+    pub git_pat: String,
     pub git_https_secret_visible: bool,
     pub git_ssh_private_key: String,
     pub git_ssh_passphrase: String,
@@ -230,11 +260,20 @@ impl Default for SyncModalViewState {
             conflict_review_available: false,
             primary_action_label: "Save and enable".into(),
             secondary_action_label: "Close".into(),
+            validation_state: SyncModalValidationState::Idle,
+            validation_message: String::new(),
+            git_provider_kind: "gitee".into(),
             git_remote_url: String::new(),
+            git_base_url: "https://gitee.com".into(),
+            git_api_base_url: "https://gitee.com/api/v5".into(),
+            git_namespace: String::new(),
+            git_repository: String::new(),
             git_branch: "main".into(),
+            git_root_path: ".mica-term-sync".into(),
             git_auth_mode: "https".into(),
             git_https_username: String::new(),
             git_https_secret: String::new(),
+            git_pat: String::new(),
             git_https_secret_visible: false,
             git_ssh_private_key: String::new(),
             git_ssh_passphrase: String::new(),

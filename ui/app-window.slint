@@ -67,11 +67,20 @@ export component AppWindow inherits Window {
     in-out property <string> sync-modal-conflict-summary: "";
     in-out property <string> sync-modal-primary-action-label: "Save and enable";
     in-out property <string> sync-modal-secondary-action-label: "Close";
+    in-out property <string> sync-modal-validation-state: "idle";
+    in-out property <string> sync-modal-validation-message: "";
+    in-out property <string> sync-modal-git-provider-kind: "gitee";
     in-out property <string> sync-modal-git-remote-url: "";
+    in-out property <string> sync-modal-git-base-url: "https://gitee.com";
+    in-out property <string> sync-modal-git-api-base-url: "https://gitee.com/api/v5";
+    in-out property <string> sync-modal-git-namespace: "";
+    in-out property <string> sync-modal-git-repository: "";
     in-out property <string> sync-modal-git-branch: "main";
+    in-out property <string> sync-modal-git-root-path: ".mica-term-sync";
     in-out property <string> sync-modal-git-auth-mode: "https";
     in-out property <string> sync-modal-git-https-username: "";
     in-out property <string> sync-modal-git-https-secret: "";
+    in-out property <string> sync-modal-git-pat: "";
     in-out property <bool> sync-modal-git-https-secret-visible: false;
     in-out property <string> sync-modal-git-ssh-private-key: "";
     in-out property <string> sync-modal-git-ssh-passphrase: "";
@@ -514,6 +523,7 @@ export component AppWindow inherits Window {
     callback sync-modal-sync-now-requested();
     callback sync-modal-primary-action-requested();
     callback sync-modal-secondary-action-requested();
+    callback sync-modal-validate-requested();
     callback sync-modal-draft-changed(string, string);
     callback sync-modal-toggle-changed(string, bool);
     callback settings-modal-close-requested();
@@ -1942,11 +1952,20 @@ export component AppWindow inherits Window {
             conflict-summary: root.sync-modal-conflict-summary;
             primary-action-label: root.sync-modal-primary-action-label;
             secondary-action-label: root.sync-modal-secondary-action-label;
+            validation-state: root.sync-modal-validation-state;
+            validation-message: root.sync-modal-validation-message;
+            git-provider-kind: root.sync-modal-git-provider-kind;
             git-remote-url: root.sync-modal-git-remote-url;
+            git-base-url: root.sync-modal-git-base-url;
+            git-api-base-url: root.sync-modal-git-api-base-url;
+            git-namespace: root.sync-modal-git-namespace;
+            git-repository: root.sync-modal-git-repository;
             git-branch: root.sync-modal-git-branch;
+            git-root-path: root.sync-modal-git-root-path;
             git-auth-mode: root.sync-modal-git-auth-mode;
             git-https-username: root.sync-modal-git-https-username;
             git-https-secret: root.sync-modal-git-https-secret;
+            git-pat: root.sync-modal-git-pat;
             git-https-secret-visible: root.sync-modal-git-https-secret-visible;
             git-ssh-private-key: root.sync-modal-git-ssh-private-key;
             git-ssh-passphrase: root.sync-modal-git-ssh-passphrase;
@@ -1969,6 +1988,10 @@ export component AppWindow inherits Window {
 
             secondary-action-requested => {
                 root.sync-modal-secondary-action-requested();
+            }
+
+            validate-requested => {
+                root.sync-modal-validate-requested();
             }
 
             draft-changed(field, value) => {

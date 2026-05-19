@@ -135,7 +135,9 @@ use crate::app::vault::model::{
     SnapshotSyncPreferences, VaultAssetPayload, VaultHead, VaultSnapshot, VaultSshProxySpec,
 };
 use crate::app::vault::provider::git_repo::{
-    GitRepoProvider, GitRepoProviderConfig, validate_first_release_git_host,
+    GitRepoProvider, GitRepoProviderConfig, GitRepositoryMetadata, GitRepositoryMetadataSource,
+    ReqwestGitRepositoryMetadataSource, validate_first_release_git_host,
+    validate_remote_for_sync,
 };
 use crate::app::vault::provider::gitee_gist::{GiteeGistProvider, GiteeGistProviderConfig};
 use crate::app::vault::provider::github_gist::{GitHubGistProvider, GitHubGistProviderConfig};
@@ -190,7 +192,8 @@ use crate::shell::tabs::WorkspaceTab;
 use crate::shell::view_model::{
     AssetModalState, AssetSshConnectionDraft, KeychainIdentityDraft, KeychainSshKeyDraft,
     RightPanelView, ShellViewModel, SnippetActivation, SshModalAction, SyncModalMode,
-    SyncModalViewState, VaultPanelViewState, WorkspaceTabClosePlan, WorkspaceTabCloseScope,
+    SyncModalValidationState, SyncModalViewState, VaultPanelViewState, WorkspaceTabClosePlan,
+    WorkspaceTabCloseScope,
 };
 use crate::theme::{ThemeMode, ThemeVariant};
 use russh::keys::ssh_key::{LineEnding, rand_core::OsRng};
@@ -392,6 +395,7 @@ pub struct VaultRuntimeOptions {
     pub root_dir: Option<PathBuf>,
     pub provider_factory: Arc<dyn VaultProviderFactory>,
     pub bootstrap_template: Option<BootstrapBundle>,
+    pub git_repo_metadata_source: Arc<dyn GitRepositoryMetadataSource>,
 }
 
 impl Default for VaultRuntimeOptions {
@@ -400,6 +404,7 @@ impl Default for VaultRuntimeOptions {
             root_dir: None,
             provider_factory: Arc::new(DefaultVaultProviderFactory),
             bootstrap_template: None,
+            git_repo_metadata_source: Arc::new(ReqwestGitRepositoryMetadataSource),
         }
     }
 }
@@ -4911,6 +4916,8 @@ struct PersistedGitRepoCredentialMaterial {
     #[serde(default)]
     https_secret: String,
     #[serde(default)]
+    personal_access_token: String,
+    #[serde(default)]
     ssh_private_key: String,
     #[serde(default)]
     ssh_passphrase: String,
@@ -4918,7 +4925,7 @@ struct PersistedGitRepoCredentialMaterial {
 
 fn git_auth_mode_for_provider_auth(auth_kind: ProviderAuthKind) -> &'static str {
     match auth_kind {
-        ProviderAuthKind::HttpsCredentials => "https",
+        ProviderAuthKind::HttpsCredentials | ProviderAuthKind::Pat => "https",
         ProviderAuthKind::SshKey => "ssh",
         _ => "https",
     }
@@ -4926,7 +4933,7 @@ fn git_auth_mode_for_provider_auth(auth_kind: ProviderAuthKind) -> &'static str 
 
 fn provider_auth_for_git_auth_mode(mode: &str) -> Result<ProviderAuthKind> {
     match mode.trim() {
-        "" | "https" => Ok(ProviderAuthKind::HttpsCredentials),
+        "" | "https" => Ok(ProviderAuthKind::Pat),
         "ssh" => Ok(ProviderAuthKind::SshKey),
         other => Err(anyhow!("Unsupported Git auth mode `{other}`")),
     }
@@ -4951,7 +4958,8 @@ fn load_git_repo_credential_material(
                 ..PersistedGitRepoCredentialMaterial::default()
             },
             _ => PersistedGitRepoCredentialMaterial {
-                https_secret: raw,
+                https_secret: raw.clone(),
+                personal_access_token: raw,
                 ..PersistedGitRepoCredentialMaterial::default()
             },
         }
@@ -4963,7 +4971,8 @@ fn build_git_repo_credential_material(
 ) -> Result<String> {
     serde_json::to_string(&PersistedGitRepoCredentialMaterial {
         https_username: modal.git_https_username.clone(),
-        https_secret: modal.git_https_secret.clone(),
+        https_secret: modal.git_pat.clone(),
+        personal_access_token: modal.git_pat.clone(),
         ssh_private_key: modal.git_ssh_private_key.clone(),
         ssh_passphrase: modal.git_ssh_passphrase.clone(),
     })
@@ -4980,18 +4989,32 @@ fn hydrate_sync_modal_draft(
     let bundle = configured_sync_bundle(vault);
     let primary = bundle.and_then(BootstrapBundle::primary_remote);
     let defaults = GitRepoRemoteDraft::default();
+    modal.validation_state = SyncModalValidationState::Idle;
+    modal.validation_message.clear();
+    modal.git_provider_kind = defaults.host_kind.id().into();
     modal.git_remote_url = defaults.remote_url.clone();
+    modal.git_base_url = defaults.base_url.clone();
+    modal.git_api_base_url = defaults.api_base_url.clone();
+    modal.git_namespace = defaults.namespace.clone();
+    modal.git_repository = defaults.repository.clone();
     modal.git_branch = defaults.branch.clone();
+    modal.git_root_path = defaults.root_path.clone();
     modal.git_auth_mode = git_auth_mode_for_provider_auth(defaults.auth_kind).into();
     modal.git_https_username.clear();
     modal.git_https_secret.clear();
+    modal.git_pat.clear();
     modal.git_ssh_private_key.clear();
     modal.git_ssh_passphrase.clear();
     if let Some(remote) = primary
         && let BootstrapRemoteLocator::GitRepo {
-            host_kind: _,
+            host_kind,
             remote_url,
             branch,
+            base_url,
+            api_base_url,
+            namespace,
+            repository,
+            root_path,
             ..
         } = &remote.locator
     {
@@ -5000,13 +5023,32 @@ fn hydrate_sync_modal_draft(
             remote.credential_ref.as_deref(),
             remote.auth_kind,
         );
+        modal.git_provider_kind = host_kind.id().into();
         modal.git_remote_url = remote_url.clone();
+        modal.git_base_url = base_url
+            .clone()
+            .unwrap_or_else(|| defaults.base_url.clone());
+        modal.git_api_base_url = api_base_url
+            .clone()
+            .unwrap_or_else(|| defaults.api_base_url.clone());
+        modal.git_namespace = namespace.clone().unwrap_or_default();
+        modal.git_repository = repository.clone().unwrap_or_default();
         modal.git_branch = branch.clone();
+        modal.git_root_path = root_path
+            .clone()
+            .unwrap_or_else(|| defaults.root_path.clone());
         modal.git_auth_mode = git_auth_mode_for_provider_auth(remote.auth_kind).into();
         modal.git_https_username = credentials.https_username;
-        modal.git_https_secret = credentials.https_secret;
+        modal.git_https_secret = credentials
+            .personal_access_token
+            .clone()
+            .if_empty_then(credentials.https_secret.clone());
+        modal.git_pat = credentials
+            .personal_access_token
+            .if_empty_then(credentials.https_secret);
         modal.git_ssh_private_key = credentials.ssh_private_key;
         modal.git_ssh_passphrase = credentials.ssh_passphrase;
+        modal.provider_label = host_kind.label().into();
     }
     modal.master_password.clear();
 }
@@ -5016,23 +5058,39 @@ fn build_sync_bundle_from_modal(
     existing_bundle: Option<&BootstrapBundle>,
 ) -> Result<BootstrapBundle> {
     let modal = state.sync_modal_state();
-    let git_remote_url = modal.git_remote_url.trim();
+    let host_kind = GitHostKind::from_id(modal.git_provider_kind.as_str());
+    let git_remote_url = if !modal.git_remote_url.trim().is_empty() {
+        modal.git_remote_url.trim().to_string()
+    } else {
+        let base_url = modal.git_base_url.trim().trim_end_matches('/');
+        let namespace = modal.git_namespace.trim().trim_matches('/');
+        let repository = modal.git_repository.trim().trim_matches('/');
+        if base_url.is_empty() || namespace.is_empty() || repository.is_empty() {
+            String::new()
+        } else {
+            format!("{base_url}/{namespace}/{repository}.git")
+        }
+    };
     let git_branch = modal.git_branch.trim();
     let auth_kind = provider_auth_for_git_auth_mode(modal.git_auth_mode.as_str())?;
 
     if git_remote_url.is_empty() {
-        return Err(anyhow!("Enter a Git remote URL before enabling sync"));
+        return Err(anyhow!(
+            "Enter a base URL, owner/namespace, and repository before enabling sync"
+        ));
     }
     if git_branch.is_empty() {
         return Err(anyhow!("Enter a Git branch before enabling sync"));
     }
     match auth_kind {
-        ProviderAuthKind::HttpsCredentials => {
+        ProviderAuthKind::Pat | ProviderAuthKind::HttpsCredentials => {
             if modal.git_https_username.trim().is_empty() {
                 return Err(anyhow!("Enter an HTTPS username before enabling sync"));
             }
-            if modal.git_https_secret.trim().is_empty() {
-                return Err(anyhow!("Enter an HTTPS secret before enabling sync"));
+            if modal.git_pat.trim().is_empty() {
+                return Err(anyhow!(
+                    "Enter a Personal Access Token before enabling sync"
+                ));
             }
         }
         ProviderAuthKind::SshKey => {
@@ -5049,15 +5107,25 @@ fn build_sync_bundle_from_modal(
         role: RemoteRole::Primary,
         provider: ProviderKind::GitRepo,
         locator: BootstrapRemoteLocator::GitRepo {
-            host_kind: GitHostKind::Gitee,
-            remote_url: git_remote_url.into(),
+            host_kind,
+            remote_url: git_remote_url,
             branch: git_branch.into(),
-            base_url: None,
-            api_base_url: None,
-            namespace: None,
-            repository: None,
-            root_path: None,
-            display_name: None,
+            base_url: Some(modal.git_base_url.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            api_base_url: Some(modal.git_api_base_url.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            namespace: Some(modal.git_namespace.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            repository: Some(modal.git_repository.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            root_path: Some(modal.git_root_path.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            display_name: Some(format!(
+                "{}/{}",
+                modal.git_namespace.trim(),
+                modal.git_repository.trim()
+            ))
+            .filter(|value| value != "/"),
         },
         credential_ref: Some(bootstrap_provider_credential_ref(sync_settings_remote_id(
             RemoteRole::Primary,
@@ -5067,6 +5135,112 @@ fn build_sync_bundle_from_modal(
     }];
 
     Ok(bundle)
+}
+
+fn sync_modal_validation_signature(
+    modal: &crate::shell::view_model::SyncModalViewState,
+) -> String {
+    [
+        modal.git_provider_kind.as_str(),
+        modal.git_base_url.as_str(),
+        modal.git_api_base_url.as_str(),
+        modal.git_namespace.as_str(),
+        modal.git_repository.as_str(),
+        modal.git_branch.as_str(),
+        modal.git_root_path.as_str(),
+        modal.git_auth_mode.as_str(),
+        modal.git_https_username.as_str(),
+        modal.git_pat.as_str(),
+        modal.git_remote_url.as_str(),
+    ]
+    .join("\n")
+}
+
+fn build_git_repo_validation_request(
+    state: &ShellViewModel,
+) -> Result<(BootstrapRemoteConfig, String)> {
+    let modal = state.sync_modal_state();
+    let host_kind = GitHostKind::from_id(modal.git_provider_kind.as_str());
+    let base_url = modal.git_base_url.trim().trim_end_matches('/');
+    let namespace = modal.git_namespace.trim().trim_matches('/');
+    let repository = modal.git_repository.trim().trim_matches('/');
+    let branch = modal.git_branch.trim();
+    if base_url.is_empty() || namespace.is_empty() || repository.is_empty() {
+        return Err(anyhow!(
+            "Enter a base URL, owner/namespace, and repository before validating sync"
+        ));
+    }
+    if branch.is_empty() {
+        return Err(anyhow!("Enter a Git branch before validating sync"));
+    }
+    let remote = BootstrapRemoteConfig {
+        remote_id: sync_settings_remote_id(RemoteRole::Primary).into(),
+        role: RemoteRole::Primary,
+        provider: ProviderKind::GitRepo,
+        locator: BootstrapRemoteLocator::GitRepo {
+            host_kind,
+            remote_url: format!("{base_url}/{namespace}/{repository}.git"),
+            branch: branch.into(),
+            base_url: Some(base_url.to_string()),
+            api_base_url: Some(modal.git_api_base_url.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            namespace: Some(namespace.to_string()),
+            repository: Some(repository.to_string()),
+            root_path: Some(modal.git_root_path.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            display_name: Some(format!("{namespace}/{repository}")),
+        },
+        credential_ref: None,
+        auth_kind: ProviderAuthKind::Pat,
+        last_health: None,
+    };
+    let access_token = state.sync_modal_state().git_pat.trim().to_string();
+    if access_token.is_empty() {
+        return Err(anyhow!(
+            "Enter a Personal Access Token before validating the repository"
+        ));
+    }
+    Ok((remote, access_token))
+}
+
+fn apply_sync_modal_validation_result(
+    state: &mut ShellViewModel,
+    draft_signature: &str,
+    result: std::result::Result<GitRepositoryMetadata, String>,
+) {
+    if sync_modal_validation_signature(state.sync_modal_state()) != draft_signature {
+        return;
+    }
+
+    let modal = state.sync_modal_state_mut();
+    match result {
+        Ok(metadata) => {
+            modal.validation_state = SyncModalValidationState::Success;
+            modal.validation_message =
+                format!("Validated private writable repository {}.", metadata.display_name);
+            modal.error_text.clear();
+            modal.target_label = metadata.display_name;
+        }
+        Err(error) => {
+            modal.validation_state = SyncModalValidationState::BlockingError;
+            modal.validation_message = "Repository validation failed.".into();
+            modal.error_text = error;
+        }
+    }
+}
+
+trait StringEmptyExt {
+    fn if_empty_then(self, fallback: String) -> String;
+}
+
+impl StringEmptyExt for String {
+    fn if_empty_then(self, fallback: String) -> String {
+        if self.trim().is_empty() {
+            fallback
+        } else {
+            self
+        }
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -5925,6 +6099,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let workspace_follow_tracker = Rc::new(RefCell::new(WorkspaceFollowTracker));
     let sftp_browser_controller = Rc::new(RefCell::new(SftpBrowserController::default()));
     let vault_session = Rc::new(RefCell::new(initial_vault_session));
+    let git_repo_metadata_source = Arc::clone(&vault_runtime.git_repo_metadata_source);
     if let Some(session_bridge_ref) = session_bridge.as_ref()
         && let Err(err) = session_bridge_ref.manager.set_theme(
             view_model.borrow().theme_mode,
@@ -6522,6 +6697,54 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         })
     };
     *run_vault_sync_slot.borrow_mut() = Some(Rc::clone(&run_vault_sync));
+    let request_sync_modal_validation: Rc<dyn Fn()> = {
+        let state = Rc::clone(&view_model);
+        let handle = window.as_weak();
+        let store_ref = store.clone();
+        let effects_ref = Rc::clone(&effects);
+        let git_repo_metadata_source_ref = Arc::clone(&git_repo_metadata_source);
+        let vault_sync_result_tx_ref = vault_sync_result_tx.clone();
+        Rc::new(move || {
+            let window = handle.unwrap();
+            let mut state = state.borrow_mut();
+            let draft_signature = sync_modal_validation_signature(state.sync_modal_state());
+            match build_git_repo_validation_request(&state) {
+                Ok((remote, access_token)) => {
+                    let modal = state.sync_modal_state_mut();
+                    modal.validation_state = SyncModalValidationState::Validating;
+                    modal.validation_message =
+                        "Validating repository visibility and write access...".into();
+                    modal.error_text.clear();
+
+                    let completion_tx = vault_sync_result_tx_ref.clone();
+                    let metadata_source = Arc::clone(&git_repo_metadata_source_ref);
+                    std::thread::spawn(move || {
+                        let result = validate_remote_for_sync(
+                            &remote,
+                            metadata_source.as_ref(),
+                            Some(access_token.as_str()),
+                        )
+                        .map_err(|err| err.to_string());
+                        let _ =
+                            completion_tx.send(vault_sync::VaultSyncBackgroundMessage::RemoteValidationCompleted {
+                                draft_signature,
+                                result,
+                            });
+                    });
+                }
+                Err(err) => {
+                    let modal = state.sync_modal_state_mut();
+                    modal.validation_state = SyncModalValidationState::BlockingError;
+                    modal.validation_message = "Repository validation failed.".into();
+                    modal.error_text = err.to_string();
+                }
+            }
+
+            shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+            windowing::sync_sync_modal_state(&window, &state);
+            save_ui_preferences(&store_ref, &state);
+        })
+    };
     {
         let state = Rc::clone(&view_model);
         let handle = window.as_weak();
@@ -6632,6 +6855,16 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                                 sync_service_ref.finish_remote_head_refresh();
                                 vault_sync::apply_remote_head_snapshot_to_sync_modal(
                                     &mut state, snapshot,
+                                );
+                            }
+                            vault_sync::VaultSyncBackgroundMessage::RemoteValidationCompleted {
+                                draft_signature,
+                                result,
+                            } => {
+                                apply_sync_modal_validation_result(
+                                    &mut state,
+                                    draft_signature.as_str(),
+                                    result,
                                 );
                             }
                         }
@@ -6915,6 +7148,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         windowing::sync_sync_modal_state(&window, &state);
     });
 
+    let request_sync_modal_validation_ref = Rc::clone(&request_sync_modal_validation);
+    window.on_sync_modal_validate_requested(move || {
+        request_sync_modal_validation_ref();
+    });
+
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let effects_ref = Rc::clone(&effects);
@@ -6973,6 +7211,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let credential_store_ref = Arc::clone(&credential_store);
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let run_vault_sync_ref = Rc::clone(&run_vault_sync);
+    let request_sync_modal_validation_ref = Rc::clone(&request_sync_modal_validation);
     window.on_sync_modal_primary_action_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -6981,7 +7220,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let master_password = state.sync_modal_state().master_password.clone();
         match state.sync_modal_state().mode {
             SyncModalMode::NotConfigured => {
-                if let Err(err) =
+                if state.sync_modal_state().validation_state != SyncModalValidationState::Success {
+                    state.set_sync_modal_error(
+                        "Validate the repository as private and writable before enabling sync.",
+                    );
+                } else if let Err(err) =
                     vault_sync::persist_sync_modal_settings(&mut state, &mut vault, credential_store_ref.as_ref())
                 {
                     vault_sync::set_sync_modal_error(&mut state, &vault, err.to_string());
@@ -7001,6 +7244,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                         state.reset_sync_modal_secret_visibility();
                     }
                 }
+            }
+            SyncModalMode::Paused => {
+                drop(vault);
+                drop(state);
+                request_sync_modal_validation_ref();
+                return;
             }
             SyncModalMode::Ready => {
                 if let Err(err) =

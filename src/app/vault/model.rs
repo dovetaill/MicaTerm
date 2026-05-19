@@ -401,14 +401,26 @@ pub struct GitRepoRemoteDraft {
     pub host_kind: GitHostKind,
     #[serde(default)]
     pub remote_url: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub api_base_url: String,
+    #[serde(default)]
+    pub namespace: String,
+    #[serde(default)]
+    pub repository: String,
     #[serde(default = "default_git_repo_branch")]
     pub branch: String,
+    #[serde(default)]
+    pub root_path: String,
     #[serde(default = "default_git_repo_auth_kind")]
     pub auth_kind: ProviderAuthKind,
     #[serde(default)]
     pub https_username: String,
     #[serde(default)]
     pub https_secret: String,
+    #[serde(default)]
+    pub personal_access_token: String,
     #[serde(default)]
     pub ssh_private_key: String,
     #[serde(default)]
@@ -429,10 +441,16 @@ impl Default for GitRepoRemoteDraft {
         Self {
             host_kind: GitHostKind::default(),
             remote_url: String::new(),
+            base_url: "https://gitee.com".into(),
+            api_base_url: "https://gitee.com/api/v5".into(),
+            namespace: String::new(),
+            repository: String::new(),
             branch: default_git_repo_branch(),
-            auth_kind: ProviderAuthKind::HttpsCredentials,
+            root_path: ".mica-term-sync".into(),
+            auth_kind: ProviderAuthKind::Pat,
             https_username: String::new(),
             https_secret: String::new(),
+            personal_access_token: String::new(),
             ssh_private_key: String::new(),
             ssh_passphrase: String::new(),
         }
@@ -545,10 +563,28 @@ fn default_git_repo_branch() -> String {
 }
 
 const fn default_git_repo_auth_kind() -> ProviderAuthKind {
-    ProviderAuthKind::HttpsCredentials
+    ProviderAuthKind::Pat
 }
 
 impl GitHostKind {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Gitee => "gitee",
+            Self::GitHub => "github",
+            Self::GitLab => "gitlab",
+            Self::Generic => "generic",
+        }
+    }
+
+    pub fn from_id(value: &str) -> Self {
+        match value {
+            "github" => Self::GitHub,
+            "gitlab" => Self::GitLab,
+            "generic" => Self::Generic,
+            _ => Self::Gitee,
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Gitee => "Gitee",

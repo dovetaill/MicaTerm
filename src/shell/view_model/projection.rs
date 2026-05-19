@@ -12,6 +12,38 @@ fn reset_sync_modal_secret_visibility(modal: &mut SyncModalViewState) {
     modal.git_ssh_passphrase_visible = false;
 }
 
+fn reset_sync_modal_validation_state(modal: &mut SyncModalViewState) {
+    modal.validation_state = SyncModalValidationState::Idle;
+    modal.validation_message.clear();
+}
+
+fn sync_modal_default_base_url(provider_kind: &str) -> &'static str {
+    match provider_kind {
+        "github" => "https://github.com",
+        "gitlab" => "https://gitlab.com",
+        _ => "https://gitee.com",
+    }
+}
+
+fn sync_modal_default_api_base_url(provider_kind: &str) -> &'static str {
+    match provider_kind {
+        "github" => "https://api.github.com",
+        "gitlab" => "https://gitlab.com/api/v4",
+        _ => "https://gitee.com/api/v5",
+    }
+}
+
+fn update_sync_modal_remote_url(modal: &mut SyncModalViewState) {
+    let base_url = modal.git_base_url.trim().trim_end_matches('/');
+    let namespace = modal.git_namespace.trim().trim_matches('/');
+    let repository = modal.git_repository.trim().trim_matches('/');
+    if base_url.is_empty() || namespace.is_empty() || repository.is_empty() {
+        return;
+    }
+
+    modal.git_remote_url = format!("{base_url}/{namespace}/{repository}.git");
+}
+
 impl ShellViewModel {
     pub fn visible_console_asset_rows(&self) -> Vec<VisibleAssetRow> {
         self.console_asset_tree
@@ -347,6 +379,7 @@ impl ShellViewModel {
     pub fn set_sync_modal_error(&mut self, error: impl Into<String>) {
         self.sync_modal_state.open = true;
         self.sync_modal_state.error_text = error.into();
+        self.sync_modal_state.validation_state = SyncModalValidationState::BlockingError;
     }
 
     pub fn clear_sync_modal_error(&mut self) {
@@ -371,9 +404,48 @@ impl ShellViewModel {
                 | "git-ssh-passphrase-visibility"
                 | "master-password-visibility"
         );
+        let resets_validation = !matches!(
+            field,
+            "git-https-secret-visibility"
+                | "git-ssh-passphrase-visibility"
+                | "master-password"
+                | "master-password-visibility"
+        );
         match field {
+            "git-provider-kind" => {
+                if modal.git_provider_kind != value {
+                    modal.git_provider_kind = value;
+                    modal.provider_label = match modal.git_provider_kind.as_str() {
+                        "github" => "GitHub".into(),
+                        "gitlab" => "GitLab".into(),
+                        _ => "Gitee".into(),
+                    };
+                    modal.git_base_url = sync_modal_default_base_url(
+                        modal.git_provider_kind.as_str(),
+                    )
+                    .into();
+                    modal.git_api_base_url = sync_modal_default_api_base_url(
+                        modal.git_provider_kind.as_str(),
+                    )
+                    .into();
+                }
+            }
             "git-remote-url" => modal.git_remote_url = value,
+            "git-base-url" => {
+                modal.git_base_url = value;
+                update_sync_modal_remote_url(modal);
+            }
+            "git-api-base-url" => modal.git_api_base_url = value,
+            "git-namespace" => {
+                modal.git_namespace = value;
+                update_sync_modal_remote_url(modal);
+            }
+            "git-repository" => {
+                modal.git_repository = value;
+                update_sync_modal_remote_url(modal);
+            }
             "git-branch" => modal.git_branch = value,
+            "git-root-path" => modal.git_root_path = value,
             "git-auth-mode" => {
                 if modal.git_auth_mode != value {
                     modal.git_auth_mode = value;
@@ -381,7 +453,14 @@ impl ShellViewModel {
                 }
             }
             "git-https-username" => modal.git_https_username = value,
-            "git-https-secret" => modal.git_https_secret = value,
+            "git-https-secret" => {
+                modal.git_https_secret = value.clone();
+                modal.git_pat = value;
+            }
+            "git-pat" => {
+                modal.git_pat = value.clone();
+                modal.git_https_secret = value;
+            }
             "git-https-secret-visibility" => modal.git_https_secret_visible = visible(&value),
             "git-ssh-private-key" => modal.git_ssh_private_key = value,
             "git-ssh-passphrase" => modal.git_ssh_passphrase = value,
@@ -394,6 +473,9 @@ impl ShellViewModel {
         }
         if clears_error {
             modal.error_text.clear();
+        }
+        if resets_validation {
+            reset_sync_modal_validation_state(modal);
         }
     }
 

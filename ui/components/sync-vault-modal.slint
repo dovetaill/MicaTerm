@@ -57,11 +57,20 @@ export component SyncVaultModal inherits Rectangle {
     in property <string> conflict-summary: "";
     in property <string> primary-action-label: "Set up sync";
     in property <string> secondary-action-label: "";
+    in property <string> validation-state: "idle";
+    in property <string> validation-message: "";
+    in property <string> git-provider-kind: "gitee";
     in property <string> git-remote-url: "";
+    in property <string> git-base-url: "https://gitee.com";
+    in property <string> git-api-base-url: "https://gitee.com/api/v5";
+    in property <string> git-namespace: "";
+    in property <string> git-repository: "";
     in property <string> git-branch: "main";
+    in property <string> git-root-path: ".mica-term-sync";
     in property <string> git-auth-mode: "https";
     in property <string> git-https-username: "";
     in property <string> git-https-secret: "";
+    in property <string> git-pat: "";
     in property <bool> git-https-secret-visible: false;
     in property <string> git-ssh-private-key: "";
     in property <string> git-ssh-passphrase: "";
@@ -76,6 +85,7 @@ export component SyncVaultModal inherits Rectangle {
     callback close-requested();
     callback primary-action-requested();
     callback secondary-action-requested();
+    callback validate-requested();
     callback draft-changed(string, string);
     callback toggle-changed(string, bool);
     callback drag-requested(length, length);
@@ -157,6 +167,12 @@ export component SyncVaultModal inherits Rectangle {
                         width: parent.width;
                         tone: "error";
                         message: root.error-text;
+                    }
+
+                    if root.validation-message != "" : DialogInlineBanner {
+                        width: parent.width;
+                        tone: root.validation-state == "blocking-error" ? "error" : root.validation-state == "validating" ? "busy" : "neutral";
+                        message: root.validation-message;
                     }
 
                     if root.provider-label != "" || root.target-label != "" : DialogSectionCard {
@@ -281,17 +297,79 @@ export component SyncVaultModal inherits Rectangle {
 
                     DialogFormSection {
                         width: parent.width;
-                        title: "Repository";
-                        description: root.compact-layout ? "" : "Keep the remote URL and branch together so the sync target is easy to verify.";
+                        title: "Provider";
+                        description: root.compact-layout ? "" : "Choose the Git hosting provider so MicaTerm can validate repository visibility with the matching metadata API.";
 
-                        git-remote-url-field := DialogTextField {
+                        HorizontalLayout {
                             width: parent.width;
-                            label: "Git remote URL";
-                            value: root.git-remote-url;
-                            helper-text: "HTTPS and SSH targets both live here so the rest of the dialog can stay mode-driven instead of duplicating fields.";
+                            height: 34px;
+                            spacing: 8px;
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Gitee";
+                                active: root.git-provider-kind == "gitee";
+
+                                clicked => {
+                                    root.draft-changed("git-provider-kind", "gitee");
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "GitHub";
+                                active: root.git-provider-kind == "github";
+
+                                clicked => {
+                                    root.draft-changed("git-provider-kind", "github");
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "GitLab";
+                                active: root.git-provider-kind == "gitlab";
+
+                                clicked => {
+                                    root.draft-changed("git-provider-kind", "gitlab");
+                                }
+                            }
+                        }
+                    }
+
+                    DialogFormSection {
+                        width: parent.width;
+                        title: "Repository";
+                        description: root.compact-layout ? "" : "Use structured repository coordinates so visibility validation can fail closed before sync is enabled.";
+
+                        DialogTextField {
+                            width: parent.width;
+                            label: "Base URL";
+                            value: root.git-base-url;
+                            helper-text: root.git-provider-kind == "gitlab" ? "Override this for self-managed GitLab instances." : "Defaults to the formal host for the selected provider.";
 
                             value-changed(value) => {
-                                root.draft-changed("git-remote-url", value);
+                                root.draft-changed("git-base-url", value);
+                            }
+                        }
+
+                        DialogTextField {
+                            width: parent.width;
+                            label: root.git-provider-kind == "gitlab" ? "Namespace" : "Owner or namespace";
+                            value: root.git-namespace;
+
+                            value-changed(value) => {
+                                root.draft-changed("git-namespace", value);
+                            }
+                        }
+
+                        DialogTextField {
+                            width: parent.width;
+                            label: "Repository";
+                            value: root.git-repository;
+
+                            value-changed(value) => {
+                                root.draft-changed("git-repository", value);
                             }
                         }
 
@@ -304,12 +382,23 @@ export component SyncVaultModal inherits Rectangle {
                                 root.draft-changed("git-branch", value);
                             }
                         }
+
+                        DialogTextField {
+                            width: parent.width;
+                            label: "Remote path";
+                            value: root.git-root-path;
+                            helper-text: "The encrypted sync payload is stored under this directory inside the repository.";
+
+                            value-changed(value) => {
+                                root.draft-changed("git-root-path", value);
+                            }
+                        }
                     }
 
                     DialogFormSection {
                         width: parent.width;
                         title: "Auth mode";
-                        description: root.compact-layout ? "" : "Switch between HTTPS and SSH credentials without duplicating repository settings.";
+                        description: root.compact-layout ? "" : "Use a Personal Access Token for metadata validation and HTTPS Git push, or switch to SSH key auth.";
 
                         HorizontalLayout {
                             width: parent.width;
@@ -318,7 +407,7 @@ export component SyncVaultModal inherits Rectangle {
 
                             DialogSegmentButton {
                                 horizontal-stretch: 1;
-                                label: "HTTPS";
+                                label: "PAT";
                                 active: root.git-auth-mode == "https";
 
                                 clicked => {
@@ -341,6 +430,7 @@ export component SyncVaultModal inherits Rectangle {
                             width: parent.width;
                             label: "HTTPS username";
                             value: root.git-https-username;
+                            helper-text: "Used for HTTPS Git transport together with the Personal Access Token.";
 
                             value-changed(value) => {
                                 root.draft-changed("git-https-username", value);
@@ -349,15 +439,15 @@ export component SyncVaultModal inherits Rectangle {
 
                         if root.git-auth-mode == "https" : DialogTextField {
                             width: parent.width;
-                            label: "HTTPS secret";
-                            value: root.git-https-secret;
+                            label: "Personal Access Token";
+                            value: root.git-pat;
                             password-mode: !root.git-https-secret-visible;
                             trailing-icon-visible: true;
                             trailing-icon-source: root.git-https-secret-visible ? root.eye-off-icon : root.eye-icon;
-                            trailing-icon-label: root.git-https-secret-visible ? "Hide HTTPS secret" : "Show HTTPS secret";
+                            trailing-icon-label: root.git-https-secret-visible ? "Hide Personal Access Token" : "Show Personal Access Token";
 
                             value-changed(value) => {
-                                root.draft-changed("git-https-secret", value);
+                                root.draft-changed("git-pat", value);
                             }
 
                             trailing-icon-requested => {
@@ -436,6 +526,15 @@ export component SyncVaultModal inherits Rectangle {
 
                     clicked => {
                         root.secondary-action-requested();
+                    }
+                }
+
+                DialogActionButton {
+                    width: 120px;
+                    label: root.validation-state == "validating" ? "Validating..." : root.validation-state == "success" ? "Validated" : "Validate";
+
+                    clicked => {
+                        root.validate-requested();
                     }
                 }
 

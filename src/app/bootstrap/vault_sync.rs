@@ -31,6 +31,10 @@ pub(super) enum VaultSyncBackgroundMessage {
     RemoteHeadRefreshed {
         snapshot: RemoteHeadSnapshot,
     },
+    RemoteValidationCompleted {
+        draft_signature: String,
+        result: std::result::Result<GitRepositoryMetadata, String>,
+    },
 }
 
 pub(super) fn persist_sync_modal_settings(
@@ -72,16 +76,42 @@ pub(super) fn update_sync_modal_for_local_state(
     let modal = state.sync_modal_state_mut();
 
     modal.title = "Sync Settings".into();
-    modal.provider_label = first_release_formal_provider_label().into();
-    modal.target_label = if has_primary_remote {
-        "1 Git primary configured".into()
-    } else {
-        String::new()
-    };
+    modal.provider_label = vault_primary_remote(vault)
+        .and_then(|remote| match &remote.locator {
+            BootstrapRemoteLocator::GitRepo { host_kind, .. } => Some(host_kind.label().to_string()),
+            _ => None,
+        })
+        .unwrap_or_else(|| first_release_formal_provider_label().into());
+    modal.target_label = vault_primary_remote(vault)
+        .and_then(|remote| match &remote.locator {
+            BootstrapRemoteLocator::GitRepo {
+                display_name,
+                namespace,
+                repository,
+                ..
+            } => display_name
+                .clone()
+                .or_else(|| match (namespace, repository) {
+                    (Some(namespace), Some(repository)) => Some(format!("{namespace}/{repository}")),
+                    _ => None,
+                }),
+            _ => None,
+        })
+        .unwrap_or_else(|| {
+            if has_primary_remote {
+                "1 Git primary configured".into()
+            } else {
+                String::new()
+            }
+        });
     modal.conflict_count = conflict_count;
     modal.conflict_summary = conflict_summary;
     modal.conflict_review_available = conflict_review_available;
-    modal.error_text.clear();
+    modal.error_text = vault
+        .local_state
+        .as_ref()
+        .and_then(|local_state| local_state.last_sync_error.clone())
+        .unwrap_or_default();
     let local_last_sync = latest_local_sync_timestamp(vault);
     modal.local_last_sync_text = local_last_sync
         .as_deref()
@@ -107,6 +137,17 @@ pub(super) fn update_sync_modal_for_local_state(
     }
 
     match (&vault.local_state, has_primary_remote) {
+        (Some(local_state), true)
+            if local_state.remote_safety_status == GitRemoteSafetyStatus::Paused =>
+        {
+            modal.mode = SyncModalMode::Paused;
+            modal.headline = "Sync paused for safety".into();
+            modal.status_text =
+                "Remote sync is paused until the repository is revalidated as private and writable."
+                    .into();
+            modal.primary_action_label = "Validate remote".into();
+            modal.secondary_action_label = "Close".into();
+        }
         (None, false) => {
             modal.mode = SyncModalMode::NotConfigured;
             modal.headline = "Configure sync".into();
@@ -809,7 +850,9 @@ pub(super) fn resolve_remote_for_sync(
     if remote.provider == ProviderKind::GitRepo
         && matches!(
             remote.auth_kind,
-            ProviderAuthKind::HttpsCredentials | ProviderAuthKind::SshKey
+            ProviderAuthKind::Pat
+                | ProviderAuthKind::HttpsCredentials
+                | ProviderAuthKind::SshKey
         )
     {
         let inline_secret =
