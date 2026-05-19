@@ -49,26 +49,49 @@ impl SftpBrowserController {
         &mut self,
         browser_session: FileBrowserSession,
     ) -> SftpBrowserLoadRequest {
+        let browser_session_id = browser_session.file_browser_session_id.clone();
         let session_id = browser_session
             .linked_terminal_session_id
             .as_deref()
             .and_then(|session_id| Uuid::parse_str(session_id).ok())
             .unwrap_or_else(Uuid::nil);
         let request = self.new_request(
-            browser_session.file_browser_session_id.clone(),
+            browser_session_id.clone(),
             session_id,
             browser_session.current_path.as_str(),
         );
-        let state = self
-            .sessions
-            .entry(browser_session.file_browser_session_id)
-            .or_default();
-        state.set_connecting(
+        let state = self.sessions.entry(browser_session_id).or_default();
+        state.seed_from_file_browser_session(&browser_session);
+        if browser_session.follow_mode == crate::app::sftp::SftpFollowMode::FollowCwd {
+            state.set_loading_follow(
+                request.path.as_str(),
+                request.generation,
+                request.request_id,
+            );
+        } else {
+            state.set_loading_manual(
+                request.path.as_str(),
+                request.generation,
+                request.request_id,
+            );
+        }
+        request
+    }
+
+    pub fn navigate_browser_session(
+        &mut self,
+        browser_session_id: &str,
+        session_id: Uuid,
+        path: &str,
+    ) -> Option<SftpBrowserLoadRequest> {
+        let request = self.new_request(browser_session_id.to_string(), session_id, path);
+        let state = self.sessions.get_mut(browser_session_id)?;
+        state.set_loading_manual(
             request.path.as_str(),
             request.generation,
             request.request_id,
         );
-        request
+        Some(request)
     }
 
     pub fn session_activated(&mut self, session_id: Uuid) -> Option<SftpBrowserLoadRequest> {
@@ -153,6 +176,34 @@ impl SftpBrowserController {
         Some(request)
     }
 
+    pub fn refresh_browser_session(
+        &mut self,
+        browser_session_id: &str,
+        session_id: Uuid,
+    ) -> Option<SftpBrowserLoadRequest> {
+        let path = self.sessions.get(browser_session_id)?.current_path.clone();
+        if path.is_empty() {
+            return None;
+        }
+
+        let request = self.new_request(browser_session_id.to_string(), session_id, path.as_str());
+        let state = self.sessions.get_mut(browser_session_id)?;
+        if state.follow_mode == crate::app::sftp::SftpFollowMode::FollowCwd {
+            state.set_loading_follow(
+                request.path.as_str(),
+                request.generation,
+                request.request_id,
+            );
+        } else {
+            state.set_loading_manual(
+                request.path.as_str(),
+                request.generation,
+                request.request_id,
+            );
+        }
+        Some(request)
+    }
+
     pub fn retry(&mut self, session_id: Uuid) -> Option<SftpBrowserLoadRequest> {
         let browser_session_id = session_id.to_string();
         let path = self.sessions.get(&browser_session_id)?.current_path.clone();
@@ -165,6 +216,26 @@ impl SftpBrowserController {
             .sessions
             .get_mut(&browser_session_id)
             .expect("state must exist");
+        state.set_retrying(
+            request.path.as_str(),
+            request.generation,
+            request.request_id,
+        );
+        Some(request)
+    }
+
+    pub fn retry_browser_session(
+        &mut self,
+        browser_session_id: &str,
+        session_id: Uuid,
+    ) -> Option<SftpBrowserLoadRequest> {
+        let path = self.sessions.get(browser_session_id)?.current_path.clone();
+        if path.is_empty() {
+            return None;
+        }
+
+        let request = self.new_request(browser_session_id.to_string(), session_id, path.as_str());
+        let state = self.sessions.get_mut(browser_session_id)?;
         state.set_retrying(
             request.path.as_str(),
             request.generation,
@@ -190,6 +261,26 @@ impl SftpBrowserController {
         })
     }
 
+    pub fn navigate_back_browser_session(
+        &mut self,
+        browser_session_id: &str,
+        session_id: Uuid,
+    ) -> Option<SftpBrowserLoadRequest> {
+        let request_id = self.next_request_id();
+        let generation = self.next_generation(browser_session_id);
+        let path = self
+            .sessions
+            .get_mut(browser_session_id)?
+            .navigate_back(generation, request_id)?;
+        Some(SftpBrowserLoadRequest {
+            file_browser_session_id: browser_session_id.to_string(),
+            session_id,
+            path,
+            generation,
+            request_id,
+        })
+    }
+
     pub fn navigate_forward(&mut self, session_id: Uuid) -> Option<SftpBrowserLoadRequest> {
         let request_id = self.next_request_id();
         let browser_session_id = session_id.to_string();
@@ -207,6 +298,26 @@ impl SftpBrowserController {
         })
     }
 
+    pub fn navigate_forward_browser_session(
+        &mut self,
+        browser_session_id: &str,
+        session_id: Uuid,
+    ) -> Option<SftpBrowserLoadRequest> {
+        let request_id = self.next_request_id();
+        let generation = self.next_generation(browser_session_id);
+        let path = self
+            .sessions
+            .get_mut(browser_session_id)?
+            .navigate_forward(generation, request_id)?;
+        Some(SftpBrowserLoadRequest {
+            file_browser_session_id: browser_session_id.to_string(),
+            session_id,
+            path,
+            generation,
+            request_id,
+        })
+    }
+
     pub fn navigate_up(&mut self, session_id: Uuid) -> Option<SftpBrowserLoadRequest> {
         let request_id = self.next_request_id();
         let browser_session_id = session_id.to_string();
@@ -217,6 +328,26 @@ impl SftpBrowserController {
             .navigate_up(generation, request_id)?;
         Some(SftpBrowserLoadRequest {
             file_browser_session_id: browser_session_id,
+            session_id,
+            path,
+            generation,
+            request_id,
+        })
+    }
+
+    pub fn navigate_up_browser_session(
+        &mut self,
+        browser_session_id: &str,
+        session_id: Uuid,
+    ) -> Option<SftpBrowserLoadRequest> {
+        let request_id = self.next_request_id();
+        let generation = self.next_generation(browser_session_id);
+        let path = self
+            .sessions
+            .get_mut(browser_session_id)?
+            .navigate_up(generation, request_id)?;
+        Some(SftpBrowserLoadRequest {
+            file_browser_session_id: browser_session_id.to_string(),
             session_id,
             path,
             generation,
@@ -271,6 +402,22 @@ impl SftpBrowserController {
         if let Some(state) = self.sessions.get_mut(browser_session_id) {
             state.mark_disconnected();
         }
+    }
+
+    pub fn apply_disconnected_for_browser_session(
+        &mut self,
+        browser_session_id: &str,
+        generation: u64,
+        request_id: u64,
+    ) {
+        let Some(state) = self.sessions.get_mut(browser_session_id) else {
+            return;
+        };
+        if !state.accepts_request(generation, request_id) {
+            return;
+        }
+
+        state.mark_disconnected();
     }
 
     pub fn apply_load_error(

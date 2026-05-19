@@ -201,6 +201,7 @@ impl ShellViewModel {
         }
 
         self.active_workspace_tab_id = Some(tab_id.to_string());
+        self.workspace_sftp_path_editing = false;
         self.normalize_workspace_tabs();
         self.close_workspace_tab_context_menu();
         let _ = self.recompute_sftp_queue_summary();

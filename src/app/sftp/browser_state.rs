@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use crate::app::sftp::{SftpDirectoryEntry, SftpFollowMode, SftpPanelMode, SftpPathHistory};
+use crate::app::sftp::{
+    FileBrowserSession, SftpDirectoryEntry, SftpFollowMode, SftpPanelMode, SftpPathHistory,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SftpBrowserSessionState {
@@ -34,6 +36,24 @@ impl Default for SftpBrowserSessionState {
 }
 
 impl SftpBrowserSessionState {
+    pub fn seed_from_file_browser_session(&mut self, browser_session: &FileBrowserSession) {
+        self.mode = browser_session.mode;
+        self.follow_mode = browser_session.follow_mode;
+        self.current_path = browser_session.current_path.clone();
+        self.history = browser_session.history.clone();
+        self.entries = browser_session.entries.clone();
+        self.selected_entry_ids = browser_session.selected_entry_ids.clone();
+        self.last_error = browser_session.last_error.clone();
+        self.active_request_id = browser_session.active_request_id;
+        self.cached_entries_by_path.clear();
+        if !browser_session.current_path.trim().is_empty() {
+            self.cached_entries_by_path.insert(
+                browser_session.current_path.clone(),
+                browser_session.entries.clone(),
+            );
+        }
+    }
+
     pub fn set_connecting(&mut self, path: &str, generation: u64, request_id: u64) {
         self.follow_mode = SftpFollowMode::FollowCwd;
         self.current_path = path.to_string();

@@ -7,7 +7,10 @@ fn workspace_pane_source_branches_to_sftp_workspace_host() {
 
     assert!(
         workspace_pane
-            .contains("import { SftpWorkspaceHost } from \"./sftp-workspace-host.slint\";"),
+            .contains("import { SftpWorkspaceHost } from \"./sftp-workspace-host.slint\";")
+            || workspace_pane.contains(
+                "import { SftpBreadcrumbItem, SftpWorkspaceHost } from \"./sftp-workspace-host.slint\";"
+            ),
         "WorkspacePane should import the dedicated SFTP workspace host"
     );
     assert!(
@@ -22,6 +25,43 @@ fn workspace_pane_source_branches_to_sftp_workspace_host() {
             && workspace_pane.contains("session-state: root.workspace-session-state;"),
         "WorkspacePane should forward the active workspace title/subtitle/state into the SFTP workspace host"
     );
+    for contract in [
+        "workspace-sftp-path: root.workspace-sftp-path;",
+        "workspace-sftp-items: root.workspace-sftp-items;",
+        "workspace-sftp-selected-entry-ids: root.workspace-sftp-selected-entry-ids;",
+        "workspace-sftp-back-requested => {",
+        "workspace-sftp-path-submitted(path) => {",
+        "workspace-sftp-item-activated(item-id, item-kind) => {",
+        "workspace-sftp-context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {",
+    ] {
+        assert!(
+            workspace_pane.contains(contract),
+            "WorkspacePane should thread the live workspace SFTP contract `{contract}` into SftpWorkspaceHost"
+        );
+    }
+}
+
+#[test]
+fn app_window_source_threads_workspace_sftp_contract_into_workspace_pane() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+
+    for contract in [
+        "in-out property <[SftpBreadcrumbItem]> workspace-sftp-breadcrumb-items: [];",
+        "callback workspace-sftp-path-submitted(string);",
+        "callback workspace-sftp-breadcrumb-clicked(string);",
+        "workspace-sftp-breadcrumb-items: root.workspace-sftp-breadcrumb-items;",
+        "workspace-sftp-path-submitted(path) => {",
+        "root.workspace-sftp-path-submitted(path);",
+        "workspace-sftp-breadcrumb-clicked(path) => {",
+        "root.workspace-sftp-breadcrumb-clicked(path);",
+        "workspace-sftp-item-activated(item-id, item-kind) => {",
+        "workspace-sftp-context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {",
+    ] {
+        assert!(
+            app_window.contains(contract),
+            "AppWindow should thread workspace SFTP contract `{contract}` into WorkspacePane"
+        );
+    }
 }
 
 #[test]
@@ -41,9 +81,40 @@ fn sftp_workspace_host_source_exposes_core_file_table_headers() {
         );
     }
     assert!(
-        source.contains("session-title")
-            && source.contains("Files workspace")
-            && source.contains("Open a Quick Browser"),
-        "SFTP workspace host should render a lightweight empty-state shell around the workspace title"
+        source.contains("workspace-sftp-path")
+            && source.contains("workspace-sftp-items")
+            && source.contains("workspace-sftp-breadcrumb-clicked")
+            && source.contains("workspace-sftp-item-activated")
+            && source.contains("workspace-sftp-context-menu-requested"),
+        "SFTP workspace host should expose a real workspace browser contract instead of a passive title shell"
     );
+    assert!(
+        !source.contains("Expand a Quick Browser session to bring file work into the main workspace.")
+            && !source.contains("Open a Quick Browser"),
+        "SFTP workspace host should stop rendering the old placeholder copy once the workspace becomes a real browser surface"
+    );
+}
+
+#[test]
+fn sftp_workspace_host_source_wires_workspace_only_interactions() {
+    let source =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    for contract in [
+        "callback workspace-sftp-path-edit-requested();",
+        "callback workspace-sftp-breadcrumb-clicked(string);",
+        "callback workspace-sftp-viewport-changed(length, length);",
+        "callback workspace-sftp-retry-requested();",
+        "callback local-action-requested(string);",
+        "root.workspace-sftp-path-submitted(self.text);",
+        "root.workspace-sftp-breadcrumb-clicked(crumb.path);",
+        "root.workspace-sftp-viewport-changed(self.viewport-y, self.visible-height);",
+        "root.workspace-sftp-context-menu-requested(",
+        "root.local-action-requested(\"reconnect-sftp-workspace\");",
+    ] {
+        assert!(
+            source.contains(contract),
+            "SFTP workspace host should wire interactive contract `{contract}` instead of remaining a passive shell"
+        );
+    }
 }

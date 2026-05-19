@@ -14299,6 +14299,115 @@ fn transfer_center_attention_rows_can_open_linked_sftp_workspace() {
 }
 
 #[test]
+fn workspace_sftp_expand_navigation_and_reconnect_drive_real_directory_reads() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(DelayedReadRecordingSftpLauncher {
+            state: sftp_state.clone(),
+            read_delay_by_path: Arc::new(BTreeMap::new()),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    let terminal_tab_id = app.get_active_workspace_session_id().to_string();
+
+    app.invoke_open_sftp_panel_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_sftp_panel_mode().as_str() == "ready"
+    });
+
+    app.invoke_sftp_panel_expand_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "sftp"
+            && app.get_workspace_sftp_items().row_count() > 0
+    });
+
+    assert_eq!(app.get_workspace_session_title().as_str(), "Files: Prod Bastion");
+    assert_eq!(app.get_workspace_sftp_path().as_str(), "/srv/app");
+    assert_eq!(app.get_workspace_sftp_items().row_count(), 2);
+    assert_eq!(
+        app.get_workspace_sftp_items()
+            .row_data(0)
+            .expect("workspace parent row")
+            .name
+            .as_str(),
+        ".."
+    );
+    assert_eq!(
+        app.get_workspace_sftp_items()
+            .row_data(1)
+            .expect("workspace logs row")
+            .name
+            .as_str(),
+        "logs",
+        "expanded workspace should immediately reuse the quick-browser snapshot instead of showing an empty shell"
+    );
+
+    app.invoke_workspace_sftp_item_activated("entry-logs".into(), "directory".into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_sftp_path().as_str() == "/srv/app/logs"
+    });
+
+    app.invoke_workspace_sftp_up_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_sftp_path().as_str() == "/srv/app"
+    });
+
+    app.invoke_workspace_sftp_path_submitted("/srv/app/releases".into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_sftp_path().as_str() == "/srv/app/releases"
+    });
+
+    app.invoke_workspace_sftp_home_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_sftp_path().as_str() == "/srv/app"
+    });
+
+    app.invoke_workspace_tab_close_requested(terminal_tab_id.into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_state().as_str() == "disconnected"
+    });
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "sftp");
+
+    app.invoke_workspace_session_local_action_requested("reconnect-sftp-workspace".into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "sftp"
+            && app.get_workspace_session_state().as_str() == "ready"
+            && app.get_workspace_sftp_path().as_str() == "/srv/app"
+    });
+
+    assert_eq!(
+        sftp_state.take_read_dir_calls(),
+        vec![
+            "/srv/app".to_string(),
+            "/srv/app".to_string(),
+            "/srv/app/logs".to_string(),
+            "/srv/app".to_string(),
+            "/srv/app/releases".to_string(),
+            "/srv/app".to_string(),
+            "/srv/app".to_string(),
+        ],
+        "workspace SFTP should drive real background read_dir calls for expand, navigation, and reconnect instead of only mutating a local view-model shell"
+    );
+}
+
+#[test]
 fn transfer_center_remove_missing_download_only_clears_record() {
     let bootstrap_sftp =
         fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");

@@ -288,6 +288,13 @@ impl ShellViewModel {
         self.sftp_panel_render_cache.get(session_id)
     }
 
+    fn workspace_sftp_render_cache(&self) -> Option<&SftpPanelRenderCache> {
+        let session_id = self
+            .active_workspace_sftp_session()
+            .map(|session| session.file_browser_session_id.as_str())?;
+        self.sftp_panel_render_cache.get(session_id)
+    }
+
     fn update_sftp_panel_render_selection_cache(
         &mut self,
         file_browser_session_id: &str,
@@ -417,6 +424,24 @@ impl ShellViewModel {
             .unwrap_or(self.sftp_panel_last_rendered_session_id.is_some())
     }
 
+    pub fn workspace_sftp_render_rows(&self) -> &[SftpPanelRenderRow] {
+        self.workspace_sftp_render_cache()
+            .and_then(|cache| cache.rows.get(cache.window_start_row..cache.window_end_row))
+            .unwrap_or(&[])
+    }
+
+    pub fn workspace_sftp_render_dirty_indices(&self) -> &[usize] {
+        self.workspace_sftp_render_cache()
+            .map(|cache| cache.dirty_row_indices.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub fn workspace_sftp_render_requires_full_resync(&self) -> bool {
+        self.workspace_sftp_render_cache()
+            .map(|cache| cache.full_resync_required)
+            .unwrap_or(self.workspace_sftp_last_rendered_session_id.is_some())
+    }
+
     pub fn update_active_sftp_panel_viewport(
         &mut self,
         viewport_y: f32,
@@ -481,6 +506,67 @@ impl ShellViewModel {
         changed || self.active_sftp_panel_render_cache().is_some()
     }
 
+    pub fn update_workspace_sftp_viewport(&mut self, viewport_y: f32, visible_height: f32) -> bool {
+        let Some(session_id) = self
+            .active_workspace_sftp_session()
+            .map(|session| session.file_browser_session_id.clone())
+        else {
+            return false;
+        };
+        let Some(render_cache) = self.sftp_panel_render_cache.get_mut(session_id.as_str()) else {
+            return false;
+        };
+
+        let next_viewport_offset_px = normalized_sftp_panel_viewport_offset_px(viewport_y);
+        let next_viewport_height_px = normalized_sftp_panel_viewport_height_px(visible_height);
+        if render_cache.viewport_offset_px == next_viewport_offset_px
+            && render_cache.viewport_height_px == next_viewport_height_px
+        {
+            return false;
+        }
+
+        render_cache.viewport_offset_px = next_viewport_offset_px;
+        render_cache.viewport_height_px = next_viewport_height_px;
+        let window_changed = recompute_sftp_panel_virtual_window(render_cache);
+        if window_changed {
+            render_cache.full_resync_required = true;
+        }
+        window_changed
+    }
+
+    pub fn workspace_sftp_total_content_height_px(&self) -> f32 {
+        self.workspace_sftp_render_cache()
+            .map(|cache| cache.total_content_height_px as f32)
+            .unwrap_or(0.0)
+    }
+
+    pub fn workspace_sftp_top_spacer_height_px(&self) -> f32 {
+        self.workspace_sftp_render_cache()
+            .map(|cache| cache.top_spacer_height_px as f32)
+            .unwrap_or(0.0)
+    }
+
+    pub fn workspace_sftp_bottom_spacer_height_px(&self) -> f32 {
+        self.workspace_sftp_render_cache()
+            .map(|cache| cache.bottom_spacer_height_px as f32)
+            .unwrap_or(0.0)
+    }
+
+    pub fn mark_workspace_sftp_render_clean(&mut self) -> bool {
+        let active_session_id = self
+            .active_workspace_sftp_session()
+            .map(|session| session.file_browser_session_id.clone());
+        if let Some(session_id) = active_session_id.as_deref()
+            && let Some(render_cache) = self.sftp_panel_render_cache.get_mut(session_id)
+        {
+            render_cache.full_resync_required = false;
+            render_cache.dirty_row_indices.clear();
+        }
+        let changed = self.workspace_sftp_last_rendered_session_id != active_session_id;
+        self.workspace_sftp_last_rendered_session_id = active_session_id;
+        changed || self.workspace_sftp_render_cache().is_some()
+    }
+
     pub fn sftp_panel_host_label(&self) -> String {
         self.quick_browser_session()
             .map(|state| state.host_profile_ref.label.clone())
@@ -519,6 +605,121 @@ impl ShellViewModel {
 
     pub fn sftp_panel_actions_enabled(&self) -> bool {
         self.quick_browser_session()
+            .map(|state| {
+                matches!(
+                    state.mode,
+                    SftpPanelMode::Ready | SftpPanelMode::Loading | SftpPanelMode::Connecting
+                )
+            })
+            .unwrap_or(false)
+    }
+
+    pub fn active_sftp_linked_terminal_session_id(&self) -> Option<&str> {
+        self.active_workspace_sftp_session()
+            .and_then(|state| state.linked_terminal_session_id.as_deref())
+            .or_else(|| self.quick_browser_linked_terminal_session_id())
+    }
+
+    pub fn active_sftp_path(&self) -> String {
+        self.active_sftp_session_state()
+            .map(|state| state.current_path.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn workspace_sftp_host_label(&self) -> String {
+        self.active_workspace_sftp_session()
+            .map(|state| state.host_profile_ref.label.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn workspace_sftp_connection_label(&self) -> &'static str {
+        match self.active_workspace_sftp_session().map(|state| state.mode) {
+            Some(SftpPanelMode::Ready) => "Ready",
+            Some(SftpPanelMode::Loading) => "Loading",
+            Some(SftpPanelMode::Connecting) => "Connecting",
+            Some(SftpPanelMode::Disconnected) => "Disconnected",
+            Some(SftpPanelMode::Error) => "Error",
+            _ => "Idle",
+        }
+    }
+
+    pub fn workspace_sftp_binding_label(&self) -> &'static str {
+        match self.active_workspace_sftp_session().map(|state| state.follow_mode) {
+            Some(SftpFollowMode::FollowCwd) => "Follow / Linked",
+            Some(SftpFollowMode::ManualBrowse) => "Locked / Manual",
+            None => "",
+        }
+    }
+
+    pub fn workspace_sftp_path(&self) -> String {
+        self.active_workspace_sftp_session()
+            .map(|state| state.current_path.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn workspace_sftp_path_editing(&self) -> bool {
+        self.active_workspace_sftp_session().is_some() && self.workspace_sftp_path_editing
+    }
+
+    pub fn begin_workspace_sftp_path_edit(&mut self) -> bool {
+        if self.active_workspace_sftp_session().is_none() {
+            return false;
+        }
+        self.workspace_sftp_path_editing = true;
+        true
+    }
+
+    pub fn finish_workspace_sftp_path_edit(&mut self) -> bool {
+        if !self.workspace_sftp_path_editing {
+            return false;
+        }
+        self.workspace_sftp_path_editing = false;
+        true
+    }
+
+    pub fn workspace_sftp_selected_entry_ids(&self) -> &[String] {
+        self.active_workspace_sftp_session()
+            .map(|state| state.selected_entry_ids.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub fn workspace_sftp_can_go_back(&self) -> bool {
+        self.active_workspace_sftp_session()
+            .map(|state| state.history.can_back())
+            .unwrap_or(false)
+    }
+
+    pub fn workspace_sftp_can_go_forward(&self) -> bool {
+        self.active_workspace_sftp_session()
+            .map(|state| state.history.can_forward())
+            .unwrap_or(false)
+    }
+
+    pub fn workspace_sftp_can_go_up(&self) -> bool {
+        self.active_workspace_sftp_session()
+            .map(FileBrowserSession::can_navigate_up)
+            .unwrap_or(false)
+    }
+
+    pub fn workspace_sftp_can_go_home(&self) -> bool {
+        self.active_workspace_sftp_session()
+            .and_then(|state| {
+                state
+                    .history
+                    .entries()
+                    .first()
+                    .map(|path| path != &state.current_path)
+            })
+            .unwrap_or(false)
+    }
+
+    pub fn workspace_sftp_home_path(&self) -> Option<String> {
+        self.active_workspace_sftp_session()
+            .and_then(|state| state.history.entries().first().cloned())
+    }
+
+    pub fn workspace_sftp_actions_enabled(&self) -> bool {
+        self.active_workspace_sftp_session()
             .map(|state| {
                 matches!(
                     state.mode,
@@ -639,6 +840,31 @@ impl ShellViewModel {
         true
     }
 
+    pub fn set_active_sftp_sort_column(&mut self, column_id: &str) -> bool {
+        let Some(column) = FileBrowserSortColumn::from_id(column_id) else {
+            return false;
+        };
+        let next_sort_state = FileBrowserSortState {
+            column: Some(column),
+            direction: Some(FileBrowserSortDirection::Asc),
+        };
+
+        let Some(session_id) = self
+            .active_sftp_session_state()
+            .map(|state| state.file_browser_session_id.clone())
+        else {
+            return false;
+        };
+        let Some(state) = self.file_browser_sessions.get_mut(session_id.as_str()) else {
+            return false;
+        };
+        if state.sort_state == next_sort_state {
+            return false;
+        }
+        state.sort_state = next_sort_state;
+        self.refresh_sftp_panel_projection_cache(session_id.as_str())
+    }
+
     pub fn select_all_sftp_entries(&mut self) -> bool {
         let next_selection = self
             .active_sftp_session_state()
@@ -729,6 +955,12 @@ impl ShellViewModel {
             .unwrap_or(&[])
     }
 
+    pub fn active_sftp_selected_entry_ids(&self) -> &[String] {
+        self.active_sftp_session_state()
+            .map(|state| state.selected_entry_ids.as_slice())
+            .unwrap_or(&[])
+    }
+
     pub fn submit_sftp_panel_path(&mut self, path: impl Into<String>) -> bool {
         let path = path.into();
         let trimmed = path.trim();
@@ -746,6 +978,31 @@ impl ShellViewModel {
             return false;
         };
         self.quick_browser_state.path_editing = false;
+        let _ = self.refresh_sftp_panel_render_cache(session_id.as_str());
+        true
+    }
+
+    pub fn submit_workspace_sftp_path(&mut self, path: impl Into<String>) -> bool {
+        let path = path.into();
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+
+        let Some(session_id) = ({
+            let Some(state) = self.active_workspace_sftp_session().cloned() else {
+                return false;
+            };
+            let session_id = state.file_browser_session_id;
+            let Some(state) = self.file_browser_sessions.get_mut(session_id.as_str()) else {
+                return false;
+            };
+            state.navigate_manual(trimmed.to_string());
+            Some(session_id)
+        }) else {
+            return false;
+        };
+        self.workspace_sftp_path_editing = false;
         let _ = self.refresh_sftp_panel_render_cache(session_id.as_str());
         true
     }
@@ -795,6 +1052,94 @@ impl ShellViewModel {
             return false;
         };
         let _ = self.refresh_sftp_panel_render_cache(session_id.as_str());
+        true
+    }
+
+    pub fn navigate_workspace_sftp_back(&mut self) -> bool {
+        let Some(session_id) = ({
+            let Some(state) = self.active_workspace_sftp_session().cloned() else {
+                return false;
+            };
+            let session_id = state.file_browser_session_id;
+            let Some(state) = self.file_browser_sessions.get_mut(session_id.as_str()) else {
+                return false;
+            };
+            if !state.navigate_back() {
+                return false;
+            }
+            Some(session_id)
+        }) else {
+            return false;
+        };
+        let _ = self.refresh_sftp_panel_render_cache(session_id.as_str());
+        true
+    }
+
+    pub fn navigate_workspace_sftp_forward(&mut self) -> bool {
+        let Some(session_id) = ({
+            let Some(state) = self.active_workspace_sftp_session().cloned() else {
+                return false;
+            };
+            let session_id = state.file_browser_session_id;
+            let Some(state) = self.file_browser_sessions.get_mut(session_id.as_str()) else {
+                return false;
+            };
+            if !state.navigate_forward() {
+                return false;
+            }
+            Some(session_id)
+        }) else {
+            return false;
+        };
+        let _ = self.refresh_sftp_panel_render_cache(session_id.as_str());
+        true
+    }
+
+    pub fn navigate_workspace_sftp_up(&mut self) -> bool {
+        let Some(session_id) = ({
+            let Some(state) = self.active_workspace_sftp_session().cloned() else {
+                return false;
+            };
+            let session_id = state.file_browser_session_id;
+            let Some(state) = self.file_browser_sessions.get_mut(session_id.as_str()) else {
+                return false;
+            };
+            if !state.navigate_up() {
+                return false;
+            }
+            Some(session_id)
+        }) else {
+            return false;
+        };
+        let _ = self.refresh_sftp_panel_render_cache(session_id.as_str());
+        true
+    }
+
+    pub fn retry_workspace_sftp(&mut self) -> bool {
+        let Some(session_id) = self
+            .active_workspace_sftp_session()
+            .map(|state| state.file_browser_session_id.clone())
+        else {
+            return false;
+        };
+        let Some(state) = self.file_browser_sessions.get_mut(session_id.as_str()) else {
+            return false;
+        };
+        state.mark_connecting();
+        true
+    }
+
+    pub fn refresh_workspace_sftp(&mut self) -> bool {
+        let Some(session_id) = self
+            .active_workspace_sftp_session()
+            .map(|state| state.file_browser_session_id.clone())
+        else {
+            return false;
+        };
+        let Some(state) = self.file_browser_sessions.get_mut(session_id.as_str()) else {
+            return false;
+        };
+        state.mark_loading();
         true
     }
 
@@ -1080,6 +1425,7 @@ impl ShellViewModel {
         self.set_file_browser_session(workspace_session);
         self.workspace_tabs.push(tab);
         let _ = self.activate_workspace_tab(tab_id.as_str());
+        self.workspace_sftp_path_editing = false;
         Some(tab_id)
     }
 
@@ -1100,10 +1446,11 @@ impl ShellViewModel {
                 && self
                     .file_browser_sessions
                     .get(tab.file_browser_session_id.as_str())
-                    .and_then(|browser_session| {
+                    .is_some_and(|browser_session| {
                         browser_session.linked_terminal_session_id.as_deref()
+                            == Some(session_id.as_str())
+                            && browser_session.current_path == remote_dir
                     })
-                    == Some(session_id.as_str())
         }) {
             let browser_session_id = existing_tab.file_browser_session_id.clone();
             let tab_id = existing_tab.tab_id.clone();
@@ -1114,6 +1461,7 @@ impl ShellViewModel {
             }
             let _ = self.refresh_sftp_panel_projection_cache(browser_session_id.as_str());
             let _ = self.activate_workspace_tab(tab_id.as_str());
+            self.workspace_sftp_path_editing = false;
             if !self.transfer_center_pinned {
                 self.transfer_center_open = false;
             }
@@ -1143,6 +1491,7 @@ impl ShellViewModel {
         self.set_file_browser_session(workspace_session);
         self.workspace_tabs.push(tab);
         let _ = self.activate_workspace_tab(tab_id.as_str());
+        self.workspace_sftp_path_editing = false;
         if !self.transfer_center_pinned {
             self.transfer_center_open = false;
         }
@@ -1169,6 +1518,7 @@ impl ShellViewModel {
             .file_browser_sessions
             .get_mut(&file_browser_session_id)?;
         browser_session.mark_connecting();
+        self.workspace_sftp_path_editing = false;
         let linked_terminal_session_id = browser_session.linked_terminal_session_id.clone();
         if let Some(tab) = self
             .workspace_tabs

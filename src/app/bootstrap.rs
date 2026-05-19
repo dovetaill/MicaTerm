@@ -4289,6 +4289,8 @@ fn sync_workspace_session_state_with_manager(
         window.set_workspace_session_error_detail("".into());
         window.set_workspace_session_can_reconnect(false);
     }
+
+    sftp::sync_workspace_sftp_state(window, state);
 }
 
 pub(super) fn sync_workspace_terminal_runtime_defaults(

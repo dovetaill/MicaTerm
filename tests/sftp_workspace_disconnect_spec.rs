@@ -2,6 +2,7 @@ use std::future::Future;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::pin::Pin;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -170,6 +171,12 @@ struct SessionCwdLauncher {
     cwd_by_host: Arc<Vec<(String, String)>>,
 }
 
+#[derive(Clone)]
+struct RetryStallsAfterFirstLaunchLauncher {
+    cwd_by_host: Arc<Vec<(String, String)>>,
+    launch_count: Arc<AtomicUsize>,
+}
+
 struct SessionCwdRuntimeControl {
     runtime: SftpRuntimeHandle,
 }
@@ -196,6 +203,49 @@ impl SessionRuntimeLauncher for SessionCwdLauncher {
                 runtime: SftpRuntimeHandle::new(Arc::new(NoopSftpBackend)),
             }) as Box<dyn SessionRuntimeControl>)
         })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SessionRuntimeLauncher for RetryStallsAfterFirstLaunchLauncher {
+    fn launch(
+        &self,
+        profile: ConnectionProfile,
+        _session_id: Uuid,
+        _attempt_id: Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let cwd = self
+            .cwd_by_host
+            .iter()
+            .find(|(host, _)| host == &profile.host)
+            .map(|(_, cwd)| cwd.clone())
+            .unwrap_or_else(|| "/".to_string());
+        let launch_index = self.launch_count.fetch_add(1, Ordering::SeqCst);
+        if launch_index == 0 {
+            Box::pin(async move {
+                let _ = event_tx.send(SessionRuntimeEvent::Connected);
+                let _ = event_tx.send(SessionRuntimeEvent::CurrentDirectoryChanged(cwd));
+                Ok(Box::new(SessionCwdRuntimeControl {
+                    runtime: SftpRuntimeHandle::new(Arc::new(NoopSftpBackend)),
+                }) as Box<dyn SessionRuntimeControl>)
+            })
+        } else {
+            Box::pin(async move {
+                std::future::pending::<()>().await;
+                #[allow(unreachable_code)]
+                Ok(Box::new(SessionCwdRuntimeControl {
+                    runtime: SftpRuntimeHandle::new(Arc::new(NoopSftpBackend)),
+                }) as Box<dyn SessionRuntimeControl>)
+            })
+        }
     }
 
     fn probe(
@@ -329,5 +379,48 @@ fn closing_the_source_terminal_keeps_the_sftp_workspace_tab_and_reconnects_witho
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
     assert_eq!(app.get_workspace_session_host_mode().as_str(), "sftp");
     assert_eq!(app.get_workspace_session_state().as_str(), "connecting");
+    assert!(!app.get_workspace_session_can_reconnect());
+}
+
+#[test]
+fn reconnecting_workspace_stays_connecting_while_the_ssh_retry_is_still_in_progress() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RetryStallsAfterFirstLaunchLauncher {
+            cwd_by_host: Arc::new(vec![("10.0.0.12".into(), "/srv/app".into())]),
+            launch_count: Arc::new(AtomicUsize::new(0)),
+        }),
+        Arc::new(MemoryCredentialStore::default()),
+    );
+
+    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    let prod_asset = find_console_asset_id(&app, "Prod Bastion");
+    app.invoke_asset_activated(prod_asset.into());
+    flush_runtime_projection();
+    let prod_session_id = app.get_active_workspace_session_id().to_string();
+
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+    app.invoke_sftp_panel_expand_requested();
+    flush_runtime_projection();
+
+    app.invoke_workspace_tab_close_requested(prod_session_id.into());
+    flush_runtime_projection();
+
+    assert_eq!(app.get_workspace_session_state().as_str(), "disconnected");
+
+    app.invoke_workspace_session_local_action_requested("reconnect-sftp-workspace".into());
+    flush_runtime_projection();
+    flush_runtime_projection();
+
+    assert_eq!(
+        app.get_workspace_session_state().as_str(),
+        "connecting",
+        "while the retried SSH session is still pending, the workspace SFTP tab should keep its reconnecting state instead of snapping back to disconnected"
+    );
     assert!(!app.get_workspace_session_can_reconnect());
 }

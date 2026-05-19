@@ -148,13 +148,13 @@ impl FileBrowserSession {
             host_profile_ref: self.host_profile_ref.clone(),
             linked_terminal_session_id: self.linked_terminal_session_id.clone(),
             mode: self.mode,
-            follow_mode: self.follow_mode,
+            follow_mode: SftpFollowMode::ManualBrowse,
             current_path: self.current_path.clone(),
             history: self.history.clone(),
             entries: self.entries.clone(),
             selected_entry_ids: Vec::new(),
             last_error: self.last_error.clone(),
-            active_request_id: self.active_request_id,
+            active_request_id: None,
             sort_state: self.sort_state,
             column_layout: self.column_layout,
         }
@@ -166,6 +166,7 @@ impl FileBrowserSession {
 
     pub fn mark_connecting(&mut self) {
         self.mode = SftpPanelMode::Connecting;
+        self.last_error = None;
     }
 
     pub fn mark_loading(&mut self) {

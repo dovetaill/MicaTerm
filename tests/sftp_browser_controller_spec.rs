@@ -257,8 +257,9 @@ fn back_forward_and_up_navigation_issue_real_load_requests() {
 #[test]
 fn load_requests_can_route_by_file_browser_session_id() {
     let mut controller = SftpBrowserController::default();
-    let browser_session =
+    let mut browser_session =
         FileBrowserSession::quick_browser(HostProfileRef::new("asset-prod"), "/srv/app");
+    browser_session.attach_terminal_session_id(Uuid::new_v4().to_string());
     let browser_session_id = browser_session.file_browser_session_id.clone();
 
     let request = controller.open_file_browser_session(browser_session.clone());
@@ -278,6 +279,147 @@ fn load_requests_can_route_by_file_browser_session_id() {
         .browser_session_state(browser_session_id.as_str())
         .expect("browser session state should remain available");
     assert_eq!(state.current_path, "/srv/app");
+}
+
+#[test]
+fn opening_a_workspace_browser_session_keeps_the_existing_snapshot_visible_while_refreshing() {
+    let mut controller = SftpBrowserController::default();
+    let mut browser_session =
+        FileBrowserSession::quick_browser(HostProfileRef::new("asset-prod"), "/srv/app");
+    browser_session.follow_mode = SftpFollowMode::ManualBrowse;
+    browser_session.attach_terminal_session_id(Uuid::new_v4().to_string());
+    browser_session.entries = vec![entry(
+        "entry-logs",
+        "logs",
+        "/srv/app/logs",
+        SftpDirectoryEntryKind::Directory,
+    )];
+    let browser_session_id = browser_session.file_browser_session_id.clone();
+
+    let request = controller.open_file_browser_session(browser_session);
+
+    let state = controller
+        .browser_session_state(browser_session_id.as_str())
+        .expect("workspace browser state should exist after open");
+    assert_eq!(request.file_browser_session_id, browser_session_id);
+    assert_eq!(state.current_path, "/srv/app");
+    assert_eq!(state.mode, SftpPanelMode::Loading);
+    assert_eq!(
+        state
+            .entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["logs"],
+        "promoted workspace sessions should keep the cloned quick-browser snapshot on screen while a refresh is in flight"
+    );
+}
+
+#[test]
+fn stale_workspace_browser_results_do_not_overwrite_newer_browser_session_requests() {
+    let mut controller = SftpBrowserController::default();
+    let terminal_session_id = Uuid::new_v4();
+    let mut browser_session =
+        FileBrowserSession::quick_browser(HostProfileRef::new("asset-prod"), "/srv/app");
+    browser_session.follow_mode = SftpFollowMode::ManualBrowse;
+    browser_session.attach_terminal_session_id(terminal_session_id.to_string());
+    let browser_session_id = browser_session.file_browser_session_id.clone();
+
+    let first = controller.open_file_browser_session(browser_session);
+    let second = controller
+        .navigate_browser_session(
+            browser_session_id.as_str(),
+            terminal_session_id,
+            "/srv/app/releases",
+        )
+        .expect("workspace browser navigation should be routed by browser session id");
+
+    controller.apply_loaded_directory_for_browser_session(
+        browser_session_id.as_str(),
+        second.generation,
+        second.request_id,
+        "/srv/app/releases",
+        vec![entry(
+            "entry-release",
+            "release.tar.gz",
+            "/srv/app/releases/release.tar.gz",
+            SftpDirectoryEntryKind::File,
+        )],
+    );
+    controller.apply_loaded_directory_for_browser_session(
+        browser_session_id.as_str(),
+        first.generation,
+        first.request_id,
+        "/srv/app",
+        vec![entry(
+            "entry-stale",
+            "stale.log",
+            "/srv/app/stale.log",
+            SftpDirectoryEntryKind::File,
+        )],
+    );
+
+    let state = controller
+        .browser_session_state(browser_session_id.as_str())
+        .expect("workspace browser session state should remain available");
+    assert_eq!(state.mode, SftpPanelMode::Ready);
+    assert_eq!(state.current_path, "/srv/app/releases");
+    assert_eq!(state.entries.len(), 1);
+    assert_eq!(state.entries[0].path, "/srv/app/releases/release.tar.gz");
+}
+
+#[test]
+fn stale_workspace_disconnects_do_not_cancel_newer_browser_session_requests() {
+    let mut controller = SftpBrowserController::default();
+    let terminal_session_id = Uuid::new_v4();
+    let mut browser_session =
+        FileBrowserSession::quick_browser(HostProfileRef::new("asset-prod"), "/srv/app");
+    browser_session.follow_mode = SftpFollowMode::ManualBrowse;
+    browser_session.attach_terminal_session_id(terminal_session_id.to_string());
+    let browser_session_id = browser_session.file_browser_session_id.clone();
+
+    let first = controller.open_file_browser_session(browser_session);
+    let second = controller
+        .navigate_browser_session(
+            browser_session_id.as_str(),
+            terminal_session_id,
+            "/srv/app/releases",
+        )
+        .expect("workspace browser navigation should issue a newer request");
+
+    controller.apply_disconnected_for_browser_session(
+        browser_session_id.as_str(),
+        first.generation,
+        first.request_id,
+    );
+    controller.apply_loaded_directory_for_browser_session(
+        browser_session_id.as_str(),
+        second.generation,
+        second.request_id,
+        "/srv/app/releases",
+        vec![entry(
+            "entry-release",
+            "release.tar.gz",
+            "/srv/app/releases/release.tar.gz",
+            SftpDirectoryEntryKind::File,
+        )],
+    );
+
+    let state = controller
+        .browser_session_state(browser_session_id.as_str())
+        .expect("workspace browser session state should remain available");
+    assert_eq!(
+        first.path, "/srv/app",
+        "sanity-check the original request path before asserting the stale disconnect behavior"
+    );
+    assert_eq!(
+        state.mode,
+        SftpPanelMode::Ready,
+        "a stale disconnect should not clear the newer request identity or block the in-flight refresh from completing"
+    );
+    assert_eq!(state.current_path, "/srv/app/releases");
+    assert_eq!(state.entries.len(), 1);
+    assert_eq!(state.entries[0].path, "/srv/app/releases/release.tar.gz");
 }
 
 #[test]

@@ -1,212 +1,133 @@
+import { ScrollView } from "std-widgets.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 import { AppTypography } from "../theme/typography.slint";
+import { SftpPanelItem } from "./right-panel.slint";
+
+export struct SftpBreadcrumbItem {
+    label: string,
+    path: string,
+    active: bool,
+}
+
+component WorkspaceToolbarButton inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> enabled: true;
+    callback clicked();
+
+    width: 72px;
+    height: 30px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: root.enabled ? ThemeTokens.input-border : ThemeTokens.divider-subtle;
+    background: button-touch.pressed
+        ? ThemeTokens.control-active-surface
+        : button-touch.has-hover && root.enabled
+            ? ThemeTokens.control-hover-surface
+            : ThemeTokens.workspace-surface;
+    opacity: root.enabled ? 1 : 0.55;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        font-family: AppTypography.ui-font-family;
+        font-size: AppTypography.ui-font-size-caption;
+        font-weight: AppTypography.ui-font-weight-semibold;
+        color: ThemeTokens.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    button-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.enabled;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+}
 
 export component SftpWorkspaceHost inherits Rectangle {
     in property <string> session-title: "";
     in property <string> session-subtitle: "";
     in property <string> session-state: "";
+    in property <string> session-error-detail: "";
+    in property <string> workspace-sftp-host-label: "";
+    in property <string> workspace-sftp-connection-label: "";
+    in property <string> workspace-sftp-binding-label: "";
+    in property <string> workspace-sftp-path: "";
+    in property <bool> workspace-sftp-path-editing: false;
+    in property <bool> workspace-sftp-can-go-back: false;
+    in property <bool> workspace-sftp-can-go-forward: false;
+    in property <bool> workspace-sftp-can-go-up: false;
+    in property <bool> workspace-sftp-can-go-home: false;
+    in property <bool> workspace-sftp-actions-enabled: false;
+    in property <length> workspace-sftp-total-content-height: 0px;
+    in property <length> workspace-sftp-top-spacer-height: 0px;
+    in property <length> workspace-sftp-bottom-spacer-height: 0px;
+    in property <[SftpPanelItem]> workspace-sftp-items: [];
+    in property <[string]> workspace-sftp-selected-entry-ids: [];
+    in property <[SftpBreadcrumbItem]> workspace-sftp-breadcrumb-items: [];
+    callback workspace-sftp-back-requested();
+    callback workspace-sftp-forward-requested();
+    callback workspace-sftp-up-requested();
+    callback workspace-sftp-home-requested();
+    callback workspace-sftp-refresh-requested();
+    callback workspace-sftp-path-edit-requested();
+    callback workspace-sftp-path-submitted(string);
+    callback workspace-sftp-breadcrumb-clicked(string);
+    callback workspace-sftp-viewport-changed(length, length);
+    callback workspace-sftp-item-selected(string);
+    callback workspace-sftp-item-activated(string, string);
+    callback workspace-sftp-context-menu-requested(string, string, length, length);
+    callback workspace-sftp-upload-requested();
+    callback workspace-sftp-new-folder-requested();
+    callback workspace-sftp-retry-requested();
     callback local-action-requested(string);
+
+    private property <length> list-viewport-y: 0px;
+    private property <length> list-visible-height: 0px;
+    private property <string> state-copy: root.session-state == "connecting"
+        ? "Connecting SFTP runtime..."
+        : root.session-state == "loading"
+            ? "Refreshing remote directory in the background..."
+            : root.session-state == "disconnected"
+                ? "The linked SSH/SFTP transport is offline. Reconnect to resume browsing."
+                : root.session-state == "error"
+                    ? (root.session-error-detail == "" ? "The last SFTP refresh failed." : root.session-error-detail)
+                    : root.workspace-sftp-items.length == 0
+                        ? "This directory is empty."
+                        : "";
 
     width: 100%;
     height: 100%;
     background: ThemeTokens.workspace-surface;
 
-    toolbar-card := Rectangle {
-        x: 16px;
-        y: 16px;
-        width: parent.width - 32px;
-        height: 72px;
-        border-radius: 12px;
-        border-width: 1px;
-        border-color: ThemeTokens.divider-subtle;
-        background: ThemeTokens.tabbar-surface;
+    VerticalLayout {
+        width: parent.width;
+        height: parent.height;
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 16px;
+        padding-bottom: 16px;
+        spacing: 12px;
 
-        eyebrow := Text {
-            x: 16px;
-            y: 14px;
-            width: parent.width - 160px;
-            height: 16px;
-            text: "Files workspace";
-            font-family: AppTypography.ui-font-family;
-            font-size: AppTypography.ui-font-size-caption;
-            font-weight: AppTypography.ui-font-weight-semibold;
-            color: ThemeTokens.text-secondary;
-            vertical-alignment: center;
-        }
-
-        title := Text {
-            x: 16px;
-            y: 30px;
-            width: parent.width - 180px;
-            height: 24px;
-            text: root.session-title;
-            font-family: AppTypography.ui-font-family;
-            font-size: AppTypography.ui-font-size-body;
-            font-weight: AppTypography.ui-font-weight-semibold;
-            color: ThemeTokens.text-primary;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-
-        subtitle := Text {
-            x: 16px;
-            y: 52px;
-            width: parent.width - 180px;
-            height: 14px;
-            text: root.session-subtitle;
-            font-family: AppTypography.ui-font-family;
-            font-size: AppTypography.ui-font-size-caption;
-            font-weight: AppTypography.ui-font-weight-regular;
-            color: ThemeTokens.text-secondary;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-
-        open-quick-browser := Rectangle {
-            x: parent.width - self.width - 16px;
-            y: 20px;
-            width: 148px;
-            height: 32px;
-            border-radius: 16px;
-            border-width: 1px;
-            border-color: ThemeTokens.input-border;
-            background: ThemeTokens.workspace-surface;
-
-            Text {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                height: parent.height;
-                text: "Open a Quick Browser";
-                font-family: AppTypography.ui-font-family;
-                font-size: AppTypography.ui-font-size-caption;
-                font-weight: AppTypography.ui-font-weight-semibold;
-                color: ThemeTokens.text-primary;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
-
-        if root.session-state == "disconnected" || root.session-state == "error" : reconnect-button := Rectangle {
-            x: open-quick-browser.x - self.width - 8px;
-            y: 20px;
-            width: 96px;
-            height: 32px;
-            border-radius: 16px;
-            border-width: 1px;
-            border-color: ThemeTokens.input-border;
-            background: ThemeTokens.workspace-surface;
-
-            Text {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                height: parent.height;
-                text: "Reconnect";
-                font-family: AppTypography.ui-font-family;
-                font-size: AppTypography.ui-font-size-caption;
-                font-weight: AppTypography.ui-font-weight-semibold;
-                color: ThemeTokens.text-primary;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-
-            TouchArea {
-                width: parent.width;
-                height: parent.height;
-
-                clicked => {
-                    root.local-action-requested("reconnect-sftp-workspace");
-                }
-            }
-        }
-    }
-
-    table-card := Rectangle {
-        x: 16px;
-        y: toolbar-card.y + toolbar-card.height + 16px;
-        width: parent.width - 32px;
-        height: max(0px, parent.height - self.y - 16px);
-        border-radius: 12px;
-        border-width: 1px;
-        border-color: ThemeTokens.divider-subtle;
-        background: ThemeTokens.workspace-surface;
-
-        header-row := Rectangle {
-            x: 0px;
-            y: 0px;
+        header-card := Rectangle {
             width: parent.width;
-            height: 38px;
-            background: ThemeTokens.tabbar-surface;
-
-            Text {
-                x: 16px;
-                y: 0px;
-                width: 220px;
-                height: parent.height;
-                text: "Name";
-                font-family: AppTypography.ui-font-family;
-                font-size: AppTypography.ui-font-size-caption;
-                font-weight: AppTypography.ui-font-weight-semibold;
-                color: ThemeTokens.text-secondary;
-                vertical-alignment: center;
-            }
-
-            Text {
-                x: 252px;
-                y: 0px;
-                width: 120px;
-                height: parent.height;
-                text: "Type";
-                font-family: AppTypography.ui-font-family;
-                font-size: AppTypography.ui-font-size-caption;
-                font-weight: AppTypography.ui-font-weight-semibold;
-                color: ThemeTokens.text-secondary;
-                vertical-alignment: center;
-            }
-
-            Text {
-                x: parent.width - 220px;
-                y: 0px;
-                width: 100px;
-                height: parent.height;
-                text: "Modified";
-                font-family: AppTypography.ui-font-family;
-                font-size: AppTypography.ui-font-size-caption;
-                font-weight: AppTypography.ui-font-weight-semibold;
-                color: ThemeTokens.text-secondary;
-                vertical-alignment: center;
-            }
-
-            Text {
-                x: parent.width - 96px;
-                y: 0px;
-                width: 72px;
-                height: parent.height;
-                text: "Size";
-                font-family: AppTypography.ui-font-family;
-                font-size: AppTypography.ui-font-size-caption;
-                font-weight: AppTypography.ui-font-weight-semibold;
-                color: ThemeTokens.text-secondary;
-                horizontal-alignment: right;
-                vertical-alignment: center;
-            }
-        }
-
-        empty-state := Rectangle {
-            x: 24px;
-            y: 62px;
-            width: parent.width - 48px;
-            height: 120px;
+            height: 70px;
             border-radius: 12px;
             border-width: 1px;
             border-color: ThemeTokens.divider-subtle;
             background: ThemeTokens.tabbar-surface;
 
             Text {
-                x: 20px;
-                y: 20px;
-                width: parent.width - 40px;
+                x: 16px;
+                y: 12px;
+                width: parent.width - 220px;
                 height: 22px;
                 text: root.session-title == "" ? "Files workspace" : root.session-title;
                 font-family: AppTypography.ui-font-family;
@@ -218,16 +139,534 @@ export component SftpWorkspaceHost inherits Rectangle {
             }
 
             Text {
-                x: 20px;
-                y: 50px;
-                width: parent.width - 40px;
-                height: 20px;
-                text: "Expand a Quick Browser session to bring file work into the main workspace.";
+                x: 16px;
+                y: 38px;
+                width: parent.width - 220px;
+                height: 18px;
+                text: root.workspace-sftp-host-label == ""
+                    ? root.session-subtitle
+                    : root.workspace-sftp-host-label + "  ·  " + root.workspace-sftp-binding-label;
                 font-family: AppTypography.ui-font-family;
                 font-size: AppTypography.ui-font-size-caption;
                 font-weight: AppTypography.ui-font-weight-regular;
                 color: ThemeTokens.text-secondary;
-                wrap: word-wrap;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            Rectangle {
+                x: parent.width - 176px;
+                y: 16px;
+                width: 160px;
+                height: 28px;
+                border-radius: 14px;
+                border-width: 1px;
+                border-color: ThemeTokens.input-border;
+                background: ThemeTokens.workspace-surface;
+
+                Text {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    text: root.workspace-sftp-connection-label == ""
+                        ? root.session-state
+                        : root.workspace-sftp-connection-label;
+                    font-family: AppTypography.ui-font-family;
+                    font-size: AppTypography.ui-font-size-caption;
+                    font-weight: AppTypography.ui-font-weight-semibold;
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+
+            if root.session-state == "disconnected" || root.session-state == "error" : reconnect-button := WorkspaceToolbarButton {
+                x: parent.width - self.width - 16px;
+                y: 46px - self.height / 2;
+                width: 112px;
+                label: "Reconnect";
+
+                clicked => {
+                    root.local-action-requested("reconnect-sftp-workspace");
+                }
+            }
+        }
+
+        toolbar-row := HorizontalLayout {
+            width: parent.width;
+            spacing: 8px;
+
+            WorkspaceToolbarButton {
+                label: "Back";
+                enabled: root.workspace-sftp-can-go-back;
+                clicked => {
+                    root.workspace-sftp-back-requested();
+                }
+            }
+
+            WorkspaceToolbarButton {
+                label: "Forward";
+                enabled: root.workspace-sftp-can-go-forward;
+                clicked => {
+                    root.workspace-sftp-forward-requested();
+                }
+            }
+
+            WorkspaceToolbarButton {
+                label: "Up";
+                enabled: root.workspace-sftp-can-go-up;
+                clicked => {
+                    root.workspace-sftp-up-requested();
+                }
+            }
+
+            WorkspaceToolbarButton {
+                label: "Home";
+                enabled: root.workspace-sftp-can-go-home;
+                clicked => {
+                    root.workspace-sftp-home-requested();
+                }
+            }
+
+            WorkspaceToolbarButton {
+                label: "Refresh";
+                enabled: root.workspace-sftp-actions-enabled;
+                clicked => {
+                    root.workspace-sftp-refresh-requested();
+                }
+            }
+
+            WorkspaceToolbarButton {
+                label: "Upload";
+                enabled: root.workspace-sftp-actions-enabled;
+                clicked => {
+                    root.workspace-sftp-upload-requested();
+                }
+            }
+
+            WorkspaceToolbarButton {
+                label: "New Folder";
+                enabled: root.workspace-sftp-actions-enabled;
+                clicked => {
+                    root.workspace-sftp-new-folder-requested();
+                }
+            }
+        }
+
+        path-card := Rectangle {
+            width: parent.width;
+            height: 38px;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: ThemeTokens.input-border;
+            background: ThemeTokens.input-surface;
+
+            if root.workspace-sftp-path-editing : path-input := TextInput {
+                x: 12px;
+                y: 0px;
+                width: parent.width - 24px;
+                height: parent.height;
+                single-line: true;
+                text: root.workspace-sftp-path;
+                enabled: root.workspace-sftp-actions-enabled;
+                font-family: AppTypography.ui-font-family;
+                font-size: AppTypography.ui-font-size-caption;
+                font-weight: AppTypography.ui-font-weight-regular;
+                color: ThemeTokens.text-primary;
+                selection-background-color: ThemeTokens.accent;
+                selection-foreground-color: ThemeTokens.text-primary;
+                vertical-alignment: center;
+
+                key-pressed(event) => {
+                    if (event.text == Key.Return) {
+                        root.workspace-sftp-path-submitted(self.text);
+                        accept
+                    } else if (event.text == Key.Escape) {
+                        root.workspace-sftp-path-submitted(root.workspace-sftp-path);
+                        accept
+                    } else {
+                        reject
+                    }
+                }
+            }
+
+            if !root.workspace-sftp-path-editing : breadcrumb-shell := Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                background: transparent;
+
+                breadcrumb-row := HorizontalLayout {
+                    x: 12px;
+                    y: 0px;
+                    width: parent.width - 24px;
+                    height: parent.height;
+                    spacing: 6px;
+
+                    for crumb[index] in root.workspace-sftp-breadcrumb-items : Rectangle {
+                        width: max(16px, crumb-label.preferred-width + 8px);
+                        height: parent.height;
+                        background: transparent;
+
+                        if index > 0 : Text {
+                            x: -6px;
+                            y: 0px;
+                            width: 8px;
+                            height: parent.height;
+                            text: "/";
+                            font-family: AppTypography.ui-font-family;
+                            font-size: AppTypography.ui-font-size-caption;
+                            color: ThemeTokens.text-secondary;
+                            vertical-alignment: center;
+                        }
+
+                        crumb-label := Text {
+                            x: 0px;
+                            y: 0px;
+                            width: parent.width;
+                            height: parent.height;
+                            text: crumb.label;
+                            font-family: AppTypography.ui-font-family;
+                            font-size: AppTypography.ui-font-size-caption;
+                            font-weight: crumb.active
+                                ? AppTypography.ui-font-weight-semibold
+                                : AppTypography.ui-font-weight-regular;
+                            color: crumb.active ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+
+                        TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+                            enabled: root.workspace-sftp-actions-enabled;
+
+                            clicked => {
+                                root.workspace-sftp-breadcrumb-clicked(crumb.path);
+                            }
+                        }
+                    }
+                }
+
+                edit-path-touch := TouchArea {
+                    x: parent.width - 28px;
+                    y: 0px;
+                    width: 28px;
+                    height: parent.height;
+                    enabled: root.workspace-sftp-actions-enabled;
+
+                    clicked => {
+                        root.workspace-sftp-path-edit-requested();
+                    }
+                }
+
+                Text {
+                    x: edit-path-touch.x;
+                    y: 0px;
+                    width: edit-path-touch.width;
+                    height: parent.height;
+                    text: "Edit";
+                    font-family: AppTypography.ui-font-family;
+                    font-size: AppTypography.ui-font-size-caption;
+                    color: ThemeTokens.text-secondary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        table-card := Rectangle {
+            width: parent.width;
+            vertical-stretch: 1;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: ThemeTokens.divider-subtle;
+            background: ThemeTokens.workspace-surface;
+            clip: true;
+
+            header-row := Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: 38px;
+                background: ThemeTokens.tabbar-surface;
+
+                Text {
+                    x: 16px;
+                    y: 0px;
+                    width: max(180px, parent.width - 440px);
+                    height: parent.height;
+                    text: "Name";
+                    font-family: AppTypography.ui-font-family;
+                    font-size: AppTypography.ui-font-size-caption;
+                    font-weight: AppTypography.ui-font-weight-semibold;
+                    color: ThemeTokens.text-secondary;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    x: max(208px, parent.width - 416px);
+                    y: 0px;
+                    width: 108px;
+                    height: parent.height;
+                    text: "Type";
+                    font-family: AppTypography.ui-font-family;
+                    font-size: AppTypography.ui-font-size-caption;
+                    font-weight: AppTypography.ui-font-weight-semibold;
+                    color: ThemeTokens.text-secondary;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    x: parent.width - 208px;
+                    y: 0px;
+                    width: 128px;
+                    height: parent.height;
+                    text: "Modified";
+                    font-family: AppTypography.ui-font-family;
+                    font-size: AppTypography.ui-font-size-caption;
+                    font-weight: AppTypography.ui-font-weight-semibold;
+                    color: ThemeTokens.text-secondary;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    x: parent.width - 76px;
+                    y: 0px;
+                    width: 56px;
+                    height: parent.height;
+                    text: "Size";
+                    font-family: AppTypography.ui-font-family;
+                    font-size: AppTypography.ui-font-size-caption;
+                    font-weight: AppTypography.ui-font-weight-semibold;
+                    color: ThemeTokens.text-secondary;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+            }
+
+            if root.state-copy != "" : status-banner := Rectangle {
+                x: 0px;
+                y: 38px;
+                width: parent.width;
+                height: 34px;
+                background: ThemeTokens.control-hover-surface;
+
+                Text {
+                    x: 16px;
+                    y: 0px;
+                    width: parent.width - 120px;
+                    height: parent.height;
+                    text: root.state-copy;
+                    font-family: AppTypography.ui-font-family;
+                    font-size: AppTypography.ui-font-size-caption;
+                    font-weight: AppTypography.ui-font-weight-regular;
+                    color: ThemeTokens.text-secondary;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                if root.session-state == "error" || root.session-state == "disconnected" : retry-button := WorkspaceToolbarButton {
+                    x: parent.width - self.width - 12px;
+                    y: 2px;
+                    width: 84px;
+                    label: root.session-state == "disconnected" ? "Reconnect" : "Retry";
+
+                    clicked => {
+                        if root.session-state == "disconnected" {
+                            root.local-action-requested("reconnect-sftp-workspace");
+                        } else {
+                            root.workspace-sftp-retry-requested();
+                        }
+                    }
+                }
+            }
+
+            list-host := ScrollView {
+                x: 0px;
+                y: 38px + (root.state-copy != "" ? 34px : 0px);
+                width: parent.width;
+                height: parent.height - self.y;
+                viewport-width: scroll-body.width;
+                viewport-height: scroll-body.height;
+                viewport-y <=> root.list-viewport-y;
+                mouse-drag-pan-enabled: false;
+
+                init => {
+                    root.list-visible-height = self.visible-height;
+                    root.workspace-sftp-viewport-changed(self.viewport-y, self.visible-height);
+                }
+
+                changed viewport-y => {
+                    root.workspace-sftp-viewport-changed(self.viewport-y, self.visible-height);
+                }
+
+                changed visible-height => {
+                    root.list-visible-height = self.visible-height;
+                    root.workspace-sftp-viewport-changed(self.viewport-y, self.visible-height);
+                }
+
+                scrolled => {
+                    root.workspace-sftp-viewport-changed(self.viewport-y, self.visible-height);
+                }
+
+                scroll-body := Rectangle {
+                    width: list-host.visible-width;
+                    height: max(list-host.visible-height, root.workspace-sftp-total-content-height);
+                    background: transparent;
+
+                    blank-area-touch := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+
+                        pointer-event(event) => {
+                            if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                                root.workspace-sftp-context-menu-requested(
+                                    "",
+                                    "sftp-blank",
+                                    self.mouse-x + self.absolute-position.x,
+                                    self.mouse-y + self.absolute-position.y,
+                                );
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width;
+                        height: root.workspace-sftp-top-spacer-height;
+                        background: transparent;
+                    }
+
+                    visible-row-host := VerticalLayout {
+                        x: 0px;
+                        y: root.workspace-sftp-top-spacer-height;
+                        width: parent.width;
+                        spacing: 0px;
+
+                        for item in root.workspace-sftp-items : Rectangle {
+                            width: parent.width;
+                            height: 44px;
+                            background: item.selected
+                                ? ThemeTokens.sidebar-item-selected-background
+                                : row-touch.has-hover
+                                    ? ThemeTokens.sidebar-item-hover-background
+                                    : transparent;
+
+                            Rectangle {
+                                x: 0px;
+                                y: 8px;
+                                width: 2px;
+                                height: parent.height - 16px;
+                                border-radius: 1px;
+                                background: ThemeTokens.sidebar-item-selected-border;
+                                opacity: item.selected ? 1 : 0;
+                            }
+
+                            Rectangle {
+                                x: 16px;
+                                y: parent.height - 1px;
+                                width: parent.width - 32px;
+                                height: 1px;
+                                background: ThemeTokens.separator;
+                            }
+
+                            Text {
+                                x: 16px;
+                                y: 0px;
+                                width: max(180px, parent.width - 440px);
+                                height: parent.height;
+                                text: item.name;
+                                font-family: AppTypography.ui-font-family;
+                                font-size: AppTypography.ui-font-size-caption;
+                                font-weight: item.selected
+                                    ? AppTypography.ui-font-weight-semibold
+                                    : AppTypography.ui-font-weight-regular;
+                                color: ThemeTokens.text-primary;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                x: max(208px, parent.width - 416px);
+                                y: 0px;
+                                width: 108px;
+                                height: parent.height;
+                                text: item.type_label;
+                                font-family: AppTypography.ui-font-family;
+                                font-size: AppTypography.ui-font-size-caption;
+                                color: ThemeTokens.text-secondary;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                x: parent.width - 208px;
+                                y: 0px;
+                                width: 128px;
+                                height: parent.height;
+                                text: item.modified_label;
+                                font-family: AppTypography.ui-font-family;
+                                font-size: AppTypography.ui-font-size-caption;
+                                color: ThemeTokens.text-secondary;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                x: parent.width - 76px;
+                                y: 0px;
+                                width: 56px;
+                                height: parent.height;
+                                text: item.size_label;
+                                font-family: AppTypography.ui-font-family;
+                                font-size: AppTypography.ui-font-size-caption;
+                                color: ThemeTokens.text-secondary;
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            row-touch := TouchArea {
+                                width: parent.width;
+                                height: parent.height;
+
+                                clicked => {
+                                    root.workspace-sftp-item-selected(item.id);
+                                }
+
+                                double-clicked => {
+                                    root.workspace-sftp-item-activated(item.id, item.kind);
+                                }
+
+                                pointer-event(event) => {
+                                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                                        root.workspace-sftp-context-menu-requested(
+                                            item.id,
+                                            item.kind == "parent-directory"
+                                                ? "sftp-blank"
+                                                : item.kind == "directory" ? "sftp-directory" : "sftp-file",
+                                            self.mouse-x + self.absolute-position.x,
+                                            self.mouse-y + self.absolute-position.y,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        x: 0px;
+                        y: visible-row-host.y + visible-row-host.height;
+                        width: parent.width;
+                        height: root.workspace-sftp-bottom-spacer-height;
+                        background: transparent;
+                    }
+                }
             }
         }
     }

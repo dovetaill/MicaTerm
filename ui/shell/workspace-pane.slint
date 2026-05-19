@@ -2,7 +2,9 @@
 
 import { ThemeTokens } from "../theme/tokens.slint";
 import { QuickLaunchCardRow } from "../welcome/quick-launch-types.slint";
+import { SftpPanelItem } from "./right-panel.slint";
 import { SftpWorkspaceHost } from "./sftp-workspace-host.slint";
+import { SftpBreadcrumbItem } from "./sftp-workspace-host.slint";
 import { TabBar, WorkspaceTabItem } from "./tabbar.slint";
 import { ConnectionProgressDiagnosticRow, ConnectionProgressFieldRow, ConnectionProgressHopRow, ConnectionProgressStepRow, TerminalCommandBlockRow, TerminalOverviewMarkerRow, TerminalSessionHost } from "./terminal-session-host.slint";
 
@@ -15,6 +17,22 @@ export component WorkspacePane inherits Rectangle {
     in property <string> workspace-session-state: "";
     in property <string> workspace-session-error-detail: "";
     in property <bool> workspace-session-can-reconnect: false;
+    in property <string> workspace-sftp-host-label: "";
+    in property <string> workspace-sftp-connection-label: "";
+    in property <string> workspace-sftp-binding-label: "";
+    in property <string> workspace-sftp-path: "";
+    in property <bool> workspace-sftp-path-editing: false;
+    in property <bool> workspace-sftp-can-go-back: false;
+    in property <bool> workspace-sftp-can-go-forward: false;
+    in property <bool> workspace-sftp-can-go-up: false;
+    in property <bool> workspace-sftp-can-go-home: false;
+    in property <bool> workspace-sftp-actions-enabled: false;
+    in property <length> workspace-sftp-total-content-height: 0px;
+    in property <length> workspace-sftp-top-spacer-height: 0px;
+    in property <length> workspace-sftp-bottom-spacer-height: 0px;
+    in property <[SftpBreadcrumbItem]> workspace-sftp-breadcrumb-items: [];
+    in property <[string]> workspace-sftp-selected-entry-ids: [];
+    in property <[SftpPanelItem]> workspace-sftp-items: [];
     in property <string> workspace-session-render-mode: "bitmap";
     in property <string> workspace-session-connection-headline: "";
     in property <string> workspace-session-connection-visual-state: "";
@@ -133,6 +151,21 @@ export component WorkspacePane inherits Rectangle {
     callback search-query-changed(string);
     callback welcome-quick-launch-connect-requested(string);
     callback welcome-open-saved-ssh-requested();
+    callback workspace-sftp-back-requested();
+    callback workspace-sftp-forward-requested();
+    callback workspace-sftp-up-requested();
+    callback workspace-sftp-home-requested();
+    callback workspace-sftp-refresh-requested();
+    callback workspace-sftp-path-edit-requested();
+    callback workspace-sftp-path-submitted(string);
+    callback workspace-sftp-breadcrumb-clicked(string);
+    callback workspace-sftp-viewport-changed(length, length);
+    callback workspace-sftp-item-selected(string);
+    callback workspace-sftp-item-activated(string, string);
+    callback workspace-sftp-context-menu-requested(string, string, length, length);
+    callback workspace-sftp-upload-requested();
+    callback workspace-sftp-new-folder-requested();
+    callback workspace-sftp-retry-requested();
 
     public function restore-primary-focus() {
         session-host.restore-primary-focus();
@@ -208,6 +241,83 @@ export component WorkspacePane inherits Rectangle {
                 session-title: root.workspace-session-title;
                 session-subtitle: root.workspace-session-subtitle;
                 session-state: root.workspace-session-state;
+                session-error-detail: root.workspace-session-error-detail;
+                workspace-sftp-host-label: root.workspace-sftp-host-label;
+                workspace-sftp-connection-label: root.workspace-sftp-connection-label;
+                workspace-sftp-binding-label: root.workspace-sftp-binding-label;
+                workspace-sftp-path: root.workspace-sftp-path;
+                workspace-sftp-path-editing: root.workspace-sftp-path-editing;
+                workspace-sftp-can-go-back: root.workspace-sftp-can-go-back;
+                workspace-sftp-can-go-forward: root.workspace-sftp-can-go-forward;
+                workspace-sftp-can-go-up: root.workspace-sftp-can-go-up;
+                workspace-sftp-can-go-home: root.workspace-sftp-can-go-home;
+                workspace-sftp-actions-enabled: root.workspace-sftp-actions-enabled;
+                workspace-sftp-total-content-height: root.workspace-sftp-total-content-height;
+                workspace-sftp-top-spacer-height: root.workspace-sftp-top-spacer-height;
+                workspace-sftp-bottom-spacer-height: root.workspace-sftp-bottom-spacer-height;
+                workspace-sftp-breadcrumb-items: root.workspace-sftp-breadcrumb-items;
+                workspace-sftp-selected-entry-ids: root.workspace-sftp-selected-entry-ids;
+                workspace-sftp-items: root.workspace-sftp-items;
+
+                workspace-sftp-back-requested => {
+                    root.workspace-sftp-back-requested();
+                }
+
+                workspace-sftp-forward-requested => {
+                    root.workspace-sftp-forward-requested();
+                }
+
+                workspace-sftp-up-requested => {
+                    root.workspace-sftp-up-requested();
+                }
+
+                workspace-sftp-home-requested => {
+                    root.workspace-sftp-home-requested();
+                }
+
+                workspace-sftp-refresh-requested => {
+                    root.workspace-sftp-refresh-requested();
+                }
+
+                workspace-sftp-path-edit-requested => {
+                    root.workspace-sftp-path-edit-requested();
+                }
+
+                workspace-sftp-path-submitted(path) => {
+                    root.workspace-sftp-path-submitted(path);
+                }
+
+                workspace-sftp-breadcrumb-clicked(path) => {
+                    root.workspace-sftp-breadcrumb-clicked(path);
+                }
+
+                workspace-sftp-viewport-changed(viewport-y, visible-height) => {
+                    root.workspace-sftp-viewport-changed(viewport-y, visible-height);
+                }
+
+                workspace-sftp-item-selected(item-id) => {
+                    root.workspace-sftp-item-selected(item-id);
+                }
+
+                workspace-sftp-item-activated(item-id, item-kind) => {
+                    root.workspace-sftp-item-activated(item-id, item-kind);
+                }
+
+                workspace-sftp-context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {
+                    root.workspace-sftp-context-menu-requested(item-id, item-kind, anchor-x, anchor-y);
+                }
+
+                workspace-sftp-upload-requested => {
+                    root.workspace-sftp-upload-requested();
+                }
+
+                workspace-sftp-new-folder-requested => {
+                    root.workspace-sftp-new-folder-requested();
+                }
+
+                workspace-sftp-retry-requested => {
+                    root.workspace-sftp-retry-requested();
+                }
 
                 local-action-requested(action-id) => {
                     root.local-action-requested(action-id);

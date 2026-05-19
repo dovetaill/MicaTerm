@@ -515,7 +515,7 @@ impl ShellViewModel {
         if let Some(AssetModalState::SftpDeleteEntriesConfirm { entry_ids, .. }) =
             self.asset_modal_state.clone()
         {
-            if self.quick_browser_linked_terminal_session_id().is_none() {
+            if self.active_sftp_linked_terminal_session_id().is_none() {
                 return false;
             }
             let selected_entries = self
@@ -535,7 +535,7 @@ impl ShellViewModel {
 
             self.pending_sftp_context_action = Some(PendingSftpContextAction::DeleteEntries {
                 entries: selected_entries,
-                refresh_path: self.sftp_panel_path(),
+                refresh_path: self.active_sftp_path(),
             });
             self.asset_modal_state = None;
             return true;

@@ -1,4 +1,7 @@
-use mica_term::app::sftp::{FileBrowserSession, HostProfileRef};
+use mica_term::app::sftp::{
+    FileBrowserSession, HostProfileRef, SftpDirectoryEntry, SftpDirectoryEntryKind,
+    SftpFollowMode,
+};
 use mica_term::shell::tabs::WorkspaceTabKind;
 use mica_term::shell::view_model::ShellViewModel;
 use uuid::Uuid;
@@ -12,6 +15,14 @@ fn expanding_quick_browser_creates_an_active_sftp_workspace_tab_with_a_cloned_br
     );
     quick_browser.selected_entry_ids = vec!["entry-current".into()];
     quick_browser.attach_terminal_session_id(Uuid::new_v4().to_string());
+    quick_browser.entries = vec![SftpDirectoryEntry {
+        id: "entry-logs".into(),
+        name: "logs".into(),
+        path: "/srv/app/logs".into(),
+        kind: SftpDirectoryEntryKind::Directory,
+        modified_unix_seconds: None,
+        size_bytes: None,
+    }];
     let quick_browser_id = quick_browser.file_browser_session_id.clone();
     view_model.quick_browser_session_id = Some(quick_browser_id.clone());
     view_model.set_file_browser_session(quick_browser);
@@ -34,6 +45,20 @@ fn expanding_quick_browser_creates_an_active_sftp_workspace_tab_with_a_cloned_br
     assert_ne!(expanded_session.file_browser_session_id, quick_browser_id);
     assert_eq!(expanded_session.current_path, "/srv/app");
     assert!(expanded_session.selected_entry_ids.is_empty());
+    assert_eq!(
+        expanded_session.follow_mode,
+        SftpFollowMode::ManualBrowse,
+        "promoted workspace tabs should lock to the expanded path instead of inheriting quick-browser follow mode"
+    );
+    assert_eq!(
+        expanded_session
+            .entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["logs"],
+        "the workspace should immediately inherit the quick-browser snapshot instead of starting from an empty shell"
+    );
     assert_eq!(
         expanded_session.linked_terminal_session_id,
         view_model

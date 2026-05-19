@@ -297,7 +297,7 @@ impl ShellViewModel {
                 }
             }
             "delete-selected" => {
-                let entry_ids = self.sftp_panel_selected_entry_ids().to_vec();
+                let entry_ids = self.active_sftp_selected_entry_ids().to_vec();
                 self.open_sftp_delete_confirm(entry_ids);
             }
             "download" => {
@@ -313,7 +313,7 @@ impl ShellViewModel {
                 }
             }
             "download-selected" => {
-                let entry_ids = self.sftp_panel_selected_entry_ids().to_vec();
+                let entry_ids = self.active_sftp_selected_entry_ids().to_vec();
                 if !entry_ids.is_empty() {
                     self.pending_sftp_context_action =
                         Some(PendingSftpContextAction::DownloadSelection { entry_ids });
@@ -329,15 +329,15 @@ impl ShellViewModel {
                 self.close_context_menu();
             }
             "sort-name" => {
-                let _ = self.set_sftp_panel_sort_column("name");
+                let _ = self.set_active_sftp_sort_column("name");
                 self.close_context_menu();
             }
             "sort-size" => {
-                let _ = self.set_sftp_panel_sort_column("size");
+                let _ = self.set_active_sftp_sort_column("size");
                 self.close_context_menu();
             }
             "sort-modified" => {
-                let _ = self.set_sftp_panel_sort_column("modified");
+                let _ = self.set_active_sftp_sort_column("modified");
                 self.close_context_menu();
             }
             "copy-current-path" => {

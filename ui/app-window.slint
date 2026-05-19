@@ -28,6 +28,7 @@ import { WorkspaceTabContextMenu } from "components/workspace-tab-context-menu.s
 import { QuickLaunchCardRow } from "welcome/quick-launch-types.slint";
 import { ConsoleAssetItem } from "shell/assets-sidebar.slint";
 import { RightPanel, SftpPanelItem } from "shell/right-panel.slint";
+import { SftpBreadcrumbItem } from "shell/sftp-workspace-host.slint";
 import { Sidebar, SidebarNavItem } from "shell/sidebar.slint";
 import { ConnectionProgressDiagnosticRow, ConnectionProgressFieldRow, ConnectionProgressHopRow, ConnectionProgressStepRow, TerminalCommandBlockRow, TerminalOverviewMarkerRow } from "shell/terminal-session-host.slint";
 import { WorkspaceTabItem } from "shell/tabbar.slint";
@@ -287,6 +288,22 @@ export component AppWindow inherits Window {
     in-out property <string> workspace-session-state: "";
     in-out property <string> workspace-session-error-detail: "";
     in-out property <bool> workspace-session-can-reconnect: false;
+    in-out property <string> workspace-sftp-host-label: "";
+    in-out property <string> workspace-sftp-connection-label: "";
+    in-out property <string> workspace-sftp-binding-label: "";
+    in-out property <string> workspace-sftp-path: "";
+    in-out property <bool> workspace-sftp-path-editing: false;
+    in-out property <bool> workspace-sftp-can-go-back: false;
+    in-out property <bool> workspace-sftp-can-go-forward: false;
+    in-out property <bool> workspace-sftp-can-go-up: false;
+    in-out property <bool> workspace-sftp-can-go-home: false;
+    in-out property <bool> workspace-sftp-actions-enabled: false;
+    in-out property <length> workspace-sftp-total-content-height: 0px;
+    in-out property <length> workspace-sftp-top-spacer-height: 0px;
+    in-out property <length> workspace-sftp-bottom-spacer-height: 0px;
+    in-out property <[SftpPanelItem]> workspace-sftp-items: [];
+    in-out property <[string]> workspace-sftp-selected-entry-ids: [];
+    in-out property <[SftpBreadcrumbItem]> workspace-sftp-breadcrumb-items: [];
     in-out property <string> workspace-session-render-mode: "bitmap";
     in-out property <string> workspace-session-connection-headline: "";
     in-out property <string> workspace-session-connection-visual-state: "";
@@ -599,6 +616,21 @@ export component AppWindow inherits Window {
     callback workspace-session-selection-changed();
     callback workspace-session-paste-requested();
     callback workspace-session-local-action-requested(string);
+    callback workspace-sftp-back-requested();
+    callback workspace-sftp-forward-requested();
+    callback workspace-sftp-up-requested();
+    callback workspace-sftp-home-requested();
+    callback workspace-sftp-refresh-requested();
+    callback workspace-sftp-path-edit-requested();
+    callback workspace-sftp-path-submitted(string);
+    callback workspace-sftp-breadcrumb-clicked(string);
+    callback workspace-sftp-viewport-changed(length, length);
+    callback workspace-sftp-item-selected(string);
+    callback workspace-sftp-item-activated(string, string);
+    callback workspace-sftp-context-menu-requested(string, string, length, length);
+    callback workspace-sftp-upload-requested();
+    callback workspace-sftp-new-folder-requested();
+    callback workspace-sftp-retry-requested();
     callback workspace-session-scroll-requested(int, int, int, bool, bool, bool);
     callback workspace-session-scroll-thumb-drag-requested(float);
     callback workspace-session-scroll-jump-requested(float);
@@ -1018,6 +1050,22 @@ export component AppWindow inherits Window {
                         workspace-session-state: root.workspace-session-state;
                         workspace-session-error-detail: root.workspace-session-error-detail;
                         workspace-session-can-reconnect: root.workspace-session-can-reconnect;
+                        workspace-sftp-host-label: root.workspace-sftp-host-label;
+                        workspace-sftp-connection-label: root.workspace-sftp-connection-label;
+                        workspace-sftp-binding-label: root.workspace-sftp-binding-label;
+                        workspace-sftp-path: root.workspace-sftp-path;
+                        workspace-sftp-path-editing: root.workspace-sftp-path-editing;
+                        workspace-sftp-can-go-back: root.workspace-sftp-can-go-back;
+                        workspace-sftp-can-go-forward: root.workspace-sftp-can-go-forward;
+                        workspace-sftp-can-go-up: root.workspace-sftp-can-go-up;
+                        workspace-sftp-can-go-home: root.workspace-sftp-can-go-home;
+                        workspace-sftp-actions-enabled: root.workspace-sftp-actions-enabled;
+                        workspace-sftp-total-content-height: root.workspace-sftp-total-content-height;
+                        workspace-sftp-top-spacer-height: root.workspace-sftp-top-spacer-height;
+                        workspace-sftp-bottom-spacer-height: root.workspace-sftp-bottom-spacer-height;
+                        workspace-sftp-breadcrumb-items: root.workspace-sftp-breadcrumb-items;
+                        workspace-sftp-selected-entry-ids: root.workspace-sftp-selected-entry-ids;
+                        workspace-sftp-items: root.workspace-sftp-items;
                         workspace-session-render-mode: root.workspace-session-render-mode;
                         workspace-session-connection-headline: root.workspace-session-connection-headline;
                         workspace-session-connection-visual-state: root.workspace-session-connection-visual-state;
@@ -1157,6 +1205,66 @@ export component AppWindow inherits Window {
 
                         local-action-requested(action-id) => {
                             root.workspace-session-local-action-requested(action-id);
+                        }
+
+                        workspace-sftp-back-requested => {
+                            root.workspace-sftp-back-requested();
+                        }
+
+                        workspace-sftp-forward-requested => {
+                            root.workspace-sftp-forward-requested();
+                        }
+
+                        workspace-sftp-up-requested => {
+                            root.workspace-sftp-up-requested();
+                        }
+
+                        workspace-sftp-home-requested => {
+                            root.workspace-sftp-home-requested();
+                        }
+
+                        workspace-sftp-refresh-requested => {
+                            root.workspace-sftp-refresh-requested();
+                        }
+
+                        workspace-sftp-path-edit-requested => {
+                            root.workspace-sftp-path-edit-requested();
+                        }
+
+                        workspace-sftp-path-submitted(path) => {
+                            root.workspace-sftp-path-submitted(path);
+                        }
+
+                        workspace-sftp-breadcrumb-clicked(path) => {
+                            root.workspace-sftp-breadcrumb-clicked(path);
+                        }
+
+                        workspace-sftp-viewport-changed(viewport_y, visible_height) => {
+                            root.workspace-sftp-viewport-changed(viewport_y, visible_height);
+                        }
+
+                        workspace-sftp-item-selected(item-id) => {
+                            root.workspace-sftp-item-selected(item-id);
+                        }
+
+                        workspace-sftp-item-activated(item-id, item-kind) => {
+                            root.workspace-sftp-item-activated(item-id, item-kind);
+                        }
+
+                        workspace-sftp-context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {
+                            root.workspace-sftp-context-menu-requested(item-id, item-kind, anchor-x, anchor-y);
+                        }
+
+                        workspace-sftp-upload-requested => {
+                            root.workspace-sftp-upload-requested();
+                        }
+
+                        workspace-sftp-new-folder-requested => {
+                            root.workspace-sftp-new-folder-requested();
+                        }
+
+                        workspace-sftp-retry-requested => {
+                            root.workspace-sftp-retry-requested();
                         }
 
                         scroll-requested(delta-lines, row, col, shift, ctrl, alt) => {

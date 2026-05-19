@@ -56,11 +56,11 @@ impl ShellViewModel {
                 if self.sftp_name_validation(&draft_name, None) != AssetNameValidation::Valid {
                     return false;
                 }
-                if self.quick_browser_linked_terminal_session_id().is_none() {
+                if self.active_sftp_linked_terminal_session_id().is_none() {
                     return false;
                 }
 
-                let refresh_path = self.sftp_panel_path();
+                let refresh_path = self.active_sftp_path();
                 let path = sftp_child_path(refresh_path.as_str(), draft_name.trim());
                 self.pending_sftp_context_action =
                     Some(PendingSftpContextAction::CreateFile { path, refresh_path });
@@ -72,11 +72,11 @@ impl ShellViewModel {
                 if self.sftp_name_validation(&draft_name, None) != AssetNameValidation::Valid {
                     return false;
                 }
-                if self.quick_browser_linked_terminal_session_id().is_none() {
+                if self.active_sftp_linked_terminal_session_id().is_none() {
                     return false;
                 }
 
-                let refresh_path = self.sftp_panel_path();
+                let refresh_path = self.active_sftp_path();
                 let path = sftp_child_path(refresh_path.as_str(), draft_name.trim());
                 self.pending_sftp_context_action =
                     Some(PendingSftpContextAction::CreateFolder { path, refresh_path });
@@ -378,14 +378,14 @@ impl ShellViewModel {
                 {
                     return false;
                 }
-                if self.quick_browser_linked_terminal_session_id().is_none() {
+                if self.active_sftp_linked_terminal_session_id().is_none() {
                     return false;
                 }
 
                 let Some(entry) = self.active_sftp_entry(entry_id.as_str()).cloned() else {
                     return false;
                 };
-                let refresh_path = self.sftp_panel_path();
+                let refresh_path = self.active_sftp_path();
                 let next_name = draft_name.trim().to_string();
                 let next_path = sftp_child_path(refresh_path.as_str(), next_name.as_str());
                 self.pending_sftp_context_action = Some(PendingSftpContextAction::RenameEntry {

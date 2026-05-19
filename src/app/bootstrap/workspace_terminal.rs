@@ -150,11 +150,20 @@ fn sync_workspace_sftp_tabs(
                 .file_browser_sessions
                 .get(tab.file_browser_session_id.as_str())
                 .and_then(|browser_session| browser_session.linked_terminal_session_id.clone());
+            let linked_session_state = linked_session_id_text
+                .as_deref()
+                .and_then(|session_id| Uuid::parse_str(session_id).ok())
+                .and_then(|session_id| manager.session(session_id))
+                .map(|session| session.state);
             let binding_disconnected = linked_session_id_text
                 .as_deref()
                 .and_then(|session_id| Uuid::parse_str(session_id).ok())
                 .and_then(|session_id| manager.sftp_binding(session_id))
                 .is_some_and(|binding| binding.mode() == SftpPanelMode::Disconnected);
+            let reconnecting_terminal = matches!(
+                linked_session_state,
+                Some(SessionState::Connecting | SessionState::WaitingUser)
+            );
 
             let Some(browser_session) = state
                 .file_browser_sessions
@@ -165,7 +174,7 @@ fn sync_workspace_sftp_tabs(
                 return tab;
             };
 
-            if binding_disconnected {
+            if binding_disconnected && !reconnecting_terminal {
                 browser_session.mark_disconnected();
             }
 
