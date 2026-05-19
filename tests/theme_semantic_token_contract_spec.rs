@@ -137,8 +137,8 @@ fn theme_semantic_token_contract_spec_theme_tokens_remain_a_boot_time_parity_sna
 }
 
 #[test]
-fn theme_semantic_token_contract_spec_shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills()
- {
+fn theme_semantic_token_contract_spec_shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills(
+) {
     let titlebar = fs::read_to_string("ui/shell/titlebar.slint").expect("read titlebar");
     let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
     let sidebar = fs::read_to_string("ui/shell/sidebar.slint").expect("read sidebar");
@@ -242,8 +242,8 @@ fn theme_semantic_token_contract_spec_shell_chrome_consumes_semantic_tokens_for_
 }
 
 #[test]
-fn theme_semantic_token_contract_spec_runtime_shell_palette_properties_are_threaded_through_the_window_tree()
- {
+fn theme_semantic_token_contract_spec_runtime_shell_palette_properties_are_threaded_through_the_window_tree(
+) {
     let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
     let titlebar = fs::read_to_string("ui/shell/titlebar.slint").expect("read titlebar");
     let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
@@ -345,8 +345,8 @@ fn theme_semantic_token_contract_spec_runtime_shell_palette_properties_are_threa
 }
 
 #[test]
-fn theme_semantic_token_contract_spec_runtime_shell_palette_consumers_switch_from_tokens_to_live_props()
- {
+fn theme_semantic_token_contract_spec_runtime_shell_palette_consumers_switch_from_tokens_to_live_props(
+) {
     let titlebar = fs::read_to_string("ui/shell/titlebar.slint").expect("read titlebar");
     let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
     let active_tab = fs::read_to_string("ui/components/active-tab.slint").expect("read active tab");
@@ -481,8 +481,8 @@ fn theme_semantic_token_contract_spec_runtime_shell_palette_consumers_switch_fro
 }
 
 #[test]
-fn theme_semantic_token_contract_spec_welcome_shell_copy_uses_token_colors_instead_of_opacity_fades()
- {
+fn theme_semantic_token_contract_spec_welcome_shell_copy_uses_token_colors_instead_of_opacity_fades(
+) {
     let welcome = fs::read_to_string("ui/welcome/welcome-view.slint").expect("read welcome view");
     let quick_launch =
         fs::read_to_string("ui/welcome/quick-launch-section.slint").expect("read quick launch");
@@ -504,4 +504,45 @@ fn theme_semantic_token_contract_spec_welcome_shell_copy_uses_token_colors_inste
         !quick_launch.contains("opacity: 0.58;") && !quick_launch.contains("opacity: 0.54;"),
         "quick-launch helper copy should not use low-opacity text on dark shell panels because that magnifies the muddy Windows UI text look"
     );
+}
+
+#[test]
+fn theme_semantic_token_contract_spec_workspace_sftp_host_stays_on_runtime_shell_and_session_properties(
+) {
+    let workspace =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+    let host =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    assert!(
+        workspace.contains(
+            "in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;"
+        ) && workspace.contains(
+            "in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;"
+        ) && workspace.contains("shell-sidebar-item-selected: root.shell-sidebar-item-selected;")
+            && workspace.contains(
+                "shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;"
+            ),
+        "workspace pane should thread runtime-projected selected-fill and accent-rail colors into the SFTP workspace host instead of leaving it on detached token reads"
+    );
+    assert!(
+        host.contains(
+            "in property <color> workspace-session-frame-surface: ThemeTokens.terminal-frame-background;"
+        ) && host.contains(
+            "in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;"
+        ) && host.contains(
+            "in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;"
+        ) && host.contains("background: root.workspace-session-frame-surface;")
+            && host.contains("background: item.selected ? root.shell-sidebar-item-selected")
+            && host.contains("background: root.shell-sidebar-item-selected-border;"),
+        "SFTP workspace host should consume runtime shell/session properties for its surface and selected-row treatment instead of inventing a detached palette ladder"
+    );
+    for banned in [
+        "#0a0e14", "#10151d", "#111821", "#141b24", "#e6b450", "#ffaa33",
+    ] {
+        assert!(
+            !host.contains(banned),
+            "SFTP workspace host should not hardcode Ayu palette literal `{banned}` because runtime shell/session projection remains the single active source of truth"
+        );
+    }
 }

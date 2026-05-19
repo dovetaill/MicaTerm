@@ -1,3 +1,5 @@
+use std::fs;
+
 use mica_term::app::ssh::runtime::TerminalSurfaceState;
 use mica_term::app::ssh::session_manager::{EnhancedSessionState, SessionHandle, SessionState};
 use mica_term::shell::tabs::WorkspaceTab;
@@ -87,5 +89,40 @@ fn closing_active_sftp_tab_falls_back_like_any_other_workspace_tab() {
     assert_eq!(
         view_model.active_workspace_terminal_session_id(),
         Some(second_terminal.session_id.as_str())
+    );
+}
+
+#[test]
+fn right_panel_policy_hidden_contract_is_projected_for_active_sftp_workspace_tabs() {
+    let view_model = fs::read_to_string("src/shell/view_model.rs").expect("read shell view model");
+    let projection =
+        fs::read_to_string("src/shell/view_model/projection.rs").expect("read projection");
+    let shell_chrome =
+        fs::read_to_string("src/app/bootstrap/shell_chrome.rs").expect("read shell chrome");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+
+    assert!(
+        view_model.contains("RightPanelDisplayPolicy")
+            && view_model.contains("PolicyHiddenForSftpWorkspace"),
+        "view model should expose an explicit right-panel display policy enum so active SFTP workspace tabs can hide duplicate quick-browser lists without pretending the user collapsed them"
+    );
+    assert!(
+        projection.contains("right_panel_display_policy")
+            && projection.contains("right_panel_can_revive")
+            && projection.contains("policy-hidden-sftp-workspace"),
+        "projection should distinguish visible, user-collapsed, and policy-hidden SFTP workspace states"
+    );
+    assert!(
+        shell_chrome.contains("window.set_right_panel_display_policy(")
+            && shell_chrome.contains("window.set_right_panel_can_revive("),
+        "bootstrap shell chrome sync should publish the right-panel display policy and revive capability into Slint"
+    );
+    assert!(
+        app_window.contains("in-out property <string> right-panel-display-policy: \"visible\";")
+            && app_window.contains("in-out property <bool> right-panel-can-revive: true;")
+            && app_window.contains(
+                "if !root.effective-show-right-panel && root.right-panel-can-revive : right-panel-revive-strip := Rectangle {"
+            ),
+        "AppWindow should thread policy-hidden SFTP workspace semantics into the right-panel revive-strip contract"
     );
 }

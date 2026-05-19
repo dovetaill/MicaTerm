@@ -96,6 +96,69 @@ fn sftp_workspace_host_source_exposes_core_file_table_headers() {
 }
 
 #[test]
+fn sftp_workspace_host_source_defines_productized_layout_markers() {
+    let source =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    for marker in [
+        "workspace-header :=",
+        "workspace-toolbar :=",
+        "workspace-breadcrumb-shell :=",
+        "workspace-file-table :=",
+        "workspace-statusbar :=",
+    ] {
+        assert!(
+            source.contains(marker),
+            "SFTP workspace host should expose the productized layout marker `{marker}` so the UI contract can freeze the compact shell structure"
+        );
+    }
+}
+
+#[test]
+fn sftp_workspace_host_source_freezes_icon_toolbar_breadcrumb_root_and_responsive_columns() {
+    let source =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    for contract in [
+        "arrow-hook-up-left-20-regular.svg",
+        "arrow-sync-20-regular.svg",
+        "folder-20-regular.svg",
+        "arrow-upload-20-regular.svg",
+        "edit-20-regular.svg",
+        "function workspace-width-tier() -> string {",
+        "root.workspace-width-tier()",
+        "crumb.path == \"/\"",
+        "text: \"Permissions\"",
+        "text: \"Owner\"",
+        "text: \"Group\"",
+    ] {
+        assert!(
+            source.contains(contract),
+            "SFTP workspace host should freeze the productized contract `{contract}` for icon-first toolbar, stable root breadcrumb, and responsive optional columns"
+        );
+    }
+}
+
+#[test]
+fn sftp_workspace_host_source_uses_runtime_shell_selection_tokens() {
+    let source =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    for contract in [
+        "in property <color> workspace-session-frame-surface: ThemeTokens.terminal-frame-background;",
+        "in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;",
+        "in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;",
+        "background: item.selected ? root.shell-sidebar-item-selected",
+        "background: root.shell-sidebar-item-selected-border;",
+    ] {
+        assert!(
+            source.contains(contract),
+            "SFTP workspace host should use runtime-projected shell/session contract `{contract}` instead of inventing a detached palette or heavy boxed selection"
+        );
+    }
+}
+
+#[test]
 fn sftp_workspace_host_source_wires_workspace_only_interactions() {
     let source =
         fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
