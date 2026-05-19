@@ -1,6 +1,5 @@
 use mica_term::app::sftp::{
-    FileBrowserSession, HostProfileRef, SftpDirectoryEntry, SftpDirectoryEntryKind,
-    SftpFollowMode,
+    FileBrowserSession, HostProfileRef, SftpDirectoryEntry, SftpDirectoryEntryKind, SftpFollowMode,
 };
 use mica_term::shell::tabs::WorkspaceTabKind;
 use mica_term::shell::view_model::ShellViewModel;

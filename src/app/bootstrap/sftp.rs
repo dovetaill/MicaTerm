@@ -1,9 +1,9 @@
 //! Bootstrap SFTP binder module.
 
 use super::*;
+use crate::SftpBreadcrumbItem;
 use crate::app::sftp::SftpDirectoryEntry;
 use crate::shell::view_model::PendingSftpContextAction;
-use crate::SftpBreadcrumbItem;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -1000,8 +1000,8 @@ pub(super) fn drain_sftp_transfer_background_messages(
                 .collect::<Vec<_>>();
 
             for browser_session_id in matching_browser_session_ids {
-                if let Some(request) = controller
-                    .refresh_browser_session(browser_session_id.as_str(), session_id)
+                if let Some(request) =
+                    controller.refresh_browser_session(browser_session_id.as_str(), session_id)
                 {
                     changed |= queue_sftp_browser_request(
                         state,
@@ -1550,14 +1550,14 @@ pub(super) fn apply_pending_sftp_context_action(
             controller
                 .refresh_browser_session(browser_session_id.as_str(), session_id)
                 .is_some_and(|request| {
-                queue_sftp_browser_request(
-                    state,
-                    controller,
-                    &session_bridge.manager,
-                    request,
-                    async_runtime,
-                    browser_result_tx,
-                )
+                    queue_sftp_browser_request(
+                        state,
+                        controller,
+                        &session_bridge.manager,
+                        request,
+                        async_runtime,
+                        browser_result_tx,
+                    )
                 })
         }
         PendingSftpContextAction::CreateFile { path, refresh_path } => {
@@ -3021,10 +3021,7 @@ pub(super) fn bind_sftp_callbacks(
             {
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    controller.navigate_up_browser_session(
-                        browser_session_id.as_str(),
-                        session_id,
-                    )
+                    controller.navigate_up_browser_session(browser_session_id.as_str(), session_id)
                 };
                 if let Some(request) = request {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
@@ -3211,10 +3208,13 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some((browser_session_id, session_id)) = active_workspace_sftp_request_identity(&state) {
+            if let Some((browser_session_id, session_id)) =
+                active_workspace_sftp_request_identity(&state)
+            {
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    controller.navigate_back_browser_session(browser_session_id.as_str(), session_id)
+                    controller
+                        .navigate_back_browser_session(browser_session_id.as_str(), session_id)
                 };
                 if let Some(request) = request {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
@@ -3256,10 +3256,13 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some((browser_session_id, session_id)) = active_workspace_sftp_request_identity(&state) {
+            if let Some((browser_session_id, session_id)) =
+                active_workspace_sftp_request_identity(&state)
+            {
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    controller.navigate_forward_browser_session(browser_session_id.as_str(), session_id)
+                    controller
+                        .navigate_forward_browser_session(browser_session_id.as_str(), session_id)
                 };
                 if let Some(request) = request {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
@@ -3301,7 +3304,9 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some((browser_session_id, session_id)) = active_workspace_sftp_request_identity(&state) {
+            if let Some((browser_session_id, session_id)) =
+                active_workspace_sftp_request_identity(&state)
+            {
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
                     controller.navigate_up_browser_session(browser_session_id.as_str(), session_id)
@@ -3346,7 +3351,9 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some((browser_session_id, session_id)) = active_workspace_sftp_request_identity(&state) {
+            if let Some((browser_session_id, session_id)) =
+                active_workspace_sftp_request_identity(&state)
+            {
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
                     controller.refresh_browser_session(browser_session_id.as_str(), session_id)
@@ -3391,7 +3398,9 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some((browser_session_id, session_id)) = active_workspace_sftp_request_identity(&state) {
+            if let Some((browser_session_id, session_id)) =
+                active_workspace_sftp_request_identity(&state)
+            {
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
                     controller.retry_browser_session(browser_session_id.as_str(), session_id)

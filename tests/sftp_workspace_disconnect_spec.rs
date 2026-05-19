@@ -2,8 +2,8 @@ use std::future::Future;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::pin::Pin;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::Duration;
 

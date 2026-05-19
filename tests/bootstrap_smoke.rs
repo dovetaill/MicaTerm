@@ -14765,7 +14765,10 @@ fn workspace_sftp_expand_navigation_and_reconnect_drive_real_directory_reads() {
             && app.get_workspace_sftp_items().row_count() > 0
     });
 
-    assert_eq!(app.get_workspace_session_title().as_str(), "Files: Prod Bastion");
+    assert_eq!(
+        app.get_workspace_session_title().as_str(),
+        "Files: Prod Bastion"
+    );
     assert_eq!(app.get_workspace_sftp_path().as_str(), "/srv/app");
     assert_eq!(app.get_workspace_sftp_items().row_count(), 2);
     assert_eq!(

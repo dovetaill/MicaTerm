@@ -89,7 +89,8 @@ fn sftp_workspace_host_source_exposes_core_file_table_headers() {
         "SFTP workspace host should expose a real workspace browser contract instead of a passive title shell"
     );
     assert!(
-        !source.contains("Expand a Quick Browser session to bring file work into the main workspace.")
+        !source
+            .contains("Expand a Quick Browser session to bring file work into the main workspace.")
             && !source.contains("Open a Quick Browser"),
         "SFTP workspace host should stop rendering the old placeholder copy once the workspace becomes a real browser surface"
     );

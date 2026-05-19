@@ -644,7 +644,10 @@ impl ShellViewModel {
     }
 
     pub fn workspace_sftp_binding_label(&self) -> &'static str {
-        match self.active_workspace_sftp_session().map(|state| state.follow_mode) {
+        match self
+            .active_workspace_sftp_session()
+            .map(|state| state.follow_mode)
+        {
             Some(SftpFollowMode::FollowCwd) => "Follow / Linked",
             Some(SftpFollowMode::ManualBrowse) => "Locked / Manual",
             None => "",
