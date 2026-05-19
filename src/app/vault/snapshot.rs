@@ -12,7 +12,6 @@ use crate::app::ssh::credentials::{
     keychain_key_credential_ref, restore_snapshot_secret_bundle, snapshot_secret_bundle,
     ssh_credential_ref,
 };
-use crate::app::ssh::known_hosts::KnownHostsService;
 use crate::app::ui_preferences::UiPreferences;
 use crate::app::vault::model::{
     SnapshotSyncPreferences, VaultAssetPayload, VaultSnapshot, VaultSshProxySpec,
@@ -31,8 +30,8 @@ pub fn export_vault_snapshot(
     asset_tree: &AssetTree,
     keychain_catalog: &KeychainCatalog,
     credential_store: &dyn CredentialStore,
-    known_hosts_path: &Path,
-    sync_preferences: SnapshotSyncPreferences,
+    _known_hosts_path: &Path,
+    _sync_preferences: SnapshotSyncPreferences,
     _ui_preferences: &UiPreferences,
 ) -> Result<VaultSnapshot> {
     let asset_catalog = asset_tree_to_vault_catalog(asset_tree);
@@ -75,8 +74,6 @@ pub fn export_vault_snapshot(
         }
     }
 
-    let known_hosts = KnownHostsService::new(known_hosts_path).export_snapshot_entries()?;
-
     Ok(normalize_snapshot_secret_refs(VaultSnapshot {
         schema_version: 1,
         asset_catalog,
@@ -84,8 +81,8 @@ pub fn export_vault_snapshot(
         keychain_catalog,
         keychain_identity_secret_bundles,
         keychain_key_secret_bundles,
-        known_hosts,
-        sync_preferences,
+        known_hosts: Vec::new(),
+        sync_preferences: SnapshotSyncPreferences::default(),
         ui_preferences: Default::default(),
     }))
 }
@@ -101,7 +98,7 @@ fn normalize_keychain_merge_metadata(catalog: KeychainCatalog) -> KeychainCatalo
 pub fn apply_vault_snapshot(
     snapshot: &VaultSnapshot,
     credential_store: &dyn CredentialStore,
-    known_hosts_path: &Path,
+    _known_hosts_path: &Path,
 ) -> Result<AppliedVaultSnapshot> {
     let normalized_snapshot = normalize_snapshot_secret_refs(snapshot.clone());
     let obsolete_secret_refs = obsolete_ssh_secret_refs(snapshot, &normalized_snapshot);
@@ -148,13 +145,10 @@ pub fn apply_vault_snapshot(
         credential_store.delete_secret(credential_ref.as_str())?;
     }
 
-    KnownHostsService::new(known_hosts_path)
-        .replace_snapshot_entries(&normalized_snapshot.known_hosts)?;
-
     Ok(AppliedVaultSnapshot {
         asset_tree,
         keychain_catalog: normalized_snapshot.keychain_catalog.clone(),
-        sync_preferences: normalized_snapshot.sync_preferences.clone(),
+        sync_preferences: SnapshotSyncPreferences::default(),
         ui_preferences: UiPreferences::default(),
     })
 }
