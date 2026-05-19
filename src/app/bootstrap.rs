@@ -151,7 +151,10 @@ use crate::app::vault::snapshot::{
     apply_vault_snapshot, export_vault_snapshot, normalize_snapshot_secret_refs,
 };
 use crate::app::vault::sync_decision::{LocalSyncState, SyncAction, decide_sync_action};
-use crate::app::vault::sync_service::RemoteHeadSnapshot;
+use crate::app::vault::sync_service::{
+    RemoteHeadSnapshot, VaultSyncExecution, VaultSyncIntent, VaultSyncService,
+    VaultSyncServiceConfig, VaultSyncTrigger,
+};
 use crate::app::window_effects::{
     PlatformWindowEffects, build_native_window_appearance_request, default_platform_window_effects,
 };
@@ -303,37 +306,8 @@ enum WorkspacePastePromptMode {
     Editor,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum VaultSyncTrigger {
-    Manual,
-    DebouncedAuto,
-    Periodic,
-}
-
-#[derive(Default)]
-struct VaultSyncSchedulerState {
-    dirty: bool,
-    running: bool,
-    pending_trigger: Option<VaultSyncTrigger>,
-}
-
 const VAULT_AUTO_SYNC_DEBOUNCE_MS: u64 = 1_200;
 const VAULT_PERIODIC_SYNC_INTERVAL_MS: u64 = 120_000;
-
-fn merge_vault_sync_trigger(
-    pending: Option<VaultSyncTrigger>,
-    next: VaultSyncTrigger,
-) -> VaultSyncTrigger {
-    match (pending, next) {
-        (Some(VaultSyncTrigger::Manual), _) | (_, VaultSyncTrigger::Manual) => {
-            VaultSyncTrigger::Manual
-        }
-        (Some(VaultSyncTrigger::Periodic), _) | (_, VaultSyncTrigger::Periodic) => {
-            VaultSyncTrigger::Periodic
-        }
-        _ => VaultSyncTrigger::DebouncedAuto,
-    }
-}
 
 #[derive(Clone)]
 struct VaultSessionState {
@@ -4780,7 +4754,10 @@ fn local_sync_state_for_snapshot(
     local_snapshot_hash: String,
 ) -> LocalSyncState {
     LocalSyncState {
-        base_revision: local_state.current_revision.clone(),
+        base_revision: local_state
+            .base_revision
+            .clone()
+            .or_else(|| local_state.current_revision.clone()),
         local_snapshot_hash: Some(local_snapshot_hash),
         last_local_change_at: local_state.last_local_change_at.clone(),
         last_successful_push_at: local_state.last_successful_push_at.clone(),
@@ -6314,11 +6291,13 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         );
     }
 
-    let vault_sync_scheduler = Rc::new(RefCell::new(VaultSyncSchedulerState::default()));
     let vault_auto_sync_timer = Rc::new(Timer::default());
     let vault_periodic_sync_timer = Rc::new(Timer::default());
     let vault_sync_completion_timer = Rc::new(Timer::default());
     let async_runtime_handle = session_runtime_guard.as_ref().map(AppAsyncRuntime::handle);
+    let vault_sync_service = Rc::new(VaultSyncService::new(
+        VaultSyncServiceConfig::default().with_runtime_handle(async_runtime_handle.clone()),
+    ));
     let (vault_sync_result_tx, vault_sync_result_rx) =
         std::sync::mpsc::channel::<vault_sync::VaultSyncBackgroundMessage>();
     let vault_sync_result_rx = Rc::new(RefCell::new(vault_sync_result_rx));
@@ -6332,7 +6311,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let vault_session_ref = Rc::clone(&vault_session);
         let credential_store_ref = Arc::clone(&credential_store);
         let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
-        let scheduler_ref = Rc::clone(&vault_sync_scheduler);
+        let sync_service_ref = Rc::clone(&vault_sync_service);
         let auto_sync_timer_ref = Rc::clone(&vault_auto_sync_timer);
         let periodic_timer_keepalive = Rc::clone(&vault_periodic_sync_timer);
         let async_runtime_handle_ref = async_runtime_handle.clone();
@@ -6347,37 +6326,15 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             let mut state = state.borrow_mut();
             let mut vault = vault_session_ref.borrow_mut();
             let (width, height) = current_window_size(&window);
-            let (should_attempt_push, should_attempt_refresh) = {
-                let mut scheduler = scheduler_ref.borrow_mut();
-                if scheduler.running {
-                    scheduler.pending_trigger =
-                        Some(merge_vault_sync_trigger(scheduler.pending_trigger, trigger));
-                    return;
-                }
-                let should_attempt_push = scheduler.dirty
-                    || (matches!(trigger, VaultSyncTrigger::Manual)
-                        && vault_sync::vault_requires_initial_remote_sync(&vault));
-                let should_attempt_refresh = !should_attempt_push
-                    && matches!(
-                        trigger,
-                        VaultSyncTrigger::Manual | VaultSyncTrigger::Periodic
-                    );
-                if matches!(
-                    trigger,
-                    VaultSyncTrigger::DebouncedAuto | VaultSyncTrigger::Periodic
-                ) && !vault_sync::vault_background_sync_ready(&vault)
-                {
-                    return;
-                }
-                if matches!(trigger, VaultSyncTrigger::DebouncedAuto) && !should_attempt_push {
-                    return;
-                }
-                if !should_attempt_push && !should_attempt_refresh {
-                    return;
-                }
-                scheduler.running = true;
-                (should_attempt_push, should_attempt_refresh)
+            let Some(plan) = sync_service_ref.begin_trigger(
+                trigger,
+                vault_sync::vault_background_sync_ready(&vault),
+                vault_sync::vault_requires_initial_remote_sync(&vault),
+            ) else {
+                return;
             };
+            let should_attempt_push = matches!(plan.execution, VaultSyncExecution::Push);
+            let should_attempt_refresh = matches!(plan.execution, VaultSyncExecution::Refresh);
 
             if matches!(trigger, VaultSyncTrigger::Manual) {
                 auto_sync_timer_ref.stop();
@@ -6479,6 +6436,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
                     let _ = completion_tx.send(vault_sync::VaultSyncBackgroundMessage::Completed {
                         trigger,
+                        execution: plan.execution,
                         result,
                     });
                 });
@@ -6498,13 +6456,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 Ok(false)
             };
 
-            {
-                let mut scheduler = scheduler_ref.borrow_mut();
-                scheduler.running = false;
-                if result.is_ok() && should_attempt_push {
-                    scheduler.dirty = false;
-                }
-            }
+            let rerun_trigger = sync_service_ref.finish(plan.execution, result.is_ok());
 
             match result {
                 Ok(changed) => {
@@ -6554,6 +6506,15 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             );
             sync_shell_layout(&window, &mut state, width, height);
             save_ui_preferences(&store_ref, &state);
+
+            let next_trigger = rerun_trigger;
+            drop(vault);
+            drop(state);
+            if let Some(trigger) = next_trigger
+                && let Some(run_sync) = run_vault_sync_slot_ref.borrow().as_ref().cloned()
+            {
+                run_sync(trigger);
+            }
         })
     };
     *run_vault_sync_slot.borrow_mut() = Some(Rc::clone(&run_vault_sync));
@@ -6564,7 +6525,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let effects_ref = Rc::clone(&effects);
         let vault_session_ref = Rc::clone(&vault_session);
         let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
-        let scheduler_ref = Rc::clone(&vault_sync_scheduler);
+        let sync_service_ref = Rc::clone(&vault_sync_service);
         let vault_sync_result_rx_ref = Rc::clone(&vault_sync_result_rx);
         let completion_timer_keepalive = Rc::clone(&vault_sync_completion_timer);
         let run_vault_sync_slot_ref = Rc::clone(&run_vault_sync_slot);
@@ -6593,6 +6554,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                         match message {
                             vault_sync::VaultSyncBackgroundMessage::Completed {
                                 trigger,
+                                execution,
                                 result,
                             } => match result {
                                 Ok(success) => {
@@ -6616,14 +6578,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                                     state.sync_modal_state_mut().error_text =
                                         success.sync_modal_state.error_text.clone();
 
-                                    {
-                                        let mut scheduler = scheduler_ref.borrow_mut();
-                                        scheduler.running = false;
-                                        if success.should_clear_dirty {
-                                            scheduler.dirty = false;
-                                        }
-                                        rerun_trigger = scheduler.pending_trigger.take();
-                                    }
+                                    rerun_trigger = sync_service_ref
+                                        .finish(execution, success.should_clear_dirty);
 
                                     if matches!(trigger, VaultSyncTrigger::Manual) {
                                         let feedback = if !success
@@ -6656,14 +6612,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                                     state.sync_modal_state_mut().error_text =
                                         failure.sync_modal_state.error_text.clone();
 
-                                    {
-                                        let mut scheduler = scheduler_ref.borrow_mut();
-                                        scheduler.running = false;
-                                        if failure.should_clear_dirty {
-                                            scheduler.dirty = false;
-                                        }
-                                        rerun_trigger = scheduler.pending_trigger.take();
-                                    }
+                                    rerun_trigger = sync_service_ref
+                                        .finish(execution, failure.should_clear_dirty);
 
                                     if matches!(trigger, VaultSyncTrigger::Manual) {
                                         state.show_sync_feedback("Sync failed");
@@ -6675,6 +6625,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                             vault_sync::VaultSyncBackgroundMessage::RemoteHeadRefreshed {
                                 snapshot,
                             } => {
+                                sync_service_ref.finish_remote_head_refresh();
                                 vault_sync::apply_remote_head_snapshot_to_sync_modal(
                                     &mut state, snapshot,
                                 );
@@ -6917,6 +6868,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let effects_ref = Rc::clone(&effects);
     let vault_session_ref = Rc::clone(&vault_session);
     let credential_store_ref = Arc::clone(&credential_store);
+    let vault_sync_service_ref = Rc::clone(&vault_sync_service);
     let vault_sync_result_tx_ref = vault_sync_result_tx.clone();
     window.on_open_sync_modal_requested(move || {
         let window = handle.unwrap();
@@ -6928,6 +6880,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         vault_sync::request_sync_modal_remote_head_refresh(
             &mut state,
             &vault,
+            vault_sync_service_ref.as_ref(),
             Arc::clone(&credential_store_ref),
             &vault_sync_result_tx_ref,
         );
@@ -7134,7 +7087,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         &workspace_follow_tracker,
         &pending_host_key_approval,
         &modal_drag_state,
-        &vault_sync_scheduler,
+        &vault_sync_service,
         &vault_auto_sync_timer,
         &run_vault_sync,
         &asset_click_tracker,

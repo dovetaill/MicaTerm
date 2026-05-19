@@ -844,7 +844,7 @@ pub(super) fn bind_assets_keychain_callbacks(
     workspace_follow_tracker: &Rc<RefCell<WorkspaceFollowTracker>>,
     pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
     modal_drag_state: &Rc<RefCell<Option<ModalDragState>>>,
-    vault_sync_scheduler: &Rc<RefCell<VaultSyncSchedulerState>>,
+    vault_sync_service: &Rc<VaultSyncService>,
     vault_auto_sync_timer: &Rc<Timer>,
     run_vault_sync: &Rc<dyn Fn(VaultSyncTrigger)>,
     asset_click_tracker: &Rc<RefCell<Option<PendingAssetClick>>>,
@@ -950,7 +950,7 @@ pub(super) fn bind_assets_keychain_callbacks(
     let handle = window.as_weak();
     let keychain_repo_ref = keychain_repo.clone();
     let vault_session_ref = Rc::clone(vault_session);
-    let vault_sync_scheduler_ref = Rc::clone(vault_sync_scheduler);
+    let vault_sync_service_ref = Rc::clone(vault_sync_service);
     let vault_auto_sync_timer_ref = Rc::clone(vault_auto_sync_timer);
     let run_vault_sync_ref = Rc::clone(run_vault_sync);
     window.on_assets_create_action_selected(move |action_id| {
@@ -971,7 +971,7 @@ pub(super) fn bind_assets_keychain_callbacks(
             vault_sync::mark_local_vault_dirty_and_arm_sync(
                 &mut state,
                 &mut vault,
-                &vault_sync_scheduler_ref,
+                &vault_sync_service_ref,
                 &vault_auto_sync_timer_ref,
                 Rc::clone(&run_vault_sync_ref),
             );
@@ -1011,7 +1011,7 @@ pub(super) fn bind_assets_keychain_callbacks(
     let sftp_result_tx_ref = sftp_result_tx.clone();
     let sftp_transfer_result_tx_ref = sftp_transfer_result_tx.clone();
     let vault_session_ref = Rc::clone(vault_session);
-    let vault_sync_scheduler_ref = Rc::clone(vault_sync_scheduler);
+    let vault_sync_service_ref = Rc::clone(vault_sync_service);
     let vault_auto_sync_timer_ref = Rc::clone(vault_auto_sync_timer);
     let run_vault_sync_ref = Rc::clone(run_vault_sync);
     window.on_confirm_asset_modal_requested(move || {
@@ -1082,7 +1082,7 @@ pub(super) fn bind_assets_keychain_callbacks(
                 vault_sync::mark_local_vault_dirty_and_arm_sync(
                     &mut state,
                     &mut vault,
-                    &vault_sync_scheduler_ref,
+                    &vault_sync_service_ref,
                     &vault_auto_sync_timer_ref,
                     Rc::clone(&run_vault_sync_ref),
                 );
@@ -1113,7 +1113,7 @@ pub(super) fn bind_assets_keychain_callbacks(
     let sftp_result_tx_ref = sftp_result_tx.clone();
     let sftp_transfer_result_tx_ref = sftp_transfer_result_tx.clone();
     let vault_session_ref = Rc::clone(vault_session);
-    let vault_sync_scheduler_ref = Rc::clone(vault_sync_scheduler);
+    let vault_sync_service_ref = Rc::clone(vault_sync_service);
     let vault_auto_sync_timer_ref = Rc::clone(vault_auto_sync_timer);
     let run_vault_sync_ref = Rc::clone(run_vault_sync);
     window.on_confirm_asset_rename_requested(move || {
@@ -1149,7 +1149,7 @@ pub(super) fn bind_assets_keychain_callbacks(
                 vault_sync::mark_local_vault_dirty_and_arm_sync(
                     &mut state,
                     &mut vault,
-                    &vault_sync_scheduler_ref,
+                    &vault_sync_service_ref,
                     &vault_auto_sync_timer_ref,
                     Rc::clone(&run_vault_sync_ref),
                 );
@@ -1171,7 +1171,7 @@ pub(super) fn bind_assets_keychain_callbacks(
     let sftp_result_tx_ref = sftp_result_tx.clone();
     let sftp_transfer_result_tx_ref = sftp_transfer_result_tx.clone();
     let vault_session_ref = Rc::clone(vault_session);
-    let vault_sync_scheduler_ref = Rc::clone(vault_sync_scheduler);
+    let vault_sync_service_ref = Rc::clone(vault_sync_service);
     let vault_auto_sync_timer_ref = Rc::clone(vault_auto_sync_timer);
     let run_vault_sync_ref = Rc::clone(run_vault_sync);
     window.on_confirm_delete_asset_requested(move || {
@@ -1207,7 +1207,7 @@ pub(super) fn bind_assets_keychain_callbacks(
                 vault_sync::mark_local_vault_dirty_and_arm_sync(
                     &mut state,
                     &mut vault,
-                    &vault_sync_scheduler_ref,
+                    &vault_sync_service_ref,
                     &vault_auto_sync_timer_ref,
                     Rc::clone(&run_vault_sync_ref),
                 );
@@ -1294,7 +1294,7 @@ pub(super) fn bind_assets_keychain_callbacks(
     let private_key_importer_ref = Arc::clone(private_key_importer);
     let vault_session_ref = Rc::clone(vault_session);
     let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
-    let vault_sync_scheduler_ref = Rc::clone(vault_sync_scheduler);
+    let vault_sync_service_ref = Rc::clone(vault_sync_service);
     let vault_auto_sync_timer_ref = Rc::clone(vault_auto_sync_timer);
     let run_vault_sync_ref = Rc::clone(run_vault_sync);
     let ssh_modal_result_tx_ref = ssh_modal_result_tx.clone();
@@ -1509,7 +1509,7 @@ pub(super) fn bind_assets_keychain_callbacks(
             vault_sync::mark_local_vault_dirty_and_arm_sync(
                 &mut state,
                 &mut vault,
-                &vault_sync_scheduler_ref,
+                &vault_sync_service_ref,
                 &vault_auto_sync_timer_ref,
                 Rc::clone(&run_vault_sync_ref),
             );
@@ -1793,7 +1793,7 @@ pub(super) fn bind_assets_keychain_callbacks(
     let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
     let keychain_repo_ref = keychain_repo.clone();
     let vault_session_ref = Rc::clone(vault_session);
-    let vault_sync_scheduler_ref = Rc::clone(vault_sync_scheduler);
+    let vault_sync_service_ref = Rc::clone(vault_sync_service);
     let vault_auto_sync_timer_ref = Rc::clone(vault_auto_sync_timer);
     let run_vault_sync_ref = Rc::clone(run_vault_sync);
     let sftp_async_runtime_ref = sftp_async_runtime.clone();
@@ -1852,7 +1852,7 @@ pub(super) fn bind_assets_keychain_callbacks(
             vault_sync::mark_local_vault_dirty_and_arm_sync(
                 &mut state,
                 &mut vault,
-                &vault_sync_scheduler_ref,
+                &vault_sync_service_ref,
                 &vault_auto_sync_timer_ref,
                 Rc::clone(&run_vault_sync_ref),
             );

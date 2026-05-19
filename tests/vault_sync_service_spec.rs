@@ -1,5 +1,7 @@
+use mica_term::app::vault::model::GitRemoteSafetyStatus;
 use mica_term::app::vault::sync_service::{
-    VaultSyncExecution, VaultSyncIntent, VaultSyncService, VaultSyncServiceConfig, VaultSyncTrigger,
+    VaultSyncExecution, VaultSyncIntent, VaultSyncPlan, VaultSyncService, VaultSyncServiceConfig,
+    VaultSyncTrigger,
 };
 use std::time::Duration;
 
@@ -46,14 +48,20 @@ fn service_promotes_dirty_periodic_sync_from_push_to_refresh_after_success() {
     service.mark_dirty();
     assert_eq!(
         service.begin_trigger(VaultSyncTrigger::Periodic, true, false),
-        Some(VaultSyncExecution::Push)
+        Some(VaultSyncPlan {
+            execution: VaultSyncExecution::Push,
+            revalidate_remote: true,
+        })
     );
 
     service.finish(VaultSyncExecution::Push, true);
 
     assert_eq!(
         service.begin_trigger(VaultSyncTrigger::Periodic, true, false),
-        Some(VaultSyncExecution::Refresh)
+        Some(VaultSyncPlan {
+            execution: VaultSyncExecution::Refresh,
+            revalidate_remote: true,
+        })
     );
 }
 
@@ -78,5 +86,122 @@ fn service_runs_blocking_work_on_explicit_runtime_handle() {
         rx.recv_timeout(Duration::from_secs(1))
             .expect("receive background result"),
         "done"
+    );
+}
+
+#[test]
+fn opening_sync_modal_refreshes_remote_head_without_blocking() {
+    let service = VaultSyncService::new(VaultSyncServiceConfig::default());
+
+    service.mark_dirty();
+    assert_eq!(
+        service.begin_trigger(VaultSyncTrigger::Manual, true, false),
+        Some(VaultSyncPlan {
+            execution: VaultSyncExecution::Push,
+            revalidate_remote: true,
+        })
+    );
+
+    assert!(service.request(VaultSyncIntent::RefreshRemoteHead));
+    assert!(!service.request(VaultSyncIntent::RefreshRemoteHead));
+}
+
+#[test]
+fn remote_changed_to_public_pauses_sync() {
+    let service = VaultSyncService::new(VaultSyncServiceConfig::default());
+
+    service.mark_dirty();
+    let plan = service
+        .begin_trigger(VaultSyncTrigger::Manual, true, false)
+        .expect("manual sync should attempt a push while dirty");
+    assert_eq!(plan.execution, VaultSyncExecution::Push);
+    assert!(plan.revalidate_remote);
+
+    service.pause_remote(
+        "remote repository `owner/repo` must stay private before sync can be enabled",
+    );
+    service.finish(plan.execution, false);
+
+    let state = service.runtime_state();
+    assert_eq!(state.remote_safety_status, GitRemoteSafetyStatus::Paused);
+    assert_eq!(
+        state.last_sync_error.as_deref(),
+        Some("remote repository `owner/repo` must stay private before sync can be enabled")
+    );
+}
+
+#[test]
+fn local_mutation_does_not_push_to_unsafe_remote() {
+    let service = VaultSyncService::new(VaultSyncServiceConfig::default());
+
+    service.pause_remote("remote repository is paused");
+    service.mark_dirty();
+
+    assert_eq!(
+        service.begin_trigger(VaultSyncTrigger::DebouncedAuto, true, false),
+        None
+    );
+    assert!(service.runtime_state().dirty);
+}
+
+#[test]
+fn manual_sync_fails_closed_when_visibility_cannot_be_checked() {
+    let service = VaultSyncService::new(VaultSyncServiceConfig::default());
+
+    service.mark_dirty();
+    service.set_remote_safety_status(GitRemoteSafetyStatus::Stale);
+
+    let plan = service
+        .begin_trigger(VaultSyncTrigger::Manual, true, false)
+        .expect("manual sync should schedule revalidation");
+    assert_eq!(
+        plan,
+        VaultSyncPlan {
+            execution: VaultSyncExecution::Push,
+            revalidate_remote: true,
+        }
+    );
+
+    service.pause_remote(
+        "remote repository visibility could not be confirmed; refusing to enable sync without verified private visibility",
+    );
+    service.finish(plan.execution, false);
+
+    let state = service.runtime_state();
+    assert_eq!(state.remote_safety_status, GitRemoteSafetyStatus::Paused);
+    assert!(
+        state
+            .last_sync_error
+            .as_deref()
+            .is_some_and(|message| message.contains("visibility could not be confirmed"))
+    );
+}
+
+#[test]
+fn periodic_sync_retries_after_remote_revalidated_private() {
+    let service = VaultSyncService::new(VaultSyncServiceConfig::default());
+
+    service.pause_remote(
+        "remote repository `owner/repo` must stay private before sync can be enabled",
+    );
+    service.mark_dirty();
+
+    assert_eq!(
+        service.begin_trigger(VaultSyncTrigger::Periodic, true, false),
+        Some(VaultSyncPlan {
+            execution: VaultSyncExecution::Refresh,
+            revalidate_remote: true,
+        })
+    );
+    service.set_remote_safety_status(GitRemoteSafetyStatus::Safe);
+    service.clear_last_sync_error();
+    service.finish(VaultSyncExecution::Refresh, true);
+
+    assert_eq!(
+        service.begin_trigger(VaultSyncTrigger::Periodic, true, false),
+        Some(VaultSyncPlan {
+            execution: VaultSyncExecution::Push,
+            revalidate_remote: true,
+        })
     );
 }

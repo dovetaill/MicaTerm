@@ -1,6 +1,7 @@
 //! Bootstrap vault sync module.
 
 use super::*;
+use crate::app::vault::model::GitRemoteSafetyStatus;
 
 #[derive(Clone)]
 pub(super) struct VaultSyncBackgroundSuccess {
@@ -24,6 +25,7 @@ pub(super) struct VaultSyncBackgroundFailure {
 pub(super) enum VaultSyncBackgroundMessage {
     Completed {
         trigger: VaultSyncTrigger,
+        execution: VaultSyncExecution,
         result: std::result::Result<VaultSyncBackgroundSuccess, VaultSyncBackgroundFailure>,
     },
     RemoteHeadRefreshed {
@@ -244,10 +246,13 @@ pub(super) fn apply_remote_head_snapshot_to_sync_modal(
 pub(super) fn request_sync_modal_remote_head_refresh(
     state: &mut ShellViewModel,
     vault: &VaultSessionState,
+    sync_service: &VaultSyncService,
     credential_store: Arc<dyn CredentialStore>,
     vault_sync_result_tx: &std::sync::mpsc::Sender<VaultSyncBackgroundMessage>,
 ) {
-    if vault_primary_remote(vault).is_none() || state.sync_modal_state().remote_status_loading {
+    if vault_primary_remote(vault).is_none()
+        || !sync_service.request(VaultSyncIntent::RefreshRemoteHead)
+    {
         return;
     }
 
@@ -484,6 +489,7 @@ pub(super) fn create_local_vault_from_shell_state(
         device_id,
         logical_revision: None,
         transport_revision_hint: None,
+        base_revision: None,
         current_revision: None,
         local_snapshot_hash: Some(payload_hash_from_encrypted_snapshot_sha(
             &encrypted_snapshot.payload_sha256,
@@ -492,6 +498,7 @@ pub(super) fn create_local_vault_from_shell_state(
         last_successful_push_at: None,
         last_successful_pull_at: None,
         last_sync_error: None,
+        remote_safety_status: GitRemoteSafetyStatus::Unknown,
     };
     save_local_vault_bootstrap_state(vault.bootstrap_state_path().as_path(), &local_state)?;
     persist_runtime_vault_key(credential_store, &local_state.bundle.vault_id, &vault_key)?;
@@ -621,12 +628,14 @@ pub(super) fn recover_local_vault_from_primary_remote(
             device_id,
             logical_revision: Some(report.primary_revision.clone()),
             transport_revision_hint: None,
+            base_revision: Some(report.primary_revision.clone()),
             current_revision: Some(report.primary_revision.clone()),
             local_snapshot_hash: Some(report.head.payload_hash.clone()),
             last_local_change_at: Some(committed_at.clone()),
             last_successful_push_at: Some(committed_at),
             last_successful_pull_at: None,
             last_sync_error: None,
+            remote_safety_status: GitRemoteSafetyStatus::Safe,
         };
         save_local_vault_bootstrap_state(vault.bootstrap_state_path().as_path(), &local_state)?;
         persist_runtime_vault_key(credential_store, &local_state.bundle.vault_id, &vault_key)?;
@@ -665,12 +674,14 @@ pub(super) fn recover_local_vault_from_primary_remote(
         device_id,
         logical_revision: Some(remote_head.vault_revision.clone()),
         transport_revision_hint: None,
+        base_revision: Some(remote_head.vault_revision.clone()),
         current_revision: Some(remote_head.vault_revision.clone()),
         local_snapshot_hash: Some(remote_head.payload_hash.clone()),
         last_local_change_at: None,
         last_successful_push_at: None,
         last_successful_pull_at: Some(recovery_pulled_at),
         last_sync_error: None,
+        remote_safety_status: GitRemoteSafetyStatus::Safe,
     };
     save_local_vault_bootstrap_state(vault.bootstrap_state_path().as_path(), &local_state)?;
     persist_runtime_vault_key(credential_store, &local_state.bundle.vault_id, &vault_key)?;
@@ -1182,12 +1193,14 @@ pub(super) fn sync_local_vault(
                     .local_state
                     .as_mut()
                     .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
+                local_state.base_revision = Some(remote_head.vault_revision.clone());
                 local_state.current_revision = Some(remote_head.vault_revision.clone());
                 local_state.local_snapshot_hash = Some(local_snapshot_hash);
                 if current_revision.as_deref() != Some(remote_head.vault_revision.as_str()) {
                     local_state.last_successful_pull_at = Some(remote_head.committed_at.clone());
                 }
                 local_state.last_sync_error = None;
+                local_state.remote_safety_status = GitRemoteSafetyStatus::Safe;
                 save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
                 vault.decrypted_snapshot = Some(snapshot);
                 update_vault_panel_for_local_state(state, vault);
@@ -1245,10 +1258,12 @@ pub(super) fn sync_local_vault(
                 .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
             local_state.wrapped_vault_key = remote_head.wrapped_vault_key.clone();
             local_state.kdf = remote_head.kdf.clone();
+            local_state.base_revision = Some(remote_head.vault_revision.clone());
             local_state.current_revision = Some(remote_head.vault_revision.clone());
             local_state.local_snapshot_hash = Some(remote_head.payload_hash.clone());
             local_state.last_successful_pull_at = Some(pulled_at);
             local_state.last_sync_error = None;
+            local_state.remote_safety_status = GitRemoteSafetyStatus::Safe;
             save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
             store_encrypted_cache(
                 cache_root.as_path(),
@@ -1357,10 +1372,12 @@ pub(super) fn sync_local_vault(
                 &local_bundle.vault_id,
                 &report.encrypted_snapshot,
             )?;
+            local_state.base_revision = Some(report.primary_revision.clone());
             local_state.current_revision = Some(report.primary_revision.clone());
             local_state.local_snapshot_hash = Some(report.head.payload_hash.clone());
             local_state.last_successful_push_at = Some(report.head.committed_at.clone());
             local_state.last_sync_error = None;
+            local_state.remote_safety_status = GitRemoteSafetyStatus::Safe;
             save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
             if matches!(decision.action, SyncAction::MergeThenPush) {
                 clear_vault_decrypted_state(state, Some(&snapshot), credential_store)?;
@@ -1517,10 +1534,12 @@ pub(super) fn refresh_local_vault_from_primary_remote_if_changed(
         .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
     local_state.wrapped_vault_key = remote_head.wrapped_vault_key.clone();
     local_state.kdf = remote_head.kdf.clone();
+    local_state.base_revision = Some(remote_head.vault_revision.clone());
     local_state.current_revision = Some(remote_head.vault_revision.clone());
     local_state.local_snapshot_hash = Some(remote_head.payload_hash.clone());
     local_state.last_successful_pull_at = Some(pulled_at);
     local_state.last_sync_error = None;
+    local_state.remote_safety_status = GitRemoteSafetyStatus::Safe;
     save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
     store_encrypted_cache(
         cache_root.as_path(),
@@ -1591,11 +1610,11 @@ pub(super) fn vault_requires_initial_remote_sync(vault: &VaultSessionState) -> b
 pub(super) fn mark_local_vault_dirty_and_arm_sync(
     state: &mut ShellViewModel,
     vault: &mut VaultSessionState,
-    scheduler: &Rc<RefCell<VaultSyncSchedulerState>>,
+    sync_service: &Rc<VaultSyncService>,
     sync_debounce_timer: &Rc<Timer>,
     run_sync: Rc<dyn Fn(VaultSyncTrigger)>,
 ) {
-    scheduler.borrow_mut().dirty = true;
+    sync_service.mark_dirty();
     let bootstrap_state_path = vault.bootstrap_state_path();
     if let Some(local_state) = vault.local_state.as_mut() {
         local_state.last_local_change_at = Some(next_local_change_timestamp(local_state));

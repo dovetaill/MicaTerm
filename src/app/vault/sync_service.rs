@@ -2,6 +2,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use crate::app::vault::model::GitRemoteSafetyStatus;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VaultSyncIntent {
     ManualSync,
@@ -23,6 +25,12 @@ pub enum VaultSyncExecution {
     Refresh,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VaultSyncPlan {
+    pub execution: VaultSyncExecution,
+    pub revalidate_remote: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RemoteHeadSnapshot {
     pub revision: Option<String>,
@@ -35,6 +43,27 @@ pub struct RemoteHeadSnapshot {
 struct VaultSyncState {
     dirty: bool,
     running: bool,
+    pending_trigger: Option<VaultSyncTrigger>,
+    base_revision: Option<String>,
+    local_snapshot_hash: Option<String>,
+    last_local_change_at: Option<String>,
+    last_successful_push_at: Option<String>,
+    last_successful_pull_at: Option<String>,
+    last_sync_error: Option<String>,
+    remote_safety_status: GitRemoteSafetyStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct VaultSyncRuntimeState {
+    pub dirty: bool,
+    pub running: bool,
+    pub base_revision: Option<String>,
+    pub local_snapshot_hash: Option<String>,
+    pub last_local_change_at: Option<String>,
+    pub last_successful_push_at: Option<String>,
+    pub last_successful_pull_at: Option<String>,
+    pub last_sync_error: Option<String>,
+    pub remote_safety_status: GitRemoteSafetyStatus,
 }
 
 #[derive(Clone, Default)]
@@ -105,6 +134,50 @@ impl VaultSyncService {
             .lock()
             .expect("vault sync state mutex should not be poisoned");
         state.dirty = true;
+        state.last_local_change_at = state.last_local_change_at.clone();
+    }
+
+    pub fn runtime_state(&self) -> VaultSyncRuntimeState {
+        let state = self
+            .state
+            .lock()
+            .expect("vault sync state mutex should not be poisoned");
+        VaultSyncRuntimeState {
+            dirty: state.dirty,
+            running: state.running,
+            base_revision: state.base_revision.clone(),
+            local_snapshot_hash: state.local_snapshot_hash.clone(),
+            last_local_change_at: state.last_local_change_at.clone(),
+            last_successful_push_at: state.last_successful_push_at.clone(),
+            last_successful_pull_at: state.last_successful_pull_at.clone(),
+            last_sync_error: state.last_sync_error.clone(),
+            remote_safety_status: state.remote_safety_status,
+        }
+    }
+
+    pub fn set_remote_safety_status(&self, safety_status: GitRemoteSafetyStatus) {
+        let mut state = self
+            .state
+            .lock()
+            .expect("vault sync state mutex should not be poisoned");
+        state.remote_safety_status = safety_status;
+    }
+
+    pub fn clear_last_sync_error(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .expect("vault sync state mutex should not be poisoned");
+        state.last_sync_error = None;
+    }
+
+    pub fn pause_remote(&self, error: impl Into<String>) {
+        let mut state = self
+            .state
+            .lock()
+            .expect("vault sync state mutex should not be poisoned");
+        state.remote_safety_status = GitRemoteSafetyStatus::Paused;
+        state.last_sync_error = Some(error.into());
     }
 
     pub fn begin_trigger(
@@ -112,12 +185,13 @@ impl VaultSyncService {
         trigger: VaultSyncTrigger,
         background_ready: bool,
         requires_initial_remote_sync: bool,
-    ) -> Option<VaultSyncExecution> {
+    ) -> Option<VaultSyncPlan> {
         let mut state = self
             .state
             .lock()
             .expect("vault sync state mutex should not be poisoned");
         if state.running {
+            state.pending_trigger = Some(merge_vault_sync_trigger(state.pending_trigger, trigger));
             return None;
         }
 
@@ -141,19 +215,35 @@ impl VaultSyncService {
             return None;
         }
 
-        let execution = if should_attempt_push {
-            VaultSyncExecution::Push
+        let plan = if should_attempt_push {
+            if state.remote_safety_status == GitRemoteSafetyStatus::Paused {
+                if matches!(trigger, VaultSyncTrigger::DebouncedAuto) {
+                    return None;
+                }
+                VaultSyncPlan {
+                    execution: VaultSyncExecution::Refresh,
+                    revalidate_remote: true,
+                }
+            } else {
+                VaultSyncPlan {
+                    execution: VaultSyncExecution::Push,
+                    revalidate_remote: true,
+                }
+            }
         } else if should_attempt_refresh {
-            VaultSyncExecution::Refresh
+            VaultSyncPlan {
+                execution: VaultSyncExecution::Refresh,
+                revalidate_remote: true,
+            }
         } else {
             return None;
         };
 
         state.running = true;
-        Some(execution)
+        Some(plan)
     }
 
-    pub fn finish(&self, execution: VaultSyncExecution, success: bool) {
+    pub fn finish(&self, execution: VaultSyncExecution, success: bool) -> Option<VaultSyncTrigger> {
         let mut state = self
             .state
             .lock()
@@ -162,6 +252,7 @@ impl VaultSyncService {
         if success && matches!(execution, VaultSyncExecution::Push) {
             state.dirty = false;
         }
+        state.pending_trigger.take()
     }
 
     pub fn finish_remote_head_refresh(&self) {
@@ -182,5 +273,20 @@ impl VaultSyncService {
         });
 
         Some(VaultSyncBackgroundTask { completion_rx })
+    }
+}
+
+fn merge_vault_sync_trigger(
+    pending: Option<VaultSyncTrigger>,
+    next: VaultSyncTrigger,
+) -> VaultSyncTrigger {
+    match (pending, next) {
+        (Some(VaultSyncTrigger::Manual), _) | (_, VaultSyncTrigger::Manual) => {
+            VaultSyncTrigger::Manual
+        }
+        (Some(VaultSyncTrigger::Periodic), _) | (_, VaultSyncTrigger::Periodic) => {
+            VaultSyncTrigger::Periodic
+        }
+        _ => VaultSyncTrigger::DebouncedAuto,
     }
 }

@@ -10,11 +10,11 @@ use mica_term::app::vault::bootstrap::{
 };
 use mica_term::app::vault::model::{
     BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind, CompressionKind,
-    GitHostKind, GitRepoRemoteDraft, KdfConfig, PackLayout, PackRef, ProviderAuthKind,
-    ProviderKind, RemoteHealth, RemoteHealthStatus, RemoteRole, SnapshotSyncPreferences,
-    SnapshotUiPreferences, VaultAssetCatalog, VaultAssetKind, VaultAssetNode, VaultAssetPayload,
-    VaultHead, VaultKnownHostEntry, VaultManifest, VaultSnapshot, VaultSocks5ProxySpec,
-    VaultSshConnectionSpec, VaultSshProxySpec,
+    GitHostKind, GitRemoteSafetyStatus, GitRepoRemoteDraft, KdfConfig, PackLayout, PackRef,
+    ProviderAuthKind, ProviderKind, RemoteHealth, RemoteHealthStatus, RemoteRole,
+    SnapshotSyncPreferences, SnapshotUiPreferences, VaultAssetCatalog, VaultAssetKind,
+    VaultAssetNode, VaultAssetPayload, VaultHead, VaultKnownHostEntry, VaultManifest,
+    VaultSnapshot, VaultSocks5ProxySpec, VaultSshConnectionSpec, VaultSshProxySpec,
 };
 use serde_json::json;
 
@@ -183,12 +183,14 @@ fn local_bootstrap_state_persists_durable_sync_state_fields() {
         device_id: "device-laptop".into(),
         logical_revision: Some("logical-merge-0042".into()),
         transport_revision_hint: Some("git:0123456789abcdef".into()),
+        base_revision: Some("rev-0041".into()),
         current_revision: Some("rev-0042".into()),
         local_snapshot_hash: Some("sha256:local-snapshot".into()),
         last_local_change_at: Some("2026-03-31T09:40:00Z".into()),
         last_successful_push_at: Some("2026-03-31T09:41:00Z".into()),
         last_successful_pull_at: Some("2026-03-31T09:39:30Z".into()),
         last_sync_error: Some("mirror degraded".into()),
+        remote_safety_status: GitRemoteSafetyStatus::Paused,
     };
 
     save_local_vault_bootstrap_state(&path, &state).unwrap();
@@ -205,6 +207,7 @@ fn local_bootstrap_state_persists_durable_sync_state_fields() {
         loaded.transport_revision_hint.as_deref(),
         Some("git:0123456789abcdef")
     );
+    assert_eq!(loaded.base_revision.as_deref(), Some("rev-0041"));
     assert_eq!(loaded.current_revision.as_deref(), Some("rev-0042"));
     assert_eq!(
         loaded.local_snapshot_hash.as_deref(),
@@ -223,6 +226,7 @@ fn local_bootstrap_state_persists_durable_sync_state_fields() {
         Some("2026-03-31T09:39:30Z")
     );
     assert_eq!(loaded.last_sync_error.as_deref(), Some("mirror degraded"));
+    assert_eq!(loaded.remote_safety_status, GitRemoteSafetyStatus::Paused);
 
     let _ = std::fs::remove_file(path);
 }

@@ -17,7 +17,7 @@ use crate::app::ssh::credentials::{
     CredentialStore, load_fixed_binary_secret, persist_binary_secret,
 };
 use crate::app::vault::device_identity::load_or_create_device_id;
-use crate::app::vault::model::{BootstrapBundle, CipherKind, KdfConfig};
+use crate::app::vault::model::{BootstrapBundle, CipherKind, GitRemoteSafetyStatus, KdfConfig};
 
 const BOOTSTRAP_FORMAT_VERSION: u32 = 1;
 const BOOTSTRAP_KEY_LEN: usize = 32;
@@ -43,6 +43,8 @@ pub struct LocalVaultBootstrapState {
     #[serde(default)]
     pub transport_revision_hint: Option<String>,
     #[serde(default)]
+    pub base_revision: Option<String>,
+    #[serde(default)]
     pub current_revision: Option<String>,
     #[serde(default)]
     pub local_snapshot_hash: Option<String>,
@@ -54,6 +56,8 @@ pub struct LocalVaultBootstrapState {
     pub last_successful_pull_at: Option<String>,
     #[serde(default)]
     pub last_sync_error: Option<String>,
+    #[serde(default)]
+    pub remote_safety_status: GitRemoteSafetyStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -269,6 +273,9 @@ pub fn load_local_vault_bootstrap_state(path: &Path) -> Result<Option<LocalVault
     }
     if state.logical_revision.is_none() {
         state.logical_revision = state.current_revision.clone();
+    }
+    if state.base_revision.is_none() {
+        state.base_revision = state.current_revision.clone();
     }
     Ok(Some(state))
 }

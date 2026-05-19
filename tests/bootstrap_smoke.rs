@@ -4768,12 +4768,14 @@ fn unlocking_existing_vault_restores_cached_snapshot_without_loading_while_locke
             device_id: "device-bootstrap-smoke".into(),
             logical_revision: Some("rev-0001".into()),
             transport_revision_hint: None,
+            base_revision: Some("rev-0001".into()),
             current_revision: Some("rev-0001".into()),
             local_snapshot_hash: Some(format!("sha256:{}", encrypted.payload_sha256)),
             last_local_change_at: Some("2026-03-31T10:00:00Z".into()),
             last_successful_push_at: None,
             last_successful_pull_at: None,
             last_sync_error: None,
+            remote_safety_status: mica_term::app::vault::model::GitRemoteSafetyStatus::Safe,
         },
     )
     .unwrap();
