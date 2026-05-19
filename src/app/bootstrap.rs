@@ -136,8 +136,7 @@ use crate::app::vault::model::{
 };
 use crate::app::vault::provider::git_repo::{
     GitRepoProvider, GitRepoProviderConfig, GitRepositoryMetadata, GitRepositoryMetadataSource,
-    ReqwestGitRepositoryMetadataSource, validate_first_release_git_host,
-    validate_remote_for_sync,
+    ReqwestGitRepositoryMetadataSource, validate_first_release_git_host, validate_remote_for_sync,
 };
 use crate::app::vault::provider::gitee_gist::{GiteeGistProvider, GiteeGistProviderConfig};
 use crate::app::vault::provider::github_gist::{GitHubGistProvider, GitHubGistProviderConfig};
@@ -5117,8 +5116,7 @@ fn build_sync_bundle_from_modal(
             host_kind,
             remote_url: git_remote_url,
             branch: git_branch.into(),
-            base_url: Some(modal.git_base_url.trim().to_string())
-                .filter(|value| !value.is_empty()),
+            base_url: Some(modal.git_base_url.trim().to_string()).filter(|value| !value.is_empty()),
             api_base_url: Some(modal.git_api_base_url.trim().to_string())
                 .filter(|value| !value.is_empty()),
             namespace: Some(modal.git_namespace.trim().to_string())
@@ -5144,9 +5142,7 @@ fn build_sync_bundle_from_modal(
     Ok(bundle)
 }
 
-fn sync_modal_validation_signature(
-    modal: &crate::shell::view_model::SyncModalViewState,
-) -> String {
+fn sync_modal_validation_signature(modal: &crate::shell::view_model::SyncModalViewState) -> String {
     [
         modal.git_provider_kind.as_str(),
         modal.git_base_url.as_str(),
@@ -5223,8 +5219,10 @@ fn apply_sync_modal_validation_result(
     match result {
         Ok(metadata) => {
             modal.validation_state = SyncModalValidationState::Success;
-            modal.validation_message =
-                format!("Validated private writable repository {}.", metadata.display_name);
+            modal.validation_message = format!(
+                "Validated private writable repository {}.",
+                metadata.display_name
+            );
             modal.error_text.clear();
             modal.target_label = metadata.display_name;
         }
@@ -6514,7 +6512,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             let mut vault = vault_session_ref.borrow_mut();
             let (width, height) = current_window_size(&window);
             sync_service_ref.set_remote_safety_status(
-                vault.local_state
+                vault
+                    .local_state
                     .as_ref()
                     .map(|local_state| local_state.remote_safety_status)
                     .unwrap_or_default(),
@@ -6776,11 +6775,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                             Some(access_token.as_str()),
                         )
                         .map_err(|err| err.to_string());
-                        let _ =
-                            completion_tx.send(vault_sync::VaultSyncBackgroundMessage::RemoteValidationCompleted {
+                        let _ = completion_tx.send(
+                            vault_sync::VaultSyncBackgroundMessage::RemoteValidationCompleted {
                                 draft_signature,
                                 result,
-                            });
+                            },
+                        );
                     });
                 }
                 Err(err) => {

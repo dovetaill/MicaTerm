@@ -420,14 +420,10 @@ impl ShellViewModel {
                         "gitlab" => "GitLab".into(),
                         _ => "Gitee".into(),
                     };
-                    modal.git_base_url = sync_modal_default_base_url(
-                        modal.git_provider_kind.as_str(),
-                    )
-                    .into();
-                    modal.git_api_base_url = sync_modal_default_api_base_url(
-                        modal.git_provider_kind.as_str(),
-                    )
-                    .into();
+                    modal.git_base_url =
+                        sync_modal_default_base_url(modal.git_provider_kind.as_str()).into();
+                    modal.git_api_base_url =
+                        sync_modal_default_api_base_url(modal.git_provider_kind.as_str()).into();
                 }
             }
             "git-remote-url" => modal.git_remote_url = value,

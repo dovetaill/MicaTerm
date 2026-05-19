@@ -232,8 +232,8 @@ impl ReqwestGitRepositoryMetadataSource {
         target: &ResolvedGitRepositoryTarget,
         access_token: Option<&str>,
     ) -> Result<GitRepositoryMetadata> {
-        let mut url = reqwest::Url::parse(&target.api_base_url)
-            .context("invalid GitHub API base URL")?;
+        let mut url =
+            reqwest::Url::parse(&target.api_base_url).context("invalid GitHub API base URL")?;
         {
             let mut segments = url
                 .path_segments_mut()
@@ -248,10 +248,7 @@ impl ReqwestGitRepositoryMetadataSource {
             let mut request = client
                 .get(url)
                 .header(reqwest::header::USER_AGENT, REQUEST_USER_AGENT)
-                .header(
-                    reqwest::header::ACCEPT,
-                    "application/vnd.github+json",
-                );
+                .header(reqwest::header::ACCEPT, "application/vnd.github+json");
             if let Some(token) = access_token.filter(|token| !token.trim().is_empty()) {
                 request = request.bearer_auth(token.trim());
             }
@@ -286,8 +283,8 @@ impl ReqwestGitRepositoryMetadataSource {
         target: &ResolvedGitRepositoryTarget,
         access_token: Option<&str>,
     ) -> Result<GitRepositoryMetadata> {
-        let mut url = reqwest::Url::parse(&target.api_base_url)
-            .context("invalid GitLab API base URL")?;
+        let mut url =
+            reqwest::Url::parse(&target.api_base_url).context("invalid GitLab API base URL")?;
         {
             let mut segments = url
                 .path_segments_mut()
@@ -298,10 +295,9 @@ impl ReqwestGitRepositoryMetadataSource {
 
         run_git_repository_request(async move {
             let client = reqwest::Client::new();
-            let mut request = client.get(url).header(
-                reqwest::header::USER_AGENT,
-                REQUEST_USER_AGENT,
-            );
+            let mut request = client
+                .get(url)
+                .header(reqwest::header::USER_AGENT, REQUEST_USER_AGENT);
             if let Some(token) = access_token.filter(|token| !token.trim().is_empty()) {
                 request = request.header("PRIVATE-TOKEN", token.trim());
             }
@@ -336,8 +332,8 @@ impl ReqwestGitRepositoryMetadataSource {
         target: &ResolvedGitRepositoryTarget,
         access_token: Option<&str>,
     ) -> Result<GitRepositoryMetadata> {
-        let mut url = reqwest::Url::parse(&target.api_base_url)
-            .context("invalid Gitee API base URL")?;
+        let mut url =
+            reqwest::Url::parse(&target.api_base_url).context("invalid Gitee API base URL")?;
         {
             let mut segments = url
                 .path_segments_mut()
@@ -392,7 +388,9 @@ struct ResolvedGitRepositoryTarget {
     display_name: String,
 }
 
-fn resolve_repository_target(remote: &BootstrapRemoteConfig) -> Result<ResolvedGitRepositoryTarget> {
+fn resolve_repository_target(
+    remote: &BootstrapRemoteConfig,
+) -> Result<ResolvedGitRepositoryTarget> {
     let BootstrapRemoteLocator::GitRepo {
         host_kind,
         remote_url,

@@ -151,8 +151,10 @@ grep -F 'settings-modal-overlay := SettingsModal {' "$APP_WINDOW" >/dev/null
 [[ -f "$SETTINGS_MODAL" ]]
 grep -F 'in property <string> download-conflict-default: "ask";' "$SETTINGS_MODAL" >/dev/null
 grep -F 'callback download-conflict-default-changed(string);' "$SETTINGS_MODAL" >/dev/null
-grep -F 'text: "Download conflict default"' "$SETTINGS_MODAL" >/dev/null
-grep -F 'root.download-conflict-default == "ask" ? "Ask every time" : root.download-conflict-default == "overwrite" ? "Overwrite existing files" : "Auto rename downloads"' "$SETTINGS_MODAL" >/dev/null
+grep -F 'title: "Download conflicts";' "$SETTINGS_MODAL" >/dev/null
+grep -F 'label: "Ask";' "$SETTINGS_MODAL" >/dev/null
+grep -F 'label: "Overwrite";' "$SETTINGS_MODAL" >/dev/null
+grep -F 'label: "Auto Rename";' "$SETTINGS_MODAL" >/dev/null
 grep -F 'root.download-conflict-default-changed(' "$SETTINGS_MODAL" >/dev/null
 grep -F 'in property <string> local-last-sync-text: "Never synced";' "$SYNC_MODAL" >/dev/null
 grep -F 'in property <string> remote-last-update-text: "Unknown";' "$SYNC_MODAL" >/dev/null

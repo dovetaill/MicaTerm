@@ -1606,15 +1606,24 @@ export component AppWindow inherits Window {
     }
 
     tooltip-overlay := TitlebarTooltip {
-        text: root.workspace-tab-tooltip-visible ? root.workspace-tab-tooltip-text : titlebar.tooltip-text;
-        anchor-x: root.workspace-tab-tooltip-visible ? root.workspace-tab-tooltip-anchor-x : titlebar.tooltip-anchor-x;
-        anchor-y: root.workspace-tab-tooltip-visible ? root.workspace-tab-tooltip-anchor-y : titlebar.tooltip-anchor-y;
-        tooltip-visible: root.workspace-tab-context-menu-open
-            ? false
-            : (root.workspace-tab-tooltip-visible ? true : titlebar.tooltip-visible);
+        text: titlebar.tooltip-text;
+        anchor-x: titlebar.tooltip-anchor-x;
+        anchor-y: titlebar.tooltip-anchor-y;
+        tooltip-visible: titlebar.tooltip-visible;
         host-width: root.width;
         host-height: root.height;
-        multiline-start-aligned: root.workspace-tab-tooltip-visible;
+    }
+
+    workspace-tab-tooltip-overlay := TitlebarTooltip {
+        text: root.workspace-tab-tooltip-text;
+        anchor-x: root.workspace-tab-tooltip-anchor-x;
+        anchor-y: root.workspace-tab-tooltip-anchor-y;
+        tooltip-visible: root.workspace-tab-context-menu-open
+            ? false
+            : root.workspace-tab-tooltip-visible;
+        host-width: root.width;
+        host-height: root.height;
+        multiline-start-aligned: true;
     }
 
     sync-feedback-overlay := TitlebarTooltip {

@@ -5,7 +5,10 @@ use std::fs;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::{Mutex, atomic::{AtomicUsize, Ordering}};
+use std::sync::{
+    Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
@@ -25,10 +28,10 @@ use mica_term::app::vault::model::{
     GitHostKind, GitRemoteSafetyStatus, GitRepositoryVisibility, GitRepositoryWritePermission,
     KdfConfig, PackLayout, ProviderAuthKind, ProviderKind, RemoteRole, VaultHead,
 };
-use mica_term::app::vault::provider::mock::MockVaultProvider;
 use mica_term::app::vault::provider::git_repo::{
     GitRepositoryMetadata, GitRepositoryMetadataSource,
 };
+use mica_term::app::vault::provider::mock::MockVaultProvider;
 use mica_term::app::vault::provider::{ProviderCapabilities, VaultProvider};
 use mica_term::app::window_effects::default_platform_window_effects;
 use tokio::sync::mpsc;
@@ -1052,6 +1055,13 @@ fn sync_modal_primary_action_routes_to_sync_and_secondary_action_closes() {
     i_slint_backend_testing::init_no_event_loop();
 
     let temp_root = sample_vault_runtime_root("actions");
+    let metadata_source = Arc::new(FakeGitRepositoryMetadataSource::returning(Ok(
+        sample_git_repository_metadata(
+            "demo/mica-vault",
+            GitRepositoryVisibility::Private,
+            GitRepositoryWritePermission::Writable,
+        ),
+    )));
     let primary = Arc::new(MockVaultProvider::new(
         "remote-primary",
         ProviderCapabilities::s3_like(),
@@ -1072,6 +1082,7 @@ fn sync_modal_primary_action_routes_to_sync_and_secondary_action_closes() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+            git_repo_metadata_source: metadata_source.clone(),
             ..VaultRuntimeOptions::default()
         },
     );
@@ -1092,6 +1103,7 @@ fn sync_modal_primary_action_routes_to_sync_and_secondary_action_closes() {
     wait_for_condition(Duration::from_secs(2), || {
         primary.recorded_writes().len() == 1
     });
+    assert_eq!(metadata_source.fetch_count(), 1);
 
     app.invoke_sync_modal_secondary_action_requested();
     assert!(!app.get_sync_modal_open());

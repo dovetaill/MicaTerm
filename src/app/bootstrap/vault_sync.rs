@@ -78,7 +78,9 @@ pub(super) fn update_sync_modal_for_local_state(
     modal.title = "Sync Settings".into();
     modal.provider_label = vault_primary_remote(vault)
         .and_then(|remote| match &remote.locator {
-            BootstrapRemoteLocator::GitRepo { host_kind, .. } => Some(host_kind.label().to_string()),
+            BootstrapRemoteLocator::GitRepo { host_kind, .. } => {
+                Some(host_kind.label().to_string())
+            }
             _ => None,
         })
         .unwrap_or_else(|| first_release_formal_provider_label().into());
@@ -92,7 +94,9 @@ pub(super) fn update_sync_modal_for_local_state(
             } => display_name
                 .clone()
                 .or_else(|| match (namespace, repository) {
-                    (Some(namespace), Some(repository)) => Some(format!("{namespace}/{repository}")),
+                    (Some(namespace), Some(repository)) => {
+                        Some(format!("{namespace}/{repository}"))
+                    }
                     _ => None,
                 }),
             _ => None,
@@ -850,9 +854,7 @@ pub(super) fn resolve_remote_for_sync(
     if remote.provider == ProviderKind::GitRepo
         && matches!(
             remote.auth_kind,
-            ProviderAuthKind::Pat
-                | ProviderAuthKind::HttpsCredentials
-                | ProviderAuthKind::SshKey
+            ProviderAuthKind::Pat | ProviderAuthKind::HttpsCredentials | ProviderAuthKind::SshKey
         )
     {
         let inline_secret =

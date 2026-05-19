@@ -8,9 +8,9 @@ use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
@@ -77,13 +77,13 @@ use mica_term::app::vault::device_identity::load_or_create_device_id;
 use mica_term::app::vault::model::{
     BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind, CompressionKind,
     GitRemoteSafetyStatus, GitRepositoryVisibility, GitRepositoryWritePermission, KdfConfig,
-    PackLayout, PackRef, ProviderAuthKind, ProviderKind, RemoteRole,
-    SnapshotSyncPreferences, VaultAssetPayload, VaultHead, VaultManifest,
+    PackLayout, PackRef, ProviderAuthKind, ProviderKind, RemoteRole, SnapshotSyncPreferences,
+    VaultAssetPayload, VaultHead, VaultManifest,
 };
-use mica_term::app::vault::provider::mock::MockVaultProvider;
 use mica_term::app::vault::provider::git_repo::{
     GitRepositoryMetadata, GitRepositoryMetadataSource,
 };
+use mica_term::app::vault::provider::mock::MockVaultProvider;
 use mica_term::app::vault::provider::{ProviderCapabilities, ProviderRevision, VaultProvider};
 use mica_term::app::vault::recovery::{RecoverySource, load_recovery_snapshots};
 use mica_term::app::vault::snapshot::export_vault_snapshot;
@@ -5936,9 +5936,15 @@ fn private_git_repo_sync_happy_path_revalidates_before_first_push() {
             .expect("local bootstrap state after safe git sync");
     assert_eq!(primary.recorded_writes().len(), 1);
     assert_eq!(metadata_source.fetch_count(), 2);
-    assert_eq!(local_state.remote_safety_status, GitRemoteSafetyStatus::Safe);
     assert_eq!(
-        local_state.bundle.primary_remote().map(|remote| remote.provider),
+        local_state.remote_safety_status,
+        GitRemoteSafetyStatus::Safe
+    );
+    assert_eq!(
+        local_state
+            .bundle
+            .primary_remote()
+            .map(|remote| remote.provider),
         Some(ProviderKind::GitRepo)
     );
 }
@@ -6018,7 +6024,10 @@ fn remote_changed_to_public_pauses_configured_git_repo_before_push() {
 
     assert_eq!(primary.recorded_writes().len(), 1);
     assert_eq!(metadata_source.fetch_count(), 3);
-    assert_eq!(local_state.remote_safety_status, GitRemoteSafetyStatus::Paused);
+    assert_eq!(
+        local_state.remote_safety_status,
+        GitRemoteSafetyStatus::Paused
+    );
     assert!(
         local_state
             .last_sync_error
@@ -6111,17 +6120,25 @@ fn periodic_refresh_revalidates_paused_git_repo_before_retrying_dirty_push() {
             .unwrap()
             .expect("paused local bootstrap state");
     assert_eq!(primary.recorded_writes().len(), 1);
-    assert_eq!(paused_state.remote_safety_status, GitRemoteSafetyStatus::Paused);
+    assert_eq!(
+        paused_state.remote_safety_status,
+        GitRemoteSafetyStatus::Paused
+    );
 
     settle_sync_scheduler(Duration::from_secs(121));
-    wait_for_condition(VAULT_SYNC_WAIT_TIMEOUT, || metadata_source.fetch_count() >= 4);
+    wait_for_condition(VAULT_SYNC_WAIT_TIMEOUT, || {
+        metadata_source.fetch_count() >= 4
+    });
 
     let revalidated_state =
         load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
             .unwrap()
             .expect("revalidated local bootstrap state");
     assert_eq!(primary.recorded_writes().len(), 1);
-    assert_eq!(revalidated_state.remote_safety_status, GitRemoteSafetyStatus::Safe);
+    assert_eq!(
+        revalidated_state.remote_safety_status,
+        GitRemoteSafetyStatus::Safe
+    );
 
     settle_sync_scheduler(Duration::from_secs(121));
     wait_for_condition(VAULT_SYNC_WAIT_TIMEOUT, || {
@@ -6132,7 +6149,10 @@ fn periodic_refresh_revalidates_paused_git_repo_before_retrying_dirty_push() {
         load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
             .unwrap()
             .expect("retried local bootstrap state");
-    assert_eq!(synced_state.remote_safety_status, GitRemoteSafetyStatus::Safe);
+    assert_eq!(
+        synced_state.remote_safety_status,
+        GitRemoteSafetyStatus::Safe
+    );
     assert_eq!(synced_state.current_revision.as_deref(), Some("rev-0002"));
 }
 
