@@ -39,12 +39,17 @@ pub struct SyncReport {
     pub head: VaultHead,
     pub manifest: VaultManifest,
     pub encrypted_snapshot: EncryptedSnapshot,
+    pub primary_cleanup_error: Option<String>,
     pub mirror_failures: Vec<SyncMirrorFailure>,
 }
 
 impl SyncReport {
     pub fn is_mirror_degraded(&self) -> bool {
         !self.mirror_failures.is_empty()
+    }
+
+    pub fn is_degraded(&self) -> bool {
+        self.primary_cleanup_error.is_some() || self.is_mirror_degraded()
     }
 }
 
@@ -146,12 +151,11 @@ impl SyncEngine {
                 remote_id: self.primary.remote_id().to_string(),
                 message: err.to_string(),
             })?;
-        self.primary
+        let primary_cleanup_error = self
+            .primary
             .prune_revisions(DEFAULT_REVISION_RETENTION_LIMIT, &primary_request.head)
-            .map_err(|err| SyncError::PrimaryWriteFailed {
-                remote_id: self.primary.remote_id().to_string(),
-                message: err.to_string(),
-            })?;
+            .err()
+            .map(|err| err.to_string());
 
         let mut mirror_failures = Vec::new();
         for mirror in &self.mirrors {
@@ -184,6 +188,7 @@ impl SyncEngine {
             head: primary_request.head,
             manifest: primary_request.manifest,
             encrypted_snapshot: primary_request.encrypted_snapshot,
+            primary_cleanup_error,
             mirror_failures,
         })
     }

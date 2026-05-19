@@ -578,6 +578,7 @@ pub(super) fn recover_local_vault_from_primary_remote(
             let captured_at = current_sync_timestamp();
             persist_merge_conflict_recovery_snapshots(
                 vault.root_dir.join("recovery").as_path(),
+                &vault_key,
                 &remote_head.vault_id,
                 None,
                 &local_snapshot,
@@ -1325,6 +1326,7 @@ pub(super) fn sync_local_vault(
             let captured_at = current_sync_timestamp();
             persist_merge_conflict_recovery_snapshots(
                 vault.root_dir.join("recovery").as_path(),
+                &vault_key,
                 &local_bundle.vault_id,
                 current_revision.clone(),
                 &snapshot,
@@ -1363,6 +1365,19 @@ pub(super) fn sync_local_vault(
 
     match engine.sync(request) {
         Ok(report) => {
+            let mut degraded_messages = Vec::new();
+            if let Some(message) = report.primary_cleanup_error.as_deref() {
+                degraded_messages.push(format!("Retention cleanup degraded: {message}"));
+            }
+            if let Some(message) = report
+                .mirror_failures
+                .first()
+                .map(|failure| format!("Mirror degraded: {}", failure.message))
+            {
+                degraded_messages.push(message);
+            }
+            let degraded_status =
+                (!degraded_messages.is_empty()).then(|| degraded_messages.join(" "));
             let local_state = vault
                 .local_state
                 .as_mut()
@@ -1376,7 +1391,7 @@ pub(super) fn sync_local_vault(
             local_state.current_revision = Some(report.primary_revision.clone());
             local_state.local_snapshot_hash = Some(report.head.payload_hash.clone());
             local_state.last_successful_push_at = Some(report.head.committed_at.clone());
-            local_state.last_sync_error = None;
+            local_state.last_sync_error = degraded_status.clone();
             local_state.remote_safety_status = GitRemoteSafetyStatus::Safe;
             save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
             if matches!(decision.action, SyncAction::MergeThenPush) {
@@ -1418,18 +1433,10 @@ pub(super) fn sync_local_vault(
                     report.primary_revision
                 )
             };
-            if report.is_mirror_degraded() {
-                let mirror_degraded_message = format!(
-                    "Mirror degraded: {}",
-                    report
-                        .mirror_failures
-                        .first()
-                        .map(|failure| failure.message.as_str())
-                        .unwrap_or("unknown mirror failure")
-                );
+            if let Some(degraded_status) = degraded_status {
                 state.vault_panel_state_mut().primary_status_label = primary_status.clone();
                 state.sync_modal_state_mut().status_text =
-                    format!("{} {}", sync_status, mirror_degraded_message);
+                    format!("{} {}", sync_status, degraded_status);
             } else {
                 state.vault_panel_state_mut().primary_status_label = primary_status;
                 state.sync_modal_state_mut().status_text = sync_status;

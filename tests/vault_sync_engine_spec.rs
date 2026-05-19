@@ -344,7 +344,7 @@ fn retention_runs_after_successful_primary_and_mirror_syncs() {
 }
 
 #[test]
-fn retention_primary_prune_failure_surfaces_as_sync_error() {
+fn retention_primary_prune_failure_keeps_the_successful_push_result() {
     let primary = Arc::new(MockVaultProvider::new(
         "remote-primary",
         ProviderCapabilities::s3_like(),
@@ -353,17 +353,12 @@ fn retention_primary_prune_failure_surfaces_as_sync_error() {
     primary.set_prune_error(Some("retention cleanup failed"));
     let engine = SyncEngine::new(primary.clone() as Arc<dyn VaultProvider>, Vec::new());
 
-    let err = engine
+    let result = engine
         .sync(sample_request("rev-0002", Some("rev-0001")))
-        .expect_err("primary prune failure should fail sync");
+        .expect("primary prune failure should degrade the sync instead of failing it");
 
-    assert_eq!(
-        err,
-        SyncError::PrimaryWriteFailed {
-            remote_id: "remote-primary".into(),
-            message: "retention cleanup failed".into(),
-        }
-    );
+    assert_eq!(result.primary_revision, "rev-0002");
+    assert!(result.mirror_failures.is_empty());
     assert_eq!(primary.recorded_writes().len(), 1);
 }
 

@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
 use anyhow::{Result, anyhow};
@@ -234,6 +234,16 @@ fn sample_repository_metadata(
     }
 }
 
+fn bare_remote_tree_has_path(remote_repo: &Path, path: &str) -> bool {
+    let repo = Repository::open_bare(remote_repo).expect("open bare remote");
+    let oid = repo
+        .refname_to_id("refs/heads/main")
+        .expect("resolve bare remote main head");
+    let commit = repo.find_commit(oid).expect("load bare remote commit");
+    let tree = commit.tree().expect("load bare remote tree");
+    tree.get_path(Path::new(path)).is_ok()
+}
+
 #[test]
 fn git_repo_remote_round_trip_preserves_branch_auth_and_repository_coordinates() {
     let remote = BootstrapRemoteConfig {
@@ -451,6 +461,40 @@ fn git_repo_provider_round_trip_does_not_require_system_git() {
 }
 
 #[test]
+fn git_repo_provider_scopes_sync_payloads_under_managed_root() {
+    let remote_repo = sample_remote_bare_repo("managed-root");
+    init_bare_remote_repo(remote_repo.as_path());
+
+    let remote = sample_remote(
+        remote_repo.display().to_string(),
+        ProviderAuthKind::HttpsCredentials,
+        Some(inline_https_credentials()),
+        GitHostKind::GitHub,
+    );
+    let provider = sample_provider(&remote, sample_cache_dir("managed-root-provider"));
+
+    provider
+        .write_revision(&sample_write_request("rev-0001", None, "device-a"))
+        .expect("seed git repo remote");
+
+    assert!(
+        bare_remote_tree_has_path(remote_repo.as_path(), ".mica-term-sync/vault-head.json"),
+        "managed root should contain the live head pointer"
+    );
+    assert!(
+        bare_remote_tree_has_path(
+            remote_repo.as_path(),
+            ".mica-term-sync/revisions/rev-0001/vault-head.json",
+        ),
+        "managed root should keep the committed head alongside the retained revision payloads"
+    );
+    assert!(
+        !bare_remote_tree_has_path(remote_repo.as_path(), "vault-head.json"),
+        "git repo sync should not spill payload files into the repository root"
+    );
+}
+
+#[test]
 fn git_https_credentials_build_transport_auth_plan() {
     let plan = build_https_auth_plan("demo", "secret-token").expect("build https auth plan");
 
@@ -516,6 +560,100 @@ fn git_repo_provider_rejects_non_fast_forward_push() {
         .expect_err("stale push should conflict");
 
     assert!(err.to_string().contains("non-fast-forward"));
+}
+
+#[test]
+fn provider_keeps_latest_10_revisions() {
+    let remote_repo = sample_remote_bare_repo("retention-latest-10");
+    init_bare_remote_repo(remote_repo.as_path());
+
+    let remote = sample_remote(
+        remote_repo.display().to_string(),
+        ProviderAuthKind::HttpsCredentials,
+        Some(inline_https_credentials()),
+        GitHostKind::GitHub,
+    );
+    let writer = sample_provider(&remote, sample_cache_dir("retention-writer"));
+
+    let mut parent_revision = None;
+    for revision in 1..=12 {
+        let revision_id = format!("rev-{revision:04}");
+        writer
+            .write_revision(&sample_write_request(
+                revision_id.as_str(),
+                parent_revision.as_deref(),
+                "device-a",
+            ))
+            .expect("write retained git revision");
+        writer
+            .prune_revisions(
+                10,
+                &sample_write_request(revision_id.as_str(), None, "device-a").head,
+            )
+            .expect("prune retained git revisions");
+        parent_revision = Some(revision_id);
+    }
+
+    let reader = sample_provider(&remote, sample_cache_dir("retention-reader"));
+    let live_head = reader
+        .read_head()
+        .expect("read retained live head")
+        .head
+        .expect("retained live head");
+    assert_eq!(live_head.vault_revision, "rev-0012");
+
+    reader
+        .read_revision(&sample_write_request("rev-0003", None, "device-a").head)
+        .expect("latest 10 revisions should stay readable");
+    let err = reader
+        .read_revision(&sample_write_request("rev-0002", None, "device-a").head)
+        .expect_err("older revisions should be pruned once the retention limit is exceeded");
+    assert!(
+        err.to_string().contains("rev-0002"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn cleanup_never_deletes_current_head_revision() {
+    let remote_repo = sample_remote_bare_repo("retention-live-head");
+    init_bare_remote_repo(remote_repo.as_path());
+
+    let remote = sample_remote(
+        remote_repo.display().to_string(),
+        ProviderAuthKind::HttpsCredentials,
+        Some(inline_https_credentials()),
+        GitHostKind::GitLab,
+    );
+    let writer = sample_provider(&remote, sample_cache_dir("retention-live-head-writer"));
+
+    writer
+        .write_revision(&sample_write_request("rev-0001", None, "device-a"))
+        .expect("write first revision");
+    writer
+        .write_revision(&sample_write_request(
+            "rev-0002",
+            Some("rev-0001"),
+            "device-a",
+        ))
+        .expect("write second revision");
+    writer
+        .prune_revisions(0, &sample_write_request("rev-0002", None, "device-a").head)
+        .expect("prune all but the live head");
+
+    let reader = sample_provider(&remote, sample_cache_dir("retention-live-head-reader"));
+    let live_head = reader
+        .read_head()
+        .expect("read live head after cleanup")
+        .head
+        .expect("live head after cleanup");
+    assert_eq!(live_head.vault_revision, "rev-0002");
+    reader
+        .read_revision(&live_head)
+        .expect("cleanup must keep the committed live head readable");
+    reader
+        .read_revision(&sample_write_request("rev-0001", None, "device-a").head)
+        .expect_err("cleanup should still remove older revisions when keeping the live head");
 }
 
 #[test]

@@ -4767,6 +4767,7 @@ fn local_sync_state_for_snapshot(
 
 fn persist_snapshot_recovery_record(
     recovery_root: &Path,
+    vault_key: &[u8; 32],
     vault_id: &str,
     source: RecoverySource,
     base_revision: Option<String>,
@@ -4783,12 +4784,13 @@ fn persist_snapshot_recovery_record(
         payload_hash,
         snapshot.clone(),
     );
-    persist_recovery_snapshot(recovery_root, &recovery_record)?;
+    persist_recovery_snapshot(recovery_root, vault_key, &recovery_record)?;
     Ok(())
 }
 
 fn persist_merge_conflict_recovery_snapshots(
     recovery_root: &Path,
+    vault_key: &[u8; 32],
     vault_id: &str,
     base_revision: Option<String>,
     local_snapshot: &VaultSnapshot,
@@ -4797,6 +4799,7 @@ fn persist_merge_conflict_recovery_snapshots(
 ) -> Result<()> {
     persist_snapshot_recovery_record(
         recovery_root,
+        vault_key,
         vault_id,
         RecoverySource::LocalConflictCopy,
         base_revision.clone(),
@@ -4806,6 +4809,7 @@ fn persist_merge_conflict_recovery_snapshots(
     )?;
     persist_snapshot_recovery_record(
         recovery_root,
+        vault_key,
         vault_id,
         RecoverySource::RemoteConflictCopy,
         Some(remote_head.vault_revision.clone()),

@@ -34,6 +34,9 @@ use mica_term::app::vault::model::{
     GitRepoRemoteDraft, GiteeRemoteDraft, KdfConfig, ProviderAuthKind, ProviderKind, RemoteRole,
     SnapshotSyncPreferences,
 };
+use mica_term::app::vault::recovery::{
+    RecoverySnapshotRecord, RecoverySource, load_recovery_snapshots, persist_recovery_snapshot,
+};
 use mica_term::app::vault::snapshot::export_vault_snapshot;
 use mica_term::app::window_effects::default_platform_window_effects;
 use mica_term::shell::assets::{
@@ -741,4 +744,51 @@ fn creating_keychain_folder_after_unlock_marks_local_vault_dirty() {
         .expect("bootstrap state after mutation");
 
     assert_ne!(after.last_local_change_at, before.last_local_change_at);
+}
+
+#[test]
+fn recovery_snapshots_are_encrypted_on_disk() {
+    let temp_root = sample_vault_runtime_root("encrypted-recovery");
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    let snapshot = export_vault_snapshot(
+        &sample_asset_tree("ssh/saved-secrets/imported-bastion"),
+        &sample_keychain_catalog("keychain/identity/identity-ops", "keychain/key/key-prod"),
+        credential_store.as_ref(),
+        temp_root.join("known-hosts").as_path(),
+        SnapshotSyncPreferences::default(),
+        &mica_term::app::ui_preferences::UiPreferences::default(),
+    )
+    .expect("build recovery snapshot");
+    let record = RecoverySnapshotRecord::new(
+        "vault-main".into(),
+        RecoverySource::LocalConflictCopy,
+        "2026-05-19T00:00:00Z".into(),
+        Some("rev-0001".into()),
+        Some("rev-0001".into()),
+        Some("sha256:payload".into()),
+        snapshot,
+    );
+    let vault_key = generate_vault_key();
+
+    let path = persist_recovery_snapshot(temp_root.join("recovery").as_path(), &vault_key, &record)
+        .expect("persist encrypted recovery snapshot");
+    let encoded = fs::read(&path).expect("read encrypted recovery payload");
+    let encoded_text = String::from_utf8_lossy(&encoded);
+
+    assert!(
+        !encoded_text.contains("Imported Bastion"),
+        "recovery payload must not leak plaintext asset titles"
+    );
+    assert!(
+        !encoded_text.contains("kubectl apply -f prod.yaml"),
+        "recovery payload must not leak plaintext snippet content"
+    );
+
+    let loaded = load_recovery_snapshots(
+        temp_root.join("recovery").as_path(),
+        "vault-main",
+        &vault_key,
+    )
+    .expect("load encrypted recovery snapshots");
+    assert_eq!(loaded, vec![record]);
 }

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, ensure};
 use git2::{
     Cred, CredentialType, FetchOptions, Oid, PushOptions, RemoteCallbacks, Repository,
-    RepositoryInitOptions, Signature,
+    RepositoryInitOptions, Signature, build::CheckoutBuilder,
 };
 use serde::Deserialize;
 
@@ -25,6 +25,8 @@ const REMOTE_NAME: &str = "origin";
 const HEAD_FILE_NAME: &str = "vault-head.json";
 const MANIFEST_FILE_NAME: &str = "vault-manifest.bin";
 const SNAPSHOT_FILE_NAME: &str = "vault-snapshot.bin";
+const DEFAULT_SYNC_ROOT_PATH: &str = ".mica-term-sync";
+const REVISIONS_DIR_NAME: &str = "revisions";
 const COMMITTER_NAME: &str = "Mica Term Vault";
 const COMMITTER_EMAIL: &str = "vault@mica-term.local";
 
@@ -261,6 +263,64 @@ impl GitRepoProvider {
         &self.config
     }
 
+    fn managed_root_relative(&self) -> PathBuf {
+        PathBuf::from(
+            self.config
+                .root_path
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(DEFAULT_SYNC_ROOT_PATH),
+        )
+    }
+
+    fn managed_root_absolute(&self) -> PathBuf {
+        self.config.cache_dir.join(self.managed_root_relative())
+    }
+
+    fn managed_head_relative(&self) -> PathBuf {
+        self.managed_root_relative().join(HEAD_FILE_NAME)
+    }
+
+    fn revisions_root_relative(&self) -> PathBuf {
+        self.managed_root_relative().join(REVISIONS_DIR_NAME)
+    }
+
+    fn revisions_root_absolute(&self) -> PathBuf {
+        self.config.cache_dir.join(self.revisions_root_relative())
+    }
+
+    fn revision_dir_relative(&self, revision: &str) -> PathBuf {
+        self.revisions_root_relative().join(revision)
+    }
+
+    fn revision_dir_absolute(&self, revision: &str) -> PathBuf {
+        self.config
+            .cache_dir
+            .join(self.revision_dir_relative(revision))
+    }
+
+    fn revision_head_relative(&self, revision: &str) -> PathBuf {
+        self.revision_dir_relative(revision).join(HEAD_FILE_NAME)
+    }
+
+    fn revision_manifest_relative(&self, revision: &str) -> PathBuf {
+        self.revision_dir_relative(revision)
+            .join(MANIFEST_FILE_NAME)
+    }
+
+    fn revision_snapshot_relative(&self, revision: &str) -> PathBuf {
+        self.revision_dir_relative(revision)
+            .join(SNAPSHOT_FILE_NAME)
+    }
+
+    fn revision_file_paths_relative(&self, revision: &str) -> [PathBuf; 3] {
+        [
+            self.revision_head_relative(revision),
+            self.revision_manifest_relative(revision),
+            self.revision_snapshot_relative(revision),
+        ]
+    }
+
     fn ensure_repo_ready(&self) -> Result<Repository> {
         let repo = if self.config.cache_dir.join(".git").exists() {
             Repository::open(self.config.cache_dir.as_path()).with_context(|| {
@@ -470,22 +530,49 @@ impl GitRepoProvider {
         repo: &Repository,
         commit: &git2::Commit<'_>,
     ) -> Result<VaultHead> {
-        let bytes = self.read_file_from_commit(repo, commit, HEAD_FILE_NAME)?;
+        let bytes = match self.maybe_read_file_from_commit(
+            repo,
+            commit,
+            self.managed_head_relative().as_path(),
+        )? {
+            Some(bytes) => bytes,
+            None => self.read_file_from_commit(repo, commit, Path::new(HEAD_FILE_NAME))?,
+        };
         serde_json::from_slice(bytes.as_slice()).context("failed to decode git repo vault head")
     }
 
-    fn read_revision_from_ref(&self, repo: &Repository, git_ref: &str) -> Result<ProviderRevision> {
-        let commit = self.resolve_commit(repo, git_ref)?;
-        let head = self.read_head_from_commit(repo, &commit)?;
+    fn read_managed_revision_from_commit(
+        &self,
+        repo: &Repository,
+        commit: &git2::Commit<'_>,
+        revision: &str,
+    ) -> Result<ProviderRevision> {
+        let head: VaultHead = serde_json::from_slice(
+            self.read_file_from_commit(
+                repo,
+                commit,
+                self.revision_head_relative(revision).as_path(),
+            )?
+            .as_slice(),
+        )
+        .context("failed to decode git repo retained vault head")?;
         let manifest: VaultManifest = bincode::deserialize(
-            self.read_file_from_commit(repo, &commit, MANIFEST_FILE_NAME)?
-                .as_slice(),
+            self.read_file_from_commit(
+                repo,
+                commit,
+                self.revision_manifest_relative(revision).as_path(),
+            )?
+            .as_slice(),
         )
         .context("failed to decode git repo vault manifest")?;
         let encrypted_snapshot = rebuild_snapshot_from_manifest(
             &head,
             &manifest,
-            self.read_file_from_commit(repo, &commit, SNAPSHOT_FILE_NAME)?,
+            self.read_file_from_commit(
+                repo,
+                commit,
+                self.revision_snapshot_relative(revision).as_path(),
+            )?,
         )?;
 
         Ok(ProviderRevision {
@@ -495,27 +582,66 @@ impl GitRepoProvider {
         })
     }
 
+    fn read_legacy_revision_from_commit(
+        &self,
+        repo: &Repository,
+        commit: &git2::Commit<'_>,
+    ) -> Result<ProviderRevision> {
+        let head = self.read_head_from_commit(repo, commit)?;
+        let manifest: VaultManifest = bincode::deserialize(
+            self.read_file_from_commit(repo, commit, Path::new(MANIFEST_FILE_NAME))?
+                .as_slice(),
+        )
+        .context("failed to decode git repo legacy vault manifest")?;
+        let encrypted_snapshot = rebuild_snapshot_from_manifest(
+            &head,
+            &manifest,
+            self.read_file_from_commit(repo, commit, Path::new(SNAPSHOT_FILE_NAME))?,
+        )?;
+
+        Ok(ProviderRevision {
+            head,
+            manifest,
+            encrypted_snapshot,
+        })
+    }
+
+    fn maybe_read_file_from_commit(
+        &self,
+        repo: &Repository,
+        commit: &git2::Commit<'_>,
+        relative_path: &Path,
+    ) -> Result<Option<Vec<u8>>> {
+        let tree = commit.tree().context("failed to load git commit tree")?;
+        let entry = match tree.get_path(relative_path) {
+            Ok(entry) => entry,
+            Err(_) => return Ok(None),
+        };
+        let blob = repo.find_blob(entry.id()).with_context(|| {
+            format!(
+                "failed to load `{}` blob from commit `{}`",
+                relative_path.display(),
+                commit.id()
+            )
+        })?;
+        Ok(Some(blob.content().to_vec()))
+    }
+
     fn read_file_from_commit(
         &self,
         repo: &Repository,
         commit: &git2::Commit<'_>,
-        file_name: &str,
+        relative_path: &Path,
     ) -> Result<Vec<u8>> {
-        let tree = commit.tree().context("failed to load git commit tree")?;
-        let entry = tree.get_name(file_name).ok_or_else(|| {
-            anyhow!(
-                "git repo remote `{}` is missing `{file_name}` in commit `{}`",
-                self.config.remote_id,
-                commit.id()
-            )
-        })?;
-        let blob = repo.find_blob(entry.id()).with_context(|| {
-            format!(
-                "failed to load `{file_name}` blob from commit `{}`",
-                commit.id()
-            )
-        })?;
-        Ok(blob.content().to_vec())
+        self.maybe_read_file_from_commit(repo, commit, relative_path)?
+            .ok_or_else(|| {
+                anyhow!(
+                    "git repo remote `{}` is missing `{}` in commit `{}`",
+                    self.config.remote_id,
+                    relative_path.display(),
+                    commit.id(),
+                )
+            })
     }
 
     fn find_commit_for_revision(&self, repo: &Repository, revision: &str) -> Result<Oid> {
@@ -551,58 +677,145 @@ impl GitRepoProvider {
         ))
     }
 
-    fn write_workspace_files(&self, request: &ProviderWriteRequest) -> Result<()> {
-        clear_worktree(self.config.cache_dir.as_path())?;
+    fn checkout_tracking_branch(&self, repo: &Repository) -> Result<()> {
+        let tracking_ref = self.tracking_ref();
+        let tracking_oid = repo
+            .refname_to_id(tracking_ref.as_str())
+            .with_context(|| format!("failed to resolve tracking ref `{tracking_ref}`"))?;
+        repo.reference(
+            self.local_branch_ref().as_str(),
+            tracking_oid,
+            true,
+            "mica-term align local git cache with remote tracking branch",
+        )
+        .context("failed to update local Git branch from tracking ref")?;
+        repo.set_head(self.local_branch_ref().as_str())
+            .context("failed to point HEAD at local Git branch")?;
+        let mut checkout = CheckoutBuilder::new();
+        checkout.force();
+        repo.checkout_head(Some(&mut checkout))
+            .context("failed to checkout tracked Git branch into cache worktree")?;
+        Ok(())
+    }
+
+    fn prepare_worktree_for_write(&self, repo: &Repository, has_remote_branch: bool) -> Result<()> {
+        if has_remote_branch {
+            self.checkout_tracking_branch(repo)?;
+        } else {
+            clear_managed_root(self.managed_root_absolute().as_path())?;
+        }
+        Ok(())
+    }
+
+    fn write_revision_files(&self, request: &ProviderWriteRequest) -> Result<Vec<PathBuf>> {
+        let managed_root = self.managed_root_absolute();
+        let revision_dir = self.revision_dir_absolute(request.head.vault_revision.as_str());
+        fs::create_dir_all(&revision_dir).with_context(|| {
+            format!(
+                "failed to create git repo revision directory `{}`",
+                revision_dir.display()
+            )
+        })?;
+
+        let managed_head_path = managed_root.join(HEAD_FILE_NAME);
+        let retained_head_path = revision_dir.join(HEAD_FILE_NAME);
+        let retained_manifest_path = revision_dir.join(MANIFEST_FILE_NAME);
+        let retained_snapshot_path = revision_dir.join(SNAPSHOT_FILE_NAME);
+
         fs::write(
-            self.config.cache_dir.join(HEAD_FILE_NAME),
+            &managed_head_path,
             serde_json::to_vec_pretty(&request.head).context("encode git repo vault head")?,
         )
         .with_context(|| {
             format!(
                 "failed to write git repo head into `{}`",
-                self.config.cache_dir.display()
+                managed_head_path.display()
             )
         })?;
         fs::write(
-            self.config.cache_dir.join(MANIFEST_FILE_NAME),
+            &retained_head_path,
+            serde_json::to_vec_pretty(&request.head)
+                .context("encode retained git repo vault head")?,
+        )
+        .with_context(|| {
+            format!(
+                "failed to write retained git repo head into `{}`",
+                retained_head_path.display()
+            )
+        })?;
+        fs::write(
+            &retained_manifest_path,
             bincode::serialize(&request.manifest).context("encode git repo vault manifest")?,
         )
         .with_context(|| {
             format!(
                 "failed to write git repo manifest into `{}`",
-                self.config.cache_dir.display()
+                retained_manifest_path.display()
             )
         })?;
         fs::write(
-            self.config.cache_dir.join(SNAPSHOT_FILE_NAME),
+            &retained_snapshot_path,
             request.encrypted_snapshot.ciphertext.as_slice(),
         )
         .with_context(|| {
             format!(
                 "failed to write git repo snapshot into `{}`",
-                self.config.cache_dir.display()
+                retained_snapshot_path.display()
             )
         })?;
-        Ok(())
+
+        Ok(vec![
+            self.managed_head_relative(),
+            self.revision_head_relative(request.head.vault_revision.as_str()),
+            self.revision_manifest_relative(request.head.vault_revision.as_str()),
+            self.revision_snapshot_relative(request.head.vault_revision.as_str()),
+        ])
     }
 
-    fn commit_workspace(
+    fn remove_legacy_root_files(&self) -> Result<Vec<PathBuf>> {
+        let legacy_paths = [
+            PathBuf::from(HEAD_FILE_NAME),
+            PathBuf::from(MANIFEST_FILE_NAME),
+            PathBuf::from(SNAPSHOT_FILE_NAME),
+        ];
+        let mut removed_paths = Vec::new();
+        for relative_path in legacy_paths {
+            let absolute_path = self.config.cache_dir.join(&relative_path);
+            if absolute_path.exists() {
+                fs::remove_file(&absolute_path).with_context(|| {
+                    format!(
+                        "failed to remove legacy git sync file `{}`",
+                        absolute_path.display()
+                    )
+                })?;
+                removed_paths.push(relative_path);
+            }
+        }
+        Ok(removed_paths)
+    }
+
+    fn commit_paths(
         &self,
         repo: &Repository,
-        request: &ProviderWriteRequest,
-        has_remote_branch: bool,
+        message: &str,
+        staged_paths: &[PathBuf],
+        removed_paths: &[PathBuf],
     ) -> Result<()> {
         let mut index = repo.index().context("failed to open Git index")?;
-        index.clear().context("failed to clear Git index")?;
-        index
-            .add_path(Path::new(HEAD_FILE_NAME))
-            .context("failed to stage vault head")?;
-        index
-            .add_path(Path::new(MANIFEST_FILE_NAME))
-            .context("failed to stage vault manifest")?;
-        index
-            .add_path(Path::new(SNAPSHOT_FILE_NAME))
-            .context("failed to stage vault snapshot")?;
+        for path in removed_paths {
+            if let Err(err) = index.remove_path(path.as_path()) {
+                if err.code() != git2::ErrorCode::NotFound {
+                    return Err(err).with_context(|| {
+                        format!("failed to stage removed Git path `{}`", path.display())
+                    });
+                }
+            }
+        }
+        for path in staged_paths {
+            index
+                .add_path(path.as_path())
+                .with_context(|| format!("failed to stage git repo path `{}`", path.display()))?;
+        }
         index.write().context("failed to persist Git index")?;
         let tree_oid = index.write_tree().context("failed to write Git tree")?;
         let tree = repo
@@ -610,38 +823,109 @@ impl GitRepoProvider {
             .context("failed to load Git tree")?;
         let signature = Signature::now(COMMITTER_NAME, COMMITTER_EMAIL)
             .context("failed to build Git signature")?;
-        let commit_message = format!("vault-revision: {}", request.head.vault_revision);
-
-        let parent_commit = if has_remote_branch {
-            Some(
-                repo.find_commit(
-                    repo.refname_to_id(self.tracking_ref().as_str())
-                        .context("failed to resolve tracking ref to commit")?,
-                )
-                .context("failed to open parent commit")?,
-            )
-        } else {
-            None
+        let parent_commit = match repo.find_reference(self.local_branch_ref().as_str()) {
+            Ok(reference) => Some(
+                reference
+                    .peel_to_commit()
+                    .context("failed to open local Git parent commit")?,
+            ),
+            Err(err) if err.code() == git2::ErrorCode::NotFound => None,
+            Err(err) => {
+                return Err(err).context("failed to resolve local Git parent branch reference");
+            }
         };
         let parents = parent_commit.iter().collect::<Vec<_>>();
-        let commit_oid = repo
-            .commit(
-                None,
-                &signature,
-                &signature,
-                commit_message.as_str(),
-                &tree,
-                &parents,
-            )
-            .context("failed to create Git commit")?;
-        repo.reference(
-            self.local_branch_ref().as_str(),
-            commit_oid,
-            true,
-            "mica-term update git primary cache",
+        repo.commit(
+            Some(self.local_branch_ref().as_str()),
+            &signature,
+            &signature,
+            message,
+            &tree,
+            &parents,
         )
-        .context("failed to update local Git branch ref")?;
+        .context("failed to create Git commit")?;
+        repo.set_head(self.local_branch_ref().as_str())
+            .context("failed to point HEAD at local Git branch")?;
         Ok(())
+    }
+
+    fn commit_workspace(&self, repo: &Repository, request: &ProviderWriteRequest) -> Result<()> {
+        let mut removed_paths = self.remove_legacy_root_files()?;
+        let staged_paths = self.write_revision_files(request)?;
+        let commit_message = format!("vault-revision: {}", request.head.vault_revision);
+        self.commit_paths(repo, commit_message.as_str(), &staged_paths, &removed_paths)?;
+        removed_paths.clear();
+        Ok(())
+    }
+
+    fn list_retained_revisions(&self) -> Result<Vec<String>> {
+        let revisions_root = self.revisions_root_absolute();
+        if !revisions_root.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut revisions = Vec::new();
+        for entry in fs::read_dir(&revisions_root).with_context(|| {
+            format!(
+                "failed to enumerate git repo revisions root `{}`",
+                revisions_root.display()
+            )
+        })? {
+            let entry = entry?;
+            if !entry.path().is_dir() {
+                continue;
+            }
+            let file_name = entry.file_name();
+            let Some(revision) = file_name.to_str() else {
+                continue;
+            };
+            if revision.trim().is_empty() {
+                continue;
+            }
+            revisions.push(revision.to_string());
+        }
+        Ok(revisions)
+    }
+
+    fn prune_revision_directories(
+        &self,
+        retained: &std::collections::BTreeSet<String>,
+    ) -> Result<Vec<PathBuf>> {
+        let mut removed_paths = Vec::new();
+        for revision in self.list_retained_revisions()? {
+            if retained.contains(revision.as_str()) {
+                continue;
+            }
+            for path in self.revision_file_paths_relative(revision.as_str()) {
+                removed_paths.push(path);
+            }
+            let revision_dir = self.revision_dir_absolute(revision.as_str());
+            if revision_dir.exists() {
+                fs::remove_dir_all(&revision_dir).with_context(|| {
+                    format!(
+                        "failed to remove retained git repo revision directory `{}`",
+                        revision_dir.display()
+                    )
+                })?;
+            }
+        }
+        Ok(removed_paths)
+    }
+
+    fn retained_revision_ids(
+        &self,
+        keep_latest: usize,
+        live_revision: &str,
+    ) -> Result<std::collections::BTreeSet<String>> {
+        let mut revisions = self.list_retained_revisions()?;
+        revisions.sort();
+        revisions.reverse();
+        let mut retained = revisions
+            .into_iter()
+            .take(keep_latest)
+            .collect::<std::collections::BTreeSet<_>>();
+        retained.insert(live_revision.to_string());
+        Ok(retained)
     }
 
     fn push_local_branch(&self, repo: &Repository) -> Result<()> {
@@ -698,8 +982,27 @@ impl VaultProvider for GitRepoProvider {
                 self.config.remote_id
             ));
         }
+        let tracking_commit = self.resolve_commit(&repo, self.tracking_ref().as_str())?;
+        if self
+            .maybe_read_file_from_commit(
+                &repo,
+                &tracking_commit,
+                self.managed_head_relative().as_path(),
+            )?
+            .is_some()
+        {
+            return self.read_managed_revision_from_commit(
+                &repo,
+                &tracking_commit,
+                head.vault_revision.as_str(),
+            );
+        }
+
         let commit = self.find_commit_for_revision(&repo, head.vault_revision.as_str())?;
-        self.read_revision_from_ref(&repo, commit.to_string().as_str())
+        let commit = repo
+            .find_commit(commit)
+            .context("failed to open legacy Git revision commit")?;
+        self.read_legacy_revision_from_commit(&repo, &commit)
     }
 
     fn write_revision(&self, request: &ProviderWriteRequest) -> Result<()> {
@@ -720,8 +1023,40 @@ impl VaultProvider for GitRepoProvider {
             ));
         }
 
-        self.write_workspace_files(request)?;
-        self.commit_workspace(&repo, request, has_remote_branch)?;
+        self.prepare_worktree_for_write(&repo, has_remote_branch)?;
+        self.commit_workspace(&repo, request)?;
+        self.push_local_branch(&repo)
+    }
+
+    fn prune_revisions(&self, keep_latest: usize, live_head: &VaultHead) -> Result<()> {
+        let repo = self.ensure_repo_ready()?;
+        if !self.fetch_remote_branch(&repo)? {
+            return Ok(());
+        }
+        self.checkout_tracking_branch(&repo)?;
+        if self
+            .maybe_read_file_from_commit(
+                &repo,
+                &self.resolve_commit(&repo, self.tracking_ref().as_str())?,
+                self.managed_head_relative().as_path(),
+            )?
+            .is_none()
+        {
+            return Ok(());
+        }
+
+        let retained =
+            self.retained_revision_ids(keep_latest, live_head.vault_revision.as_str())?;
+        let removed_paths = self.prune_revision_directories(&retained)?;
+        if removed_paths.is_empty() {
+            return Ok(());
+        }
+        self.commit_paths(
+            &repo,
+            format!("vault-retention: {}", live_head.vault_revision).as_str(),
+            &[],
+            &removed_paths,
+        )?;
         self.push_local_branch(&repo)
     }
 }
@@ -746,24 +1081,11 @@ fn decode_inline_credentials(
     })
 }
 
-fn clear_worktree(root: &Path) -> Result<()> {
-    for entry in
-        fs::read_dir(root).with_context(|| format!("failed to enumerate `{}`", root.display()))?
-    {
-        let entry = entry?;
-        let path = entry.path();
-        if entry.file_name() == ".git" {
-            continue;
-        }
-        if path.is_dir() {
-            fs::remove_dir_all(&path)
-                .with_context(|| format!("failed to remove `{}`", path.display()))?;
-        } else {
-            fs::remove_file(&path)
-                .with_context(|| format!("failed to remove `{}`", path.display()))?;
-        }
+fn clear_managed_root(root: &Path) -> Result<()> {
+    if root.exists() {
+        fs::remove_dir_all(root)
+            .with_context(|| format!("failed to remove `{}`", root.display()))?;
     }
-
     Ok(())
 }
 

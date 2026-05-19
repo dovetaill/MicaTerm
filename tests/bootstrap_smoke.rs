@@ -5088,9 +5088,12 @@ fn manual_sync_merges_divergent_local_and_remote_additions_before_push_body() {
             .is_some()
     );
 
-    let recovery_entries =
-        load_recovery_snapshots(temp_root.join("recovery").as_path(), "vault-main")
-            .expect("load persisted recovery snapshots");
+    let recovery_entries = load_recovery_snapshots(
+        temp_root.join("recovery").as_path(),
+        "vault-main",
+        &runtime_vault_key,
+    )
+    .expect("load persisted recovery snapshots");
     assert!(recovery_entries.is_empty());
 
     let cached_snapshot = decrypt_snapshot(
@@ -5654,9 +5657,12 @@ fn periodic_sync_conflicts_use_merge_engine_and_persist_conflict_copies_body() {
     assert_eq!(latest_write.head.vault_revision, "rev-0003");
     assert_eq!(app.get_console_asset_items().row_count(), 1);
 
-    let recovery_entries =
-        load_recovery_snapshots(temp_root.join("recovery").as_path(), "vault-main")
-            .expect("load persisted periodic recovery snapshots");
+    let recovery_entries = load_recovery_snapshots(
+        temp_root.join("recovery").as_path(),
+        "vault-main",
+        &runtime_vault_key,
+    )
+    .expect("load persisted periodic recovery snapshots");
     assert_eq!(recovery_entries.len(), 2);
     assert!(
         recovery_entries
@@ -5837,6 +5843,65 @@ fn manual_vault_sync_reports_mirror_degradation_after_primary_commit() {
         app.get_sync_modal_status_text()
             .as_str()
             .contains("mirror unavailable")
+    );
+}
+
+#[test]
+fn cleanup_failure_records_error_but_does_not_corrupt_successful_push() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let temp_root = sample_vault_runtime_root("primary-cleanup-degraded");
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::s3_like(),
+    ));
+    primary.set_prune_error(Some("retention cleanup failed"));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(primary.clone());
+    let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
+    bundle
+        .remotes
+        .retain(|remote| remote.role == RemoteRole::Primary);
+
+    let app = AppWindow::new().unwrap();
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        credential_store,
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root.clone()),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(bundle),
+        },
+    );
+    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+
+    app.invoke_sync_modal_sync_now_requested();
+    wait_for_condition(VAULT_SYNC_WAIT_TIMEOUT, || {
+        primary.recorded_writes().len() >= 1
+            && load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+                .ok()
+                .flatten()
+                .and_then(|state| state.current_revision)
+                .as_deref()
+                == Some("rev-0001")
+    });
+
+    let local_state =
+        load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+            .unwrap()
+            .expect("local bootstrap state after degraded cleanup");
+    assert_eq!(primary.recorded_writes().len(), 1);
+    assert_eq!(local_state.current_revision.as_deref(), Some("rev-0001"));
+    assert!(
+        local_state
+            .last_sync_error
+            .as_deref()
+            .is_some_and(|message| message.contains("retention cleanup failed")),
+        "cleanup failure should be recorded as degraded state without rolling back the committed revision"
     );
 }
 
