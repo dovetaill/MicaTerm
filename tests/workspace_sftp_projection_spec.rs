@@ -3,7 +3,7 @@ use std::fs;
 use mica_term::app::ssh::runtime::TerminalSurfaceState;
 use mica_term::app::ssh::session_manager::{EnhancedSessionState, SessionHandle, SessionState};
 use mica_term::shell::tabs::WorkspaceTab;
-use mica_term::shell::view_model::ShellViewModel;
+use mica_term::shell::view_model::{RightPanelView, ShellViewModel};
 use uuid::Uuid;
 
 fn sample_handle(title: &str, subtitle: &str, state: SessionState) -> SessionHandle {
@@ -90,6 +90,63 @@ fn closing_active_sftp_tab_falls_back_like_any_other_workspace_tab() {
         view_model.active_workspace_terminal_session_id(),
         Some(second_terminal.session_id.as_str())
     );
+}
+
+#[test]
+fn active_sftp_workspace_policy_hides_duplicate_sftp_panel_without_forgetting_user_preference() {
+    let terminal_tab = WorkspaceTab::from_session(&sample_handle(
+        "Prod Bastion",
+        "ops@example.com:22",
+        SessionState::Connected,
+    ));
+    let sftp_tab = WorkspaceTab::sftp("tab-files-1", "browser-1", "Files: Prod");
+    let mut view_model = ShellViewModel::default();
+    view_model.set_workspace_tabs(vec![terminal_tab.clone(), sftp_tab.clone()]);
+    view_model.toggle_right_panel();
+
+    assert_eq!(view_model.right_panel_display_policy_id(), "visible");
+    assert!(view_model.requested_right_panel());
+    assert!(view_model.right_panel_can_revive());
+
+    assert!(view_model.activate_workspace_tab(sftp_tab.tab_id.as_str()));
+
+    assert_eq!(
+        view_model.right_panel_display_policy_id(),
+        "policy-hidden-sftp-workspace"
+    );
+    assert!(view_model.show_right_panel);
+    assert!(
+        !view_model.requested_right_panel(),
+        "policy-hidden workspace tabs should release right-panel width without clearing the user's remembered open preference"
+    );
+    assert!(
+        !view_model.right_panel_can_revive(),
+        "policy-hidden workspace tabs should not offer a revive affordance for the duplicate quick browser"
+    );
+
+    assert!(view_model.activate_workspace_tab(terminal_tab.tab_id.as_str()));
+    assert_eq!(view_model.right_panel_display_policy_id(), "visible");
+    assert!(view_model.requested_right_panel());
+}
+
+#[test]
+fn active_sftp_workspace_only_policy_hides_the_sftp_right_panel_view() {
+    let terminal_tab = WorkspaceTab::from_session(&sample_handle(
+        "Prod Bastion",
+        "ops@example.com:22",
+        SessionState::Connected,
+    ));
+    let sftp_tab = WorkspaceTab::sftp("tab-files-1", "browser-1", "Files: Prod");
+    let mut view_model = ShellViewModel::default();
+    view_model.set_workspace_tabs(vec![terminal_tab, sftp_tab.clone()]);
+    view_model.toggle_right_panel();
+    view_model.set_right_panel_view(RightPanelView::Appearance);
+
+    assert!(view_model.activate_workspace_tab(sftp_tab.tab_id.as_str()));
+
+    assert_eq!(view_model.right_panel_display_policy_id(), "visible");
+    assert!(view_model.requested_right_panel());
+    assert!(view_model.right_panel_can_revive());
 }
 
 #[test]

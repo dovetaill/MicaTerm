@@ -110,7 +110,7 @@ impl ShellViewModel {
     }
 
     pub fn requested_right_panel(&self) -> bool {
-        self.show_right_panel
+        self.right_panel_display_policy().shows_panel()
     }
 
     pub fn workspace_focus_mode(&self) -> bool {
@@ -256,6 +256,30 @@ impl ShellViewModel {
 
     pub fn right_panel_view_id(&self) -> &'static str {
         self.right_panel_view.id()
+    }
+
+    pub fn right_panel_display_policy(&self) -> RightPanelDisplayPolicy {
+        if self.right_panel_view == RightPanelView::Sftp
+            && self.active_workspace_tab().is_some_and(|tab| {
+                tab.kind == crate::shell::tabs::WorkspaceTabKind::Sftp
+            })
+        {
+            return RightPanelDisplayPolicy::PolicyHiddenForSftpWorkspace;
+        }
+
+        if self.show_right_panel {
+            RightPanelDisplayPolicy::Visible
+        } else {
+            RightPanelDisplayPolicy::UserCollapsed
+        }
+    }
+
+    pub fn right_panel_display_policy_id(&self) -> &'static str {
+        self.right_panel_display_policy().id()
+    }
+
+    pub fn right_panel_can_revive(&self) -> bool {
+        self.right_panel_display_policy_id() != "policy-hidden-sftp-workspace"
     }
 
     pub fn set_right_panel_view(&mut self, value: RightPanelView) {

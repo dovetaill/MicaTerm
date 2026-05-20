@@ -400,6 +400,8 @@ pub(super) fn sync_top_status_bar_state(
         },
     );
     window.set_show_right_panel(state.show_right_panel);
+    window.set_right_panel_display_policy(state.right_panel_display_policy_id().into());
+    window.set_right_panel_can_revive(state.right_panel_can_revive());
     window.set_workspace_focus_mode(state.workspace_focus_mode());
     window.set_transfer_center_open(state.transfer_center_open());
     window.set_transfer_center_pinned(state.transfer_center_pinned());

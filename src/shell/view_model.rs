@@ -117,6 +117,31 @@ impl RightPanelView {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RightPanelDisplayPolicy {
+    Visible,
+    UserCollapsed,
+    PolicyHiddenForSftpWorkspace,
+}
+
+impl RightPanelDisplayPolicy {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Visible => "visible",
+            Self::UserCollapsed => "user-collapsed",
+            Self::PolicyHiddenForSftpWorkspace => "policy-hidden-sftp-workspace",
+        }
+    }
+
+    pub fn shows_panel(self) -> bool {
+        matches!(self, Self::Visible)
+    }
+
+    pub fn can_revive(self) -> bool {
+        !matches!(self, Self::PolicyHiddenForSftpWorkspace)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TransferCenterFilter {
     #[default]

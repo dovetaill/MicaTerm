@@ -130,6 +130,8 @@ export component AppWindow inherits Window {
     private property <length> right-panel-revive-tooltip-anchor-y: 0px;
     private property <length> right-panel-revive-tooltip-anchor-width: 0px;
     in-out property <string> right-panel-view: "sftp";
+    in-out property <string> right-panel-display-policy: "visible";
+    in-out property <bool> right-panel-can-revive: true;
     in-out property <string> sftp-panel-mode: "empty";
     in-out property <string> sftp-panel-host-label: "";
     in-out property <string> sftp-panel-path: "";
@@ -1457,7 +1459,7 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    if !root.effective-show-right-panel : right-panel-revive-strip := Rectangle {
+                    if !root.effective-show-right-panel && root.right-panel-can-revive : right-panel-revive-strip := Rectangle {
                         x: parent.width - 12px;
                         y: 0px;
                         width: 12px;
