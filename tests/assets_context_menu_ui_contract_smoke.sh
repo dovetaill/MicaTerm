@@ -52,6 +52,7 @@ grep -F 'callback confirm-delete-asset-requested();' "$APP_WINDOW" >/dev/null
 ! grep -F 'callback dismiss-active-asset-rename-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback assets-context-menu-pointer-moved(length, length);' "$APP_WINDOW" >/dev/null
 grep -F 'assets-context-menu-overlay := AssetsContextMenuOverlay {' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <length> assets-context-menu-column-width:' "$APP_WINDOW" >/dev/null
 grep -F 'assets-context-menu-dismiss-layer := TouchArea {' "$APP_WINDOW" >/dev/null
 grep -F 'StatusPill {' "$APP_WINDOW" >/dev/null
 grep -F 'root.context-menu-feedback-text' "$APP_WINDOW" >/dev/null
@@ -65,10 +66,13 @@ grep -F 'export component AssetsContextMenuColumn inherits Rectangle' "$MENU_COL
 grep -F 'private property <image> clipboard-icon:' "$MENU_COLUMN" >/dev/null
 grep -F 'private property <image> document-code-icon:' "$MENU_COLUMN" >/dev/null
 grep -F 'private property <image> play-icon:' "$MENU_COLUMN" >/dev/null
+grep -F 'in property <length> column-width:' "$MENU_COLUMN" >/dev/null
+grep -F 'width: root.column-width;' "$MENU_COLUMN" >/dev/null
 grep -F 'item.icon_id == "clipboard"' "$MENU_COLUMN" >/dev/null
 grep -F 'item.icon_id == "document-code"' "$MENU_COLUMN" >/dev/null
 grep -F 'item.icon_id == "play"' "$MENU_COLUMN" >/dev/null
 grep -F 'export component AssetsContextMenuOverlay inherits Rectangle' "$MENU_OVERLAY" >/dev/null
+grep -F 'in property <length> column-width:' "$MENU_OVERLAY" >/dev/null
 grep -F 'out property <brush> explorer-row-hover-surface:' "$TOKENS" >/dev/null
 grep -F 'out property <brush> explorer-row-selected-surface:' "$TOKENS" >/dev/null
 grep -F 'out property <brush> menu-row-hover-surface:' "$TOKENS" >/dev/null

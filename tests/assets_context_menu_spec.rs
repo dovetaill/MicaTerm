@@ -1,7 +1,8 @@
 use mica_term::shell::assets::{AssetTree, ConsoleAssetKind};
 use mica_term::shell::context_menu::{
     ContextMenuActionState, ContextTargetKind, MenuPlacementInput, Rect, SelectionContext,
-    context_menu_column_height, resolve_action_tree, resolve_root_menu_origin,
+    context_menu_column_height, context_menu_column_width_for_items, resolve_action_tree,
+    resolve_root_menu_origin,
     should_keep_corridor_open, visible_columns_for_path,
 };
 use mica_term::shell::view_model::ShellViewModel;
@@ -48,6 +49,13 @@ fn blank_area_menu_height_is_compact() {
 
     let height = context_menu_column_height(&roots);
     assert!(height < 160.0);
+}
+
+#[test]
+fn blank_area_context_menu_uses_compact_width_tier() {
+    let roots = resolve_action_tree(ContextTargetKind::BlankArea, &blank_selection());
+
+    assert_eq!(context_menu_column_width_for_items(&roots), 256.0);
 }
 
 #[test]
@@ -145,6 +153,20 @@ fn ssh_scene_marks_proxy_chrome_as_planned_but_clickable() {
         .expect("ssh menu should expose the proxy chrome action");
 
     assert_eq!(proxy.state, ContextMenuActionState::Planned);
+}
+
+#[test]
+fn ssh_context_menu_uses_expanded_width_tier_for_long_planned_actions() {
+    let selection = SelectionContext {
+        selected_ids: vec!["ssh-prod-01".into()],
+        clipboard_has_asset_payload: false,
+        target_mutable: true,
+        selected_file_count: 0,
+        selected_directory_count: 0,
+    };
+    let roots = resolve_action_tree(ContextTargetKind::SshConnection, &selection);
+
+    assert_eq!(context_menu_column_width_for_items(&roots), 368.0);
 }
 
 #[test]

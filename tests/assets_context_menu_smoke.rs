@@ -343,6 +343,19 @@ fn blank_area_menu_projects_compact_overlay_height() {
 }
 
 #[test]
+fn ssh_context_menu_projects_expanded_overlay_width() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_fake_sessions(&app);
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+    app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
+
+    assert_eq!(app.get_layout_assets_context_menu_width(), 368.0);
+}
+
+#[test]
 fn blank_area_right_click_opens_minimal_primary_menu() {
     i_slint_backend_testing::init_no_event_loop();
 
