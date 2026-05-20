@@ -340,6 +340,7 @@ fn restart_then_manual_sync_runs_without_password_prompt() {
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(sample_bootstrap_bundle_with_primary()),
+            ..VaultRuntimeOptions::default()
         },
     );
 
@@ -361,6 +362,7 @@ fn restart_then_manual_sync_runs_without_password_prompt() {
             root_dir: Some(temp_root),
             provider_factory: Arc::new(restarted_provider_factory),
             bootstrap_template: None,
+            ..VaultRuntimeOptions::default()
         },
     );
 

@@ -519,6 +519,7 @@ fn setup_attach_merge_case() -> AttachMergeCase {
             root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(sample_bootstrap_bundle_with_primary()),
+            ..VaultRuntimeOptions::default()
         },
     );
     create_root_ssh(&app, "Local Bastion", "10.0.0.12");
