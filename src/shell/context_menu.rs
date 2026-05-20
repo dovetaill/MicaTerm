@@ -160,7 +160,11 @@ pub fn context_menu_column_height(items: &[ContextMenuActionNode]) -> f32 {
 }
 
 pub fn context_menu_column_width_for_items(items: &[ContextMenuActionNode]) -> f32 {
-    let longest = items.iter().map(|item| item.label.chars().count()).max().unwrap_or(0);
+    let longest = items
+        .iter()
+        .map(|item| item.label.chars().count())
+        .max()
+        .unwrap_or(0);
 
     match longest {
         0..=18 => CONTEXT_MENU_COLUMN_WIDTH_COMPACT,

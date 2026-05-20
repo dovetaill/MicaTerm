@@ -2,8 +2,8 @@ use mica_term::shell::assets::{AssetTree, ConsoleAssetKind};
 use mica_term::shell::context_menu::{
     ContextMenuActionState, ContextTargetKind, MenuPlacementInput, Rect, SelectionContext,
     context_menu_column_height, context_menu_column_offset, context_menu_column_width_for_items,
-    resolve_action_tree, resolve_root_menu_origin,
-    should_keep_corridor_open, visible_columns_for_path,
+    resolve_action_tree, resolve_root_menu_origin, should_keep_corridor_open,
+    visible_columns_for_path,
 };
 use mica_term::shell::view_model::ShellViewModel;
 
