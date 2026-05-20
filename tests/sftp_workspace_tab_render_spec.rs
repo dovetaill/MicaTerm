@@ -181,3 +181,63 @@ fn sftp_workspace_host_source_wires_workspace_only_interactions() {
         );
     }
 }
+
+#[test]
+fn workspace_transfer_center_contract_threads_from_app_window_into_sftp_workspace_host() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let workspace_pane =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+
+    assert!(
+        app_window.contains(
+            "workspace-sftp-items: root.workspace-sftp-items;\n                        transfer-center-open: root.transfer-center-open;\n                        transfer-queue-active: root.transfer-queue-active;\n                        transfer-queue-failed: root.transfer-queue-failed;\n                        transfer-queue-current-session: root.transfer-queue-current-session;"
+        ),
+        "AppWindow should thread transfer-center visibility and queue summary state into WorkspacePane so the productized SFTP workspace can expose a lightweight transfer entry even while the duplicate quick browser stays policy-hidden"
+    );
+    assert!(
+        app_window.contains(
+            "workspace-sftp-retry-requested => {\n                            root.workspace-sftp-retry-requested();\n                        }\n\n                        open-transfer-center-requested => {\n                            root.open-transfer-center-requested();\n                        }"
+        ),
+        "AppWindow should forward the workspace transfer-entry callback into the existing global Transfer Center toggle instead of inventing a second transfer surface"
+    );
+
+    for contract in [
+        "in property <bool> transfer-center-open: false;",
+        "in property <int> transfer-queue-active: 0;",
+        "in property <int> transfer-queue-failed: 0;",
+        "in property <int> transfer-queue-current-session: 0;",
+        "callback open-transfer-center-requested();",
+        "transfer-center-open: root.transfer-center-open;",
+        "transfer-queue-active: root.transfer-queue-active;",
+        "transfer-queue-failed: root.transfer-queue-failed;",
+        "transfer-queue-current-session: root.transfer-queue-current-session;",
+        "open-transfer-center-requested => {",
+        "root.open-transfer-center-requested();",
+    ] {
+        assert!(
+            workspace_pane.contains(contract),
+            "WorkspacePane should thread workspace transfer contract `{contract}` into SftpWorkspaceHost so the host can expose a lightweight global queue entry"
+        );
+    }
+}
+
+#[test]
+fn sftp_workspace_host_source_exposes_a_lightweight_transfer_center_entry() {
+    let source =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    for contract in [
+        "in property <bool> transfer-center-open: false;",
+        "in property <int> transfer-queue-active: 0;",
+        "in property <int> transfer-queue-failed: 0;",
+        "in property <int> transfer-queue-current-session: 0;",
+        "callback open-transfer-center-requested();",
+        "transfer-entry :=",
+        "root.open-transfer-center-requested();",
+    ] {
+        assert!(
+            source.contains(contract),
+            "SFTP workspace host should expose transfer-entry contract `{contract}` so upload/download activity can stay reachable from the workspace surface after the right-side duplicate browser is policy-hidden"
+        );
+    }
+}
