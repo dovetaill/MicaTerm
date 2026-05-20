@@ -2,28 +2,57 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WORKSPACE_TABS="$ROOT_DIR/src/shell/tabs.rs"
-SFTP_MOD="$ROOT_DIR/src/app/sftp/mod.rs"
-BROWSER_SESSION="$ROOT_DIR/src/app/sftp/browser_session.rs"
+SFTP_HOST="$ROOT_DIR/ui/shell/sftp-workspace-host.slint"
+WORKSPACE_PANE="$ROOT_DIR/ui/shell/workspace-pane.slint"
+APP_WINDOW="$ROOT_DIR/ui/app-window.slint"
 
-[[ -f "$WORKSPACE_TABS" ]] || {
-  echo "missing src/shell/tabs.rs" >&2
+require_contains() {
+  local needle="$1"
+  local file="$2"
+  grep -F "$needle" "$file" >/dev/null || {
+    echo "missing contract in $(basename "$file"): $needle" >&2
+    exit 1
+  }
+}
+
+require_absent() {
+  local needle="$1"
+  local file="$2"
+  if grep -F "$needle" "$file" >/dev/null; then
+    echo "unexpected legacy contract in $(basename "$file"): $needle" >&2
+    exit 1
+  fi
+}
+
+[[ -f "$SFTP_HOST" ]] || {
+  echo "missing ui/shell/sftp-workspace-host.slint" >&2
   exit 1
 }
 
-[[ -f "$SFTP_MOD" ]] || {
-  echo "missing src/app/sftp/mod.rs" >&2
+[[ -f "$WORKSPACE_PANE" ]] || {
+  echo "missing ui/shell/workspace-pane.slint" >&2
   exit 1
 }
 
-[[ -f "$BROWSER_SESSION" ]] || {
-  echo "missing src/app/sftp/browser_session.rs" >&2
+[[ -f "$APP_WINDOW" ]] || {
+  echo "missing ui/app-window.slint" >&2
   exit 1
 }
 
-grep -F 'pub type WorkspaceTabId = String;' "$WORKSPACE_TABS" >/dev/null
-grep -F 'Sftp,' "$WORKSPACE_TABS" >/dev/null
-grep -F 'pub tab_id: WorkspaceTabId,' "$WORKSPACE_TABS" >/dev/null
-grep -F 'pub fn sftp(' "$WORKSPACE_TABS" >/dev/null
-grep -F 'pub mod browser_session;' "$SFTP_MOD" >/dev/null
-grep -F 'pub use browser_session::{FileBrowserSession, FileBrowserSessionId, HostProfileRef};' "$SFTP_MOD" >/dev/null
+require_contains 'workspace-header :=' "$SFTP_HOST"
+require_contains 'workspace-toolbar :=' "$SFTP_HOST"
+require_contains 'workspace-breadcrumb-shell :=' "$SFTP_HOST"
+require_contains 'workspace-file-table :=' "$SFTP_HOST"
+require_contains 'workspace-statusbar :=' "$SFTP_HOST"
+require_contains 'function workspace-width-tier() -> string {' "$SFTP_HOST"
+require_contains 'text: "Permissions"' "$SFTP_HOST"
+require_contains 'text: "Owner"' "$SFTP_HOST"
+require_contains 'text: "Group"' "$SFTP_HOST"
+require_contains 'shell-sidebar-item-selected: root.shell-sidebar-item-selected;' "$WORKSPACE_PANE"
+require_contains 'shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;' "$WORKSPACE_PANE"
+require_contains 'in-out property <string> right-panel-display-policy: "visible";' "$APP_WINDOW"
+require_contains 'in-out property <bool> right-panel-can-revive: true;' "$APP_WINDOW"
+require_contains 'if !root.effective-show-right-panel && root.right-panel-can-revive : right-panel-revive-strip := Rectangle {' "$APP_WINDOW"
+require_contains 'policy-hidden-sftp-workspace' "$APP_WINDOW"
+require_absent 'New Folde' "$SFTP_HOST"
+require_absent 'if !root.effective-show-right-panel : right-panel-revive-strip := Rectangle {' "$APP_WINDOW"

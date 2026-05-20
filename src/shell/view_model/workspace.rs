@@ -80,6 +80,44 @@ impl ShellViewModel {
 
     pub fn active_workspace_tab_summary(&self) -> Option<ActiveWorkspaceTabSummary> {
         let tab = self.active_workspace_tab()?;
+        if tab.kind == WorkspaceTabKind::Sftp
+            && let Some(session) = self.active_workspace_sftp_session()
+        {
+            let host = session.host_profile_ref.label.trim().to_string();
+            let connection_status = session.mode.id().to_string();
+            let connection_status_label = self.workspace_sftp_connection_label().to_string();
+            let binding_label = self.workspace_sftp_binding_label();
+            let primary_summary_text = if host.is_empty() {
+                "SFTP".into()
+            } else {
+                format!("{host} · SFTP")
+            };
+            let mut tooltip_lines = Vec::new();
+            if !tab.display_name.trim().is_empty() {
+                tooltip_lines.push(tab.display_name.clone());
+            }
+            if !host.is_empty() {
+                tooltip_lines.push(format!("Host: {host}"));
+            }
+            if !session.current_path.trim().is_empty() {
+                tooltip_lines.push(format!("Path: {}", session.current_path));
+            }
+            if !binding_label.is_empty() {
+                tooltip_lines.push(format!("Binding: {binding_label}"));
+            }
+            tooltip_lines.push(format!("Status: {connection_status_label}"));
+            return Some(ActiveWorkspaceTabSummary {
+                tab_id: tab.tab_id.clone(),
+                primary_summary_text,
+                display_name: tab.display_name.clone(),
+                host,
+                username: String::new(),
+                port: 0,
+                connection_status,
+                connection_status_label,
+                tooltip_text: tooltip_lines.join("\n"),
+            });
+        }
         Some(ActiveWorkspaceTabSummary {
             tab_id: tab.tab_id.clone(),
             primary_summary_text: tab.primary_summary_text(),

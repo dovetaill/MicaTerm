@@ -139,6 +139,10 @@ export component AppWindow inherits Window {
     private property <length> right-panel-revive-tooltip-anchor-y: 0px;
     private property <length> right-panel-revive-tooltip-anchor-width: 0px;
     in-out property <string> right-panel-view: "sftp";
+    in-out property <string> right-panel-display-policy: "visible";
+    in-out property <bool> right-panel-can-revive: true;
+    private property <bool> right-panel-policy-hidden-for-sftp-workspace:
+        root.right-panel-display-policy == "policy-hidden-sftp-workspace";
     in-out property <string> sftp-panel-mode: "empty";
     in-out property <string> sftp-panel-host-label: "";
     in-out property <string> sftp-panel-path: "";
@@ -1077,6 +1081,10 @@ export component AppWindow inherits Window {
                         workspace-sftp-breadcrumb-items: root.workspace-sftp-breadcrumb-items;
                         workspace-sftp-selected-entry-ids: root.workspace-sftp-selected-entry-ids;
                         workspace-sftp-items: root.workspace-sftp-items;
+                        transfer-center-open: root.transfer-center-open;
+                        transfer-queue-active: root.transfer-queue-active;
+                        transfer-queue-failed: root.transfer-queue-failed;
+                        transfer-queue-current-session: root.transfer-queue-current-session;
                         workspace-session-render-mode: root.workspace-session-render-mode;
                         workspace-session-connection-headline: root.workspace-session-connection-headline;
                         workspace-session-connection-visual-state: root.workspace-session-connection-visual-state;
@@ -1147,8 +1155,13 @@ export component AppWindow inherits Window {
                         shell-hairline: root.shell-hairline;
                         shell-text-primary: root.shell-text-primary;
                         shell-text-secondary: root.shell-text-secondary;
+                        shell-text-muted: root.shell-text-muted;
                         shell-text-inactive: root.shell-text-inactive;
                         shell-accent: root.shell-accent;
+                        shell-focus-ring: root.shell-focus-ring;
+                        shell-sidebar-item-hover: root.shell-sidebar-item-hover;
+                        shell-sidebar-item-selected: root.shell-sidebar-item-selected;
+                        shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
                         shell-tab-active: root.shell-tab-active;
                         shell-tab-inactive: root.shell-tab-inactive;
                         shell-tab-hover: root.shell-tab-hover;
@@ -1276,6 +1289,10 @@ export component AppWindow inherits Window {
 
                         workspace-sftp-retry-requested => {
                             root.workspace-sftp-retry-requested();
+                        }
+
+                        open-transfer-center-requested => {
+                            root.open-transfer-center-requested();
                         }
 
                         scroll-requested(delta-lines, row, col, shift, ctrl, alt) => {
@@ -1468,7 +1485,7 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    if !root.effective-show-right-panel : right-panel-revive-strip := Rectangle {
+                    if !root.effective-show-right-panel && root.right-panel-can-revive : right-panel-revive-strip := Rectangle {
                         x: parent.width - 12px;
                         y: 0px;
                         width: 12px;

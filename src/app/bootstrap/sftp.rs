@@ -60,6 +60,10 @@ fn project_sftp_panel_item(row: &crate::shell::view_model::SftpPanelRenderRow) -
         type_label: row.type_label.as_str().into(),
         modified_label: row.modified_label.as_str().into(),
         size_label: row.size_label.as_str().into(),
+        permissions_label: row.permissions_label.as_str().into(),
+        owner_label: row.owner_label.as_str().into(),
+        group_label: row.group_label.as_str().into(),
+        icon_kind: row.icon_kind.as_str().into(),
         kind: row.kind.as_str().into(),
         selected: row.selected,
     }
@@ -204,7 +208,7 @@ pub(super) fn sync_right_panel_state(window: &AppWindow, state: &mut ShellViewMo
     sync_sftp_panel_state(window, state);
 }
 
-pub(super) fn sync_workspace_sftp_state(window: &AppWindow, state: &ShellViewModel) {
+pub(super) fn sync_workspace_sftp_state(window: &AppWindow, state: &mut ShellViewModel) {
     window.set_workspace_sftp_host_label(state.workspace_sftp_host_label().into());
     window.set_workspace_sftp_connection_label(state.workspace_sftp_connection_label().into());
     window.set_workspace_sftp_binding_label(state.workspace_sftp_binding_label().into());
@@ -237,9 +241,26 @@ pub(super) fn sync_workspace_sftp_state(window: &AppWindow, state: &ShellViewMod
         |model| window.set_workspace_sftp_selected_entry_ids(model),
     );
 
-    replace_sftp_panel_items_model(state.workspace_sftp_render_rows(), |model| {
-        window.set_workspace_sftp_items(model);
-    });
+    let active_session_id = state
+        .active_workspace_sftp_session()
+        .map(|session| session.file_browser_session_id.clone());
+    let force_full_resync = active_session_id != state.workspace_sftp_last_rendered_session_id
+        || state.workspace_sftp_render_requires_full_resync();
+    let dirty_row_indices = if force_full_resync {
+        Vec::new()
+    } else {
+        state.workspace_sftp_render_dirty_indices().to_vec()
+    };
+    if force_full_resync || !dirty_row_indices.is_empty() {
+        sync_sftp_panel_items_model(
+            window.get_workspace_sftp_items(),
+            state.workspace_sftp_render_rows(),
+            dirty_row_indices.as_slice(),
+            force_full_resync,
+            |model| window.set_workspace_sftp_items(model),
+        );
+        let _ = state.mark_workspace_sftp_render_clean();
+    }
 }
 
 pub(super) fn sync_sftp_remote_file_modal_state(window: &AppWindow, state: &ShellViewModel) {
@@ -2161,7 +2182,7 @@ pub(super) fn bind_sftp_callbacks(
             sync_right_panel_state(&window, &mut state);
             super::sync_workspace_tabs_with_manager(
                 &window,
-                &state,
+                &mut state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
@@ -2383,7 +2404,7 @@ pub(super) fn bind_sftp_callbacks(
         }
         super::sync_workspace_tabs_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -2929,7 +2950,7 @@ pub(super) fn bind_sftp_callbacks(
         if state.begin_workspace_sftp_path_edit() {
             super::sync_workspace_session_state_with_manager(
                 &window,
-                &state,
+                &mut state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
@@ -2967,7 +2988,7 @@ pub(super) fn bind_sftp_callbacks(
         if state.update_workspace_sftp_viewport(viewport_y, visible_height) {
             super::sync_workspace_session_state_with_manager(
                 &window,
-                &state,
+                &mut state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
@@ -2987,7 +3008,7 @@ pub(super) fn bind_sftp_callbacks(
         if state.select_sftp_panel_entry(entry_id.as_str()) {
             super::sync_workspace_session_state_with_manager(
                 &window,
-                &state,
+                &mut state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
@@ -3079,7 +3100,7 @@ pub(super) fn bind_sftp_callbacks(
         if changed {
             super::sync_workspace_session_state_with_manager(
                 &window,
-                &state,
+                &mut state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
@@ -3135,7 +3156,7 @@ pub(super) fn bind_sftp_callbacks(
         if changed {
             super::sync_workspace_session_state_with_manager(
                 &window,
-                &state,
+                &mut state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
@@ -3190,7 +3211,7 @@ pub(super) fn bind_sftp_callbacks(
         if changed {
             super::sync_workspace_session_state_with_manager(
                 &window,
-                &state,
+                &mut state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
@@ -3238,7 +3259,7 @@ pub(super) fn bind_sftp_callbacks(
         if changed {
             super::sync_workspace_session_state_with_manager(
                 &window,
-                &state,
+                &mut state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
@@ -3286,7 +3307,7 @@ pub(super) fn bind_sftp_callbacks(
         if changed {
             super::sync_workspace_session_state_with_manager(
                 &window,
-                &state,
+                &mut state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
@@ -3333,7 +3354,7 @@ pub(super) fn bind_sftp_callbacks(
         if changed {
             super::sync_workspace_session_state_with_manager(
                 &window,
-                &state,
+                &mut state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
@@ -3380,7 +3401,7 @@ pub(super) fn bind_sftp_callbacks(
         if changed {
             super::sync_workspace_session_state_with_manager(
                 &window,
-                &state,
+                &mut state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
@@ -3427,7 +3448,7 @@ pub(super) fn bind_sftp_callbacks(
         if changed {
             super::sync_workspace_session_state_with_manager(
                 &window,
-                &state,
+                &mut state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
@@ -3482,7 +3503,7 @@ pub(super) fn bind_sftp_callbacks(
         if changed {
             super::sync_workspace_session_state_with_manager(
                 &window,
-                &state,
+                &mut state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
@@ -3513,7 +3534,7 @@ pub(super) fn bind_sftp_callbacks(
         if uploaded {
             super::sync_workspace_session_state_with_manager(
                 &window,
-                &state,
+                &mut state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );

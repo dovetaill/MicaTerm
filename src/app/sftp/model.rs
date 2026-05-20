@@ -56,6 +56,9 @@ pub struct SftpDirectoryEntry {
     pub kind: SftpDirectoryEntryKind,
     pub modified_unix_seconds: Option<u64>,
     pub size_bytes: Option<u64>,
+    pub permissions_label: Option<String>,
+    pub owner_label: Option<String>,
+    pub group_label: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

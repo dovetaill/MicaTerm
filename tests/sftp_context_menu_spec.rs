@@ -156,12 +156,17 @@ fn sftp_targets_resolve_expected_action_sets() {
             "open-remote",
             "open-in-new-sftp-tab",
             "download",
+            "upload-files",
+            "upload-folder",
+            "new-folder",
+            "new-file",
             "rename-sftp-entry",
             "delete-sftp-entry",
             "copy-sftp-entry",
             "cut-sftp-entry",
             "paste-sftp",
             "copy-folder-path",
+            "refresh-sftp",
             "open-terminal-here",
             "permissions-sftp",
             "properties",
@@ -206,6 +211,10 @@ fn sftp_targets_resolve_expected_action_sets() {
             "open-local",
             "edit-locally",
             "download",
+            "upload-files",
+            "upload-folder",
+            "new-folder",
+            "new-file",
             "rename-sftp-entry",
             "delete-sftp-entry",
             "copy-sftp-entry",
@@ -213,6 +222,7 @@ fn sftp_targets_resolve_expected_action_sets() {
             "paste-sftp",
             "copy-file-path",
             "copy-file-name",
+            "refresh-sftp",
             "permissions-sftp",
             "properties",
         ]
@@ -244,6 +254,23 @@ fn sftp_targets_resolve_expected_action_sets() {
             .state,
         ContextMenuActionState::Enabled
     );
+    for action_id in [
+        "upload-files",
+        "upload-folder",
+        "new-folder",
+        "new-file",
+        "refresh-sftp",
+    ] {
+        assert_eq!(
+            file_actions
+                .iter()
+                .find(|node| node.id == action_id)
+                .unwrap_or_else(|| panic!("missing `{action_id}` action"))
+                .state,
+            ContextMenuActionState::Enabled,
+            "workspace-style SFTP file menus should keep `{action_id}` available via the shared dispatcher instead of forcing users back to a blank-area-only action path"
+        );
+    }
     assert_eq!(
         file_actions
             .iter()
@@ -252,6 +279,23 @@ fn sftp_targets_resolve_expected_action_sets() {
             .state,
         ContextMenuActionState::Disabled
     );
+    for action_id in [
+        "upload-files",
+        "upload-folder",
+        "new-folder",
+        "new-file",
+        "refresh-sftp",
+    ] {
+        assert_eq!(
+            folder_actions
+                .iter()
+                .find(|node| node.id == action_id)
+                .unwrap_or_else(|| panic!("missing `{action_id}` action"))
+                .state,
+            ContextMenuActionState::Enabled,
+            "workspace-style SFTP directory menus should keep `{action_id}` close to the selected row while still routing through the existing pending-action and modal system"
+        );
+    }
 
     let multi_actions = resolve_action_tree(
         ContextTargetKind::SftpMultiSelection,
@@ -397,6 +441,9 @@ fn opening_sftp_context_menu_tracks_remote_selection_without_touching_asset_sele
         kind: SftpDirectoryEntryKind::Directory,
         modified_unix_seconds: None,
         size_bytes: None,
+    permissions_label: None,
+    owner_label: None,
+    group_label: None,
     }]);
 
     state.selected_asset_ids = vec!["asset-root".into()];
@@ -427,6 +474,9 @@ fn right_clicking_an_already_multi_selected_sftp_entry_keeps_the_multi_selection
             kind: SftpDirectoryEntryKind::Directory,
             modified_unix_seconds: None,
             size_bytes: None,
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         },
         SftpDirectoryEntry {
             id: "entry-release".into(),
@@ -435,6 +485,9 @@ fn right_clicking_an_already_multi_selected_sftp_entry_keeps_the_multi_selection
             kind: SftpDirectoryEntryKind::File,
             modified_unix_seconds: None,
             size_bytes: Some(14 * 1024),
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         },
     ]);
     let active_session_id = state
@@ -474,6 +527,9 @@ fn sftp_create_rename_and_delete_confirmations_do_not_mutate_projected_entries_l
             kind: SftpDirectoryEntryKind::Directory,
             modified_unix_seconds: None,
             size_bytes: None,
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         },
         SftpDirectoryEntry {
             id: "entry-release".into(),
@@ -482,6 +538,9 @@ fn sftp_create_rename_and_delete_confirmations_do_not_mutate_projected_entries_l
             kind: SftpDirectoryEntryKind::File,
             modified_unix_seconds: None,
             size_bytes: Some(14 * 1024),
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         },
     ]);
 
@@ -613,6 +672,9 @@ fn unsupported_sftp_actions_render_disabled_reasons() {
             kind: SftpDirectoryEntryKind::Directory,
             modified_unix_seconds: None,
             size_bytes: None,
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         },
         SftpDirectoryEntry {
             id: "entry-release".into(),
@@ -621,6 +683,9 @@ fn unsupported_sftp_actions_render_disabled_reasons() {
             kind: SftpDirectoryEntryKind::File,
             modified_unix_seconds: None,
             size_bytes: Some(14 * 1024),
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         },
     ]);
 

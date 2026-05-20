@@ -12,6 +12,10 @@ export struct SftpPanelItem {
     type_label: string,
     modified_label: string,
     size_label: string,
+    permissions_label: string,
+    owner_label: string,
+    group_label: string,
+    icon_kind: string,
     kind: string,
     selected: bool,
 }
@@ -791,29 +795,29 @@ export component RightPanel inherits Rectangle {
                                 y: 12px;
                                 width: 16px;
                                 height: 16px;
-                                source: item.kind == "parent-directory"
+                                source: item.icon_kind == "parent-directory"
                                     ? root.arrow-hook-up-left-icon
-                                    : item.kind == "directory" ? root.folder-icon
-                                    : item.kind == "symlink" ? root.link-icon
-                                    : item.kind == "archive" ? root.archive-icon
-                                    : item.kind == "image" ? root.image-icon
-                                    : item.kind == "config" ? root.document-code-icon
-                                    : item.kind == "executable" ? root.executable-icon
+                                    : item.icon_kind == "directory" ? root.folder-icon
+                                    : item.icon_kind == "symlink" ? root.link-icon
+                                    : item.icon_kind == "archive" ? root.archive-icon
+                                    : item.icon_kind == "image" ? root.image-icon
+                                    : item.icon_kind == "config" ? root.document-code-icon
+                                    : item.icon_kind == "executable" ? root.executable-icon
                                     : root.document-icon;
                                 image-fit: contain;
-                                colorize: item.kind == "directory"
+                                colorize: item.icon_kind == "directory"
                                     ? ThemeTokens.status-busy-accent
-                                    : item.kind == "parent-directory"
+                                    : item.icon_kind == "parent-directory"
                                         ? root.shell-text-muted
-                                        : item.kind == "symlink"
+                                        : item.icon_kind == "symlink"
                                             ? ThemeTokens.link-accent
-                                            : item.kind == "archive"
+                                            : item.icon_kind == "archive"
                                                 ? root.shell-accent
-                                                : item.kind == "image"
+                                                : item.icon_kind == "image"
                                                     ? ThemeTokens.status-error-accent
-                                                    : item.kind == "config"
+                                                    : item.icon_kind == "config"
                                                         ? root.shell-text-muted
-                                                        : item.kind == "executable"
+                                                        : item.icon_kind == "executable"
                                                             ? ThemeTokens.status-success-accent
                                         : root.shell-text-secondary;
                             }
