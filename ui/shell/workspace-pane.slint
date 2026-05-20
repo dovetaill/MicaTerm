@@ -33,6 +33,10 @@ export component WorkspacePane inherits Rectangle {
     in property <[SftpBreadcrumbItem]> workspace-sftp-breadcrumb-items: [];
     in property <[string]> workspace-sftp-selected-entry-ids: [];
     in property <[SftpPanelItem]> workspace-sftp-items: [];
+    in property <bool> transfer-center-open: false;
+    in property <int> transfer-queue-active: 0;
+    in property <int> transfer-queue-failed: 0;
+    in property <int> transfer-queue-current-session: 0;
     in property <string> workspace-session-render-mode: "bitmap";
     in property <string> workspace-session-connection-headline: "";
     in property <string> workspace-session-connection-visual-state: "";
@@ -171,6 +175,7 @@ export component WorkspacePane inherits Rectangle {
     callback workspace-sftp-upload-requested();
     callback workspace-sftp-new-folder-requested();
     callback workspace-sftp-retry-requested();
+    callback open-transfer-center-requested();
 
     public function restore-primary-focus() {
         session-host.restore-primary-focus();
@@ -263,6 +268,10 @@ export component WorkspacePane inherits Rectangle {
                 workspace-sftp-breadcrumb-items: root.workspace-sftp-breadcrumb-items;
                 workspace-sftp-selected-entry-ids: root.workspace-sftp-selected-entry-ids;
                 workspace-sftp-items: root.workspace-sftp-items;
+                transfer-center-open: root.transfer-center-open;
+                transfer-queue-active: root.transfer-queue-active;
+                transfer-queue-failed: root.transfer-queue-failed;
+                transfer-queue-current-session: root.transfer-queue-current-session;
                 workspace-session-frame-surface: root.workspace-session-frame-surface;
                 workspace-session-frame-border: root.workspace-session-frame-border;
                 shell-separator: root.shell-separator;
@@ -334,6 +343,10 @@ export component WorkspacePane inherits Rectangle {
 
                 workspace-sftp-retry-requested => {
                     root.workspace-sftp-retry-requested();
+                }
+
+                open-transfer-center-requested => {
+                    root.open-transfer-center-requested();
                 }
 
                 local-action-requested(action-id) => {

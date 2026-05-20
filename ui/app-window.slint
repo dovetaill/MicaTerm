@@ -1070,6 +1070,10 @@ export component AppWindow inherits Window {
                         workspace-sftp-breadcrumb-items: root.workspace-sftp-breadcrumb-items;
                         workspace-sftp-selected-entry-ids: root.workspace-sftp-selected-entry-ids;
                         workspace-sftp-items: root.workspace-sftp-items;
+                        transfer-center-open: root.transfer-center-open;
+                        transfer-queue-active: root.transfer-queue-active;
+                        transfer-queue-failed: root.transfer-queue-failed;
+                        transfer-queue-current-session: root.transfer-queue-current-session;
                         workspace-session-render-mode: root.workspace-session-render-mode;
                         workspace-session-connection-headline: root.workspace-session-connection-headline;
                         workspace-session-connection-visual-state: root.workspace-session-connection-visual-state;
@@ -1274,6 +1278,10 @@ export component AppWindow inherits Window {
 
                         workspace-sftp-retry-requested => {
                             root.workspace-sftp-retry-requested();
+                        }
+
+                        open-transfer-center-requested => {
+                            root.open-transfer-center-requested();
                         }
 
                         scroll-requested(delta-lines, row, col, shift, ctrl, alt) => {

@@ -182,6 +182,10 @@ export component SftpWorkspaceHost inherits Rectangle {
     in property <[SftpPanelItem]> workspace-sftp-items: [];
     in property <[string]> workspace-sftp-selected-entry-ids: [];
     in property <[SftpBreadcrumbItem]> workspace-sftp-breadcrumb-items: [];
+    in property <bool> transfer-center-open: false;
+    in property <int> transfer-queue-active: 0;
+    in property <int> transfer-queue-failed: 0;
+    in property <int> transfer-queue-current-session: 0;
     in property <color> workspace-session-frame-surface: ThemeTokens.terminal-frame-background;
     in property <color> workspace-session-frame-border: ThemeTokens.divider-subtle;
     in property <color> shell-separator: ThemeTokens.separator;
@@ -209,6 +213,7 @@ export component SftpWorkspaceHost inherits Rectangle {
     callback workspace-sftp-upload-requested();
     callback workspace-sftp-new-folder-requested();
     callback workspace-sftp-retry-requested();
+    callback open-transfer-center-requested();
     callback local-action-requested(string);
 
     private property <length> list-viewport-y: 0px;
@@ -317,6 +322,55 @@ export component SftpWorkspaceHost inherits Rectangle {
         return root.workspace-sftp-selected-entry-ids.length == 0
             ? "No selection"
             : "" + root.workspace-sftp-selected-entry-ids.length + " selected";
+    }
+
+    function transfer-entry-label() -> string {
+        if root.transfer-queue-failed > 0 {
+            return "" + root.transfer-queue-failed + " need attention";
+        }
+        if root.transfer-queue-current-session > 0 {
+            return "" + root.transfer-queue-current-session + " in this session";
+        }
+        if root.transfer-queue-active > 0 {
+            return "" + root.transfer-queue-active + " active";
+        }
+        return "Transfer Center";
+    }
+
+    function transfer-entry-surface() -> brush {
+        if root.transfer-center-open {
+            return ThemeTokens.control-active-surface;
+        }
+        if root.transfer-queue-failed > 0 {
+            return ThemeTokens.status-error-surface;
+        }
+        if root.transfer-queue-active > 0 {
+            return ThemeTokens.status-busy-surface;
+        }
+        return ThemeTokens.status-pill-surface;
+    }
+
+    function transfer-entry-border() -> brush {
+        if root.transfer-center-open {
+            return root.shell-focus-ring;
+        }
+        if root.transfer-queue-failed > 0 {
+            return ThemeTokens.status-error-accent;
+        }
+        if root.transfer-queue-active > 0 {
+            return ThemeTokens.status-busy-accent;
+        }
+        return ThemeTokens.status-pill-border;
+    }
+
+    function transfer-entry-accent() -> brush {
+        if root.transfer-queue-failed > 0 {
+            return ThemeTokens.status-error-accent;
+        }
+        if root.transfer-queue-active > 0 {
+            return ThemeTokens.status-busy-accent;
+        }
+        return root.shell-accent;
     }
 
     width: 100%;
@@ -1192,6 +1246,66 @@ export component SftpWorkspaceHost inherits Rectangle {
                     vertical-alignment: center;
                     horizontal-alignment: right;
                     overflow: elide;
+                }
+
+                transfer-entry := Rectangle {
+                    width: 160px;
+                    height: 20px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.transfer-entry-border();
+                    background: root.transfer-center-open
+                        ? ThemeTokens.control-active-surface
+                        : transfer-entry-touch.pressed
+                            ? ThemeTokens.control-active-surface
+                            : transfer-entry-touch.has-hover
+                                ? ThemeTokens.control-hover-surface
+                                : root.transfer-entry-surface();
+                    accessible-role: AccessibleRole.button;
+                    accessible-label: "Open transfer center";
+
+                    Rectangle {
+                        x: 8px;
+                        y: (parent.height - self.height) / 2;
+                        width: 6px;
+                        height: 6px;
+                        border-radius: 3px;
+                        background: root.transfer-entry-accent();
+                    }
+
+                    Image {
+                        x: 20px;
+                        y: (parent.height - self.height) / 2;
+                        width: 14px;
+                        height: 14px;
+                        source: root.arrow-upload-icon;
+                        image-fit: contain;
+                        colorize: root.transfer-entry-accent();
+                    }
+
+                    Text {
+                        x: 40px;
+                        y: 0px;
+                        width: parent.width - 48px;
+                        height: parent.height;
+                        text: root.transfer-entry-label();
+                        font-family: AppTypography.ui-font-family;
+                        font-size: AppTypography.ui-font-size-caption;
+                        font-weight: AppTypography.ui-font-weight-semibold;
+                        color: root.shell-text-primary;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    transfer-entry-touch := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+
+                        clicked => {
+                            root.open-transfer-center-requested();
+                        }
+                    }
                 }
             }
         }
