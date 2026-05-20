@@ -1,6 +1,7 @@
 //! Bootstrap assets and keychain binder module.
 
 use super::*;
+use crate::shell::context_menu::context_menu_column_width_for_items;
 
 pub(super) fn sync_sidebar_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_show_assets_sidebar(state.show_assets_sidebar);
@@ -194,17 +195,27 @@ fn context_menu_overlay_height_for(state: &ShellViewModel) -> f32 {
         .fold(0.0, f32::max)
 }
 
+fn context_menu_column_width_for(state: &ShellViewModel) -> f32 {
+    context_menu_columns_for(state)
+        .into_iter()
+        .filter(|column| !column.is_empty())
+        .map(|column| context_menu_column_width_for_items(column.as_slice()))
+        .fold(CONTEXT_MENU_COLUMN_WIDTH, f32::max)
+}
+
 fn context_menu_child_width_for(state: &ShellViewModel) -> f32 {
+    let column_width = context_menu_column_width_for(state);
     let child_count = context_menu_visible_column_count(state).saturating_sub(1) as f32;
     if child_count <= 0.0 {
         0.0
     } else {
-        child_count * (CONTEXT_MENU_COLUMN_WIDTH + CONTEXT_MENU_COLUMN_GAP)
+        child_count * (column_width + CONTEXT_MENU_COLUMN_GAP)
     }
 }
 
 fn context_menu_column_rects_for(state: &ShellViewModel) -> [Option<Rect>; 3] {
     let columns = context_menu_columns_for(state);
+    let column_width = context_menu_column_width_for(state);
     let visible_column_count = columns
         .iter()
         .take_while(|column| !column.is_empty())
@@ -219,9 +230,10 @@ fn context_menu_column_rects_for(state: &ShellViewModel) -> [Option<Rect>; 3] {
                     column_index,
                     visible_column_count,
                     state.context_menu_child_flows_left,
+                    column_width,
                 ),
             y: state.context_menu_origin_y,
-            width: CONTEXT_MENU_COLUMN_WIDTH,
+            width: column_width,
             height,
         });
     }
@@ -235,13 +247,14 @@ pub(super) fn update_context_menu_placement(window: &AppWindow, state: &mut Shel
         return;
     }
 
+    let column_width = context_menu_column_width_for(state);
     let (host_width, host_height) = current_window_size(window);
     let (origin_x, origin_y, child_flows_left) = resolve_root_menu_origin(MenuPlacementInput {
         host_width: host_width as f32,
         host_height: host_height as f32,
         anchor_x: state.context_menu_anchor_x,
         anchor_y: state.context_menu_anchor_y,
-        root_width: CONTEXT_MENU_COLUMN_WIDTH,
+        root_width: column_width,
         root_height: context_menu_overlay_height_for(state),
         child_width: context_menu_child_width_for(state),
     });

@@ -1,8 +1,8 @@
 use mica_term::shell::assets::{AssetTree, ConsoleAssetKind};
 use mica_term::shell::context_menu::{
     ContextMenuActionState, ContextTargetKind, MenuPlacementInput, Rect, SelectionContext,
-    context_menu_column_height, context_menu_column_width_for_items, resolve_action_tree,
-    resolve_root_menu_origin,
+    context_menu_column_height, context_menu_column_offset, context_menu_column_width_for_items,
+    resolve_action_tree, resolve_root_menu_origin,
     should_keep_corridor_open, visible_columns_for_path,
 };
 use mica_term::shell::view_model::ShellViewModel;
@@ -371,6 +371,31 @@ fn corridor_keeps_pointer_alive_between_parent_and_child_columns() {
 
     assert!(should_keep_corridor_open((320.0, 140.0), parent, child));
     assert!(!should_keep_corridor_open((320.0, 40.0), parent, child));
+}
+
+#[test]
+fn expanded_width_keeps_corridor_open_for_runtime_sized_columns() {
+    let width = 368.0;
+    let stride = context_menu_column_offset(1, 2, false, width);
+    let parent = Rect {
+        x: 100.0,
+        y: 100.0,
+        width,
+        height: 120.0,
+    };
+    let child = Rect {
+        x: 100.0 + stride,
+        y: 100.0,
+        width,
+        height: 120.0,
+    };
+
+    assert_eq!(stride, width + 8.0);
+    assert!(should_keep_corridor_open(
+        (100.0 + width + 4.0, 140.0),
+        parent,
+        child,
+    ));
 }
 
 #[test]

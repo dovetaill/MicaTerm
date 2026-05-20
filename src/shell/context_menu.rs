@@ -50,7 +50,10 @@ impl SelectionContext {
     }
 }
 
-pub const CONTEXT_MENU_COLUMN_WIDTH: f32 = 224.0;
+pub const CONTEXT_MENU_COLUMN_WIDTH_COMPACT: f32 = 256.0;
+pub const CONTEXT_MENU_COLUMN_WIDTH_STANDARD: f32 = 312.0;
+pub const CONTEXT_MENU_COLUMN_WIDTH_EXPANDED: f32 = 368.0;
+pub const CONTEXT_MENU_COLUMN_WIDTH: f32 = CONTEXT_MENU_COLUMN_WIDTH_COMPACT;
 pub const CONTEXT_MENU_COLUMN_GAP: f32 = 8.0;
 pub const CONTEXT_MENU_ROW_HEIGHT: f32 = 32.0;
 pub const CONTEXT_MENU_ROW_GAP: f32 = 4.0;
@@ -156,12 +159,23 @@ pub fn context_menu_column_height(items: &[ContextMenuActionNode]) -> f32 {
         + dividers * CONTEXT_MENU_DIVIDER_HEIGHT
 }
 
+pub fn context_menu_column_width_for_items(items: &[ContextMenuActionNode]) -> f32 {
+    let longest = items.iter().map(|item| item.label.chars().count()).max().unwrap_or(0);
+
+    match longest {
+        0..=18 => CONTEXT_MENU_COLUMN_WIDTH_COMPACT,
+        19..=26 => CONTEXT_MENU_COLUMN_WIDTH_STANDARD,
+        _ => CONTEXT_MENU_COLUMN_WIDTH_EXPANDED,
+    }
+}
+
 pub fn context_menu_column_offset(
     column_index: usize,
     visible_column_count: usize,
     flow_left: bool,
+    column_width: f32,
 ) -> f32 {
-    let stride = CONTEXT_MENU_COLUMN_WIDTH + CONTEXT_MENU_COLUMN_GAP;
+    let stride = column_width + CONTEXT_MENU_COLUMN_GAP;
     if flow_left {
         visible_column_count.saturating_sub(1 + column_index) as f32 * stride
     } else {
