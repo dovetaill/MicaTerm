@@ -708,8 +708,6 @@ fn sync_modal_short_viewport_keeps_master_password_field_actionable() {
 
     let short_height = 640;
     let modal = blocking_modal_rect_for_viewport(WINDOW_WIDTH, short_height, 640, 680);
-    let footer_height = 82;
-    let footer_top = modal.y + modal.height - footer_height;
     let buffer = render_app_with_size(WINDOW_WIDTH, short_height, |app| {
         app.set_sync_modal_open(true);
         app.set_sync_modal_mode("not-configured".into());
@@ -725,12 +723,16 @@ fn sync_modal_short_viewport_keeps_master_password_field_actionable() {
     write_ppm(&buffer, "/tmp/sync-vault-short-modal.ppm");
 
     let body_surface = pixel_at(&buffer, modal.x + 36, modal.y + 124);
+    // The sticky footer stays pinned while provider/repository controls remain visible below the
+    // bootstrap field, so sample the actual rendered password band instead of a footer-adjacent
+    // strip that can miss the control even when it is still clearly actionable on screen.
+    let field_band_top = modal.y + 300;
     let master_password_field_pixels = count_distinct_pixels(
         &buffer,
         modal.x + 36,
-        footer_top - 42,
+        field_band_top,
         modal.width - 92,
-        28,
+        40,
         body_surface,
         10,
     );

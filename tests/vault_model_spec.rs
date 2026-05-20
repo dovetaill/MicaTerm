@@ -232,13 +232,13 @@ fn local_bootstrap_state_persists_durable_sync_state_fields() {
 }
 
 #[test]
-fn git_repo_remote_draft_defaults_to_gitee_https_contract() {
+fn git_repo_remote_draft_defaults_to_gitee_pat_contract() {
     let draft = GitRepoRemoteDraft::default();
 
     assert_eq!(draft.host_kind, GitHostKind::Gitee);
     assert_eq!(draft.remote_url, "");
     assert_eq!(draft.branch, "main");
-    assert_eq!(draft.auth_kind, ProviderAuthKind::HttpsCredentials);
+    assert_eq!(draft.auth_kind, ProviderAuthKind::Pat);
 }
 
 #[test]

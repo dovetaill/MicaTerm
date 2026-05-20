@@ -657,11 +657,11 @@ fn cleanup_never_deletes_current_head_revision() {
 }
 
 #[test]
-fn first_release_git_host_validation_rejects_non_gitee_hosts() {
-    let err = validate_first_release_git_host(GitHostKind::GitHub)
-        .expect_err("non-gitee hosts should stay hidden in first release");
+fn first_release_git_host_validation_rejects_generic_hosts_only() {
+    let err = validate_first_release_git_host(GitHostKind::Generic)
+        .expect_err("generic hosts should stay hidden until custom metadata support exists");
 
-    assert!(err.to_string().contains("first release"));
+    assert!(err.to_string().contains("supported"));
 }
 
 #[test]

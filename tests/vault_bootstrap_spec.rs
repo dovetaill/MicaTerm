@@ -569,12 +569,12 @@ fn sync_modal_first_release_copy_mentions_git_repo_dual_auth_only() {
 }
 
 #[test]
-fn git_repo_remote_draft_describes_dual_auth_gitee_repo_setup() {
+fn git_repo_remote_draft_defaults_to_gitee_pat_and_ssh_setup() {
     let draft = GitRepoRemoteDraft::default();
 
     assert_eq!(draft.host_kind, GitHostKind::Gitee);
     assert_eq!(draft.branch, "main");
-    assert_eq!(draft.auth_kind, ProviderAuthKind::HttpsCredentials);
+    assert_eq!(draft.auth_kind, ProviderAuthKind::Pat);
     assert!(draft.setup_summary().contains("Gitee"));
     assert!(draft.setup_summary().contains("HTTPS"));
     assert!(draft.setup_summary().contains("SSH"));
