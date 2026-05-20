@@ -427,6 +427,7 @@ export component AppWindow inherits Window {
     in-out property <length> assets-context-menu-anchor-y: 0px;
     in-out property <length> assets-context-menu-origin-x: 0px;
     in-out property <length> assets-context-menu-origin-y: 0px;
+    in-out property <length> assets-context-menu-column-width: 256px;
     in-out property <bool> assets-context-menu-child-flows-left: false;
     in-out property <[AssetsContextMenuItem]> assets-context-menu-primary-items: [];
     in-out property <[AssetsContextMenuItem]> assets-context-menu-secondary-items: [];
@@ -1797,6 +1798,7 @@ export component AppWindow inherits Window {
         visible: root.assets-context-menu-open;
         x: root.assets-context-menu-origin-x;
         y: root.assets-context-menu-origin-y;
+        column-width: root.assets-context-menu-column-width;
         flow-left: root.assets-context-menu-child-flows-left;
         primary-items: root.assets-context-menu-primary-items;
         secondary-items: root.assets-context-menu-secondary-items;

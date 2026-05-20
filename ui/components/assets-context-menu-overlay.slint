@@ -4,6 +4,7 @@ export component AssetsContextMenuOverlay inherits Rectangle {
     in property <[AssetsContextMenuItem]> primary-items: [];
     in property <[AssetsContextMenuItem]> secondary-items: [];
     in property <[AssetsContextMenuItem]> tertiary-items: [];
+    in property <length> column-width: 256px;
     in property <bool> flow-left: false;
     property <int> visual-hover-column: -1;
     property <int> visual-hover-row: -1;
@@ -71,6 +72,7 @@ export component AssetsContextMenuOverlay inherits Rectangle {
             x: root.flow-left ? root.width - self.width : 0px;
             y: 0px;
             items: root.primary-items;
+            column-width: root.column-width;
             visual-hover-row: root.visual-hover-column == 0 ? root.visual-hover-row : -1;
 
             item-invoked(action-id) => {
@@ -101,6 +103,7 @@ export component AssetsContextMenuOverlay inherits Rectangle {
             y: 0px;
             visible: root.secondary-items.length > 0;
             items: root.secondary-items;
+            column-width: root.column-width;
             visual-hover-row: root.visual-hover-column == 1 ? root.visual-hover-row : -1;
 
             item-invoked(action-id) => {
@@ -131,6 +134,7 @@ export component AssetsContextMenuOverlay inherits Rectangle {
             y: 0px;
             visible: root.tertiary-items.length > 0;
             items: root.tertiary-items;
+            column-width: root.column-width;
             visual-hover-row: root.visual-hover-column == 2 ? root.visual-hover-row : -1;
 
             item-invoked(action-id) => {

@@ -13,6 +13,7 @@ APP_WINDOW="$ROOT_DIR/ui/app-window.slint"
 TOKENS="$ROOT_DIR/ui/theme/tokens.slint"
 RENAME_MODAL="$ROOT_DIR/ui/components/assets-rename-modal.slint"
 DELETE_MODAL="$ROOT_DIR/ui/components/assets-delete-confirm-modal.slint"
+ASSETS_BOOTSTRAP="$ROOT_DIR/src/app/bootstrap/assets_keychain.rs"
 
 grep -F 'export component AssetNodeRow inherits Rectangle' "$ROW" >/dev/null
 grep -F 'in property <int> depth: 0;' "$ROW" >/dev/null
@@ -84,5 +85,5 @@ grep -F 'callback row-hovered(int, int);' "$MENU_OVERLAY" >/dev/null
 grep -F 'callback pointer-moved(length, length);' "$MENU_OVERLAY" >/dev/null
 grep -F 'key-pressed(event) => {' "$MENU_OVERLAY" >/dev/null
 grep -F 'event.text == Key.Escape' "$MENU_OVERLAY" >/dev/null
-grep -F 'window.on_assets_context_menu_pointer_moved(move |pointer_x, pointer_y| {' "$ROOT_DIR/src/app/bootstrap.rs" >/dev/null
+grep -F 'window.on_assets_context_menu_pointer_moved(move |pointer_x, pointer_y| {' "$ASSETS_BOOTSTRAP" >/dev/null
 ! grep -F 'ThemeTokens.control-hover-surface' "$MENU_ROW" >/dev/null

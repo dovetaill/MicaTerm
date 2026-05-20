@@ -43,6 +43,7 @@ pub(super) fn sync_assets_context_menu_state(window: &AppWindow, state: &ShellVi
     window.set_assets_context_menu_anchor_y(state.context_menu_anchor_y);
     window.set_assets_context_menu_origin_x(state.context_menu_origin_x);
     window.set_assets_context_menu_origin_y(state.context_menu_origin_y);
+    window.set_assets_context_menu_column_width(context_menu_column_width_for(state));
     window.set_assets_context_menu_child_flows_left(state.context_menu_child_flows_left);
     window.set_assets_context_menu_primary_items(ModelRc::new(VecModel::from(
         context_menu_primary_items_for(state),

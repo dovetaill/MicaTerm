@@ -14,6 +14,7 @@ export struct AssetsContextMenuItem {
 
 export component AssetsContextMenuColumn inherits Rectangle {
     in property <[AssetsContextMenuItem]> items: [];
+    in property <length> column-width: 256px;
     in property <int> visual-hover-row: -1;
     private property <image> add-icon: @image-url("../../assets/icons/fluent/add-20-regular.svg");
     private property <image> arrow-clockwise-icon: @image-url("../../assets/icons/fluent/arrow-clockwise-20-regular.svg");
@@ -41,7 +42,7 @@ export component AssetsContextMenuColumn inherits Rectangle {
     callback item-hovered(int, bool);
     callback item-pointer-moved(length, length);
 
-    width: 224px;
+    width: root.column-width;
     height: 16px + menu-body.preferred-height;
     border-radius: 8px;
     border-width: 1px;
