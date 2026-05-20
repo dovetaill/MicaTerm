@@ -226,20 +226,11 @@ export component AssetsKeychainIdentityModal inherits Rectangle {
                                 spacing: 10px;
 
                                 DialogActionButton {
-                                    horizontal-stretch: 1;
+                                    horizontal-stretch: 2;
                                     label: "Use Existing Key";
 
                                     clicked => {
                                         root.action-requested("use-existing-ssh-key");
-                                    }
-                                }
-
-                                DialogActionButton {
-                                    horizontal-stretch: 1;
-                                    label: "Create New Key";
-
-                                    clicked => {
-                                        root.action-requested("create-ssh-key");
                                     }
                                 }
                             }

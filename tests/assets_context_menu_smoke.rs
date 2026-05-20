@@ -343,7 +343,7 @@ fn blank_area_menu_projects_compact_overlay_height() {
 }
 
 #[test]
-fn ssh_context_menu_projects_expanded_overlay_width() {
+fn ssh_context_menu_projects_compact_overlay_width_after_dead_actions_are_removed() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -352,7 +352,7 @@ fn ssh_context_menu_projects_expanded_overlay_width() {
 
     app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
 
-    assert_eq!(app.get_layout_assets_context_menu_width(), 368.0);
+    assert_eq!(app.get_layout_assets_context_menu_width(), 256.0);
 }
 
 #[test]
@@ -367,7 +367,7 @@ fn different_targets_project_different_context_menu_overlay_widths() {
 
     let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
     app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
-    assert_eq!(app.get_layout_assets_context_menu_width(), 368.0);
+    assert_eq!(app.get_layout_assets_context_menu_width(), 256.0);
 }
 
 #[test]
@@ -694,24 +694,26 @@ fn right_click_near_edge_still_keeps_overlay_within_window_bounds() {
 }
 
 #[test]
-fn invoking_planned_action_shows_status_pill_feedback() {
+fn ssh_context_menu_omits_removed_dead_actions_from_primary_items() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
 
     app.invoke_asset_context_menu_requested("ssh-prod-01".into(), "ssh".into(), 144.0, 188.0);
-    app.invoke_assets_context_menu_action_invoked("proxy-chrome-via-server".into());
 
-    assert!(app.get_assets_context_menu_open());
-    assert_eq!(
-        app.get_context_menu_feedback_text().as_str(),
-        "Proxy Chrome via Server is not wired yet."
-    );
+    let primary = app.get_assets_context_menu_primary_items();
+    let ids: Vec<String> = (0..primary.row_count())
+        .filter_map(|index| primary.row_data(index))
+        .map(|item| item.id.to_string())
+        .collect();
+
+    assert!(!ids.contains(&"proxy-chrome-via-server".to_string()));
+    assert!(!ids.contains(&"upload-ssh-public-key".to_string()));
 }
 
 #[test]
-fn closing_context_menu_clears_planned_action_feedback() {
+fn invoking_removed_planned_action_id_no_longer_sets_feedback() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -719,9 +721,7 @@ fn closing_context_menu_clears_planned_action_feedback() {
 
     app.invoke_asset_context_menu_requested("ssh-prod-01".into(), "ssh".into(), 144.0, 188.0);
     app.invoke_assets_context_menu_action_invoked("proxy-chrome-via-server".into());
-    app.invoke_close_assets_context_menu_requested();
 
-    assert!(!app.get_assets_context_menu_open());
     assert_eq!(app.get_context_menu_feedback_text().as_str(), "");
 }
 

@@ -137,7 +137,7 @@ fn ssh_scene_exposes_flat_create_actions_without_connection_submenu() {
 }
 
 #[test]
-fn ssh_scene_marks_proxy_chrome_as_planned_but_clickable() {
+fn ssh_scene_hides_dead_planned_actions() {
     let selection = SelectionContext {
         selected_ids: vec!["ssh-prod-01".into()],
         clipboard_has_asset_payload: true,
@@ -146,17 +146,17 @@ fn ssh_scene_marks_proxy_chrome_as_planned_but_clickable() {
         selected_directory_count: 0,
     };
 
-    let roots = resolve_action_tree(ContextTargetKind::SshConnection, &selection);
-    let proxy = roots
-        .iter()
-        .find(|node| node.id == "proxy-chrome-via-server")
-        .expect("ssh menu should expose the proxy chrome action");
+    let ids: Vec<_> = resolve_action_tree(ContextTargetKind::SshConnection, &selection)
+        .into_iter()
+        .map(|node| node.id)
+        .collect();
 
-    assert_eq!(proxy.state, ContextMenuActionState::Planned);
+    assert!(!ids.contains(&"proxy-chrome-via-server"));
+    assert!(!ids.contains(&"upload-ssh-public-key"));
 }
 
 #[test]
-fn ssh_context_menu_uses_expanded_width_tier_for_long_planned_actions() {
+fn ssh_context_menu_uses_compact_width_after_dead_actions_are_removed() {
     let selection = SelectionContext {
         selected_ids: vec!["ssh-prod-01".into()],
         clipboard_has_asset_payload: false,
@@ -166,7 +166,7 @@ fn ssh_context_menu_uses_expanded_width_tier_for_long_planned_actions() {
     };
     let roots = resolve_action_tree(ContextTargetKind::SshConnection, &selection);
 
-    assert_eq!(context_menu_column_width_for_items(&roots), 368.0);
+    assert_eq!(context_menu_column_width_for_items(&roots), 256.0);
 }
 
 #[test]
@@ -442,7 +442,7 @@ fn invoking_run_snippet_leaf_action_records_explicit_run_activation() {
 }
 
 #[test]
-fn invoking_planned_action_sets_feedback_text_without_closing_documentation_gap() {
+fn removed_planned_ssh_actions_no_longer_exist_in_keyboard_dispatch_tree() {
     let mut view_model = ShellViewModel::default();
     view_model.open_context_menu_for_target(
         ContextTargetKind::SshConnection,
@@ -461,17 +461,6 @@ fn invoking_planned_action_sets_feedback_text_without_closing_documentation_gap(
             selected_directory_count: 0,
         },
     );
-    let proxy_index = roots
-        .iter()
-        .position(|node| node.id == "proxy-chrome-via-server")
-        .expect("ssh menu should expose the proxy chrome action");
-
-    view_model.set_context_menu_open_path(vec![proxy_index]);
-    view_model.invoke_current_context_menu_item();
-
-    assert!(view_model.context_menu_open);
-    assert_eq!(
-        view_model.context_menu_feedback_text,
-        "Proxy Chrome via Server is not wired yet."
-    );
+    assert!(!roots.iter().any(|node| node.id == "proxy-chrome-via-server"));
+    assert!(!roots.iter().any(|node| node.id == "upload-ssh-public-key"));
 }

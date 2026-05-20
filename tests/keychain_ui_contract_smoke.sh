@@ -41,6 +41,8 @@ MODAL_CHROME="$ROOT_DIR/ui/components/modal-chrome.slint"
 grep -F 'keychain-asset-items' "$SIDEBAR" >/dev/null
 grep -F 'Identity' "$IDENTITY_MODAL" >/dev/null
 grep -F 'SSH Key' "$IDENTITY_MODAL" >/dev/null
+! grep -F 'Create New Key' "$IDENTITY_MODAL" >/dev/null
+! grep -F '"create-ssh-key"' "$IDENTITY_MODAL" >/dev/null
 grep -F 'Generate Key Pair' "$SSH_KEY_MODAL" >/dev/null
 grep -F 'Copy Public Key' "$SSH_KEY_MODAL" >/dev/null
 grep -F 'root.item-kind == "identity"' "$ASSET_NODE_ROW" >/dev/null

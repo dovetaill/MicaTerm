@@ -1365,6 +1365,16 @@ fn keychain_identity_modal_scrolls_body_inside_the_shared_scaffold() {
 }
 
 #[test]
+fn keychain_identity_modal_omits_dead_create_new_key_button() {
+    let identity_modal = fs::read_to_string("ui/components/assets-keychain-identity-modal.slint")
+        .expect("read keychain identity modal");
+
+    assert!(identity_modal.contains("Use Existing Key"));
+    assert!(!identity_modal.contains("Create New Key"));
+    assert!(!identity_modal.contains("\"create-ssh-key\""));
+}
+
+#[test]
 fn long_form_modal_shells_use_viewport_constrained_heights_instead_of_fixed_frames() {
     let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
     let blocking_shell =

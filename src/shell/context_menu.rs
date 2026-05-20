@@ -385,20 +385,6 @@ fn resolve_ssh_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNod
             false,
         ),
         action_with_state(
-            "proxy-chrome-via-server",
-            "Proxy Chrome via Server",
-            "branch",
-            ContextMenuActionState::Planned,
-            true,
-        ),
-        action_with_state(
-            "upload-ssh-public-key",
-            "Upload SSH Public Key (ssh-copy-id)",
-            "arrow-upload",
-            ContextMenuActionState::Planned,
-            false,
-        ),
-        action_with_state(
             "delete-asset",
             "Delete",
             "delete",
