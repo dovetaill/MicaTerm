@@ -566,7 +566,7 @@ pub(super) fn bind_shell_chrome_callbacks(
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         sync_workspace_session_state_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -616,7 +616,7 @@ pub(super) fn bind_shell_chrome_callbacks(
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         sync_workspace_session_state_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -636,7 +636,7 @@ pub(super) fn bind_shell_chrome_callbacks(
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         sync_workspace_session_state_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -656,7 +656,7 @@ pub(super) fn bind_shell_chrome_callbacks(
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         sync_workspace_session_state_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -676,7 +676,7 @@ pub(super) fn bind_shell_chrome_callbacks(
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         sync_workspace_session_state_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -696,7 +696,7 @@ pub(super) fn bind_shell_chrome_callbacks(
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         sync_workspace_session_state_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -716,7 +716,7 @@ pub(super) fn bind_shell_chrome_callbacks(
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         sync_workspace_session_state_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -808,7 +808,7 @@ pub(super) fn bind_shell_chrome_callbacks(
             if state.active_workspace_terminal_surface().is_none() {
                 sync_workspace_session_state_with_manager(
                     &window,
-                    &state,
+                    &mut state,
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     Some(&session_bridge.manager),
                 );

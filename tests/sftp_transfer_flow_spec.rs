@@ -344,6 +344,9 @@ fn file_entry(id: &str, name: &str, path: &str) -> SftpDirectoryEntry {
         kind: SftpDirectoryEntryKind::File,
         modified_unix_seconds: None,
         size_bytes: Some(128),
+    permissions_label: None,
+    owner_label: None,
+    group_label: None,
     }
 }
 
@@ -355,6 +358,9 @@ fn directory_entry(id: &str, name: &str, path: &str) -> SftpDirectoryEntry {
         kind: SftpDirectoryEntryKind::Directory,
         modified_unix_seconds: None,
         size_bytes: None,
+    permissions_label: None,
+    owner_label: None,
+    group_label: None,
     }
 }
 

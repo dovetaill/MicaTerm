@@ -3373,7 +3373,7 @@ fn update_workspace_terminal_idle_cache_shrink(
 #[cfg(test)]
 fn sync_workspace_session_state(
     window: &AppWindow,
-    state: &ShellViewModel,
+    state: &mut ShellViewModel,
     follow_tracker: &mut WorkspaceFollowTracker,
 ) {
     sync_workspace_session_state_with_manager(window, state, follow_tracker, None);
@@ -4229,7 +4229,7 @@ fn projected_workspace_session_host_mode(
 
 fn sync_workspace_session_state_with_manager(
     window: &AppWindow,
-    state: &ShellViewModel,
+    state: &mut ShellViewModel,
     _follow_tracker: &mut WorkspaceFollowTracker,
     manager: Option<&SessionManager>,
 ) {
@@ -4600,7 +4600,7 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
 
 fn sync_workspace_tabs(
     window: &AppWindow,
-    state: &ShellViewModel,
+    state: &mut ShellViewModel,
     follow_tracker: &mut WorkspaceFollowTracker,
 ) {
     sync_workspace_tabs_with_manager(window, state, follow_tracker, None);
@@ -4608,7 +4608,7 @@ fn sync_workspace_tabs(
 
 fn sync_workspace_tabs_with_manager(
     window: &AppWindow,
-    state: &ShellViewModel,
+    state: &mut ShellViewModel,
     follow_tracker: &mut WorkspaceFollowTracker,
     manager: Option<&SessionManager>,
 ) {
@@ -6129,7 +6129,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             if projection_delta.any_changed() {
                 sync_workspace_session_state_with_manager(
                     &window,
-                    &state,
+                    &mut state,
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     Some(&manager),
                 );
@@ -6238,7 +6238,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             if workspace_sftp_projection_delta.any_changed() {
                 sync_workspace_session_state_with_manager(
                     &window,
-                    &state,
+                    &mut state,
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     Some(&manager),
                 );
@@ -7146,7 +7146,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         state.open_workspace_launcher_tab();
         sync_workspace_tabs_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -7187,7 +7187,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         sync_welcome_quick_launch_state(&window, &state);
         sync_workspace_tabs_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -7334,7 +7334,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         window.set_blocking_modal_offset_y(0.0);
         sync_workspace_tabs_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -7412,7 +7412,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         window.set_blocking_modal_offset_y(0.0);
         sync_workspace_tabs_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             None,
         );
@@ -7506,7 +7506,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             }
             sync_workspace_tabs_with_manager(
                 &window,
-                &state,
+                &mut state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
@@ -7595,7 +7595,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             }
             sync_workspace_tabs_with_manager(
                 &window,
-                &state,
+                &mut state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
@@ -7618,7 +7618,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         if state.reorder_workspace_tab(tab_id.as_str(), target_index.max(0) as usize) {
             sync_workspace_tabs_with_manager(
                 &window,
-                &state,
+                &mut state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
@@ -7694,7 +7694,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     }
                     sync_workspace_tabs_with_manager(
                         &window,
-                        &state,
+                        &mut state,
                         &mut workspace_follow_tracker_ref.borrow_mut(),
                         session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
                     );
@@ -7721,7 +7721,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     Ok(true) => {
                         sync_workspace_tabs_with_manager(
                             &window,
-                            &state,
+                            &mut state,
                             &mut workspace_follow_tracker_ref.borrow_mut(),
                             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
                         );
@@ -7742,7 +7742,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                         );
                         sync_workspace_tabs_with_manager(
                             &window,
-                            &state,
+                            &mut state,
                             &mut workspace_follow_tracker_ref.borrow_mut(),
                             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
                         );
@@ -7763,7 +7763,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     Ok(true) => {
                         sync_workspace_tabs_with_manager(
                             &window,
-                            &state,
+                            &mut state,
                             &mut workspace_follow_tracker_ref.borrow_mut(),
                             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
                         );
@@ -7787,7 +7787,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                         );
                         sync_workspace_tabs_with_manager(
                             &window,
-                            &state,
+                            &mut state,
                             &mut workspace_follow_tracker_ref.borrow_mut(),
                             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
                         );
@@ -7834,7 +7834,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
                 sync_workspace_tabs_with_manager(
                     &window,
-                    &state,
+                    &mut state,
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
                 );
@@ -7878,7 +7878,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     }
                     sync_workspace_tabs_with_manager(
                         &window,
-                        &state,
+                        &mut state,
                         &mut workspace_follow_tracker_ref.borrow_mut(),
                         session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
                     );
@@ -7955,7 +7955,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 );
                 sync_workspace_tabs_with_manager(
                     &window,
-                    &state,
+                    &mut state,
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     Some(&session_bridge.manager),
                 );
@@ -7982,7 +7982,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 );
                 sync_workspace_tabs_with_manager(
                     &window,
-                    &state,
+                    &mut state,
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     Some(&session_bridge.manager),
                 );
@@ -8016,7 +8016,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 state.hide_workspace_terminal_session(session_id.to_string().as_str());
                 sync_workspace_tabs_with_manager(
                     &window,
-                    &state,
+                    &mut state,
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     Some(&session_bridge.manager),
                 );
@@ -8059,7 +8059,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 );
                 sync_workspace_tabs_with_manager(
                     &window,
-                    &state,
+                    &mut state,
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     Some(&session_bridge.manager),
                 );
@@ -8078,7 +8078,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 );
                 sync_workspace_tabs_with_manager(
                     &window,
-                    &state,
+                    &mut state,
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     Some(&session_bridge.manager),
                 );
@@ -8260,7 +8260,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         state.open_workspace_terminal_search();
         sync_workspace_session_state_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -8278,7 +8278,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         state.close_workspace_terminal_search();
         sync_workspace_session_state_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -8296,7 +8296,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         state.set_workspace_terminal_search_query(query.to_string());
         sync_workspace_session_state_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -8313,10 +8313,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         if workspace_session_uses_host_selection_overlay(&window) {
             return;
         }
-        let state = state.borrow();
+        let mut state = state.borrow_mut();
         sync_workspace_session_state_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -8937,9 +8937,9 @@ mod tests {
 
     fn seeded_bitmap_workspace_terminal_state_for_test()
     -> (AppWindow, ShellViewModel, WorkspaceFollowTracker) {
-        let (window, state, mut follow_tracker) =
+        let (window, mut state, mut follow_tracker) =
             bitmap_workspace_terminal_state_fixture_for_test();
-        sync_workspace_session_state(&window, &state, &mut follow_tracker);
+        sync_workspace_session_state(&window, &mut state, &mut follow_tracker);
         (window, state, follow_tracker)
     }
 
@@ -9799,7 +9799,7 @@ mod tests {
             state.set_active_workspace_terminal_surface(Some(initial_surface));
             let mut follow_tracker = WorkspaceFollowTracker::default();
 
-            sync_workspace_session_state(&window, &state, &mut follow_tracker);
+            sync_workspace_session_state(&window, &mut state, &mut follow_tracker);
             let initial_lines_model = window.get_workspace_session_visible_lines();
             let initial_surface_seqno = window.get_workspace_session_surface_seqno();
 
@@ -9833,7 +9833,7 @@ mod tests {
             }];
             state.set_active_workspace_terminal_surface(Some(updated_surface));
 
-            sync_workspace_session_state(&window, &state, &mut follow_tracker);
+            sync_workspace_session_state(&window, &mut state, &mut follow_tracker);
 
             assert_eq!(
                 window.get_workspace_session_visible_lines(),
@@ -9875,7 +9875,7 @@ mod tests {
             );
 
             state.set_active_workspace_terminal_surface(None);
-            sync_workspace_session_state(&window, &state, &mut follow_tracker);
+            sync_workspace_session_state(&window, &mut state, &mut follow_tracker);
 
             assert_eq!(
                 window.get_workspace_session_visible_lines(),
@@ -10918,7 +10918,7 @@ mod tests {
             state.set_active_workspace_terminal_surface(Some(initial_surface));
             let mut follow_tracker = WorkspaceFollowTracker::default();
 
-            sync_workspace_session_state(&window, &state, &mut follow_tracker);
+            sync_workspace_session_state(&window, &mut state, &mut follow_tracker);
             WORKSPACE_TERMINAL_POINTER_STATE.with(|pointer_state| {
                 *pointer_state.borrow_mut() =
                     Some(workspace_terminal::WorkspaceTerminalPointerState {
@@ -10941,7 +10941,7 @@ mod tests {
             refreshed_surface.cells = ascii_cells_for_row(0, row_text);
             state.set_active_workspace_terminal_surface(Some(refreshed_surface));
 
-            sync_workspace_session_state(&window, &state, &mut follow_tracker);
+            sync_workspace_session_state(&window, &mut state, &mut follow_tracker);
 
             assert!(
                 window.get_workspace_session_link_hovered(),

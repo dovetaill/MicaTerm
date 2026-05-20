@@ -1518,7 +1518,7 @@ pub(super) fn bind_assets_keychain_callbacks(
         sync_console_assets(&window, &state);
         sync_workspace_tabs_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -1561,7 +1561,7 @@ pub(super) fn bind_assets_keychain_callbacks(
         window.set_blocking_modal_offset_y(0.0);
         sync_workspace_tabs_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -1657,7 +1657,7 @@ pub(super) fn bind_assets_keychain_callbacks(
         sync_keychain_assets(&window, &state);
         sync_workspace_tabs_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -1719,7 +1719,7 @@ pub(super) fn bind_assets_keychain_callbacks(
         sync_keychain_assets(&window, &state);
         sync_workspace_tabs_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
@@ -1872,7 +1872,7 @@ pub(super) fn bind_assets_keychain_callbacks(
         sync_keychain_assets(&window, &state);
         sync_workspace_tabs_with_manager(
             &window,
-            &state,
+            &mut state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );

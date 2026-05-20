@@ -1,5 +1,9 @@
 use std::fs;
 
+use mica_term::app::sftp::{
+    FileBrowserSession, HostProfileRef, SftpDirectoryEntry, SftpDirectoryEntryKind,
+    SftpFollowMode, SftpPanelMode, SftpPathHistory,
+};
 use mica_term::app::ssh::runtime::TerminalSurfaceState;
 use mica_term::app::ssh::session_manager::{EnhancedSessionState, SessionHandle, SessionState};
 use mica_term::shell::tabs::WorkspaceTab;
@@ -15,6 +19,71 @@ fn sample_handle(title: &str, subtitle: &str, state: SessionState) -> SessionHan
         state,
         can_reconnect: false,
         enhanced_session_state: EnhancedSessionState::Plain,
+    }
+}
+
+fn sample_sftp_entry(
+    id: &str,
+    name: &str,
+    path: &str,
+    kind: SftpDirectoryEntryKind,
+    modified_unix_seconds: Option<u64>,
+    size_bytes: Option<u64>,
+    permissions_label: Option<&str>,
+    owner_label: Option<&str>,
+    group_label: Option<&str>,
+) -> SftpDirectoryEntry {
+    SftpDirectoryEntry {
+        id: id.into(),
+        name: name.into(),
+        path: path.into(),
+        kind,
+        modified_unix_seconds,
+        size_bytes,
+        permissions_label: permissions_label.map(str::to_string),
+        owner_label: owner_label.map(str::to_string),
+        group_label: group_label.map(str::to_string),
+    }
+}
+
+fn sample_workspace_sftp_session(mode: SftpPanelMode, follow_mode: SftpFollowMode) -> FileBrowserSession {
+    FileBrowserSession {
+        file_browser_session_id: "browser-1".into(),
+        host_profile_ref: HostProfileRef::with_label("asset-prod", "Interserver"),
+        linked_terminal_session_id: Some(Uuid::new_v4().to_string()),
+        mode,
+        follow_mode,
+        current_path: "/srv/app/releases".into(),
+        history: SftpPathHistory::with_initial("/srv/app/releases"),
+        entries: vec![
+            sample_sftp_entry(
+                "/srv/app/releases/logs",
+                "logs",
+                "/srv/app/releases/logs",
+                SftpDirectoryEntryKind::Directory,
+                Some(1_777_000_001),
+                None,
+                Some("rwxr-xr-x"),
+                Some("deploy"),
+                Some("www-data"),
+            ),
+            sample_sftp_entry(
+                "/srv/app/releases/release.tar.gz",
+                "release.tar.gz",
+                "/srv/app/releases/release.tar.gz",
+                SftpDirectoryEntryKind::File,
+                Some(1_777_000_777),
+                Some(14 * 1024),
+                Some("rw-r--r--"),
+                Some("deploy"),
+                Some("www-data"),
+            ),
+        ],
+        selected_entry_ids: vec!["/srv/app/releases/release.tar.gz".into()],
+        last_error: None,
+        active_request_id: None,
+        sort_state: Default::default(),
+        column_layout: Default::default(),
     }
 }
 
@@ -182,4 +251,128 @@ fn right_panel_policy_hidden_contract_is_projected_for_active_sftp_workspace_tab
             ),
         "AppWindow should thread policy-hidden SFTP workspace semantics into the right-panel revive-strip contract"
     );
+}
+
+#[test]
+fn workspace_sftp_projection_rows_preserve_productized_icon_and_metadata_contract() {
+    let session = sample_workspace_sftp_session(SftpPanelMode::Ready, SftpFollowMode::ManualBrowse);
+    let sftp_tab = WorkspaceTab::sftp(
+        "tab-files-1",
+        session.file_browser_session_id.clone(),
+        "Files: Prod",
+    );
+    let mut view_model = ShellViewModel::default();
+    view_model.set_file_browser_session(session);
+    view_model.set_workspace_tabs(vec![sftp_tab]);
+
+    let rows = view_model.workspace_sftp_render_rows();
+
+    assert_eq!(view_model.workspace_sftp_total_row_count(), 3);
+    assert_eq!(view_model.workspace_sftp_selected_row_count(), 1);
+    assert_eq!(rows[0].icon_kind, "parent-directory");
+    assert_eq!(rows[1].icon_kind, "directory");
+    assert_eq!(rows[1].permissions_label, "rwxr-xr-x");
+    assert_eq!(rows[1].owner_label, "deploy");
+    assert_eq!(rows[1].group_label, "www-data");
+    assert_eq!(rows[2].icon_kind, "archive");
+    assert_eq!(rows[2].kind, "archive");
+    assert_eq!(rows[2].permissions_label, "rw-r--r--");
+    assert!(rows[2].selected);
+}
+
+#[test]
+fn active_sftp_workspace_summary_prefers_live_host_status_and_binding_metadata() {
+    let session =
+        sample_workspace_sftp_session(SftpPanelMode::Loading, SftpFollowMode::ManualBrowse);
+    let sftp_tab = WorkspaceTab::sftp(
+        "tab-files-1",
+        session.file_browser_session_id.clone(),
+        "Files: Prod",
+    );
+    let mut view_model = ShellViewModel::default();
+    view_model.set_file_browser_session(session);
+    view_model.set_workspace_tabs(vec![sftp_tab]);
+
+    let summary = view_model
+        .active_workspace_tab_summary()
+        .expect("active workspace tab summary");
+
+    assert_eq!(summary.display_name, "Files: Prod");
+    assert_eq!(summary.primary_summary_text, "Interserver · SFTP");
+    assert_eq!(summary.host, "Interserver");
+    assert_eq!(summary.connection_status, "loading");
+    assert_eq!(summary.connection_status_label, "Loading");
+    assert!(
+        summary.tooltip_text.contains("Path: /srv/app/releases"),
+        "expected live SFTP path in tooltip, got: {}",
+        summary.tooltip_text
+    );
+    assert!(
+        summary.tooltip_text.contains("Binding: Locked / Manual"),
+        "expected live SFTP binding in tooltip, got: {}",
+        summary.tooltip_text
+    );
+    assert!(
+        summary.tooltip_text.contains("Status: Loading"),
+        "expected live SFTP status in tooltip, got: {}",
+        summary.tooltip_text
+    );
+}
+
+#[test]
+fn workspace_sftp_projection_contract_threads_richer_rows_and_incremental_sync_into_slint() {
+    let view_model = fs::read_to_string("src/shell/view_model.rs").expect("read shell view model");
+    let sftp_view_model =
+        fs::read_to_string("src/shell/view_model/sftp.rs").expect("read sftp view model");
+    let right_panel = fs::read_to_string("ui/shell/right-panel.slint").expect("read right panel");
+    let bootstrap = fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read sftp bootstrap");
+
+    for contract in [
+        "pub permissions_label: String,",
+        "pub owner_label: String,",
+        "pub group_label: String,",
+        "pub icon_kind: String,",
+    ] {
+        assert!(
+            view_model.contains(contract),
+            "workspace SFTP projection should expose `{contract}` for the productized host row and summary contract"
+        );
+    }
+
+    for contract in [
+        "pub fn workspace_sftp_total_row_count(&self) -> usize {",
+        "pub fn workspace_sftp_selected_row_count(&self) -> usize {",
+    ] {
+        assert!(
+            sftp_view_model.contains(contract),
+            "workspace SFTP view-model helpers should expose `{contract}` for the productized host status summary"
+        );
+    }
+
+    for contract in [
+        "permissions_label: string,",
+        "owner_label: string,",
+        "group_label: string,",
+        "icon_kind: string,",
+    ] {
+        assert!(
+            right_panel.contains(contract),
+            "Slint-facing SFTP item contract should expose `{contract}` so quick browser and workspace host can share one richer row projection"
+        );
+    }
+
+    for contract in [
+        "permissions_label: row.permissions_label.as_str().into(),",
+        "owner_label: row.owner_label.as_str().into(),",
+        "group_label: row.group_label.as_str().into(),",
+        "icon_kind: row.icon_kind.as_str().into(),",
+        "sync_sftp_panel_items_model(",
+        "state.workspace_sftp_render_dirty_indices()",
+        "state.mark_workspace_sftp_render_clean()",
+    ] {
+        assert!(
+            bootstrap.contains(contract),
+            "workspace SFTP bootstrap sync should project `{contract}` instead of replacing the whole workspace file model on every tick"
+        );
+    }
 }

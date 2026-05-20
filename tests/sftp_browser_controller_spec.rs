@@ -12,6 +12,9 @@ fn entry(id: &str, name: &str, path: &str, kind: SftpDirectoryEntryKind) -> Sftp
         kind,
         modified_unix_seconds: None,
         size_bytes: None,
+    permissions_label: None,
+    owner_label: None,
+    group_label: None,
     }
 }
 

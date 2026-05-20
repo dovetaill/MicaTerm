@@ -397,6 +397,9 @@ fn opening_sftp_context_menu_tracks_remote_selection_without_touching_asset_sele
         kind: SftpDirectoryEntryKind::Directory,
         modified_unix_seconds: None,
         size_bytes: None,
+    permissions_label: None,
+    owner_label: None,
+    group_label: None,
     }]);
 
     state.selected_asset_ids = vec!["asset-root".into()];
@@ -427,6 +430,9 @@ fn right_clicking_an_already_multi_selected_sftp_entry_keeps_the_multi_selection
             kind: SftpDirectoryEntryKind::Directory,
             modified_unix_seconds: None,
             size_bytes: None,
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         },
         SftpDirectoryEntry {
             id: "entry-release".into(),
@@ -435,6 +441,9 @@ fn right_clicking_an_already_multi_selected_sftp_entry_keeps_the_multi_selection
             kind: SftpDirectoryEntryKind::File,
             modified_unix_seconds: None,
             size_bytes: Some(14 * 1024),
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         },
     ]);
     let active_session_id = state
@@ -474,6 +483,9 @@ fn sftp_create_rename_and_delete_confirmations_do_not_mutate_projected_entries_l
             kind: SftpDirectoryEntryKind::Directory,
             modified_unix_seconds: None,
             size_bytes: None,
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         },
         SftpDirectoryEntry {
             id: "entry-release".into(),
@@ -482,6 +494,9 @@ fn sftp_create_rename_and_delete_confirmations_do_not_mutate_projected_entries_l
             kind: SftpDirectoryEntryKind::File,
             modified_unix_seconds: None,
             size_bytes: Some(14 * 1024),
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         },
     ]);
 
@@ -613,6 +628,9 @@ fn unsupported_sftp_actions_render_disabled_reasons() {
             kind: SftpDirectoryEntryKind::Directory,
             modified_unix_seconds: None,
             size_bytes: None,
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         },
         SftpDirectoryEntry {
             id: "entry-release".into(),
@@ -621,6 +639,9 @@ fn unsupported_sftp_actions_render_disabled_reasons() {
             kind: SftpDirectoryEntryKind::File,
             modified_unix_seconds: None,
             size_bytes: Some(14 * 1024),
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         },
     ]);
 

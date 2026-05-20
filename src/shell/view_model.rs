@@ -662,6 +662,10 @@ pub struct SftpPanelRenderRow {
     pub type_label: String,
     pub modified_label: String,
     pub size_label: String,
+    pub permissions_label: String,
+    pub owner_label: String,
+    pub group_label: String,
+    pub icon_kind: String,
     pub kind: String,
     pub selected: bool,
 }

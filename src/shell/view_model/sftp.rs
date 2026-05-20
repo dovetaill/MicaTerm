@@ -15,6 +15,10 @@ fn sftp_parent_render_row() -> SftpPanelRenderRow {
         type_label: "Up".into(),
         modified_label: String::new(),
         size_label: String::new(),
+        permissions_label: String::new(),
+        owner_label: String::new(),
+        group_label: String::new(),
+        icon_kind: "parent-directory".into(),
         kind: "parent-directory".into(),
         selected: false,
     }
@@ -428,6 +432,18 @@ impl ShellViewModel {
         self.workspace_sftp_render_cache()
             .and_then(|cache| cache.rows.get(cache.window_start_row..cache.window_end_row))
             .unwrap_or(&[])
+    }
+
+    pub fn workspace_sftp_total_row_count(&self) -> usize {
+        self.workspace_sftp_render_cache()
+            .map(|cache| cache.rows.len())
+            .unwrap_or(0)
+    }
+
+    pub fn workspace_sftp_selected_row_count(&self) -> usize {
+        self.active_workspace_sftp_session()
+            .map(|session| session.selected_entry_ids.len())
+            .unwrap_or(0)
     }
 
     pub fn workspace_sftp_render_dirty_indices(&self) -> &[usize] {
@@ -1709,6 +1725,10 @@ fn build_sftp_panel_render_row(entry: &SftpDirectoryEntry, selected: bool) -> Sf
         type_label: type_label.to_string(),
         modified_label,
         size_label,
+        permissions_label: entry.permissions_label.clone().unwrap_or_default(),
+        owner_label: entry.owner_label.clone().unwrap_or_default(),
+        group_label: entry.group_label.clone().unwrap_or_default(),
+        icon_kind: kind.to_string(),
         kind: kind.to_string(),
         selected,
     }

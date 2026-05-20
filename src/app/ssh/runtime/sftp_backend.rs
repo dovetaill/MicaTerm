@@ -5,6 +5,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use russh::client;
 use russh_sftp::client::SftpSession;
+use russh_sftp::protocol::FilePermissions;
 use russh_sftp::protocol::OpenFlags;
 use tokio::io::AsyncWriteExt;
 
@@ -66,6 +67,14 @@ impl SftpBackend for RusshSftpBackend {
                     kind,
                     modified_unix_seconds: metadata.mtime.map(u64::from),
                     size_bytes: metadata.size,
+                    permissions_label: metadata
+                        .permissions
+                        .map(|permissions| FilePermissions::from(permissions).to_string()),
+                    owner_label: metadata.user.clone().or_else(|| metadata.uid.map(|id| id.to_string())),
+                    group_label: metadata
+                        .group
+                        .clone()
+                        .or_else(|| metadata.gid.map(|id| id.to_string())),
                 });
             }
 

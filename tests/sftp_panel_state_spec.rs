@@ -107,6 +107,9 @@ fn shell_view_model_cycles_sftp_sort_state_and_restores_default_projection() {
             kind: SftpDirectoryEntryKind::File,
             modified_unix_seconds: Some(3),
             size_bytes: Some(100),
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         },
         SftpDirectoryEntry {
             id: "dir-app".into(),
@@ -115,6 +118,9 @@ fn shell_view_model_cycles_sftp_sort_state_and_restores_default_projection() {
             kind: SftpDirectoryEntryKind::Directory,
             modified_unix_seconds: Some(2),
             size_bytes: None,
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         },
         SftpDirectoryEntry {
             id: "file-alpha".into(),
@@ -123,6 +129,9 @@ fn shell_view_model_cycles_sftp_sort_state_and_restores_default_projection() {
             kind: SftpDirectoryEntryKind::File,
             modified_unix_seconds: Some(1),
             size_bytes: Some(10),
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         },
     ];
 
@@ -210,6 +219,9 @@ fn sftp_panel_render_cache_only_marks_changed_selection_rows_dirty() {
             kind: SftpDirectoryEntryKind::File,
             modified_unix_seconds: Some(3),
             size_bytes: Some(100),
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         },
         SftpDirectoryEntry {
             id: "dir-app".into(),
@@ -218,6 +230,9 @@ fn sftp_panel_render_cache_only_marks_changed_selection_rows_dirty() {
             kind: SftpDirectoryEntryKind::Directory,
             modified_unix_seconds: Some(2),
             size_bytes: None,
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         },
         SftpDirectoryEntry {
             id: "file-alpha".into(),
@@ -226,6 +241,9 @@ fn sftp_panel_render_cache_only_marks_changed_selection_rows_dirty() {
             kind: SftpDirectoryEntryKind::File,
             modified_unix_seconds: Some(1),
             size_bytes: Some(10),
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         },
     ];
     session.selected_entry_ids = vec!["file-alpha".into()];
@@ -334,6 +352,9 @@ fn sftp_panel_virtualization_exposes_bounded_visible_window_for_large_directorie
             kind: SftpDirectoryEntryKind::File,
             modified_unix_seconds: Some(index as u64),
             size_bytes: Some(index as u64),
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         })
         .collect::<Vec<_>>();
 
@@ -377,6 +398,9 @@ fn sftp_panel_virtualization_updates_visible_window_and_spacers_when_scrolled() 
             kind: SftpDirectoryEntryKind::File,
             modified_unix_seconds: Some(index as u64),
             size_bytes: Some(index as u64),
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         })
         .collect::<Vec<_>>();
 
@@ -419,6 +443,9 @@ fn sftp_panel_virtualization_keeps_non_visible_selection_changes_out_of_visible_
             kind: SftpDirectoryEntryKind::File,
             modified_unix_seconds: Some(index as u64),
             size_bytes: Some(index as u64),
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
         })
         .collect::<Vec<_>>();
 

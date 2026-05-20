@@ -22,6 +22,9 @@ fn expanding_quick_browser_creates_an_active_sftp_workspace_tab_with_a_cloned_br
         kind: SftpDirectoryEntryKind::Directory,
         modified_unix_seconds: None,
         size_bytes: None,
+    permissions_label: None,
+    owner_label: None,
+    group_label: None,
     }];
     let quick_browser_id = quick_browser.file_browser_session_id.clone();
     view_model.quick_browser_session_id = Some(quick_browser_id.clone());
