@@ -103,8 +103,13 @@ export component WorkspacePane inherits Rectangle {
     in property <color> shell-hairline: ThemeTokens.hairline;
     in property <color> shell-text-primary: ThemeTokens.text-primary;
     in property <color> shell-text-secondary: ThemeTokens.text-secondary;
+    in property <color> shell-text-muted: ThemeTokens.text-muted;
     in property <color> shell-text-inactive: ThemeTokens.text-muted;
     in property <color> shell-accent: ThemeTokens.accent;
+    in property <color> shell-focus-ring: ThemeTokens.focus-ring;
+    in property <color> shell-sidebar-item-hover: ThemeTokens.sidebar-item-hover-background;
+    in property <color> shell-sidebar-item-selected: ThemeTokens.sidebar-item-selected-background;
+    in property <color> shell-sidebar-item-selected-border: ThemeTokens.sidebar-item-selected-border;
     in property <color> shell-tab-active: ThemeTokens.tab-active-surface;
     in property <color> shell-tab-inactive: ThemeTokens.tab-inactive-surface;
     in property <color> shell-tab-hover: ThemeTokens.tab-hover-surface;
@@ -258,6 +263,18 @@ export component WorkspacePane inherits Rectangle {
                 workspace-sftp-breadcrumb-items: root.workspace-sftp-breadcrumb-items;
                 workspace-sftp-selected-entry-ids: root.workspace-sftp-selected-entry-ids;
                 workspace-sftp-items: root.workspace-sftp-items;
+                workspace-session-frame-surface: root.workspace-session-frame-surface;
+                workspace-session-frame-border: root.workspace-session-frame-border;
+                shell-separator: root.shell-separator;
+                shell-border: root.shell-border;
+                shell-text-primary: root.shell-text-primary;
+                shell-text-secondary: root.shell-text-secondary;
+                shell-text-muted: root.shell-text-muted;
+                shell-accent: root.shell-accent;
+                shell-focus-ring: root.shell-focus-ring;
+                shell-sidebar-item-hover: root.shell-sidebar-item-hover;
+                shell-sidebar-item-selected: root.shell-sidebar-item-selected;
+                shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
 
                 workspace-sftp-back-requested => {
                     root.workspace-sftp-back-requested();

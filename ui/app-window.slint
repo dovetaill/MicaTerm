@@ -132,6 +132,8 @@ export component AppWindow inherits Window {
     in-out property <string> right-panel-view: "sftp";
     in-out property <string> right-panel-display-policy: "visible";
     in-out property <bool> right-panel-can-revive: true;
+    private property <bool> right-panel-policy-hidden-for-sftp-workspace:
+        root.right-panel-display-policy == "policy-hidden-sftp-workspace";
     in-out property <string> sftp-panel-mode: "empty";
     in-out property <string> sftp-panel-host-label: "";
     in-out property <string> sftp-panel-path: "";
@@ -1138,8 +1140,13 @@ export component AppWindow inherits Window {
                         shell-hairline: root.shell-hairline;
                         shell-text-primary: root.shell-text-primary;
                         shell-text-secondary: root.shell-text-secondary;
+                        shell-text-muted: root.shell-text-muted;
                         shell-text-inactive: root.shell-text-inactive;
                         shell-accent: root.shell-accent;
+                        shell-focus-ring: root.shell-focus-ring;
+                        shell-sidebar-item-hover: root.shell-sidebar-item-hover;
+                        shell-sidebar-item-selected: root.shell-sidebar-item-selected;
+                        shell-sidebar-item-selected-border: root.shell-sidebar-item-selected-border;
                         shell-tab-active: root.shell-tab-active;
                         shell-tab-inactive: root.shell-tab-inactive;
                         shell-tab-hover: root.shell-tab-hover;
