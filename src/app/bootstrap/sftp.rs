@@ -220,6 +220,9 @@ pub(super) fn sync_workspace_sftp_state(window: &AppWindow, state: &mut ShellVie
     window.set_workspace_sftp_can_go_up(state.workspace_sftp_can_go_up());
     window.set_workspace_sftp_can_go_home(state.workspace_sftp_can_go_home());
     window.set_workspace_sftp_actions_enabled(state.workspace_sftp_actions_enabled());
+    window.set_workspace_sftp_toolbar_disabled_reason(
+        state.workspace_sftp_toolbar_disabled_reason().into(),
+    );
     window.set_workspace_sftp_viewport_y(state.workspace_sftp_viewport_y());
     window.set_workspace_sftp_row_height(state.workspace_sftp_row_height_px());
     window.set_workspace_sftp_total_row_count(state.workspace_sftp_total_row_count_i32());

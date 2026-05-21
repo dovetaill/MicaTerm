@@ -312,6 +312,7 @@ export component AppWindow inherits Window {
     in-out property <bool> workspace-sftp-can-go-up: false;
     in-out property <bool> workspace-sftp-can-go-home: false;
     in-out property <bool> workspace-sftp-actions-enabled: false;
+    in-out property <string> workspace-sftp-toolbar-disabled-reason: "";
     in-out property <length> workspace-sftp-viewport-y: 0px;
     in-out property <length> workspace-sftp-row-height: 40px;
     in-out property <int> workspace-sftp-total-row-count: 0;
@@ -396,6 +397,13 @@ export component AppWindow inherits Window {
     in-out property <bool> workspace-session-mouse-grabbed: false;
     in-out property <bool> workspace-session-link-hovered: false;
     in-out property <bool> workspace-session-link-armed: false;
+    in-out property <bool> workspace-sftp-tooltip-visible: false;
+    in-out property <string> workspace-sftp-tooltip-text: "";
+    in-out property <length> workspace-sftp-tooltip-anchor-x: 0px;
+    in-out property <length> workspace-sftp-tooltip-anchor-y: 0px;
+    in-out property <length> workspace-sftp-tooltip-anchor-width: 0px;
+    private property <string> workspace-sftp-tooltip-source-id: "";
+    private property <string> workspace-sftp-tooltip-close-source-id: "";
     in-out property <bool> workspace-tab-tooltip-visible: false;
     in-out property <string> workspace-tab-tooltip-text: "";
     in-out property <length> workspace-tab-tooltip-anchor-x: 0px;
@@ -711,6 +719,7 @@ export component AppWindow inherits Window {
 
     changed asset-create-menu-open => {
         if root.asset-create-menu-open {
+            close-workspace-sftp-tooltip("");
             assets-create-menu-overlay.focus-menu();
         }
     }
@@ -806,11 +815,15 @@ export component AppWindow inherits Window {
 
     changed workspace-tab-context-menu-open => {
         if root.workspace-tab-context-menu-open {
+            close-workspace-sftp-tooltip("");
+        }
+        if root.workspace-tab-context-menu-open {
             workspace-tab-context-menu-overlay.focus-menu();
         }
     }
 
     changed workspace-session-host-mode => {
+        close-workspace-sftp-tooltip("");
         if root.workspace-session-host-mode == "sftp" && !root.workspace-sftp-path-editing {
             main-workspace.restore-primary-focus();
         }
@@ -823,8 +836,53 @@ export component AppWindow inherits Window {
     }
 
     changed workspace-sftp-path-editing => {
+        if root.workspace-sftp-path-editing {
+            close-workspace-sftp-tooltip("");
+        }
         if root.workspace-session-host-mode == "sftp" && !root.workspace-sftp-path-editing {
             main-workspace.restore-primary-focus();
+        }
+    }
+
+    changed workspace-session-context-menu-open => {
+        if root.workspace-session-context-menu-open {
+            close-workspace-sftp-tooltip("");
+        }
+    }
+
+    function schedule-workspace-sftp-tooltip(source-id: string, text: string, anchor-x: length, anchor-y: length, anchor-width: length) {
+        root.workspace-sftp-tooltip-anchor-x = anchor-x;
+        root.workspace-sftp-tooltip-anchor-y = anchor-y;
+        root.workspace-sftp-tooltip-anchor-width = anchor-width;
+
+        if root.workspace-sftp-tooltip-source-id == source-id && root.workspace-sftp-tooltip-text == text {
+            workspace-sftp-tooltip-close-delay.stop();
+            root.workspace-sftp-tooltip-close-source-id = "";
+        } else {
+            workspace-sftp-tooltip-close-delay.stop();
+            root.workspace-sftp-tooltip-close-source-id = "";
+            root.workspace-sftp-tooltip-source-id = source-id;
+            root.workspace-sftp-tooltip-text = text;
+            root.workspace-sftp-tooltip-visible = false;
+            workspace-sftp-tooltip-delay.start();
+        }
+    }
+
+    function queue-workspace-sftp-tooltip-close(source-id: string) {
+        if root.workspace-sftp-tooltip-source-id == source-id && source-id != "" {
+            root.workspace-sftp-tooltip-close-source-id = source-id;
+            workspace-sftp-tooltip-close-delay.start();
+        }
+    }
+
+    function close-workspace-sftp-tooltip(source-id: string) {
+        if root.workspace-sftp-tooltip-source-id == source-id || source-id == "" {
+            workspace-sftp-tooltip-close-delay.stop();
+            root.workspace-sftp-tooltip-close-source-id = "";
+            root.workspace-sftp-tooltip-visible = false;
+            root.workspace-sftp-tooltip-text = "";
+            root.workspace-sftp-tooltip-source-id = "";
+            workspace-sftp-tooltip-delay.stop();
         }
     }
 
@@ -1103,6 +1161,7 @@ export component AppWindow inherits Window {
                         workspace-sftp-can-go-up: root.workspace-sftp-can-go-up;
                         workspace-sftp-can-go-home: root.workspace-sftp-can-go-home;
                         workspace-sftp-actions-enabled: root.workspace-sftp-actions-enabled;
+                        workspace-sftp-toolbar-disabled-reason: root.workspace-sftp-toolbar-disabled-reason;
                         workspace-sftp-viewport-y <=> root.workspace-sftp-viewport-y;
                         workspace-sftp-row-height: root.workspace-sftp-row-height;
                         workspace-sftp-total-row-count: root.workspace-sftp-total-row-count;
@@ -1328,6 +1387,14 @@ export component AppWindow inherits Window {
 
                         open-transfer-center-requested => {
                             root.open-transfer-center-requested();
+                        }
+
+                        workspace-sftp-tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                            root.schedule-workspace-sftp-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);
+                        }
+
+                        workspace-sftp-tooltip-close-requested(source-id) => {
+                            root.queue-workspace-sftp-tooltip-close(source-id);
                         }
 
                         scroll-requested(delta-lines, row, col, shift, ctrl, alt) => {
@@ -1679,6 +1746,16 @@ export component AppWindow inherits Window {
         multiline-start-aligned: true;
     }
 
+    workspace-sftp-tooltip-overlay := TitlebarTooltip {
+        text: root.workspace-sftp-tooltip-text;
+        anchor-x: root.workspace-sftp-tooltip-anchor-x;
+        anchor-y: root.workspace-sftp-tooltip-anchor-y;
+        anchor-width: root.workspace-sftp-tooltip-anchor-width;
+        tooltip-visible: root.workspace-sftp-tooltip-visible;
+        host-width: root.width;
+        host-height: root.height;
+    }
+
     sync-feedback-overlay := TitlebarTooltip {
         text: root.sync-feedback-text;
         anchor-x: titlebar.sync-feedback-anchor-x;
@@ -1730,6 +1807,32 @@ export component AppWindow inherits Window {
         host-width: root.width;
         host-height: root.height;
         place-right: false;
+    }
+
+    workspace-sftp-tooltip-delay := Timer {
+        interval: 280ms;
+        running: false;
+
+        triggered => {
+            self.running = false;
+
+            if root.workspace-sftp-tooltip-text != "" {
+                root.workspace-sftp-tooltip-visible = true;
+            }
+        }
+    }
+
+    workspace-sftp-tooltip-close-delay := Timer {
+        interval: 80ms;
+        running: false;
+
+        triggered => {
+            self.running = false;
+
+            if root.workspace-sftp-tooltip-close-source-id != "" {
+                root.close-workspace-sftp-tooltip(root.workspace-sftp-tooltip-close-source-id);
+            }
+        }
     }
 
     shell-body-empty-search-dismiss-layer := TouchArea {

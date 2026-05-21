@@ -12,28 +12,47 @@ export struct SftpBreadcrumbItem {
 component WorkspaceIconButton inherits Rectangle {
     in property <image> icon-source;
     in property <string> tooltip-text: "";
+    in property <string> disabled-tooltip-text: "";
+    in property <string> tooltip-source-id: "";
     in property <bool> enabled: true;
     callback clicked();
+    callback tooltip-open-requested(string, string, length, length, length);
+    callback tooltip-close-requested(string);
 
     private property <bool> has-focus: focus-scope.has-focus;
+    private property <bool> has-hover: touch.has-hover;
+    out property <bool> tooltip-active: (root.has-hover || root.has-focus) && root.effective-tooltip-text() != "";
+
+    function effective-tooltip-text() -> string {
+        return !root.enabled && root.disabled-tooltip-text != ""
+            ? root.disabled-tooltip-text
+            : root.tooltip-text;
+    }
 
     width: 28px;
     height: 28px;
     border-radius: 6px;
-    border-width: root.enabled && (touch.has-hover || touch.pressed || root.has-focus) ? 1px : 0px;
+    border-width: root.has-hover || touch.pressed || root.has-focus ? 1px : 0px;
     border-color: root.has-focus ? ThemeTokens.focus-ring : ThemeTokens.divider-subtle;
     background: !root.enabled
-        ? transparent
+        ? root.has-hover || root.has-focus
+            ? ThemeTokens.control-hover-surface
+            : transparent
         : touch.pressed
             ? ThemeTokens.control-active-surface
             : root.has-focus
                 ? ThemeTokens.control-active-surface
-                : touch.has-hover
+                : root.has-hover
                     ? ThemeTokens.control-hover-surface
                     : transparent;
-    opacity: root.enabled ? 1 : 0.5;
+    opacity: root.enabled ? 1 : 0.7;
     accessible-role: AccessibleRole.button;
-    accessible-label: root.tooltip-text;
+    accessible-label: root.effective-tooltip-text();
+    accessible-action-default => {
+        if root.enabled {
+            touch.clicked();
+        }
+    }
     forward-focus: focus-scope;
 
     Image {
@@ -45,25 +64,41 @@ component WorkspaceIconButton inherits Rectangle {
         image-fit: contain;
         colorize: !root.enabled
             ? ThemeTokens.text-muted
-            : touch.has-hover || touch.pressed || root.has-focus
+            : root.has-hover || touch.pressed || root.has-focus
                 ? ThemeTokens.text-primary
                 : ThemeTokens.text-secondary;
+    }
+
+    changed tooltip-active => {
+        if self.tooltip-active {
+            root.tooltip-open-requested(
+                root.tooltip-source-id,
+                root.effective-tooltip-text(),
+                self.absolute-position.x + self.width / 2,
+                self.absolute-position.y + self.height + 8px,
+                self.width,
+            );
+        } else {
+            root.tooltip-close-requested(root.tooltip-source-id);
+        }
     }
 
     touch := TouchArea {
         width: parent.width;
         height: parent.height;
-        enabled: root.enabled;
 
         clicked => {
-            root.clicked();
+            root.tooltip-close-requested(root.tooltip-source-id);
+            if root.enabled {
+                root.clicked();
+            }
         }
     }
 
     focus-scope := FocusScope {
         x: 0px;
         width: 0px;
-        enabled: root.visible && root.enabled;
+        enabled: root.visible && (root.enabled || root.effective-tooltip-text() != "");
 
         key-pressed(event) => {
             if (event.text == " " || event.text == "\n") {
@@ -79,31 +114,52 @@ component WorkspaceIconButton inherits Rectangle {
 component WorkspaceActionButton inherits Rectangle {
     in property <image> icon-source;
     in property <string> label: "";
+    in property <string> tooltip-text: "";
+    in property <string> disabled-tooltip-text: "";
+    in property <string> tooltip-source-id: "";
     in property <bool> enabled: true;
     callback clicked();
+    callback tooltip-open-requested(string, string, length, length, length);
+    callback tooltip-close-requested(string);
 
     private property <bool> has-focus: focus-scope.has-focus;
+    private property <bool> has-hover: touch.has-hover;
+    private property <bool> icon-only: root.label == "";
+    out property <bool> tooltip-active: (root.has-hover || root.has-focus) && root.effective-tooltip-text() != "";
+
+    function effective-tooltip-text() -> string {
+        return !root.enabled && root.disabled-tooltip-text != ""
+            ? root.disabled-tooltip-text
+            : root.tooltip-text;
+    }
 
     height: 30px;
     border-radius: 6px;
     border-width: 1px;
     border-color: root.has-focus ? ThemeTokens.focus-ring : ThemeTokens.divider-subtle;
     background: !root.enabled
-        ? transparent
+        ? root.has-hover || root.has-focus
+            ? ThemeTokens.control-hover-surface
+            : transparent
         : touch.pressed
             ? ThemeTokens.control-active-surface
             : root.has-focus
                 ? ThemeTokens.control-active-surface
-                : touch.has-hover
+                : root.has-hover
                     ? ThemeTokens.control-hover-surface
                     : ThemeTokens.panel-surface;
-    opacity: root.enabled ? 1 : 0.5;
+    opacity: root.enabled ? 1 : 0.7;
     accessible-role: AccessibleRole.button;
-    accessible-label: root.label;
+    accessible-label: root.effective-tooltip-text();
+    accessible-action-default => {
+        if root.enabled {
+            touch.clicked();
+        }
+    }
     forward-focus: focus-scope;
 
     Image {
-        x: 10px;
+        x: root.icon-only ? (parent.width - self.width) / 2 : 10px;
         y: (parent.height - self.height) / 2;
         width: 16px;
         height: 16px;
@@ -112,7 +168,7 @@ component WorkspaceActionButton inherits Rectangle {
         colorize: root.enabled ? ThemeTokens.text-secondary : ThemeTokens.text-muted;
     }
 
-    label-text := Text {
+    if !root.icon-only : label-text := Text {
         x: 32px;
         y: 0px;
         width: parent.width - 42px;
@@ -123,23 +179,39 @@ component WorkspaceActionButton inherits Rectangle {
         font-weight: AppTypography.ui-font-weight-semibold;
         color: root.enabled ? ThemeTokens.text-primary : ThemeTokens.text-muted;
         vertical-alignment: center;
-        overflow: elide;
+        overflow: clip;
+    }
+
+    changed tooltip-active => {
+        if self.tooltip-active {
+            root.tooltip-open-requested(
+                root.tooltip-source-id,
+                root.effective-tooltip-text(),
+                self.absolute-position.x + self.width / 2,
+                self.absolute-position.y + self.height + 8px,
+                self.width,
+            );
+        } else {
+            root.tooltip-close-requested(root.tooltip-source-id);
+        }
     }
 
     touch := TouchArea {
         width: parent.width;
         height: parent.height;
-        enabled: root.enabled;
 
         clicked => {
-            root.clicked();
+            root.tooltip-close-requested(root.tooltip-source-id);
+            if root.enabled {
+                root.clicked();
+            }
         }
     }
 
     focus-scope := FocusScope {
         x: 0px;
         width: 0px;
-        enabled: root.visible && root.enabled;
+        enabled: root.visible && (root.enabled || root.effective-tooltip-text() != "");
 
         key-pressed(event) => {
             if (event.text == " " || event.text == "\n") {
@@ -176,6 +248,7 @@ export component SftpWorkspaceHost inherits Rectangle {
     in property <bool> workspace-sftp-can-go-up: false;
     in property <bool> workspace-sftp-can-go-home: false;
     in property <bool> workspace-sftp-actions-enabled: false;
+    in property <string> workspace-sftp-toolbar-disabled-reason: "";
     in-out property <length> workspace-sftp-viewport-y: 0px;
     in property <length> workspace-sftp-row-height: 40px;
     in property <int> workspace-sftp-total-row-count: 0;
@@ -219,6 +292,8 @@ export component SftpWorkspaceHost inherits Rectangle {
     callback workspace-sftp-retry-requested();
     callback open-transfer-center-requested();
     callback local-action-requested(string);
+    callback tooltip-open-requested(string, string, length, length, length);
+    callback tooltip-close-requested(string);
 
     private property <length> list-visible-height: 0px;
     private property <image> arrow-hook-up-left-icon: @image-url("../../assets/icons/fluent/arrow-hook-up-left-20-regular.svg");
@@ -246,6 +321,10 @@ export component SftpWorkspaceHost inherits Rectangle {
             return "medium";
         }
         return "compact";
+    }
+
+    function workspace-toolbar-actions-compact() -> bool {
+        return root.width < 1120px;
     }
 
     function state-overlay-visible() -> bool {
@@ -325,6 +404,10 @@ export component SftpWorkspaceHost inherits Rectangle {
         return root.workspace-sftp-selected-entry-ids.length == 0
             ? "No selection"
             : "" + root.workspace-sftp-selected-entry-ids.length + " selected";
+    }
+
+    function toolbar-disabled-reason() -> string {
+        return root.workspace-sftp-toolbar-disabled-reason;
     }
 
     function transfer-entry-label() -> string {
@@ -475,45 +558,85 @@ export component SftpWorkspaceHost inherits Rectangle {
                 WorkspaceIconButton {
                     icon-source: root.arrow-collapse-all-icon;
                     tooltip-text: "Back";
+                    disabled-tooltip-text: root.toolbar-disabled-reason();
+                    tooltip-source-id: "workspace-sftp-back";
                     enabled: root.workspace-sftp-can-go-back;
                     clicked => {
                         root.workspace-sftp-back-requested();
+                    }
+                    tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                        root.tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width);
+                    }
+                    tooltip-close-requested(source-id) => {
+                        root.tooltip-close-requested(source-id);
                     }
                 }
 
                 WorkspaceIconButton {
                     icon-source: root.arrow-expand-all-icon;
                     tooltip-text: "Forward";
+                    disabled-tooltip-text: root.toolbar-disabled-reason();
+                    tooltip-source-id: "workspace-sftp-forward";
                     enabled: root.workspace-sftp-can-go-forward;
                     clicked => {
                         root.workspace-sftp-forward-requested();
+                    }
+                    tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                        root.tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width);
+                    }
+                    tooltip-close-requested(source-id) => {
+                        root.tooltip-close-requested(source-id);
                     }
                 }
 
                 WorkspaceIconButton {
                     icon-source: root.arrow-hook-up-left-icon;
-                    tooltip-text: "Up";
+                    tooltip-text: "Up one level";
+                    disabled-tooltip-text: root.toolbar-disabled-reason();
+                    tooltip-source-id: "workspace-sftp-up";
                     enabled: root.workspace-sftp-can-go-up;
                     clicked => {
                         root.workspace-sftp-up-requested();
+                    }
+                    tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                        root.tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width);
+                    }
+                    tooltip-close-requested(source-id) => {
+                        root.tooltip-close-requested(source-id);
                     }
                 }
 
                 WorkspaceIconButton {
                     icon-source: root.folder-open-icon;
-                    tooltip-text: "Home";
+                    tooltip-text: "Go to home directory";
+                    disabled-tooltip-text: root.toolbar-disabled-reason();
+                    tooltip-source-id: "workspace-sftp-home";
                     enabled: root.workspace-sftp-can-go-home;
                     clicked => {
                         root.workspace-sftp-home-requested();
                     }
+                    tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                        root.tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width);
+                    }
+                    tooltip-close-requested(source-id) => {
+                        root.tooltip-close-requested(source-id);
+                    }
                 }
 
-                WorkspaceIconButton {
+                workspace-refresh-button := WorkspaceIconButton {
                     icon-source: root.arrow-sync-icon;
-                    tooltip-text: "Refresh";
+                    tooltip-text: "Refresh remote directory";
+                    disabled-tooltip-text: root.toolbar-disabled-reason();
+                    tooltip-source-id: "workspace-sftp-refresh";
                     enabled: root.workspace-sftp-actions-enabled;
                     clicked => {
                         root.workspace-sftp-refresh-requested();
+                    }
+                    tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                        root.tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width);
+                    }
+                    tooltip-close-requested(source-id) => {
+                        root.tooltip-close-requested(source-id);
                     }
                 }
 
@@ -564,10 +687,28 @@ export component SftpWorkspaceHost inherits Rectangle {
                     if !root.workspace-sftp-path-editing : shell-touch := TouchArea {
                         width: max(0px, parent.width - 36px);
                         height: parent.height;
-                        enabled: root.workspace-sftp-actions-enabled;
+
+                        changed has-hover => {
+                            if self.has-hover {
+                                root.tooltip-open-requested(
+                                    "workspace-sftp-path-shell",
+                                    root.workspace-sftp-actions-enabled || root.toolbar-disabled-reason() == ""
+                                        ? "Edit path"
+                                        : root.toolbar-disabled-reason(),
+                                    parent.absolute-position.x + parent.width / 2,
+                                    parent.absolute-position.y + parent.height + 8px,
+                                    parent.width,
+                                );
+                            } else {
+                                root.tooltip-close-requested("workspace-sftp-path-shell");
+                            }
+                        }
 
                         clicked => {
-                            root.workspace-sftp-path-edit-requested();
+                            root.tooltip-close-requested("workspace-sftp-path-shell");
+                            if root.workspace-sftp-actions-enabled {
+                                root.workspace-sftp-path-edit-requested();
+                            }
                         }
                     }
 
@@ -644,33 +785,78 @@ export component SftpWorkspaceHost inherits Rectangle {
                         y: 1px;
                         icon-source: root.edit-icon;
                         tooltip-text: "Edit path";
+                        disabled-tooltip-text: root.toolbar-disabled-reason();
+                        tooltip-source-id: "workspace-sftp-edit-path";
                         enabled: root.workspace-sftp-actions-enabled;
 
                         clicked => {
                             root.workspace-sftp-path-edit-requested();
                         }
+                        tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                            root.tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width);
+                        }
+                        tooltip-close-requested(source-id) => {
+                            root.tooltip-close-requested(source-id);
+                        }
                     }
                 }
 
                 upload-button := WorkspaceActionButton {
-                    width: 92px;
+                    width: root.workspace-toolbar-actions-compact() ? 30px : 108px;
                     icon-source: root.arrow-upload-icon;
-                    label: "Upload";
+                    label: root.workspace-toolbar-actions-compact() ? "" : "Upload";
+                    tooltip-text: "Upload files or folders";
+                    disabled-tooltip-text: root.toolbar-disabled-reason();
+                    tooltip-source-id: "workspace-sftp-upload";
                     enabled: root.workspace-sftp-actions-enabled;
 
                     clicked => {
                         root.workspace-sftp-upload-requested();
                     }
+                    tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                        root.tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width);
+                    }
+                    tooltip-close-requested(source-id) => {
+                        root.tooltip-close-requested(source-id);
+                    }
                 }
 
                 new-folder-button := WorkspaceActionButton {
-                    width: 118px;
+                    width: root.workspace-toolbar-actions-compact() ? 30px : 126px;
                     icon-source: root.folder-icon;
-                    label: "New " + "Folder";
+                    label: root.workspace-toolbar-actions-compact() ? "" : "New Folder";
+                    tooltip-text: "Create folder";
+                    disabled-tooltip-text: root.toolbar-disabled-reason();
+                    tooltip-source-id: "workspace-sftp-new-folder";
                     enabled: root.workspace-sftp-actions-enabled;
 
                     clicked => {
                         root.workspace-sftp-new-folder-requested();
+                    }
+                    tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                        root.tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width);
+                    }
+                    tooltip-close-requested(source-id) => {
+                        root.tooltip-close-requested(source-id);
+                    }
+                }
+
+                transfer-center-button := WorkspaceActionButton {
+                    width: root.workspace-toolbar-actions-compact() ? 30px : 150px;
+                    icon-source: root.arrow-upload-icon;
+                    label: root.workspace-toolbar-actions-compact() ? "" : "Transfer Center";
+                    tooltip-text: "Open Transfer Center";
+                    tooltip-source-id: "workspace-sftp-transfer-center";
+                    enabled: true;
+
+                    clicked => {
+                        root.open-transfer-center-requested();
+                    }
+                    tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                        root.tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width);
+                    }
+                    tooltip-close-requested(source-id) => {
+                        root.tooltip-close-requested(source-id);
                     }
                 }
             }

@@ -840,6 +840,15 @@ impl ShellViewModel {
             .unwrap_or(false)
     }
 
+    pub fn workspace_sftp_toolbar_disabled_reason(&self) -> &'static str {
+        match self.active_workspace_sftp_session().map(|state| state.mode) {
+            Some(SftpPanelMode::Disconnected | SftpPanelMode::Error) => {
+                "Reconnect to browse files"
+            }
+            _ => "",
+        }
+    }
+
     pub fn schedule_active_workspace_sftp_viewport_reset(&mut self) -> bool {
         let Some(session_id) = self
             .active_workspace_sftp_session()

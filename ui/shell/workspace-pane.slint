@@ -28,6 +28,7 @@ export component WorkspacePane inherits Rectangle {
     in property <bool> workspace-sftp-can-go-up: false;
     in property <bool> workspace-sftp-can-go-home: false;
     in property <bool> workspace-sftp-actions-enabled: false;
+    in property <string> workspace-sftp-toolbar-disabled-reason: "";
     in-out property <length> workspace-sftp-viewport-y: 0px;
     in property <length> workspace-sftp-row-height: 40px;
     in property <int> workspace-sftp-total-row-count: 0;
@@ -181,6 +182,8 @@ export component WorkspacePane inherits Rectangle {
     callback workspace-sftp-new-folder-requested();
     callback workspace-sftp-retry-requested();
     callback open-transfer-center-requested();
+    callback workspace-sftp-tooltip-open-requested(string, string, length, length, length);
+    callback workspace-sftp-tooltip-close-requested(string);
 
     public function restore-primary-focus() {
         if root.workspace-session-host-mode == "sftp" && !root.workspace-sftp-path-editing {
@@ -331,6 +334,7 @@ export component WorkspacePane inherits Rectangle {
                 workspace-sftp-can-go-up: root.workspace-sftp-can-go-up;
                 workspace-sftp-can-go-home: root.workspace-sftp-can-go-home;
                 workspace-sftp-actions-enabled: root.workspace-sftp-actions-enabled;
+                workspace-sftp-toolbar-disabled-reason: root.workspace-sftp-toolbar-disabled-reason;
                 workspace-sftp-viewport-y <=> root.workspace-sftp-viewport-y;
                 workspace-sftp-row-height: root.workspace-sftp-row-height;
                 workspace-sftp-total-row-count: root.workspace-sftp-total-row-count;
@@ -423,6 +427,14 @@ export component WorkspacePane inherits Rectangle {
 
                 open-transfer-center-requested => {
                     root.open-transfer-center-requested();
+                }
+
+                tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                    root.workspace-sftp-tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width);
+                }
+
+                tooltip-close-requested(source-id) => {
+                    root.workspace-sftp-tooltip-close-requested(source-id);
                 }
 
                 local-action-requested(action-id) => {

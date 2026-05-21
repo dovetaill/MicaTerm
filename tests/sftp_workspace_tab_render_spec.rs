@@ -320,13 +320,62 @@ fn workspace_path_edit_mode_focuses_and_selects_the_full_canonical_path() {
 fn workspace_toolbar_tooltips_must_route_through_the_shared_shell_overlay() {
     let host =
         fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+    let workspace_pane =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
     let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
 
     assert!(
         host.contains("callback tooltip-open-requested(")
             && host.contains("callback tooltip-close-requested(")
-            && app_window.contains("workspace-sftp-tooltip-overlay := TitlebarTooltip {"),
+            && host.contains("tooltip-source-id: \"workspace-sftp-refresh\";")
+            && host.contains("tooltip-source-id: \"workspace-sftp-upload\";")
+            && host.contains("tooltip-source-id: \"workspace-sftp-new-folder\";")
+            && host.contains("tooltip-source-id: \"workspace-sftp-transfer-center\";")
+            && workspace_pane.contains("callback workspace-sftp-tooltip-open-requested(string, string, length, length, length);")
+            && workspace_pane.contains("callback workspace-sftp-tooltip-close-requested(string);")
+            && workspace_pane.contains("tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {")
+            && workspace_pane.contains("root.workspace-sftp-tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width);")
+            && workspace_pane.contains("tooltip-close-requested(source-id) => {")
+            && workspace_pane.contains("root.workspace-sftp-tooltip-close-requested(source-id);")
+            && app_window.contains("in-out property <bool> workspace-sftp-tooltip-visible: false;")
+            && app_window.contains("in-out property <string> workspace-sftp-tooltip-text: \"\";")
+            && app_window.contains("workspace-sftp-tooltip-overlay := TitlebarTooltip {")
+            && app_window.contains("text: root.workspace-sftp-tooltip-text;")
+            && app_window.contains("tooltip-visible: root.workspace-sftp-tooltip-visible;"),
         "workspace toolbar actions should use the shared AppWindow tooltip overlay contract instead of local tooltip text that never owns a real overlay"
+    );
+}
+
+#[test]
+fn workspace_toolbar_disabled_reason_must_keep_hover_tooltips_alive() {
+    let host =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+
+    assert!(
+        host.contains("function effective-tooltip-text() -> string {")
+            && host.contains("disabled-tooltip-text")
+            && host.contains("out property <bool> tooltip-active:")
+            && host.contains("if root.enabled {")
+            && app_window
+                .contains("in-out property <string> workspace-sftp-toolbar-disabled-reason: \"\";")
+            && !host.contains("out property <bool> tooltip-active: root.enabled &&"),
+        "workspace toolbar buttons should separate click-disable from hover/focus tooltip ownership so disconnected actions can still explain themselves"
+    );
+}
+
+#[test]
+fn workspace_toolbar_action_width_tiers_switch_between_full_labels_and_icon_only() {
+    let host =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    assert!(
+        host.contains("function workspace-toolbar-actions-compact() -> bool {")
+            && host.contains("transfer-center-button := WorkspaceActionButton {")
+            && host.contains("label: root.workspace-toolbar-actions-compact() ? \"\" : \"Upload\";")
+            && host.contains("label: root.workspace-toolbar-actions-compact() ? \"\" : \"New Folder\";")
+            && host.contains("label: root.workspace-toolbar-actions-compact() ? \"\" : \"Transfer Center\";"),
+        "workspace toolbar actions should fall back from full labels to icon-only affordances instead of truncating labels like `New Folder` into broken half-words"
     );
 }
 
