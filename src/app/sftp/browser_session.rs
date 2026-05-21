@@ -2,7 +2,9 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::model::{SftpDirectoryEntry, SftpFollowMode, SftpPanelMode, SftpPathHistory};
+use super::model::{
+    SftpDirectoryEntry, SftpFollowMode, SftpPanelMode, SftpPathHistory, normalize_remote_dir,
+};
 
 pub type FileBrowserSessionId = String;
 
@@ -184,6 +186,7 @@ impl FileBrowserSession {
 
     pub fn navigate_manual(&mut self, path: impl Into<String>) {
         let path = path.into();
+        let path = normalize_remote_dir(path.as_str());
         self.follow_mode = SftpFollowMode::ManualBrowse;
         self.current_path = path.clone();
         self.mode = SftpPanelMode::Ready;

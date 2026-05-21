@@ -181,6 +181,7 @@ impl SftpSessionBindingState {
 
     pub fn navigate_manual(&mut self, path: impl Into<String>) {
         let path = path.into();
+        let path = normalize_remote_dir(path.as_str());
         self.follow_mode = SftpFollowMode::ManualBrowse;
         self.current_path = path.clone();
         self.mode = SftpPanelMode::Ready;
@@ -233,8 +234,26 @@ impl SftpSessionBindingState {
     }
 }
 
-fn remote_parent_path(path: &str) -> Option<String> {
+pub fn normalize_remote_dir(path: &str) -> String {
     let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed == "/" {
+        return "/".into();
+    }
+
+    let segments = trimmed
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    if segments.is_empty() {
+        "/".into()
+    } else {
+        format!("/{}", segments.join("/"))
+    }
+}
+
+fn remote_parent_path(path: &str) -> Option<String> {
+    let normalized = normalize_remote_dir(path);
+    let trimmed = normalized.as_str();
     if trimmed.is_empty() || trimmed == "/" {
         return None;
     }

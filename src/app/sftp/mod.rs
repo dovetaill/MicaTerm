@@ -32,7 +32,7 @@ pub use local_ops::{
 };
 pub use model::{
     SftpDirectoryEntry, SftpDirectoryEntryKind, SftpFollowMode, SftpPanelMode, SftpPathHistory,
-    SftpSessionBindingState,
+    SftpSessionBindingState, normalize_remote_dir,
 };
 pub use operation_dispatch::{
     SftpBrowserOperationResult, SftpOperationKind, SftpOperationToken,

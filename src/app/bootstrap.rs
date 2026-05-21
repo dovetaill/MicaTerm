@@ -617,6 +617,31 @@ fn native_terminal_clipboard_shortcut(
     }
 }
 
+fn workspace_sftp_path_edit_shortcut(
+    key: &slint::winit_030::winit::keyboard::Key,
+    modifiers: NativeTerminalModifierState,
+) -> bool {
+    if !modifiers.ctrl || modifiers.shift || modifiers.alt {
+        return false;
+    }
+
+    match key {
+        slint::winit_030::winit::keyboard::Key::Character(text) => {
+            workspace_sftp_path_edit_shortcut_matches(text.as_str(), true, false, false)
+        }
+        _ => false,
+    }
+}
+
+pub fn workspace_sftp_path_edit_shortcut_matches(
+    key: &str,
+    ctrl: bool,
+    shift: bool,
+    alt: bool,
+) -> bool {
+    ctrl && !shift && !alt && (key.eq_ignore_ascii_case("l") || key == "\u{c}")
+}
+
 pub fn app_title() -> &'static str {
     "Mica Term"
 }
@@ -8430,6 +8455,23 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         }
 
         let mut state = view_model_ref.borrow_mut();
+        if ctrl
+            && !alt
+            && !shift
+            && key.eq_ignore_ascii_case("l")
+            && state.active_workspace_sftp_session().is_some()
+            && state.begin_workspace_sftp_path_edit()
+        {
+            if let Some(window) = window_handle.upgrade() {
+                sync_workspace_session_state_with_manager(
+                    &window,
+                    &mut state,
+                    &mut workspace_follow_tracker_ref.borrow_mut(),
+                    session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+                );
+            }
+            return;
+        }
         if key == "escape"
             && !alt
             && !ctrl

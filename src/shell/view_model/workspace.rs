@@ -234,12 +234,16 @@ impl ShellViewModel {
     }
 
     pub fn activate_workspace_tab(&mut self, tab_id: &str) -> bool {
-        if self.workspace_tab_by_id(tab_id).is_none() {
+        let Some(tab) = self.workspace_tab_by_id(tab_id).cloned() else {
             return false;
-        }
+        };
 
         self.active_workspace_tab_id = Some(tab_id.to_string());
         self.workspace_sftp_path_editing = false;
+        if tab.kind == WorkspaceTabKind::Sftp {
+            self.workspace_sftp_focus_sequence =
+                self.workspace_sftp_focus_sequence.saturating_add(1);
+        }
         self.normalize_workspace_tabs();
         self.close_workspace_tab_context_menu();
         let _ = self.recompute_sftp_queue_summary();

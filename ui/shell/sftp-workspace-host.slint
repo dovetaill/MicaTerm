@@ -207,6 +207,7 @@ export component SftpWorkspaceHost inherits Rectangle {
     callback workspace-sftp-home-requested();
     callback workspace-sftp-refresh-requested();
     callback workspace-sftp-path-edit-requested();
+    callback workspace-sftp-path-cancelled();
     callback workspace-sftp-path-submitted(string);
     callback workspace-sftp-breadcrumb-clicked(string);
     callback workspace-sftp-viewport-changed(length, length);
@@ -542,16 +543,31 @@ export component SftpWorkspaceHost inherits Rectangle {
                         selection-foreground-color: root.shell-text-primary;
                         vertical-alignment: center;
 
+                        init => {
+                            self.focus();
+                            self.select-all();
+                        }
+
                         key-pressed(event) => {
                             if (event.text == Key.Return) {
                                 root.workspace-sftp-path-submitted(self.text);
                                 accept
                             } else if (event.text == Key.Escape) {
-                                root.workspace-sftp-path-submitted(root.workspace-sftp-path);
+                                root.workspace-sftp-path-cancelled();
                                 accept
                             } else {
                                 reject
                             }
+                        }
+                    }
+
+                    if !root.workspace-sftp-path-editing : shell-touch := TouchArea {
+                        width: max(0px, parent.width - 36px);
+                        height: parent.height;
+                        enabled: root.workspace-sftp-actions-enabled;
+
+                        clicked => {
+                            root.workspace-sftp-path-edit-requested();
                         }
                     }
 

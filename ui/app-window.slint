@@ -306,6 +306,7 @@ export component AppWindow inherits Window {
     in-out property <string> workspace-sftp-binding-label: "";
     in-out property <string> workspace-sftp-path: "";
     in-out property <bool> workspace-sftp-path-editing: false;
+    in-out property <int> workspace-sftp-focus-sequence: 0;
     in-out property <bool> workspace-sftp-can-go-back: false;
     in-out property <bool> workspace-sftp-can-go-forward: false;
     in-out property <bool> workspace-sftp-can-go-up: false;
@@ -640,6 +641,7 @@ export component AppWindow inherits Window {
     callback workspace-sftp-home-requested();
     callback workspace-sftp-refresh-requested();
     callback workspace-sftp-path-edit-requested();
+    callback workspace-sftp-path-cancelled();
     callback workspace-sftp-path-submitted(string);
     callback workspace-sftp-breadcrumb-clicked(string);
     callback workspace-sftp-viewport-changed(length, length);
@@ -806,6 +808,28 @@ export component AppWindow inherits Window {
         if root.workspace-tab-context-menu-open {
             workspace-tab-context-menu-overlay.focus-menu();
         }
+    }
+
+    changed workspace-session-host-mode => {
+        if root.workspace-session-host-mode == "sftp" && !root.workspace-sftp-path-editing {
+            main-workspace.restore-primary-focus();
+        }
+    }
+
+    changed workspace-sftp-focus-sequence => {
+        if root.workspace-session-host-mode == "sftp" && !root.workspace-sftp-path-editing {
+            main-workspace.restore-primary-focus();
+        }
+    }
+
+    changed workspace-sftp-path-editing => {
+        if root.workspace-session-host-mode == "sftp" && !root.workspace-sftp-path-editing {
+            main-workspace.restore-primary-focus();
+        }
+    }
+
+    public function focus-workspace-primary() {
+        main-workspace.restore-primary-focus();
     }
 
     // The shell frame owns the full frameless surface so Rust can query a single set of geometry
@@ -1073,6 +1097,7 @@ export component AppWindow inherits Window {
                         workspace-sftp-binding-label: root.workspace-sftp-binding-label;
                         workspace-sftp-path: root.workspace-sftp-path;
                         workspace-sftp-path-editing: root.workspace-sftp-path-editing;
+                        workspace-sftp-focus-sequence: root.workspace-sftp-focus-sequence;
                         workspace-sftp-can-go-back: root.workspace-sftp-can-go-back;
                         workspace-sftp-can-go-forward: root.workspace-sftp-can-go-forward;
                         workspace-sftp-can-go-up: root.workspace-sftp-can-go-up;
@@ -1259,6 +1284,10 @@ export component AppWindow inherits Window {
 
                         workspace-sftp-path-edit-requested => {
                             root.workspace-sftp-path-edit-requested();
+                        }
+
+                        workspace-sftp-path-cancelled => {
+                            root.workspace-sftp-path-cancelled();
                         }
 
                         workspace-sftp-path-submitted(path) => {

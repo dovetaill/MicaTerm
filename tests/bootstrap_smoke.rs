@@ -32,7 +32,7 @@ use mica_term::app::bootstrap::{
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_terminal_defaults,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_transfer_store,
     build_shared_app_credential_store_for_paths, default_window_size,
-    install_url_open_handler_for_test,
+    install_url_open_handler_for_test, workspace_sftp_path_edit_shortcut_matches,
 };
 use mica_term::app::keychain::KeychainCatalog;
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
@@ -2087,9 +2087,9 @@ impl SessionRuntimeLauncher for RecordingSftpLauncher {
                             kind: SftpDirectoryEntryKind::Directory,
                             modified_unix_seconds: Some(1_775_012_700),
                             size_bytes: None,
-                        permissions_label: None,
-                        owner_label: None,
-                        group_label: None,
+                            permissions_label: None,
+                            owner_label: None,
+                            group_label: None,
                         }],
                     ),
                     (
@@ -2101,9 +2101,9 @@ impl SessionRuntimeLauncher for RecordingSftpLauncher {
                             kind: SftpDirectoryEntryKind::File,
                             modified_unix_seconds: Some(1_775_013_060),
                             size_bytes: Some(14 * 1024),
-                        permissions_label: None,
-                        owner_label: None,
-                        group_label: None,
+                            permissions_label: None,
+                            owner_label: None,
+                            group_label: None,
                         }],
                     ),
                 ]),
@@ -2116,9 +2116,9 @@ impl SessionRuntimeLauncher for RecordingSftpLauncher {
                         kind: SftpDirectoryEntryKind::File,
                         modified_unix_seconds: Some(1_775_013_420),
                         size_bytes: Some(7 * 1024),
-                    permissions_label: None,
-                    owner_label: None,
-                    group_label: None,
+                        permissions_label: None,
+                        owner_label: None,
+                        group_label: None,
                     }],
                 )]),
             };
@@ -2170,9 +2170,9 @@ impl SessionRuntimeLauncher for DelayedCwdRecordingSftpLauncher {
                             kind: SftpDirectoryEntryKind::Directory,
                             modified_unix_seconds: Some(1_775_012_340),
                             size_bytes: None,
-                        permissions_label: None,
-                        owner_label: None,
-                        group_label: None,
+                            permissions_label: None,
+                            owner_label: None,
+                            group_label: None,
                         }],
                     ),
                     (
@@ -2184,9 +2184,9 @@ impl SessionRuntimeLauncher for DelayedCwdRecordingSftpLauncher {
                             kind: SftpDirectoryEntryKind::Directory,
                             modified_unix_seconds: Some(1_775_012_700),
                             size_bytes: None,
-                        permissions_label: None,
-                        owner_label: None,
-                        group_label: None,
+                            permissions_label: None,
+                            owner_label: None,
+                            group_label: None,
                         }],
                     ),
                 ]),
@@ -2199,9 +2199,9 @@ impl SessionRuntimeLauncher for DelayedCwdRecordingSftpLauncher {
                         kind: SftpDirectoryEntryKind::Directory,
                         modified_unix_seconds: Some(1_775_011_980),
                         size_bytes: None,
-                    permissions_label: None,
-                    owner_label: None,
-                    group_label: None,
+                        permissions_label: None,
+                        owner_label: None,
+                        group_label: None,
                     }],
                 )]),
             };
@@ -2248,9 +2248,9 @@ impl SessionRuntimeLauncher for DelayedReadRecordingSftpLauncher {
                             kind: SftpDirectoryEntryKind::Directory,
                             modified_unix_seconds: Some(1_775_012_700),
                             size_bytes: None,
-                        permissions_label: None,
-                        owner_label: None,
-                        group_label: None,
+                            permissions_label: None,
+                            owner_label: None,
+                            group_label: None,
                         }],
                     ),
                     (
@@ -2262,9 +2262,9 @@ impl SessionRuntimeLauncher for DelayedReadRecordingSftpLauncher {
                             kind: SftpDirectoryEntryKind::File,
                             modified_unix_seconds: Some(1_775_012_780),
                             size_bytes: Some(2048),
-                        permissions_label: None,
-                        owner_label: None,
-                        group_label: None,
+                            permissions_label: None,
+                            owner_label: None,
+                            group_label: None,
                         }],
                     ),
                     (
@@ -2276,9 +2276,9 @@ impl SessionRuntimeLauncher for DelayedReadRecordingSftpLauncher {
                             kind: SftpDirectoryEntryKind::File,
                             modified_unix_seconds: Some(1_775_013_060),
                             size_bytes: Some(14 * 1024),
-                        permissions_label: None,
-                        owner_label: None,
-                        group_label: None,
+                            permissions_label: None,
+                            owner_label: None,
+                            group_label: None,
                         }],
                     ),
                 ]),
@@ -2291,9 +2291,9 @@ impl SessionRuntimeLauncher for DelayedReadRecordingSftpLauncher {
                         kind: SftpDirectoryEntryKind::File,
                         modified_unix_seconds: Some(1_775_013_420),
                         size_bytes: Some(7 * 1024),
-                    permissions_label: None,
-                    owner_label: None,
-                    group_label: None,
+                        permissions_label: None,
+                        owner_label: None,
+                        group_label: None,
                     }],
                 )]),
             };
@@ -14910,12 +14910,72 @@ fn workspace_sftp_ctrl_l_enters_path_editing() {
             "workspace SFTP should start in breadcrumb viewing mode before Ctrl+L is pressed"
         );
 
-        dispatch_text_key_chord(&app, "l", true, false, false);
+        let windowing_source =
+            fs::read_to_string("src/app/bootstrap/windowing.rs").expect("read bootstrap windowing");
+        assert!(
+            workspace_sftp_path_edit_shortcut_matches("l", true, false, false)
+                && !workspace_sftp_path_edit_shortcut_matches("l", false, false, false)
+                && !workspace_sftp_path_edit_shortcut_matches("l", true, true, false)
+                && windowing_source.contains("workspace_sftp_path_edit_shortcut(")
+                && windowing_source.contains("window.invoke_workspace_sftp_path_edit_requested();"),
+            "Ctrl+L should be claimed as a real workspace SFTP location-bar shortcut in the native windowing layer instead of depending on terminal-only key routing"
+        );
+
+        app.invoke_workspace_sftp_path_edit_requested();
         flush_runtime_projection();
 
         assert!(
             app.get_workspace_sftp_path_editing(),
-            "Ctrl+L should enter workspace path editing so the SFTP workspace follows the browser-like location bar contract"
+            "the workspace SFTP path-edit request should still drive the live bootstrap/view-model route once Ctrl+L claims the shortcut"
+        );
+    });
+}
+
+#[test]
+fn workspace_sftp_path_submit_normalizes_extra_slashes_before_navigation() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+        let app = AppWindow::new().unwrap();
+        let sftp_state = RecordingSftpState::default();
+        bind_with_launcher(
+            &app,
+            None,
+            Arc::new(DelayedReadRecordingSftpLauncher {
+                state: sftp_state.clone(),
+                read_delay_by_path: Arc::new(BTreeMap::new()),
+            }),
+        );
+
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.into());
+        flush_runtime_projection();
+        app.invoke_open_sftp_panel_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_sftp_panel_mode().as_str() == "ready"
+        });
+
+        app.invoke_sftp_panel_expand_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_workspace_session_host_mode().as_str() == "sftp"
+        });
+
+        app.invoke_workspace_sftp_path_submitted(" //srv//app//releases// ".into());
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_workspace_sftp_path().as_str() == "/srv/app/releases"
+        });
+
+        assert_eq!(
+            sftp_state.take_read_dir_calls(),
+            vec![
+                "/srv/app".to_string(),
+                "/srv/app".to_string(),
+                "/srv/app/releases".to_string(),
+            ],
+            "workspace path submit should normalize extra slashes before issuing the real SFTP navigation request so the controller/session path stays canonical"
         );
     });
 }

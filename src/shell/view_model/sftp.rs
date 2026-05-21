@@ -762,8 +762,17 @@ impl ShellViewModel {
         self.active_workspace_sftp_session().is_some() && self.workspace_sftp_path_editing
     }
 
+    pub fn workspace_sftp_focus_sequence(&self) -> i32 {
+        if self.active_workspace_sftp_session().is_some() {
+            self.workspace_sftp_focus_sequence
+        } else {
+            0
+        }
+    }
+
     pub fn begin_workspace_sftp_path_edit(&mut self) -> bool {
-        if self.active_workspace_sftp_session().is_none() {
+        if self.active_workspace_sftp_session().is_none() || !self.workspace_sftp_actions_enabled()
+        {
             return false;
         }
         self.workspace_sftp_path_editing = true;
@@ -775,6 +784,7 @@ impl ShellViewModel {
             return false;
         }
         self.workspace_sftp_path_editing = false;
+        self.workspace_sftp_focus_sequence = self.workspace_sftp_focus_sequence.saturating_add(1);
         true
     }
 
@@ -1544,6 +1554,7 @@ impl ShellViewModel {
         self.workspace_tabs.push(tab);
         let _ = self.activate_workspace_tab(tab_id.as_str());
         self.workspace_sftp_path_editing = false;
+        self.workspace_sftp_focus_sequence = self.workspace_sftp_focus_sequence.saturating_add(1);
         Some(tab_id)
     }
 
@@ -1581,6 +1592,8 @@ impl ShellViewModel {
             let _ = self.refresh_sftp_panel_projection_cache(browser_session_id.as_str());
             let _ = self.activate_workspace_tab(tab_id.as_str());
             self.workspace_sftp_path_editing = false;
+            self.workspace_sftp_focus_sequence =
+                self.workspace_sftp_focus_sequence.saturating_add(1);
             if !self.transfer_center_pinned {
                 self.transfer_center_open = false;
             }
@@ -1611,6 +1624,7 @@ impl ShellViewModel {
         self.workspace_tabs.push(tab);
         let _ = self.activate_workspace_tab(tab_id.as_str());
         self.workspace_sftp_path_editing = false;
+        self.workspace_sftp_focus_sequence = self.workspace_sftp_focus_sequence.saturating_add(1);
         if !self.transfer_center_pinned {
             self.transfer_center_open = false;
         }

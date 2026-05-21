@@ -54,14 +54,23 @@ pub(super) fn bind_windows_window_state_tracking(
             {
                 let mut modifier_state = modifiers.borrow_mut();
                 update_native_terminal_modifier_state(&mut modifier_state, key_event);
-
-                if key_event.state == winit::event::ElementState::Pressed
+                let modifier_snapshot = *modifier_state;
+                let clipboard_shortcut = if key_event.state == winit::event::ElementState::Pressed
                     && !key_event.repeat
                     && !is_synthetic
-                    && let Some(shortcut) =
-                        native_terminal_clipboard_shortcut(&key_event.logical_key, *modifier_state)
                 {
-                    drop(modifier_state);
+                    native_terminal_clipboard_shortcut(&key_event.logical_key, modifier_snapshot)
+                } else {
+                    None
+                };
+                let sftp_path_edit_shortcut = key_event.state
+                    == winit::event::ElementState::Pressed
+                    && !key_event.repeat
+                    && !is_synthetic
+                    && workspace_sftp_path_edit_shortcut(&key_event.logical_key, modifier_snapshot);
+                drop(modifier_state);
+
+                if let Some(shortcut) = clipboard_shortcut {
                     let window = handle.unwrap();
                     if window.get_workspace_session_host_mode() == "terminal"
                         && !window.get_active_workspace_session_id().is_empty()
@@ -90,6 +99,16 @@ pub(super) fn bind_windows_window_state_tracking(
                             }
                             _ => {}
                         }
+                    }
+                }
+
+                if sftp_path_edit_shortcut {
+                    let window = handle.unwrap();
+                    if window.get_workspace_session_host_mode() == "sftp"
+                        && !window.get_active_workspace_session_id().is_empty()
+                    {
+                        window.invoke_workspace_sftp_path_edit_requested();
+                        return EventResult::PreventDefault;
                     }
                 }
             }

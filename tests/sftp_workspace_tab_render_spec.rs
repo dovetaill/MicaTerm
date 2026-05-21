@@ -243,6 +243,8 @@ fn workspace_breadcrumb_shell_click_requests_path_edit_mode() {
     app.show().expect("show app window");
     app.window()
         .dispatch_event(WindowEvent::WindowActiveChanged(true));
+    app.set_workspace_sftp_focus_sequence(1);
+    app.invoke_focus_workspace_primary();
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(20));
     slint::platform::update_timers_and_animations();
 
@@ -263,13 +265,54 @@ fn workspace_breadcrumb_shell_click_requests_path_edit_mode() {
 }
 
 #[test]
+fn workspace_ctrl_l_requests_path_edit_mode() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let workspace_pane =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+
+    assert!(
+        app_window.contains("public function focus-workspace-primary()")
+            && app_window.contains("main-workspace.restore-primary-focus();")
+            && workspace_pane.contains("workspace-sftp-shortcut-anchor := TextInput {")
+            && workspace_pane.contains("root.workspace-sftp-path-edit-requested();"),
+        "Ctrl+L should have a dedicated workspace shortcut-focus handoff and callback route instead of depending on the hidden terminal-only input path"
+    );
+}
+
+#[test]
 fn workspace_path_escape_is_a_cancel_instead_of_a_hidden_resubmit() {
     let source =
         fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+    let workspace_pane =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
 
     assert!(
         !source.contains("root.workspace-sftp-path-submitted(root.workspace-sftp-path);"),
         "Esc in the workspace path editor should cancel editing and restore the canonical path instead of routing a hidden submit of the current path"
+    );
+    assert!(
+        source.contains("callback workspace-sftp-path-cancelled();")
+            && workspace_pane.contains("callback workspace-sftp-path-cancelled();")
+            && workspace_pane.contains("workspace-sftp-path-cancelled => {")
+            && workspace_pane.contains("root.workspace-sftp-path-cancelled();")
+            && app_window.contains("callback workspace-sftp-path-cancelled();")
+            && app_window.contains("workspace-sftp-path-cancelled => {")
+            && app_window.contains("root.workspace-sftp-path-cancelled();"),
+        "Esc cancel should travel through an explicit workspace path-cancel contract instead of smuggling a submit through the host-only text field"
+    );
+}
+
+#[test]
+fn workspace_path_edit_mode_focuses_and_selects_the_full_canonical_path() {
+    let source =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    assert!(
+        source.contains("init => {")
+            && source.contains("self.focus();")
+            && source.contains("self.select-all();"),
+        "entering workspace path edit mode should immediately focus the input and select the full canonical path so Ctrl+L and shell clicks behave like a real location bar"
     );
 }
 

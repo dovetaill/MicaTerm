@@ -22,6 +22,7 @@ export component WorkspacePane inherits Rectangle {
     in property <string> workspace-sftp-binding-label: "";
     in property <string> workspace-sftp-path: "";
     in property <bool> workspace-sftp-path-editing: false;
+    in property <int> workspace-sftp-focus-sequence: 0;
     in property <bool> workspace-sftp-can-go-back: false;
     in property <bool> workspace-sftp-can-go-forward: false;
     in property <bool> workspace-sftp-can-go-up: false;
@@ -169,6 +170,7 @@ export component WorkspacePane inherits Rectangle {
     callback workspace-sftp-home-requested();
     callback workspace-sftp-refresh-requested();
     callback workspace-sftp-path-edit-requested();
+    callback workspace-sftp-path-cancelled();
     callback workspace-sftp-path-submitted(string);
     callback workspace-sftp-breadcrumb-clicked(string);
     callback workspace-sftp-viewport-changed(length, length);
@@ -181,12 +183,76 @@ export component WorkspacePane inherits Rectangle {
     callback open-transfer-center-requested();
 
     public function restore-primary-focus() {
-        session-host.restore-primary-focus();
+        if root.workspace-session-host-mode == "sftp" && !root.workspace-sftp-path-editing {
+            workspace-sftp-shortcut-focus-timer.restart();
+        } else {
+            session-host.restore-primary-focus();
+        }
+    }
+
+    changed workspace-session-host-mode => {
+        if root.workspace-session-host-mode == "sftp" && !root.workspace-sftp-path-editing {
+            workspace-sftp-shortcut-focus-timer.restart();
+        }
+    }
+
+    changed workspace-sftp-focus-sequence => {
+        if root.workspace-session-host-mode == "sftp" && !root.workspace-sftp-path-editing {
+            workspace-sftp-shortcut-focus-timer.restart();
+        }
+    }
+
+    changed workspace-sftp-path-editing => {
+        if root.workspace-session-host-mode == "sftp" && !root.workspace-sftp-path-editing {
+            workspace-sftp-shortcut-focus-timer.restart();
+        }
     }
 
     horizontal-stretch: 1;
     min-width: 0px;
     background: root.workspace-session-frame-surface;
+
+    workspace-sftp-shortcut-anchor := TextInput {
+        x: 0px;
+        y: 0px;
+        width: 1px;
+        height: 1px;
+        text: "";
+        color: transparent;
+        selection-background-color: transparent;
+        selection-foreground-color: transparent;
+        visible: root.workspace-session-host-mode == "sftp";
+
+        edited => {
+            if self.text != "" {
+                self.text = "";
+            }
+        }
+
+        key-pressed(event) => {
+            if root.workspace-session-host-mode != "sftp" {
+                reject
+            } else if (event.text == Key.Control || event.text == Key.Shift || event.text == Key.Alt) {
+                accept
+            } else if (event.modifiers.control && !event.modifiers.shift && !event.modifiers.alt
+                && (event.text == "l" || event.text == "L" || event.text == "\u{c}")) {
+                root.workspace-sftp-path-edit-requested();
+                accept
+            } else {
+                reject
+            }
+        }
+    }
+
+    workspace-sftp-shortcut-focus-timer := Timer {
+        interval: 1ms;
+        running: false;
+
+        triggered => {
+            self.running = false;
+            workspace-sftp-shortcut-anchor.focus();
+        }
+    }
 
     VerticalLayout {
         width: 100%;
@@ -313,6 +379,10 @@ export component WorkspacePane inherits Rectangle {
 
                 workspace-sftp-path-edit-requested => {
                     root.workspace-sftp-path-edit-requested();
+                }
+
+                workspace-sftp-path-cancelled => {
+                    root.workspace-sftp-path-cancelled();
                 }
 
                 workspace-sftp-path-submitted(path) => {

@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::SftpBreadcrumbItem;
-use crate::app::sftp::SftpDirectoryEntry;
+use crate::app::sftp::{SftpDirectoryEntry, normalize_remote_dir};
 use crate::shell::view_model::PendingSftpContextAction;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -214,6 +214,7 @@ pub(super) fn sync_workspace_sftp_state(window: &AppWindow, state: &mut ShellVie
     window.set_workspace_sftp_binding_label(state.workspace_sftp_binding_label().into());
     window.set_workspace_sftp_path(state.workspace_sftp_path().into());
     window.set_workspace_sftp_path_editing(state.workspace_sftp_path_editing());
+    window.set_workspace_sftp_focus_sequence(state.workspace_sftp_focus_sequence());
     window.set_workspace_sftp_can_go_back(state.workspace_sftp_can_go_back());
     window.set_workspace_sftp_can_go_forward(state.workspace_sftp_can_go_forward());
     window.set_workspace_sftp_can_go_up(state.workspace_sftp_can_go_up());
@@ -2962,6 +2963,23 @@ pub(super) fn bind_sftp_callbacks(
 
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
+    window.on_workspace_sftp_path_cancelled(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.finish_workspace_sftp_path_edit() {
+            super::sync_workspace_session_state_with_manager(
+                &window,
+                &mut state,
+                &mut workspace_follow_tracker_ref.borrow_mut(),
+                session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+            );
+        }
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
     window.on_workspace_sftp_context_menu_requested(
         move |target_id, target_kind, anchor_x, anchor_y| {
             let window = handle.unwrap();
@@ -3186,6 +3204,7 @@ pub(super) fn bind_sftp_callbacks(
             } else if let Some((browser_session_id, session_id)) =
                 active_workspace_sftp_request_identity(&state)
             {
+                let normalized_path = normalize_remote_dir(trimmed);
                 state.finish_workspace_sftp_path_edit();
                 let _ = state.schedule_active_workspace_sftp_viewport_reset();
                 let request = {
@@ -3193,7 +3212,7 @@ pub(super) fn bind_sftp_callbacks(
                     controller.navigate_browser_session(
                         browser_session_id.as_str(),
                         session_id,
-                        trimmed,
+                        normalized_path.as_str(),
                     )
                 };
                 if let Some(request) = request {
