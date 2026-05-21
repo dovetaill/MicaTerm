@@ -2,6 +2,23 @@
 
 use super::*;
 
+fn next_available_sftp_name(entries: &[SftpDirectoryEntry], seed: &str) -> String {
+    let mut candidate_index = 1usize;
+    loop {
+        let candidate = match seed {
+            "New Folder" if candidate_index > 1 => format!("New Folder {candidate_index}"),
+            "new-file.txt" if candidate_index > 1 => {
+                format!("new-file-{candidate_index}.txt")
+            }
+            _ => seed.to_string(),
+        };
+        if entries.iter().all(|entry| entry.name != candidate) {
+            return candidate;
+        }
+        candidate_index += 1;
+    }
+}
+
 impl ShellViewModel {
     fn clamp_assets_sidebar_expanded_width(width_px: f32) -> f32 {
         width_px.clamp(
@@ -211,20 +228,42 @@ impl ShellViewModel {
     }
 
     pub fn open_sftp_new_folder_modal(&mut self) {
+        let draft_name = if self
+            .context_menu_target_kind
+            .is_some_and(super::is_sftp_context_target)
+        {
+            let Some(state) = self.context_menu_sftp_session() else {
+                return;
+            };
+            next_available_sftp_name(state.entries.as_slice(), "New Folder")
+        } else {
+            self.next_default_sftp_folder_name()
+        };
         self.dismiss_active_asset_rename();
         self.close_context_menu();
         self.close_asset_create_menu();
         self.asset_modal_state = Some(AssetModalState::SftpNewFolder {
-            draft_name: self.next_default_sftp_folder_name(),
+            draft_name,
         });
     }
 
     pub fn open_sftp_new_file_modal(&mut self) {
+        let draft_name = if self
+            .context_menu_target_kind
+            .is_some_and(super::is_sftp_context_target)
+        {
+            let Some(state) = self.context_menu_sftp_session() else {
+                return;
+            };
+            next_available_sftp_name(state.entries.as_slice(), "new-file.txt")
+        } else {
+            self.next_default_sftp_file_name()
+        };
         self.dismiss_active_asset_rename();
         self.close_context_menu();
         self.close_asset_create_menu();
         self.asset_modal_state = Some(AssetModalState::SftpNewFile {
-            draft_name: self.next_default_sftp_file_name(),
+            draft_name,
         });
     }
 
@@ -387,7 +426,7 @@ impl ShellViewModel {
 
     pub fn open_sftp_rename_entry_modal(&mut self, entry_id: String) {
         let Some(entry) = self
-            .active_sftp_session_state()
+            .context_menu_sftp_session()
             .and_then(|state| state.entries.iter().find(|entry| entry.id == entry_id))
             .cloned()
         else {
@@ -397,7 +436,7 @@ impl ShellViewModel {
         self.dismiss_active_asset_rename();
         self.close_context_menu();
         self.close_asset_create_menu();
-        let _ = self.replace_active_sftp_selection(vec![entry.id.clone()]);
+        let _ = self.replace_context_menu_sftp_selection(vec![entry.id.clone()]);
         self.context_target_asset_id = Some(entry.id.clone());
         self.asset_modal_state = Some(AssetModalState::SftpRenameEntry {
             entry_id: entry.id,
@@ -480,7 +519,7 @@ impl ShellViewModel {
     }
 
     pub fn open_sftp_delete_confirm(&mut self, entry_ids: Vec<String>) {
-        let Some(state) = self.active_sftp_session_state() else {
+        let Some(state) = self.context_menu_sftp_session() else {
             return;
         };
         let selected_entries = state
@@ -502,7 +541,7 @@ impl ShellViewModel {
         self.dismiss_active_asset_rename();
         self.close_context_menu();
         self.close_asset_create_menu();
-        let _ = self.replace_active_sftp_selection(entry_ids.clone());
+        let _ = self.replace_context_menu_sftp_selection(entry_ids.clone());
         self.context_target_asset_id = entry_ids.first().cloned();
         self.asset_modal_state = Some(AssetModalState::SftpDeleteEntriesConfirm {
             entry_ids,

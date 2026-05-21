@@ -297,7 +297,7 @@ impl ShellViewModel {
                 }
             }
             "delete-selected" => {
-                let entry_ids = self.active_sftp_selected_entry_ids().to_vec();
+                let entry_ids = self.context_menu_sftp_selected_entry_ids().to_vec();
                 self.open_sftp_delete_confirm(entry_ids);
             }
             "download" => {
@@ -313,7 +313,7 @@ impl ShellViewModel {
                 }
             }
             "download-selected" => {
-                let entry_ids = self.active_sftp_selected_entry_ids().to_vec();
+                let entry_ids = self.context_menu_sftp_selected_entry_ids().to_vec();
                 if !entry_ids.is_empty() {
                     self.pending_sftp_context_action =
                         Some(PendingSftpContextAction::DownloadSelection { entry_ids });
@@ -341,7 +341,7 @@ impl ShellViewModel {
                 self.close_context_menu();
             }
             "copy-current-path" => {
-                self.copy_sftp_text_to_clipboard(self.sftp_panel_path(), "Current path");
+                self.copy_sftp_text_to_clipboard(self.context_menu_sftp_path(), "Current path");
             }
             "copy-file-path" | "copy-folder-path" => {
                 if let Some(text) = self.context_target_sftp_entry_text(|entry| entry.path.clone())
@@ -412,11 +412,11 @@ impl ShellViewModel {
         project: impl FnOnce(&SftpDirectoryEntry) -> String,
     ) -> Option<String> {
         let entry_id = self.context_target_asset_id.as_deref()?;
-        self.active_sftp_entry(entry_id).map(project)
+        self.context_menu_sftp_entry(entry_id).map(project)
     }
 
     fn sftp_selected_entries(&self) -> Vec<&SftpDirectoryEntry> {
-        let Some(state) = self.active_sftp_session_state() else {
+        let Some(state) = self.context_menu_sftp_session() else {
             return Vec::new();
         };
 

@@ -44,11 +44,25 @@ fn workspace_and_quick_browser_view_model(
     workspace_path: &str,
     quick_browser_path: &str,
 ) -> ShellViewModel {
+    workspace_and_quick_browser_modes_view_model(
+        workspace_path,
+        SftpPanelMode::Ready,
+        quick_browser_path,
+        SftpPanelMode::Ready,
+    )
+}
+
+fn workspace_and_quick_browser_modes_view_model(
+    workspace_path: &str,
+    workspace_mode: SftpPanelMode,
+    quick_browser_path: &str,
+    quick_browser_mode: SftpPanelMode,
+) -> ShellViewModel {
     let workspace_session = FileBrowserSession {
         file_browser_session_id: "browser-workspace".into(),
         host_profile_ref: HostProfileRef::with_label("asset-prod", "Interserver"),
         linked_terminal_session_id: Some(Uuid::new_v4().to_string()),
-        mode: SftpPanelMode::Ready,
+        mode: workspace_mode,
         follow_mode: SftpFollowMode::ManualBrowse,
         current_path: workspace_path.into(),
         history: SftpPathHistory::with_initial(workspace_path),
@@ -73,7 +87,7 @@ fn workspace_and_quick_browser_view_model(
         file_browser_session_id: "browser-quick".into(),
         host_profile_ref: HostProfileRef::with_label("asset-prod", "Interserver"),
         linked_terminal_session_id: Some(Uuid::new_v4().to_string()),
-        mode: SftpPanelMode::Ready,
+        mode: quick_browser_mode,
         follow_mode: SftpFollowMode::FollowCwd,
         current_path: quick_browser_path.into(),
         history: SftpPathHistory::with_initial(quick_browser_path),
@@ -863,6 +877,53 @@ fn workspace_blank_menu_copy_current_path_prefers_the_workspace_session_path() {
         copied,
         "/home/wwwroot",
         "workspace blank-area copy-current-path should copy the active workspace path, not the quick-browser path from a different surface"
+    );
+}
+
+#[test]
+fn workspace_context_menu_selection_prefers_the_workspace_surface_selection() {
+    let mut state = workspace_and_quick_browser_view_model("/home/wwwroot", "/srv/app");
+
+    state.open_context_menu_for_target(
+        ContextTargetKind::SftpDirectory,
+        Some("entry-wwwroot".into()),
+        84.0,
+        112.0,
+    );
+
+    assert_eq!(
+        state.context_menu_selection().selected_ids,
+        vec!["entry-wwwroot".to_string()],
+        "workspace row context menus should read selected ids from the workspace SFTP surface instead of leaking the quick-browser selection"
+    );
+}
+
+#[test]
+fn workspace_context_menu_mutability_prefers_the_workspace_surface_mode() {
+    let mut state = workspace_and_quick_browser_modes_view_model(
+        "/home/wwwroot",
+        SftpPanelMode::Ready,
+        "/srv/app",
+        SftpPanelMode::Disconnected,
+    );
+
+    state.open_context_menu_for_target(ContextTargetKind::SftpBlankArea, None, 64.0, 96.0);
+
+    assert!(
+        state.context_menu_selection().target_mutable,
+        "workspace blank menus should stay mutable when the workspace surface is ready even if the quick browser happens to be disconnected"
+    );
+}
+
+#[test]
+fn bootstrap_routes_workspace_and_quick_browser_context_menus_through_distinct_sftp_surfaces() {
+    let bootstrap_sftp =
+        fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
+
+    assert!(
+        bootstrap_sftp.contains("ContextMenuSurface::QuickBrowserSftp")
+            && bootstrap_sftp.contains("ContextMenuSurface::WorkspaceSftp"),
+        "bootstrap should open quick-browser and workspace SFTP context menus through explicit surface ids so selection, mutability, and copied paths cannot bleed across surfaces"
     );
 }
 

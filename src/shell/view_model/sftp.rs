@@ -432,6 +432,29 @@ impl ShellViewModel {
         true
     }
 
+    pub(super) fn replace_context_menu_sftp_selection(
+        &mut self,
+        next_selection: Vec<String>,
+    ) -> bool {
+        let (file_browser_session_id, previous_selection) = {
+            let Some(state) = self.context_menu_sftp_session_mut() else {
+                return false;
+            };
+            if state.selected_entry_ids == next_selection {
+                return false;
+            }
+            let previous_selection =
+                std::mem::replace(&mut state.selected_entry_ids, next_selection.clone());
+            (state.file_browser_session_id.clone(), previous_selection)
+        };
+        self.update_sftp_panel_render_selection_cache(
+            file_browser_session_id.as_str(),
+            previous_selection.as_slice(),
+            next_selection.as_slice(),
+        );
+        true
+    }
+
     pub fn select_sftp_panel_entry(&mut self, entry_id: &str) -> bool {
         if !self.replace_active_sftp_selection(vec![entry_id.to_string()]) {
             return false;
@@ -445,6 +468,19 @@ impl ShellViewModel {
             .entries
             .iter()
             .find(|entry| entry.id == entry_id)
+    }
+
+    pub(super) fn context_menu_sftp_entry(&self, entry_id: &str) -> Option<&SftpDirectoryEntry> {
+        self.context_menu_sftp_session()?
+            .entries
+            .iter()
+            .find(|entry| entry.id == entry_id)
+    }
+
+    pub(super) fn context_menu_sftp_path(&self) -> String {
+        self.context_menu_sftp_session()
+            .map(|state| state.current_path.clone())
+            .unwrap_or_default()
     }
 
     pub fn sftp_panel_mode_id(&self) -> &'static str {
@@ -1087,6 +1123,12 @@ impl ShellViewModel {
 
     pub fn active_sftp_selected_entry_ids(&self) -> &[String] {
         self.active_sftp_session_state()
+            .map(|state| state.selected_entry_ids.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub(super) fn context_menu_sftp_selected_entry_ids(&self) -> &[String] {
+        self.context_menu_sftp_session()
             .map(|state| state.selected_entry_ids.as_slice())
             .unwrap_or(&[])
     }

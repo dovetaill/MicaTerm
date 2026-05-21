@@ -19,6 +19,13 @@ pub enum ContextTargetKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextMenuSurface {
+    Assets,
+    QuickBrowserSftp,
+    WorkspaceSftp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextMenuActionState {
     Enabled,
     Disabled,

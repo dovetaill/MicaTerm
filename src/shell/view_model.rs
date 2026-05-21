@@ -41,7 +41,8 @@ use crate::shell::assets::{
     normalized_ssh_auth_source, resolve_committed_name,
 };
 use crate::shell::context_menu::{
-    ContextMenuActionNode, ContextMenuActionState, ContextTargetKind, SelectionContext,
+    ContextMenuActionNode, ContextMenuActionState, ContextMenuSurface, ContextTargetKind,
+    SelectionContext,
     resolve_action_tree,
 };
 use crate::shell::keychain::{
@@ -825,6 +826,7 @@ pub struct ShellViewModel {
     pub editing_asset_id: Option<String>,
     pub editing_asset_text: String,
     pub context_menu_open: bool,
+    pub context_menu_surface: Option<ContextMenuSurface>,
     pub context_menu_target_kind: Option<ContextTargetKind>,
     pub context_target_asset_id: Option<String>,
     pub context_menu_anchor_x: f32,
@@ -916,6 +918,7 @@ impl Default for ShellViewModel {
             editing_asset_id: None,
             editing_asset_text: String::new(),
             context_menu_open: false,
+            context_menu_surface: None,
             context_menu_target_kind: None,
             context_target_asset_id: None,
             context_menu_anchor_x: 0.0,
@@ -1385,6 +1388,19 @@ impl ShellViewModel {
         anchor_x: f32,
         anchor_y: f32,
     ) {
+        let surface = self.default_context_menu_surface_for_target(target_kind);
+        self.open_context_menu_for_surface(surface, target_kind, target_id, anchor_x, anchor_y);
+    }
+
+    pub fn open_context_menu_for_surface(
+        &mut self,
+        surface: ContextMenuSurface,
+        target_kind: ContextTargetKind,
+        target_id: Option<String>,
+        anchor_x: f32,
+        anchor_y: f32,
+    ) {
+        self.context_menu_surface = Some(surface);
         let target_kind =
             self.resolve_context_target_kind_for_selection(target_kind, target_id.as_deref());
         self.context_menu_open = true;
@@ -1403,19 +1419,19 @@ impl ShellViewModel {
             match target_id.clone() {
                 Some(target_id)
                     if matches!(target_kind, ContextTargetKind::SftpMultiSelection)
-                        && self.active_sftp_session_state().is_some_and(|state| {
+                        && self.context_menu_sftp_session().is_some_and(|state| {
                             state
                                 .selected_entry_ids
                                 .iter()
                                 .any(|selected_id| selected_id == &target_id)
                         }) => {}
                 Some(target_id) => {
-                    if let Some(state) = self.active_sftp_session_state_mut() {
+                    if let Some(state) = self.context_menu_sftp_session_mut() {
                         state.selected_entry_ids = vec![target_id.clone()];
                     }
                 }
                 None => {
-                    if let Some(state) = self.active_sftp_session_state_mut() {
+                    if let Some(state) = self.context_menu_sftp_session_mut() {
                         state.selected_entry_ids.clear();
                     }
                 }
@@ -1461,6 +1477,7 @@ impl ShellViewModel {
 
     pub fn close_context_menu(&mut self) {
         self.context_menu_open = false;
+        self.context_menu_surface = None;
         self.context_menu_target_kind = None;
         self.context_menu_origin_x = 0.0;
         self.context_menu_origin_y = 0.0;
@@ -1669,7 +1686,7 @@ impl ShellViewModel {
             .is_some_and(is_sftp_context_target)
         {
             let (selected_file_count, selected_directory_count) = self
-                .active_sftp_session_state()
+                .context_menu_sftp_session()
                 .map(|state| {
                     state
                         .entries
@@ -1690,9 +1707,14 @@ impl ShellViewModel {
                 })
                 .unwrap_or((0, 0));
             return SelectionContext {
-                selected_ids: self.sftp_panel_selected_entry_ids().to_vec(),
+                selected_ids: self
+                    .context_menu_sftp_session()
+                    .map(|state| state.selected_entry_ids.clone())
+                    .unwrap_or_default(),
                 clipboard_has_asset_payload: false,
-                target_mutable: matches!(self.sftp_panel_mode_id(), "ready"),
+                target_mutable: self
+                    .context_menu_sftp_session()
+                    .is_some_and(|state| matches!(state.mode, SftpPanelMode::Ready)),
                 selected_file_count,
                 selected_directory_count,
             };
@@ -1720,6 +1742,42 @@ impl ShellViewModel {
         }
     }
 
+    fn default_context_menu_surface_for_target(
+        &self,
+        target_kind: ContextTargetKind,
+    ) -> ContextMenuSurface {
+        if is_sftp_context_target(target_kind) {
+            if self.active_workspace_sftp_session().is_some() {
+                ContextMenuSurface::WorkspaceSftp
+            } else {
+                ContextMenuSurface::QuickBrowserSftp
+            }
+        } else {
+            ContextMenuSurface::Assets
+        }
+    }
+
+    fn context_menu_sftp_session(&self) -> Option<&FileBrowserSession> {
+        match self.context_menu_surface {
+            Some(ContextMenuSurface::WorkspaceSftp) => self.active_workspace_sftp_session(),
+            Some(ContextMenuSurface::QuickBrowserSftp) => self.quick_browser_session(),
+            _ => self.active_sftp_session_state(),
+        }
+    }
+
+    fn context_menu_sftp_session_mut(&mut self) -> Option<&mut FileBrowserSession> {
+        match self.context_menu_surface {
+            Some(ContextMenuSurface::WorkspaceSftp) => {
+                let session_id = self
+                    .active_workspace_sftp_session()
+                    .map(|session| session.file_browser_session_id.clone())?;
+                self.file_browser_sessions.get_mut(&session_id)
+            }
+            Some(ContextMenuSurface::QuickBrowserSftp) => self.quick_browser_session_mut(),
+            _ => self.active_sftp_session_state_mut(),
+        }
+    }
+
     fn resolve_context_target_kind_for_selection(
         &self,
         target_kind: ContextTargetKind,
@@ -1732,7 +1790,7 @@ impl ShellViewModel {
         let Some(target_id) = target_id else {
             return target_kind;
         };
-        let Some(state) = self.active_sftp_session_state() else {
+        let Some(state) = self.context_menu_sftp_session() else {
             return target_kind;
         };
 

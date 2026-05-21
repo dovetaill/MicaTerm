@@ -2471,7 +2471,8 @@ pub(super) fn bind_sftp_callbacks(
         move |target_id, target_kind, anchor_x, anchor_y| {
             let window = handle.unwrap();
             let mut state = state.borrow_mut();
-            state.open_context_menu_for_target(
+            state.open_context_menu_for_surface(
+                crate::shell::context_menu::ContextMenuSurface::QuickBrowserSftp,
                 parse_context_target_kind(target_kind.as_str(), SidebarDestination::Console),
                 if target_id.is_empty() {
                     None
@@ -2987,7 +2988,8 @@ pub(super) fn bind_sftp_callbacks(
         move |target_id, target_kind, anchor_x, anchor_y| {
             let window = handle.unwrap();
             let mut state = state.borrow_mut();
-            state.open_context_menu_for_target(
+            state.open_context_menu_for_surface(
+                crate::shell::context_menu::ContextMenuSurface::WorkspaceSftp,
                 parse_context_target_kind(target_kind.as_str(), SidebarDestination::Console),
                 if target_id.is_empty() {
                     None
