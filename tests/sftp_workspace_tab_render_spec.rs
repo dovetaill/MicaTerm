@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::fs;
+use std::rc::Rc;
 use std::time::Duration;
 
 use i_slint_backend_testing::ElementHandle;
@@ -261,6 +263,67 @@ fn workspace_breadcrumb_shell_click_requests_path_edit_mode() {
     assert!(
         app.get_workspace_sftp_path_editing(),
         "clicking the workspace breadcrumb shell should enter path editing instead of forcing users onto the pencil affordance"
+    );
+}
+
+#[test]
+fn workspace_home_breadcrumb_click_routes_to_the_home_path() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().expect("create app window");
+    app.set_workspace_session_host_mode("sftp".into());
+    app.set_workspace_sftp_actions_enabled(true);
+    app.set_workspace_sftp_path("/home/wwwroot".into());
+    app.set_workspace_sftp_breadcrumb_items(ModelRc::new(VecModel::from(vec![
+        SftpBreadcrumbItem {
+            label: "/".into(),
+            path: "/".into(),
+            active: false,
+        },
+        SftpBreadcrumbItem {
+            label: "home".into(),
+            path: "/home".into(),
+            active: false,
+        },
+        SftpBreadcrumbItem {
+            label: "wwwroot".into(),
+            path: "/home/wwwroot".into(),
+            active: true,
+        },
+    ])));
+
+    let clicked_path = Rc::new(RefCell::new(None::<String>));
+    let clicked_path_ref = Rc::clone(&clicked_path);
+    app.on_workspace_sftp_breadcrumb_clicked(move |path| {
+        clicked_path_ref.replace(Some(path.to_string()));
+    });
+
+    app.show().expect("show app window");
+    slint::platform::update_timers_and_animations();
+
+    let mut crumb_targets = ElementHandle::find_by_element_id(
+        &app,
+        "SftpWorkspaceHost::workspace-breadcrumb-crumb-touch",
+    )
+    .chain(ElementHandle::find_by_element_id(
+        &app,
+        "workspace-breadcrumb-crumb-touch",
+    ))
+    .collect::<Vec<_>>();
+    crumb_targets.sort_by(|left, right| {
+        left.absolute_position()
+            .x
+            .partial_cmp(&right.absolute_position().x)
+            .expect("workspace breadcrumb x position")
+    });
+
+    let home_crumb = crumb_targets.get(1).expect("workspace home breadcrumb");
+    click_element(&app, home_crumb);
+
+    assert_eq!(
+        clicked_path.borrow().as_deref(),
+        Some("/home"),
+        "clicking the `home` workspace breadcrumb should route the canonical `/home` path instead of reusing the current leaf path or entering edit mode"
     );
 }
 
