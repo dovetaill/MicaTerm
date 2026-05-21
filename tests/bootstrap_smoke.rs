@@ -14875,6 +14875,52 @@ fn workspace_sftp_expand_navigation_and_reconnect_drive_real_directory_reads() {
 }
 
 #[test]
+fn workspace_sftp_ctrl_l_enters_path_editing() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+        let app = AppWindow::new().unwrap();
+        let sftp_state = RecordingSftpState::default();
+        bind_with_launcher(
+            &app,
+            None,
+            Arc::new(DelayedReadRecordingSftpLauncher {
+                state: sftp_state,
+                read_delay_by_path: Arc::new(BTreeMap::new()),
+            }),
+        );
+
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.into());
+        flush_runtime_projection();
+        app.invoke_open_sftp_panel_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_sftp_panel_mode().as_str() == "ready"
+        });
+
+        app.invoke_sftp_panel_expand_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_workspace_session_host_mode().as_str() == "sftp"
+        });
+
+        assert!(
+            !app.get_workspace_sftp_path_editing(),
+            "workspace SFTP should start in breadcrumb viewing mode before Ctrl+L is pressed"
+        );
+
+        dispatch_text_key_chord(&app, "l", true, false, false);
+        flush_runtime_projection();
+
+        assert!(
+            app.get_workspace_sftp_path_editing(),
+            "Ctrl+L should enter workspace path editing so the SFTP workspace follows the browser-like location bar contract"
+        );
+    });
+}
+
+#[test]
 fn transfer_center_remove_missing_download_only_clears_record() {
     let bootstrap_sftp =
         fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");

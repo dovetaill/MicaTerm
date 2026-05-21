@@ -509,6 +509,7 @@ fn theme_semantic_token_contract_spec_welcome_shell_copy_uses_token_colors_inste
 #[test]
 fn theme_semantic_token_contract_spec_workspace_sftp_host_stays_on_runtime_shell_and_session_properties(
 ) {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
     let workspace =
         fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
     let host =
@@ -536,6 +537,11 @@ fn theme_semantic_token_contract_spec_workspace_sftp_host_stays_on_runtime_shell
             && host.contains("background: item.selected ? root.shell-sidebar-item-selected")
             && host.contains("background: root.shell-sidebar-item-selected-border;"),
         "SFTP workspace host should consume runtime shell/session properties for its surface and selected-row treatment instead of inventing a detached palette ladder"
+    );
+    assert!(
+        app_window.contains("workspace-sftp-tooltip-overlay := TitlebarTooltip {")
+            && !host.contains("import { TitlebarTooltip }"),
+        "workspace SFTP tooltips should reuse the shared AppWindow overlay so hardening does not introduce a second local tooltip surface with its own detached palette contract"
     );
     for banned in [
         "#0a0e14", "#10151d", "#111821", "#141b24", "#e6b450", "#ffaa33",

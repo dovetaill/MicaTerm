@@ -1,4 +1,29 @@
 use std::fs;
+use std::time::Duration;
+
+use i_slint_backend_testing::ElementHandle;
+use mica_term::{AppWindow, SftpBreadcrumbItem};
+use slint::platform::{PointerEventButton, WindowEvent};
+use slint::{ComponentHandle, LogicalPosition, ModelRc, VecModel};
+
+fn click_element(app: &AppWindow, element: &ElementHandle) {
+    let position = LogicalPosition::new(
+        element.absolute_position().x + element.size().width / 2.0,
+        element.absolute_position().y + element.size().height / 2.0,
+    );
+    let window = app.window();
+    window.dispatch_event(WindowEvent::PointerMoved { position });
+    window.dispatch_event(WindowEvent::PointerPressed {
+        position,
+        button: PointerEventButton::Left,
+    });
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(20));
+    window.dispatch_event(WindowEvent::PointerReleased {
+        position,
+        button: PointerEventButton::Left,
+    });
+    slint::platform::update_timers_and_animations();
+}
 
 #[test]
 fn workspace_pane_source_branches_to_sftp_workspace_host() {
@@ -181,6 +206,87 @@ fn sftp_workspace_host_source_wires_workspace_only_interactions() {
             "SFTP workspace host should wire interactive contract `{contract}` instead of remaining a passive shell"
         );
     }
+}
+
+#[test]
+fn workspace_breadcrumb_shell_click_requests_path_edit_mode() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().expect("create app window");
+    app.set_workspace_session_host_mode("sftp".into());
+    app.set_workspace_sftp_actions_enabled(true);
+    app.set_workspace_sftp_path("/home/wwwroot".into());
+    app.set_workspace_sftp_breadcrumb_items(ModelRc::new(VecModel::from(vec![
+        SftpBreadcrumbItem {
+            label: "/".into(),
+            path: "/".into(),
+            active: false,
+        },
+        SftpBreadcrumbItem {
+            label: "home".into(),
+            path: "/home".into(),
+            active: false,
+        },
+        SftpBreadcrumbItem {
+            label: "wwwroot".into(),
+            path: "/home/wwwroot".into(),
+            active: true,
+        },
+    ])));
+
+    let app_handle = app.as_weak();
+    app.on_workspace_sftp_path_edit_requested(move || {
+        let app = app_handle.unwrap();
+        app.set_workspace_sftp_path_editing(true);
+    });
+
+    app.show().expect("show app window");
+    app.window()
+        .dispatch_event(WindowEvent::WindowActiveChanged(true));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(20));
+    slint::platform::update_timers_and_animations();
+
+    let shell = ElementHandle::find_by_element_id(
+        &app,
+        "SftpWorkspaceHost::workspace-breadcrumb-shell",
+    )
+    .chain(ElementHandle::find_by_element_id(
+        &app,
+        "workspace-breadcrumb-shell",
+    ))
+        .next()
+        .expect("workspace breadcrumb shell");
+    click_element(&app, &shell);
+
+    assert!(
+        app.get_workspace_sftp_path_editing(),
+        "clicking the workspace breadcrumb shell should enter path editing instead of forcing users onto the pencil affordance"
+    );
+}
+
+#[test]
+fn workspace_path_escape_is_a_cancel_instead_of_a_hidden_resubmit() {
+    let source =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    assert!(
+        !source.contains("root.workspace-sftp-path-submitted(root.workspace-sftp-path);"),
+        "Esc in the workspace path editor should cancel editing and restore the canonical path instead of routing a hidden submit of the current path"
+    );
+}
+
+#[test]
+fn workspace_toolbar_tooltips_must_route_through_the_shared_shell_overlay() {
+    let host =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+
+    assert!(
+        host.contains("callback tooltip-open-requested(")
+            && host.contains("callback tooltip-close-requested(")
+            && app_window.contains("workspace-sftp-tooltip-overlay := TitlebarTooltip {"),
+        "workspace toolbar actions should use the shared AppWindow tooltip overlay contract instead of local tooltip text that never owns a real overlay"
+    );
 }
 
 #[test]

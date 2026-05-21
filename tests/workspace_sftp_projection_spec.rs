@@ -87,6 +87,67 @@ fn sample_workspace_sftp_session(mode: SftpPanelMode, follow_mode: SftpFollowMod
     }
 }
 
+fn root_scroll_fixture_session(current_path: &str) -> FileBrowserSession {
+    let root_names = [
+        "bin",
+        "boot",
+        "dev",
+        "etc",
+        "home",
+        "lib",
+        "lib32",
+        "lib64",
+        "media",
+        "mnt",
+        "opt",
+        "proc",
+        "root",
+        "run",
+        "sbin",
+        "snap",
+        "srv",
+        "sys",
+        "tmp",
+        "usr",
+        "var",
+        "workspace",
+        "www",
+        "wwwroot",
+        "zfs",
+        "zzz-last",
+    ];
+    FileBrowserSession {
+        file_browser_session_id: "browser-root".into(),
+        host_profile_ref: HostProfileRef::with_label("asset-prod", "Interserver"),
+        linked_terminal_session_id: Some(Uuid::new_v4().to_string()),
+        mode: SftpPanelMode::Ready,
+        follow_mode: SftpFollowMode::ManualBrowse,
+        current_path: current_path.into(),
+        history: SftpPathHistory::with_initial(current_path),
+        entries: root_names
+            .iter()
+            .map(|name| {
+                sample_sftp_entry(
+                    &format!("root-{name}"),
+                    name,
+                    &format!("/{name}"),
+                    SftpDirectoryEntryKind::Directory,
+                    Some(1_777_000_000),
+                    None,
+                    Some("rwxr-xr-x"),
+                    Some("root"),
+                    Some("root"),
+                )
+            })
+            .collect(),
+        selected_entry_ids: vec![],
+        last_error: None,
+        active_request_id: None,
+        sort_state: Default::default(),
+        column_layout: Default::default(),
+    }
+}
+
 #[test]
 fn active_workspace_identity_tracks_tab_id_instead_of_terminal_session_id() {
     let terminal_tab = WorkspaceTab::from_session(&sample_handle(
@@ -375,4 +436,56 @@ fn workspace_sftp_projection_contract_threads_richer_rows_and_incremental_sync_i
             "workspace SFTP bootstrap sync should project `{contract}` instead of replacing the whole workspace file model on every tick"
         );
     }
+}
+
+#[test]
+fn workspace_sftp_row_height_contract_matches_the_slint_host() {
+    let sftp_view_model =
+        fs::read_to_string("src/shell/view_model/sftp.rs").expect("read sftp view model");
+    let host =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    assert!(
+        sftp_view_model.contains("const SFTP_PANEL_ROW_HEIGHT_PX: u32 = 40;")
+            && host.contains("height: 40px;"),
+        "workspace virtualization must share one 40px row-height contract across Rust and Slint so scrolling math does not drift between visible rows and spacer heights"
+    );
+}
+
+#[test]
+fn workspace_sftp_submitting_root_path_resets_the_virtual_viewport_to_the_top() {
+    let session = root_scroll_fixture_session("/srv/app/releases");
+    let sftp_tab = WorkspaceTab::sftp(
+        "tab-files-root",
+        session.file_browser_session_id.clone(),
+        "Files: Root",
+    );
+    let mut view_model = ShellViewModel::default();
+    view_model.set_file_browser_session(session);
+    view_model.set_workspace_tabs(vec![sftp_tab]);
+
+    assert!(
+        view_model.update_workspace_sftp_viewport(-14.0 * 44.0, 160.0),
+        "scroll fixture should move the virtual workspace viewport away from the top before navigation resets are asserted"
+    );
+    assert!(
+        view_model.workspace_sftp_top_spacer_height_px() > 0.0,
+        "scroll fixture should start from a non-zero spacer height"
+    );
+
+    assert!(view_model.submit_workspace_sftp_path("/"));
+
+    assert_eq!(
+        view_model.workspace_sftp_top_spacer_height_px(),
+        0.0,
+        "navigating the workspace to `/` should reset the controlled viewport to the top instead of preserving a stale scrolled window from the previous directory"
+    );
+    assert!(
+        view_model
+            .workspace_sftp_render_rows()
+            .iter()
+            .take(8)
+            .any(|row| row.name == "home"),
+        "once `/` is projected from the top, the first visible workspace rows should include early root entries such as `home`"
+    );
 }

@@ -1,9 +1,11 @@
 use std::fs;
 
+use i_slint_backend_selector::with_platform;
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::bind_top_status_bar_with_store;
 use mica_term::app::sftp::{
-    SftpDirectoryEntry, SftpDirectoryEntryKind, SftpPanelMode, SftpSessionBindingState,
+    FileBrowserSession, HostProfileRef, SftpDirectoryEntry, SftpDirectoryEntryKind,
+    SftpFollowMode, SftpPanelMode, SftpPathHistory, SftpSessionBindingState,
 };
 use mica_term::app::ssh::session_manager::{EnhancedSessionState, SessionHandle, SessionState};
 use mica_term::shell::context_menu::{
@@ -34,6 +36,75 @@ fn active_sftp_view_model(entries: Vec<SftpDirectoryEntry>) -> ShellViewModel {
     let mut state = ShellViewModel::default();
     state.set_workspace_tabs(vec![tab]);
     state.set_sftp_session_state(session_id.to_string(), sftp);
+    state.open_sftp_panel();
+    state
+}
+
+fn workspace_and_quick_browser_view_model(
+    workspace_path: &str,
+    quick_browser_path: &str,
+) -> ShellViewModel {
+    let workspace_session = FileBrowserSession {
+        file_browser_session_id: "browser-workspace".into(),
+        host_profile_ref: HostProfileRef::with_label("asset-prod", "Interserver"),
+        linked_terminal_session_id: Some(Uuid::new_v4().to_string()),
+        mode: SftpPanelMode::Ready,
+        follow_mode: SftpFollowMode::ManualBrowse,
+        current_path: workspace_path.into(),
+        history: SftpPathHistory::with_initial(workspace_path),
+        entries: vec![SftpDirectoryEntry {
+            id: "entry-wwwroot".into(),
+            name: "wwwroot".into(),
+            path: format!("{workspace_path}/wwwroot"),
+            kind: SftpDirectoryEntryKind::Directory,
+            modified_unix_seconds: None,
+            size_bytes: None,
+            permissions_label: None,
+            owner_label: None,
+            group_label: None,
+        }],
+        selected_entry_ids: vec![],
+        last_error: None,
+        active_request_id: None,
+        sort_state: Default::default(),
+        column_layout: Default::default(),
+    };
+    let quick_browser_session = FileBrowserSession {
+        file_browser_session_id: "browser-quick".into(),
+        host_profile_ref: HostProfileRef::with_label("asset-prod", "Interserver"),
+        linked_terminal_session_id: Some(Uuid::new_v4().to_string()),
+        mode: SftpPanelMode::Ready,
+        follow_mode: SftpFollowMode::FollowCwd,
+        current_path: quick_browser_path.into(),
+        history: SftpPathHistory::with_initial(quick_browser_path),
+        entries: vec![SftpDirectoryEntry {
+            id: "entry-app".into(),
+            name: "app".into(),
+            path: format!("{quick_browser_path}/app"),
+            kind: SftpDirectoryEntryKind::Directory,
+            modified_unix_seconds: None,
+            size_bytes: None,
+            permissions_label: None,
+            owner_label: None,
+            group_label: None,
+        }],
+        selected_entry_ids: vec!["entry-app".into()],
+        last_error: None,
+        active_request_id: None,
+        sort_state: Default::default(),
+        column_layout: Default::default(),
+    };
+
+    let sftp_tab = WorkspaceTab::sftp(
+        "tab-files-1",
+        workspace_session.file_browser_session_id.clone(),
+        "Files: Prod",
+    );
+    let mut state = ShellViewModel::default();
+    state.set_file_browser_session(workspace_session);
+    state.set_file_browser_session(quick_browser_session);
+    state.quick_browser_session_id = Some("browser-quick".into());
+    state.set_workspace_tabs(vec![sftp_tab]);
     state.open_sftp_panel();
     state
 }
@@ -764,6 +835,57 @@ fn unsupported_sftp_actions_render_disabled_reasons() {
     assert_eq!(
         state.context_menu_feedback_text,
         "Permissions are not available for SFTP yet."
+    );
+}
+
+#[test]
+fn workspace_blank_menu_copy_current_path_prefers_the_workspace_session_path() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let mut state = workspace_and_quick_browser_view_model("/home/wwwroot", "/srv/app");
+    with_platform(|platform| {
+        platform.set_clipboard_text("", slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("clear clipboard");
+
+    state.open_context_menu_for_target(ContextTargetKind::SftpBlankArea, None, 64.0, 96.0);
+    state.handle_context_menu_leaf_action("copy-current-path");
+
+    let copied = with_platform(|platform| {
+        Ok(platform
+            .clipboard_text(slint::platform::Clipboard::DefaultClipboard)
+            .unwrap_or_default())
+    })
+    .expect("read clipboard");
+
+    assert_eq!(
+        copied,
+        "/home/wwwroot",
+        "workspace blank-area copy-current-path should copy the active workspace path, not the quick-browser path from a different surface"
+    );
+}
+
+#[test]
+fn opening_workspace_sftp_context_menu_dismisses_the_assets_create_popup_first() {
+    let mut state = active_sftp_view_model(vec![SftpDirectoryEntry {
+        id: "entry-app".into(),
+        name: "app".into(),
+        path: "/srv/app".into(),
+        kind: SftpDirectoryEntryKind::Directory,
+        modified_unix_seconds: None,
+        size_bytes: None,
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
+    }]);
+    state.asset_create_menu_open = true;
+
+    state.open_context_menu_for_target(ContextTargetKind::SftpBlankArea, None, 64.0, 96.0);
+
+    assert!(
+        !state.asset_create_menu_open,
+        "opening a workspace SFTP context menu should dismiss the assets create popup before the new menu takes over the transient surface"
     );
 }
 
