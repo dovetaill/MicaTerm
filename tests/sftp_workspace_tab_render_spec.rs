@@ -246,16 +246,14 @@ fn workspace_breadcrumb_shell_click_requests_path_edit_mode() {
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(20));
     slint::platform::update_timers_and_animations();
 
-    let shell = ElementHandle::find_by_element_id(
-        &app,
-        "SftpWorkspaceHost::workspace-breadcrumb-shell",
-    )
-    .chain(ElementHandle::find_by_element_id(
-        &app,
-        "workspace-breadcrumb-shell",
-    ))
-        .next()
-        .expect("workspace breadcrumb shell");
+    let shell =
+        ElementHandle::find_by_element_id(&app, "SftpWorkspaceHost::workspace-breadcrumb-shell")
+            .chain(ElementHandle::find_by_element_id(
+                &app,
+                "workspace-breadcrumb-shell",
+            ))
+            .next()
+            .expect("workspace breadcrumb shell");
     click_element(&app, &shell);
 
     assert!(
@@ -286,6 +284,59 @@ fn workspace_toolbar_tooltips_must_route_through_the_shared_shell_overlay() {
             && host.contains("callback tooltip-close-requested(")
             && app_window.contains("workspace-sftp-tooltip-overlay := TitlebarTooltip {"),
         "workspace toolbar actions should use the shared AppWindow tooltip overlay contract instead of local tooltip text that never owns a real overlay"
+    );
+}
+
+#[test]
+fn workspace_viewport_contract_is_projected_from_the_vm_into_the_host() {
+    let host =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+    let workspace_pane =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+
+    assert!(
+        app_window.contains("in-out property <length> workspace-sftp-viewport-y: 0px;")
+            && app_window.contains("in-out property <length> workspace-sftp-row-height: 40px;")
+            && app_window.contains("in-out property <int> workspace-sftp-total-row-count: 0;")
+            && app_window.contains("workspace-sftp-viewport-y <=> root.workspace-sftp-viewport-y;")
+            && app_window.contains("workspace-sftp-row-height: root.workspace-sftp-row-height;")
+            && app_window
+                .contains("workspace-sftp-total-row-count: root.workspace-sftp-total-row-count;"),
+        "AppWindow should own the projected workspace viewport, row-height, and total-row-count contract so tab restore and status summaries are driven by the view-model instead of host-private state"
+    );
+    assert!(
+        workspace_pane.contains("in-out property <length> workspace-sftp-viewport-y: 0px;")
+            && workspace_pane.contains("in property <length> workspace-sftp-row-height: 40px;")
+            && workspace_pane.contains("in property <int> workspace-sftp-total-row-count: 0;")
+            && workspace_pane
+                .contains("workspace-sftp-viewport-y <=> root.workspace-sftp-viewport-y;")
+            && workspace_pane
+                .contains("workspace-sftp-row-height: root.workspace-sftp-row-height;")
+            && workspace_pane
+                .contains("workspace-sftp-total-row-count: root.workspace-sftp-total-row-count;"),
+        "WorkspacePane should thread the controlled viewport and full-count contract straight through to SftpWorkspaceHost"
+    );
+    assert!(
+        host.contains("in-out property <length> workspace-sftp-viewport-y: 0px;")
+            && host.contains("in property <length> workspace-sftp-row-height: 40px;")
+            && host.contains("in property <int> workspace-sftp-total-row-count: 0;")
+            && host.contains("viewport-y <=> root.workspace-sftp-viewport-y;")
+            && host.contains("height: root.workspace-sftp-row-height;")
+            && !host.contains("private property <length> list-viewport-y: 0px;"),
+        "SftpWorkspaceHost should consume a Rust-controlled viewport and row-height contract instead of hiding a private viewport cache that drifts away from session restore/reset policy"
+    );
+}
+
+#[test]
+fn workspace_statusbar_item_count_must_not_use_the_visible_row_slice_length() {
+    let host =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    assert!(
+        host.contains("return \"\" + root.workspace-sftp-total-row-count + \" items\";")
+            && !host.contains("return \"\" + root.workspace-sftp-items.length + \" items\";"),
+        "workspace status summaries should use the projected full row count instead of the currently visible virtual window length"
     );
 }
 

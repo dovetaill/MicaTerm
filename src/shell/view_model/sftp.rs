@@ -3,9 +3,13 @@
 use super::*;
 use chrono::{DateTime, Utc};
 
-const SFTP_PANEL_ROW_HEIGHT_PX: u32 = 44;
-const SFTP_PANEL_DEFAULT_VIEWPORT_HEIGHT_PX: u32 = SFTP_PANEL_ROW_HEIGHT_PX * 10;
+const QUICK_BROWSER_SFTP_ROW_HEIGHT_PX: u32 = 44;
+const WORKSPACE_SFTP_ROW_HEIGHT_PX: u32 = 40;
 const SFTP_PANEL_WINDOW_OVERSCAN_ROWS: usize = 6;
+
+fn default_sftp_panel_viewport_height_px(row_height_px: u32) -> u32 {
+    row_height_px.saturating_mul(10)
+}
 
 fn sftp_parent_render_row() -> SftpPanelRenderRow {
     SftpPanelRenderRow {
@@ -33,6 +37,7 @@ fn normalized_sftp_panel_viewport_height_px(visible_height: f32) -> u32 {
 }
 
 fn recompute_sftp_panel_virtual_window(render_cache: &mut SftpPanelRenderCache) -> bool {
+    let row_height_px = render_cache.row_height_px.max(1);
     let total_row_count = render_cache.rows.len();
     let previous_window_start_row = render_cache.window_start_row;
     let previous_window_end_row = render_cache.window_end_row;
@@ -42,7 +47,7 @@ fn recompute_sftp_panel_virtual_window(render_cache: &mut SftpPanelRenderCache) 
 
     render_cache.total_content_height_px = u32::try_from(total_row_count)
         .unwrap_or(u32::MAX)
-        .saturating_mul(SFTP_PANEL_ROW_HEIGHT_PX);
+        .saturating_mul(row_height_px);
 
     if total_row_count == 0 {
         render_cache.window_start_row = 0;
@@ -52,15 +57,13 @@ fn recompute_sftp_panel_virtual_window(render_cache: &mut SftpPanelRenderCache) 
     } else {
         let viewport_height_px = render_cache
             .viewport_height_px
-            .max(SFTP_PANEL_DEFAULT_VIEWPORT_HEIGHT_PX);
-        let first_visible_row =
-            usize::try_from(render_cache.viewport_offset_px / SFTP_PANEL_ROW_HEIGHT_PX)
-                .unwrap_or(usize::MAX)
-                .min(total_row_count.saturating_sub(1));
-        let visible_row_count =
-            usize::try_from(viewport_height_px.div_ceil(SFTP_PANEL_ROW_HEIGHT_PX).max(1))
-                .unwrap_or(usize::MAX)
-                .max(1);
+            .max(default_sftp_panel_viewport_height_px(row_height_px));
+        let first_visible_row = usize::try_from(render_cache.viewport_offset_px / row_height_px)
+            .unwrap_or(usize::MAX)
+            .min(total_row_count.saturating_sub(1));
+        let visible_row_count = usize::try_from(viewport_height_px.div_ceil(row_height_px).max(1))
+            .unwrap_or(usize::MAX)
+            .max(1);
         let desired_window_len = visible_row_count + (SFTP_PANEL_WINDOW_OVERSCAN_ROWS * 2);
 
         let mut window_start_row =
@@ -77,11 +80,11 @@ fn recompute_sftp_panel_virtual_window(render_cache: &mut SftpPanelRenderCache) 
         render_cache.window_end_row = window_end_row;
         render_cache.top_spacer_height_px = u32::try_from(window_start_row)
             .unwrap_or(u32::MAX)
-            .saturating_mul(SFTP_PANEL_ROW_HEIGHT_PX);
+            .saturating_mul(row_height_px);
         render_cache.bottom_spacer_height_px =
             u32::try_from(total_row_count.saturating_sub(window_end_row))
                 .unwrap_or(u32::MAX)
-                .saturating_mul(SFTP_PANEL_ROW_HEIGHT_PX);
+                .saturating_mul(row_height_px);
     }
 
     if render_cache.window_start_row != previous_window_start_row
@@ -97,6 +100,56 @@ fn recompute_sftp_panel_virtual_window(render_cache: &mut SftpPanelRenderCache) 
 }
 
 impl ShellViewModel {
+    fn sftp_panel_row_height_px_for_session(&self, file_browser_session_id: &str) -> u32 {
+        if self.workspace_tabs.iter().any(|tab| {
+            tab.kind == crate::shell::tabs::WorkspaceTabKind::Sftp
+                && tab.file_browser_session_id == file_browser_session_id
+        }) {
+            WORKSPACE_SFTP_ROW_HEIGHT_PX
+        } else {
+            QUICK_BROWSER_SFTP_ROW_HEIGHT_PX
+        }
+    }
+
+    fn schedule_sftp_panel_viewport_reset(&mut self, file_browser_session_id: &str) -> bool {
+        let Some(render_cache) = self
+            .sftp_panel_render_cache
+            .get_mut(file_browser_session_id)
+        else {
+            return false;
+        };
+        if render_cache.pending_viewport_reset {
+            return false;
+        }
+        render_cache.pending_viewport_reset = true;
+        true
+    }
+
+    pub(super) fn reconcile_sftp_panel_row_height_contracts(&mut self) -> bool {
+        let session_ids = self
+            .sftp_panel_render_cache
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut changed = false;
+        for session_id in session_ids {
+            let next_row_height_px = self.sftp_panel_row_height_px_for_session(session_id.as_str());
+            let Some(render_cache) = self.sftp_panel_render_cache.get_mut(session_id.as_str())
+            else {
+                continue;
+            };
+            if render_cache.row_height_px == next_row_height_px {
+                continue;
+            }
+
+            render_cache.row_height_px = next_row_height_px;
+            let _ = recompute_sftp_panel_virtual_window(render_cache);
+            render_cache.full_resync_required = true;
+            changed = true;
+        }
+        changed
+    }
+
     pub fn open_sftp_panel(&mut self) {
         if self.workspace_focus_mode && !self.show_right_panel {
             self.exit_workspace_focus_mode();
@@ -108,6 +161,8 @@ impl ShellViewModel {
 
     pub fn set_file_browser_session(&mut self, session: FileBrowserSession) {
         let projection = self.build_sftp_panel_projection(&session);
+        let row_height_px =
+            self.sftp_panel_row_height_px_for_session(session.file_browser_session_id.as_str());
         let previous_render_cache = self
             .sftp_panel_render_cache
             .get(session.file_browser_session_id.as_str());
@@ -115,6 +170,7 @@ impl ShellViewModel {
             &session,
             projection.as_slice(),
             previous_render_cache,
+            row_height_px,
         );
         self.sftp_panel_projection_cache
             .insert(session.file_browser_session_id.clone(), projection);
@@ -151,6 +207,7 @@ impl ShellViewModel {
         session: &FileBrowserSession,
         projection: &[SftpDirectoryEntry],
         previous_render_cache: Option<&SftpPanelRenderCache>,
+        row_height_px: u32,
     ) -> SftpPanelRenderCache {
         let selected_entry_ids = session
             .selected_entry_ids
@@ -172,15 +229,23 @@ impl ShellViewModel {
             ));
         }
 
+        let pending_viewport_reset = previous_render_cache
+            .map(|cache| cache.pending_viewport_reset)
+            .unwrap_or(false);
         let mut render_cache = SftpPanelRenderCache {
             rows,
             row_index_by_entry_id,
-            viewport_offset_px: previous_render_cache
-                .map(|cache| cache.viewport_offset_px)
-                .unwrap_or(0),
+            row_height_px,
+            viewport_offset_px: if pending_viewport_reset {
+                0
+            } else {
+                previous_render_cache
+                    .map(|cache| cache.viewport_offset_px)
+                    .unwrap_or(0)
+            },
             viewport_height_px: previous_render_cache
                 .map(|cache| cache.viewport_height_px)
-                .unwrap_or(SFTP_PANEL_DEFAULT_VIEWPORT_HEIGHT_PX),
+                .unwrap_or(default_sftp_panel_viewport_height_px(row_height_px)),
             window_start_row: 0,
             window_end_row: 0,
             total_content_height_px: 0,
@@ -188,6 +253,7 @@ impl ShellViewModel {
             bottom_spacer_height_px: 0,
             dirty_row_indices: Vec::new(),
             full_resync_required: true,
+            pending_viewport_reset: false,
         };
         let _ = recompute_sftp_panel_virtual_window(&mut render_cache);
         render_cache
@@ -206,12 +272,14 @@ impl ShellViewModel {
             .get(file_browser_session_id)
             .cloned()
             .unwrap_or_else(|| self.build_sftp_panel_projection(&session));
+        let row_height_px = self.sftp_panel_row_height_px_for_session(file_browser_session_id);
         self.sftp_panel_render_cache.insert(
             file_browser_session_id.to_string(),
             self.build_sftp_panel_render_cache(
                 &session,
                 projection.as_slice(),
                 self.sftp_panel_render_cache.get(file_browser_session_id),
+                row_height_px,
             ),
         );
         true
@@ -440,6 +508,10 @@ impl ShellViewModel {
             .unwrap_or(0)
     }
 
+    pub fn workspace_sftp_total_row_count_i32(&self) -> i32 {
+        i32::try_from(self.workspace_sftp_total_row_count()).unwrap_or(i32::MAX)
+    }
+
     pub fn workspace_sftp_selected_row_count(&self) -> usize {
         self.active_workspace_sftp_session()
             .map(|session| session.selected_entry_ids.len())
@@ -554,6 +626,16 @@ impl ShellViewModel {
         self.workspace_sftp_render_cache()
             .map(|cache| cache.total_content_height_px as f32)
             .unwrap_or(0.0)
+    }
+
+    pub fn workspace_sftp_viewport_y(&self) -> f32 {
+        self.workspace_sftp_render_cache()
+            .map(|cache| -(cache.viewport_offset_px as f32))
+            .unwrap_or(0.0)
+    }
+
+    pub fn workspace_sftp_row_height_px(&self) -> f32 {
+        WORKSPACE_SFTP_ROW_HEIGHT_PX as f32
     }
 
     pub fn workspace_sftp_top_spacer_height_px(&self) -> f32 {
@@ -746,6 +828,16 @@ impl ShellViewModel {
                 )
             })
             .unwrap_or(false)
+    }
+
+    pub fn schedule_active_workspace_sftp_viewport_reset(&mut self) -> bool {
+        let Some(session_id) = self
+            .active_workspace_sftp_session()
+            .map(|session| session.file_browser_session_id.clone())
+        else {
+            return false;
+        };
+        self.schedule_sftp_panel_viewport_reset(session_id.as_str())
     }
 
     pub fn quick_browser_accepts_external_drop(&self) -> bool {
@@ -1022,6 +1114,7 @@ impl ShellViewModel {
             return false;
         };
         self.workspace_sftp_path_editing = false;
+        let _ = self.schedule_sftp_panel_viewport_reset(session_id.as_str());
         let _ = self.refresh_sftp_panel_render_cache(session_id.as_str());
         true
     }
@@ -1090,6 +1183,7 @@ impl ShellViewModel {
         }) else {
             return false;
         };
+        let _ = self.schedule_sftp_panel_viewport_reset(session_id.as_str());
         let _ = self.refresh_sftp_panel_render_cache(session_id.as_str());
         true
     }
@@ -1110,6 +1204,7 @@ impl ShellViewModel {
         }) else {
             return false;
         };
+        let _ = self.schedule_sftp_panel_viewport_reset(session_id.as_str());
         let _ = self.refresh_sftp_panel_render_cache(session_id.as_str());
         true
     }
@@ -1130,6 +1225,7 @@ impl ShellViewModel {
         }) else {
             return false;
         };
+        let _ = self.schedule_sftp_panel_viewport_reset(session_id.as_str());
         let _ = self.refresh_sftp_panel_render_cache(session_id.as_str());
         true
     }
@@ -1155,10 +1251,13 @@ impl ShellViewModel {
         else {
             return false;
         };
-        let Some(state) = self.file_browser_sessions.get_mut(session_id.as_str()) else {
-            return false;
-        };
-        state.mark_loading();
+        {
+            let Some(state) = self.file_browser_sessions.get_mut(session_id.as_str()) else {
+                return false;
+            };
+            state.mark_loading();
+        }
+        let _ = self.schedule_sftp_panel_viewport_reset(session_id.as_str());
         true
     }
 
@@ -1478,6 +1577,7 @@ impl ShellViewModel {
                 browser_session.selected_entry_ids.clear();
                 browser_session.last_error = None;
             }
+            let _ = self.schedule_sftp_panel_viewport_reset(browser_session_id.as_str());
             let _ = self.refresh_sftp_panel_projection_cache(browser_session_id.as_str());
             let _ = self.activate_workspace_tab(tab_id.as_str());
             self.workspace_sftp_path_editing = false;

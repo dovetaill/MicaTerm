@@ -311,6 +311,9 @@ export component AppWindow inherits Window {
     in-out property <bool> workspace-sftp-can-go-up: false;
     in-out property <bool> workspace-sftp-can-go-home: false;
     in-out property <bool> workspace-sftp-actions-enabled: false;
+    in-out property <length> workspace-sftp-viewport-y: 0px;
+    in-out property <length> workspace-sftp-row-height: 40px;
+    in-out property <int> workspace-sftp-total-row-count: 0;
     in-out property <length> workspace-sftp-total-content-height: 0px;
     in-out property <length> workspace-sftp-top-spacer-height: 0px;
     in-out property <length> workspace-sftp-bottom-spacer-height: 0px;
@@ -1075,6 +1078,9 @@ export component AppWindow inherits Window {
                         workspace-sftp-can-go-up: root.workspace-sftp-can-go-up;
                         workspace-sftp-can-go-home: root.workspace-sftp-can-go-home;
                         workspace-sftp-actions-enabled: root.workspace-sftp-actions-enabled;
+                        workspace-sftp-viewport-y <=> root.workspace-sftp-viewport-y;
+                        workspace-sftp-row-height: root.workspace-sftp-row-height;
+                        workspace-sftp-total-row-count: root.workspace-sftp-total-row-count;
                         workspace-sftp-total-content-height: root.workspace-sftp-total-content-height;
                         workspace-sftp-top-spacer-height: root.workspace-sftp-top-spacer-height;
                         workspace-sftp-bottom-spacer-height: root.workspace-sftp-bottom-spacer-height;

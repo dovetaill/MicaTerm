@@ -219,6 +219,9 @@ pub(super) fn sync_workspace_sftp_state(window: &AppWindow, state: &mut ShellVie
     window.set_workspace_sftp_can_go_up(state.workspace_sftp_can_go_up());
     window.set_workspace_sftp_can_go_home(state.workspace_sftp_can_go_home());
     window.set_workspace_sftp_actions_enabled(state.workspace_sftp_actions_enabled());
+    window.set_workspace_sftp_viewport_y(state.workspace_sftp_viewport_y());
+    window.set_workspace_sftp_row_height(state.workspace_sftp_row_height_px());
+    window.set_workspace_sftp_total_row_count(state.workspace_sftp_total_row_count_i32());
     window.set_workspace_sftp_total_content_height(state.workspace_sftp_total_content_height_px());
     window.set_workspace_sftp_top_spacer_height(state.workspace_sftp_top_spacer_height_px());
     window.set_workspace_sftp_bottom_spacer_height(state.workspace_sftp_bottom_spacer_height_px());
@@ -3040,6 +3043,7 @@ pub(super) fn bind_sftp_callbacks(
                 && let Some((browser_session_id, session_id)) =
                     active_workspace_sftp_request_identity(&state)
             {
+                let _ = state.schedule_active_workspace_sftp_viewport_reset();
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
                     controller.navigate_up_browser_session(browser_session_id.as_str(), session_id)
@@ -3065,6 +3069,7 @@ pub(super) fn bind_sftp_callbacks(
                     && let Some((browser_session_id, session_id)) =
                         active_workspace_sftp_request_identity(&state)
                 {
+                    let _ = state.schedule_active_workspace_sftp_viewport_reset();
                     let request = {
                         let mut controller = sftp_browser_controller_ref.borrow_mut();
                         controller.navigate_browser_session(
@@ -3126,6 +3131,7 @@ pub(super) fn bind_sftp_callbacks(
                 active_workspace_sftp_request_identity(&state)
             {
                 state.finish_workspace_sftp_path_edit();
+                let _ = state.schedule_active_workspace_sftp_viewport_reset();
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
                     controller.navigate_browser_session(
@@ -3181,6 +3187,7 @@ pub(super) fn bind_sftp_callbacks(
                 active_workspace_sftp_request_identity(&state)
             {
                 state.finish_workspace_sftp_path_edit();
+                let _ = state.schedule_active_workspace_sftp_viewport_reset();
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
                     controller.navigate_browser_session(
@@ -3232,6 +3239,7 @@ pub(super) fn bind_sftp_callbacks(
             if let Some((browser_session_id, session_id)) =
                 active_workspace_sftp_request_identity(&state)
             {
+                let _ = state.schedule_active_workspace_sftp_viewport_reset();
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
                     controller
@@ -3280,6 +3288,7 @@ pub(super) fn bind_sftp_callbacks(
             if let Some((browser_session_id, session_id)) =
                 active_workspace_sftp_request_identity(&state)
             {
+                let _ = state.schedule_active_workspace_sftp_viewport_reset();
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
                     controller
@@ -3328,6 +3337,7 @@ pub(super) fn bind_sftp_callbacks(
             if let Some((browser_session_id, session_id)) =
                 active_workspace_sftp_request_identity(&state)
             {
+                let _ = state.schedule_active_workspace_sftp_viewport_reset();
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
                     controller.navigate_up_browser_session(browser_session_id.as_str(), session_id)
@@ -3375,6 +3385,7 @@ pub(super) fn bind_sftp_callbacks(
             if let Some((browser_session_id, session_id)) =
                 active_workspace_sftp_request_identity(&state)
             {
+                let _ = state.schedule_active_workspace_sftp_viewport_reset();
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
                     controller.refresh_browser_session(browser_session_id.as_str(), session_id)
@@ -3471,6 +3482,7 @@ pub(super) fn bind_sftp_callbacks(
                 && let Some((browser_session_id, session_id)) =
                     active_workspace_sftp_request_identity(&state)
             {
+                let _ = state.schedule_active_workspace_sftp_viewport_reset();
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
                     controller.navigate_browser_session(

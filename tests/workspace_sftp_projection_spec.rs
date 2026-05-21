@@ -1,8 +1,8 @@
 use std::fs;
 
 use mica_term::app::sftp::{
-    FileBrowserSession, HostProfileRef, SftpDirectoryEntry, SftpDirectoryEntryKind,
-    SftpFollowMode, SftpPanelMode, SftpPathHistory,
+    FileBrowserSession, HostProfileRef, SftpDirectoryEntry, SftpDirectoryEntryKind, SftpFollowMode,
+    SftpPanelMode, SftpPathHistory,
 };
 use mica_term::app::ssh::runtime::TerminalSurfaceState;
 use mica_term::app::ssh::session_manager::{EnhancedSessionState, SessionHandle, SessionState};
@@ -46,7 +46,10 @@ fn sample_sftp_entry(
     }
 }
 
-fn sample_workspace_sftp_session(mode: SftpPanelMode, follow_mode: SftpFollowMode) -> FileBrowserSession {
+fn sample_workspace_sftp_session(
+    mode: SftpPanelMode,
+    follow_mode: SftpFollowMode,
+) -> FileBrowserSession {
     FileBrowserSession {
         file_browser_session_id: "browser-1".into(),
         host_profile_ref: HostProfileRef::with_label("asset-prod", "Interserver"),
@@ -440,15 +443,21 @@ fn workspace_sftp_projection_contract_threads_richer_rows_and_incremental_sync_i
 
 #[test]
 fn workspace_sftp_row_height_contract_matches_the_slint_host() {
+    let bootstrap = fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read sftp bootstrap");
     let sftp_view_model =
         fs::read_to_string("src/shell/view_model/sftp.rs").expect("read sftp view model");
     let host =
         fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
 
     assert!(
-        sftp_view_model.contains("const SFTP_PANEL_ROW_HEIGHT_PX: u32 = 40;")
-            && host.contains("height: 40px;"),
-        "workspace virtualization must share one 40px row-height contract across Rust and Slint so scrolling math does not drift between visible rows and spacer heights"
+        sftp_view_model.contains("const WORKSPACE_SFTP_ROW_HEIGHT_PX: u32 = 40;")
+            && sftp_view_model.contains("pub fn workspace_sftp_row_height_px(&self) -> f32 {")
+            && bootstrap.contains(
+                "window.set_workspace_sftp_row_height(state.workspace_sftp_row_height_px());"
+            )
+            && host.contains("in property <length> workspace-sftp-row-height: 40px;")
+            && host.contains("height: root.workspace-sftp-row-height;"),
+        "workspace virtualization must project one 40px row-height contract from Rust into Slint so the render math and the host row boxes cannot drift apart"
     );
 }
 
@@ -487,5 +496,40 @@ fn workspace_sftp_submitting_root_path_resets_the_virtual_viewport_to_the_top() 
             .take(8)
             .any(|row| row.name == "home"),
         "once `/` is projected from the top, the first visible workspace rows should include early root entries such as `home`"
+    );
+}
+
+#[test]
+fn workspace_sftp_refresh_completion_resets_the_virtual_viewport_to_the_top() {
+    let session = root_scroll_fixture_session("/srv/app/releases");
+    let sftp_tab = WorkspaceTab::sftp(
+        "tab-files-refresh",
+        session.file_browser_session_id.clone(),
+        "Files: Refresh",
+    );
+    let mut view_model = ShellViewModel::default();
+    view_model.set_file_browser_session(session.clone());
+    view_model.set_workspace_tabs(vec![sftp_tab]);
+
+    assert!(
+        view_model.update_workspace_sftp_viewport(-560.0, 160.0),
+        "scroll fixture should move the virtual workspace viewport away from the top before refresh resets are asserted"
+    );
+    assert!(
+        view_model.workspace_sftp_top_spacer_height_px() > 0.0,
+        "scroll fixture should start from a non-zero spacer height"
+    );
+
+    assert!(view_model.refresh_workspace_sftp());
+
+    let mut refreshed = session;
+    refreshed.mark_ready();
+    refreshed.entries.reverse();
+    view_model.set_file_browser_session(refreshed);
+
+    assert_eq!(
+        view_model.workspace_sftp_top_spacer_height_px(),
+        0.0,
+        "completing a workspace refresh should reset the controlled viewport to the top instead of preserving the stale scroll window from the previous render"
     );
 }

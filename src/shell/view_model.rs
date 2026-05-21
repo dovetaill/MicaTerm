@@ -713,6 +713,7 @@ pub struct SftpPanelRenderRow {
 pub struct SftpPanelRenderCache {
     pub rows: Vec<SftpPanelRenderRow>,
     pub row_index_by_entry_id: HashMap<String, usize>,
+    pub row_height_px: u32,
     pub viewport_offset_px: u32,
     pub viewport_height_px: u32,
     pub window_start_row: usize,
@@ -722,6 +723,7 @@ pub struct SftpPanelRenderCache {
     pub bottom_spacer_height_px: u32,
     pub dirty_row_indices: Vec<usize>,
     pub full_resync_required: bool,
+    pub pending_viewport_reset: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1862,6 +1864,7 @@ impl ShellViewModel {
             self.active_workspace_terminal_surface = None;
         }
         self.show_welcome = self.workspace_tabs.is_empty();
+        let _ = self.reconcile_sftp_panel_row_height_contracts();
         let next_summary = crate::app::sftp::TransferQueueSummary::from_tasks(
             &self.sftp_transfer_tasks,
             self.active_workspace_terminal_session_id(),
