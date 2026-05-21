@@ -4,7 +4,7 @@ use std::time::Duration;
 use i_slint_backend_testing::ElementHandle;
 use mica_term::{AppWindow, SftpBreadcrumbItem};
 use slint::platform::{PointerEventButton, WindowEvent};
-use slint::{ComponentHandle, LogicalPosition, ModelRc, VecModel};
+use slint::{ComponentHandle, LogicalPosition, ModelRc, PhysicalSize, VecModel};
 
 fn click_element(app: &AppWindow, element: &ElementHandle) {
     let position = LogicalPosition::new(
@@ -380,6 +380,49 @@ fn workspace_toolbar_action_width_tiers_switch_between_full_labels_and_icon_only
 }
 
 #[test]
+fn workspace_compact_width_hides_optional_size_column_before_name_column_is_clipped() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().expect("create app window");
+    app.set_workspace_session_host_mode("sftp".into());
+    app.set_workspace_sftp_actions_enabled(true);
+    app.window().set_size(PhysicalSize::new(860, 720));
+    app.show().expect("show app window");
+    slint::platform::update_timers_and_animations();
+
+    let name_header = ElementHandle::find_by_element_id(
+        &app,
+        "SftpWorkspaceHost::workspace-table-header-name",
+    )
+    .chain(ElementHandle::find_by_element_id(
+        &app,
+        "workspace-table-header-name",
+    ))
+    .next()
+    .expect("workspace name header");
+
+    assert!(
+        name_header.size().width >= 160.0,
+        "compact workspace widths should protect the primary Name column instead of letting optional columns squeeze it down to an unreadable stub"
+    );
+
+    let size_header = ElementHandle::find_by_element_id(
+        &app,
+        "SftpWorkspaceHost::workspace-table-header-size",
+    )
+    .chain(ElementHandle::find_by_element_id(
+        &app,
+        "workspace-table-header-size",
+    ))
+    .next();
+
+    assert!(
+        size_header.is_none(),
+        "compact workspace widths should collapse the optional Size column entirely so Name remains the stable primary column"
+    );
+}
+
+#[test]
 fn workspace_viewport_contract_is_projected_from_the_vm_into_the_host() {
     let host =
         fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
@@ -430,6 +473,27 @@ fn workspace_statusbar_item_count_must_not_use_the_visible_row_slice_length() {
             && !host.contains("return \"\" + root.workspace-sftp-items.length + \" items\";"),
         "workspace status summaries should use the projected full row count instead of the currently visible virtual window length"
     );
+}
+
+#[test]
+fn workspace_statusbar_contract_keeps_connection_counts_path_binding_and_transfer_entry_visible() {
+    let host =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    for contract in [
+        "text: root.status-label();",
+        "text: root.statusbar-item-count();",
+        "text: root.statusbar-selection-count();",
+        "text: root.workspace-sftp-path == \"\" ? \"/\" : root.workspace-sftp-path;",
+        "text: root.workspace-sftp-binding-label == \"\" ? \"SFTP\" : root.workspace-sftp-binding-label;",
+        "transfer-entry := Rectangle {",
+        "text: root.transfer-entry-label();",
+    ] {
+        assert!(
+            host.contains(contract),
+            "workspace status bar should keep the full contract `{contract}` visible instead of collapsing semantics into a single vague footer label"
+        );
+    }
 }
 
 #[test]

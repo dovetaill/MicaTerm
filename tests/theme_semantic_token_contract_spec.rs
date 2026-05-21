@@ -551,4 +551,17 @@ fn theme_semantic_token_contract_spec_workspace_sftp_host_stays_on_runtime_shell
             "SFTP workspace host should not hardcode Ayu palette literal `{banned}` because runtime shell/session projection remains the single active source of truth"
         );
     }
+    for status_contract in [
+        "ThemeTokens.status-busy-surface",
+        "ThemeTokens.status-success-surface",
+        "ThemeTokens.status-error-surface",
+        "ThemeTokens.status-busy-accent",
+        "ThemeTokens.status-success-accent",
+        "ThemeTokens.status-error-accent",
+    ] {
+        assert!(
+            host.contains(status_contract),
+            "workspace content states should keep using semantic status token `{status_contract}` instead of introducing a detached content-state palette"
+        );
+    }
 }

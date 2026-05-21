@@ -917,7 +917,7 @@ export component SftpWorkspaceHost inherits Rectangle {
                     height: parent.height;
                     spacing: 12px;
 
-                    Rectangle {
+                    workspace-table-header-name := Rectangle {
                         horizontal-stretch: 1;
                         min-width: 120px;
                         background: transparent;
@@ -952,7 +952,7 @@ export component SftpWorkspaceHost inherits Rectangle {
                         }
                     }
 
-                    Rectangle {
+                    if root.workspace-width-tier() != "compact" : workspace-table-header-size := Rectangle {
                         width: 76px;
                         background: transparent;
 
@@ -1207,7 +1207,7 @@ export component SftpWorkspaceHost inherits Rectangle {
                                         }
                                     }
 
-                                    Rectangle {
+                                    if root.workspace-width-tier() != "compact" : workspace-row-size-cell := Rectangle {
                                         width: 76px;
                                         background: transparent;
 
