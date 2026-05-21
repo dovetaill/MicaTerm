@@ -307,6 +307,7 @@ export component SftpWorkspaceHost inherits Rectangle {
     private property <image> copy-icon: @image-url("../../assets/icons/fluent/copy-20-regular.svg");
     private property <image> chevron-right-icon: @image-url("../../assets/icons/fluent/chevron-right-20-regular.svg");
     private property <image> link-icon: @image-url("../../assets/icons/fluent/link-20-regular.svg");
+    private property <image> dismiss-icon: @image-url("../../assets/icons/fluent/dismiss-20-regular.svg");
     private property <image> document-icon: @image-url("../../assets/icons/fluent/document-20-regular.svg");
     private property <image> document-code-icon: @image-url("../../assets/icons/fluent/document-code-16-regular.svg");
     private property <image> archive-icon: @image-url("../../assets/icons/fluent/archive-20-regular.svg");
@@ -327,7 +328,7 @@ export component SftpWorkspaceHost inherits Rectangle {
         return root.width < 1120px;
     }
 
-    function state-overlay-visible() -> bool {
+    function content-state-visible() -> bool {
         return root.session-state == "connecting"
             || root.session-state == "loading"
             || root.session-state == "disconnected"
@@ -335,7 +336,7 @@ export component SftpWorkspaceHost inherits Rectangle {
             || (root.workspace-sftp-total-row-count == 0 && root.session-state != "connecting" && root.session-state != "loading");
     }
 
-    function state-heading() -> string {
+    function content-state-heading() -> string {
         if root.session-state == "connecting" {
             return "Connecting workspace";
         }
@@ -351,7 +352,7 @@ export component SftpWorkspaceHost inherits Rectangle {
         return "This directory is empty";
     }
 
-    function state-copy() -> string {
+    function content-state-copy() -> string {
         if root.session-state == "connecting" {
             return "The SFTP session is establishing in the background.";
         }
@@ -359,12 +360,43 @@ export component SftpWorkspaceHost inherits Rectangle {
             return "Fetching the latest remote snapshot without blocking the UI thread.";
         }
         if root.session-state == "disconnected" {
-            return "The linked SSH or SFTP transport is offline. Reconnect to resume browsing.";
+            return "The linked SSH or SFTP transport is offline.";
         }
         if root.session-state == "error" {
             return root.session-error-detail == "" ? "The last SFTP refresh failed." : root.session-error-detail;
         }
         return "Create a folder or upload a file to start working in this path.";
+    }
+
+    function content-state-meta() -> string {
+        if root.session-state == "disconnected" || root.session-state == "error" {
+            return "Last path: " + (root.workspace-sftp-path == "" ? "/" : root.workspace-sftp-path);
+        }
+        return "Path: " + (root.workspace-sftp-path == "" ? "/" : root.workspace-sftp-path);
+    }
+
+    function content-state-action-visible() -> bool {
+        return root.session-state == "disconnected" || root.session-state == "error";
+    }
+
+    function content-state-icon-surface() -> brush {
+        if root.session-state == "disconnected" || root.session-state == "error" {
+            return ThemeTokens.status-error-surface;
+        }
+        if root.session-state == "connecting" || root.session-state == "loading" {
+            return ThemeTokens.status-busy-surface;
+        }
+        return ThemeTokens.status-success-surface;
+    }
+
+    function content-state-icon-accent() -> brush {
+        if root.session-state == "disconnected" || root.session-state == "error" {
+            return ThemeTokens.status-error-accent;
+        }
+        if root.session-state == "connecting" || root.session-state == "loading" {
+            return ThemeTokens.status-busy-accent;
+        }
+        return ThemeTokens.status-success-accent;
     }
 
     function header-title() -> string {
@@ -1011,7 +1043,7 @@ export component SftpWorkspaceHost inherits Rectangle {
                 background: transparent;
                 clip: true;
 
-                list-host := ScrollView {
+                if !root.content-state-visible() : list-host := ScrollView {
                     x: 0px;
                     y: 0px;
                     width: parent.width;
@@ -1297,38 +1329,49 @@ export component SftpWorkspaceHost inherits Rectangle {
                     }
                 }
 
-                if root.state-overlay-visible() : state-overlay := Rectangle {
+                if root.content-state-visible() : content-state-surface := Rectangle {
                     x: 0px;
                     y: 0px;
                     width: parent.width;
                     height: parent.height;
                     background: transparent;
 
-                    overlay-card := Rectangle {
+                    content-state-column := Rectangle {
                         x: (parent.width - self.width) / 2;
                         y: max(24px, (parent.height - self.height) / 2);
                         width: min(parent.width - 48px, 420px);
-                        height: 138px;
-                        border-radius: 6px;
-                        border-width: 1px;
-                        border-color: root.workspace-session-frame-border;
-                        background: ThemeTokens.panel-surface;
+                        height: 196px;
+                        background: transparent;
 
-                        WorkspaceStatusDot {
+                        state-icon-shell := Rectangle {
                             x: (parent.width - self.width) / 2;
-                            y: 24px;
-                            width: 10px;
-                            height: 10px;
-                            border-radius: 5px;
-                            dot-color: root.status-dot-color();
+                            y: 0px;
+                            width: 44px;
+                            height: 44px;
+                            border-radius: 22px;
+                            background: root.content-state-icon-surface();
+
+                            Image {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: 18px;
+                                height: 18px;
+                                source: root.session-state == "disconnected" || root.session-state == "error"
+                                    ? root.dismiss-icon
+                                    : root.session-state == "connecting" || root.session-state == "loading"
+                                        ? root.arrow-sync-icon
+                                        : root.folder-open-icon;
+                                image-fit: contain;
+                                colorize: root.content-state-icon-accent();
+                            }
                         }
 
                         Text {
                             x: 20px;
-                            y: 44px;
+                            y: 58px;
                             width: parent.width - 40px;
                             height: 24px;
-                            text: root.state-heading();
+                            text: root.content-state-heading();
                             font-family: AppTypography.ui-font-family;
                             font-size: AppTypography.ui-font-size-body;
                             font-weight: AppTypography.ui-font-weight-semibold;
@@ -1340,10 +1383,10 @@ export component SftpWorkspaceHost inherits Rectangle {
 
                         Text {
                             x: 20px;
-                            y: 72px;
+                            y: 90px;
                             width: parent.width - 40px;
-                            height: 32px;
-                            text: root.state-copy();
+                            height: 34px;
+                            text: root.content-state-copy();
                             font-family: AppTypography.ui-font-family;
                             font-size: AppTypography.ui-font-size-caption;
                             font-weight: AppTypography.ui-font-weight-regular;
@@ -1353,9 +1396,24 @@ export component SftpWorkspaceHost inherits Rectangle {
                             wrap: word-wrap;
                         }
 
-                        if root.session-state == "error" || root.session-state == "disconnected" : reconnect-button := WorkspaceActionButton {
+                        Text {
+                            x: 20px;
+                            y: 130px;
+                            width: parent.width - 40px;
+                            height: 18px;
+                            text: root.content-state-meta();
+                            font-family: AppTypography.ui-font-family;
+                            font-size: AppTypography.ui-font-size-caption;
+                            font-weight: AppTypography.ui-font-weight-regular;
+                            color: root.shell-text-muted;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+
+                        if root.content-state-action-visible() : reconnect-button := WorkspaceActionButton {
                             x: (parent.width - self.width) / 2;
-                            y: parent.height - self.height - 16px;
+                            y: 164px;
                             width: 122px;
                             icon-source: root.arrow-sync-icon;
                             label: "Reconnect";

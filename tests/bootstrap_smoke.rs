@@ -647,6 +647,27 @@ fn path_errors_render_as_lightweight_status_rows_instead_of_full_height_empty_ca
 }
 
 #[test]
+fn workspace_sftp_states_render_as_inline_content_surfaces_instead_of_overlay_cards() {
+    let host_source =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read workspace host");
+
+    assert!(
+        host_source.contains("content-state-surface := Rectangle {"),
+        "workspace SFTP should render loading, disconnected, empty, and error states through a centered content-state surface inside the table body"
+    );
+    assert!(
+        host_source.contains("The linked SSH or SFTP transport is offline.")
+            && host_source.contains("Last path: ")
+            && host_source.contains("label: \"Reconnect\";"),
+        "workspace disconnected content states should preserve the required copy and a real reconnect action"
+    );
+    assert!(
+        !host_source.contains("overlay-card := Rectangle"),
+        "workspace SFTP states should stop using the modal-like overlay-card shell once the productized content surface lands"
+    );
+}
+
+#[test]
 fn transfer_center_projection_contract_includes_completed_file_actions() {
     let shell_chrome_source =
         fs::read_to_string("src/app/bootstrap/shell_chrome.rs").expect("read shell chrome");
