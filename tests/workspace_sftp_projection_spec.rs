@@ -462,7 +462,38 @@ fn workspace_sftp_row_height_contract_matches_the_slint_host() {
 }
 
 #[test]
-fn workspace_sftp_submitting_root_path_resets_the_virtual_viewport_to_the_top() {
+fn workspace_sftp_projects_full_row_sets_for_workspace_paths_instead_of_a_virtual_slice() {
+    for current_path in ["/", "/home", "/home/wwwroot"] {
+        let session = root_scroll_fixture_session(current_path);
+        let sftp_tab = WorkspaceTab::sftp(
+            &format!("tab-files-{current_path}"),
+            session.file_browser_session_id.clone(),
+            "Files: Root",
+        );
+        let mut view_model = ShellViewModel::default();
+        view_model.set_file_browser_session(session);
+        view_model.set_workspace_tabs(vec![sftp_tab]);
+
+        let rows = view_model.workspace_sftp_render_rows();
+
+        assert_eq!(
+            rows.len(),
+            view_model.workspace_sftp_total_row_count(),
+            "workspace path `{current_path}` should project the full row set so the main SFTP workspace can scroll through every item instead of only showing a virtual window slice"
+        );
+        assert!(
+            rows.iter().any(|row| row.name == "home"),
+            "workspace path `{current_path}` should keep early directory rows such as `home` in the projected model"
+        );
+        assert!(
+            rows.iter().any(|row| row.name == "zzz-last"),
+            "workspace path `{current_path}` should keep late directory rows such as `zzz-last` in the projected model"
+        );
+    }
+}
+
+#[test]
+fn workspace_sftp_submitting_root_path_resets_the_controlled_viewport_to_the_top() {
     let session = root_scroll_fixture_session("/srv/app/releases");
     let sftp_tab = WorkspaceTab::sftp(
         "tab-files-root",
@@ -475,32 +506,36 @@ fn workspace_sftp_submitting_root_path_resets_the_virtual_viewport_to_the_top() 
 
     assert!(
         view_model.update_workspace_sftp_viewport(-14.0 * 44.0, 160.0),
-        "scroll fixture should move the virtual workspace viewport away from the top before navigation resets are asserted"
+        "scroll fixture should move the controlled workspace viewport away from the top before navigation resets are asserted"
     );
     assert!(
-        view_model.workspace_sftp_top_spacer_height_px() > 0.0,
-        "scroll fixture should start from a non-zero spacer height"
+        view_model.workspace_sftp_viewport_y() < 0.0,
+        "scroll fixture should start from a non-zero viewport offset"
     );
 
     assert!(view_model.submit_workspace_sftp_path("/"));
 
     assert_eq!(
-        view_model.workspace_sftp_top_spacer_height_px(),
+        view_model.workspace_sftp_viewport_y(),
         0.0,
         "navigating the workspace to `/` should reset the controlled viewport to the top instead of preserving a stale scrolled window from the previous directory"
+    );
+    assert_eq!(
+        view_model.workspace_sftp_render_rows().len(),
+        view_model.workspace_sftp_total_row_count(),
+        "navigating the workspace to `/` should still leave the full root row set projected into the main workspace model"
     );
     assert!(
         view_model
             .workspace_sftp_render_rows()
             .iter()
-            .take(8)
             .any(|row| row.name == "home"),
-        "once `/` is projected from the top, the first visible workspace rows should include early root entries such as `home`"
+        "once `/` is projected from the top, the workspace rows should still include early root entries such as `home`"
     );
 }
 
 #[test]
-fn workspace_sftp_refresh_completion_resets_the_virtual_viewport_to_the_top() {
+fn workspace_sftp_refresh_completion_resets_the_controlled_viewport_to_the_top() {
     let session = root_scroll_fixture_session("/srv/app/releases");
     let sftp_tab = WorkspaceTab::sftp(
         "tab-files-refresh",
@@ -513,11 +548,11 @@ fn workspace_sftp_refresh_completion_resets_the_virtual_viewport_to_the_top() {
 
     assert!(
         view_model.update_workspace_sftp_viewport(-560.0, 160.0),
-        "scroll fixture should move the virtual workspace viewport away from the top before refresh resets are asserted"
+        "scroll fixture should move the controlled workspace viewport away from the top before refresh resets are asserted"
     );
     assert!(
-        view_model.workspace_sftp_top_spacer_height_px() > 0.0,
-        "scroll fixture should start from a non-zero spacer height"
+        view_model.workspace_sftp_viewport_y() < 0.0,
+        "scroll fixture should start from a non-zero viewport offset"
     );
 
     assert!(view_model.refresh_workspace_sftp());
@@ -528,8 +563,13 @@ fn workspace_sftp_refresh_completion_resets_the_virtual_viewport_to_the_top() {
     view_model.set_file_browser_session(refreshed);
 
     assert_eq!(
-        view_model.workspace_sftp_top_spacer_height_px(),
+        view_model.workspace_sftp_viewport_y(),
         0.0,
         "completing a workspace refresh should reset the controlled viewport to the top instead of preserving the stale scroll window from the previous render"
+    );
+    assert_eq!(
+        view_model.workspace_sftp_render_rows().len(),
+        view_model.workspace_sftp_total_row_count(),
+        "refresh completion should keep the full workspace row set projected so the rebuilt directory listing remains fully scrollable"
     );
 }

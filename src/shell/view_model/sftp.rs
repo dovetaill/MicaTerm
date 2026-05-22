@@ -401,13 +401,7 @@ impl ShellViewModel {
                 row.selected = next_selection.contains(row.id.as_str());
             }
         }
-        render_cache.dirty_row_indices = dirty_row_indices
-            .into_iter()
-            .filter(|index| {
-                *index >= render_cache.window_start_row && *index < render_cache.window_end_row
-            })
-            .map(|index| index - render_cache.window_start_row)
-            .collect();
+        render_cache.dirty_row_indices = dirty_row_indices;
         render_cache.full_resync_required = false;
         true
     }
@@ -520,10 +514,20 @@ impl ShellViewModel {
             .unwrap_or(0..0)
     }
 
-    pub fn active_sftp_panel_render_dirty_indices(&self) -> &[usize] {
+    pub fn active_sftp_panel_render_dirty_indices(&self) -> Vec<usize> {
         self.active_sftp_panel_render_cache()
-            .map(|cache| cache.dirty_row_indices.as_slice())
-            .unwrap_or(&[])
+            .map(|cache| {
+                cache
+                    .dirty_row_indices
+                    .iter()
+                    .copied()
+                    .filter(|index| {
+                        *index >= cache.window_start_row && *index < cache.window_end_row
+                    })
+                    .map(|index| index - cache.window_start_row)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub fn active_sftp_panel_render_requires_full_resync(&self) -> bool {
@@ -534,7 +538,7 @@ impl ShellViewModel {
 
     pub fn workspace_sftp_render_rows(&self) -> &[SftpPanelRenderRow] {
         self.workspace_sftp_render_cache()
-            .and_then(|cache| cache.rows.get(cache.window_start_row..cache.window_end_row))
+            .map(|cache| cache.rows.as_slice())
             .unwrap_or(&[])
     }
 
@@ -554,10 +558,10 @@ impl ShellViewModel {
             .unwrap_or(0)
     }
 
-    pub fn workspace_sftp_render_dirty_indices(&self) -> &[usize] {
+    pub fn workspace_sftp_render_dirty_indices(&self) -> Vec<usize> {
         self.workspace_sftp_render_cache()
-            .map(|cache| cache.dirty_row_indices.as_slice())
-            .unwrap_or(&[])
+            .map(|cache| cache.dirty_row_indices.clone())
+            .unwrap_or_default()
     }
 
     pub fn workspace_sftp_render_requires_full_resync(&self) -> bool {
@@ -675,15 +679,11 @@ impl ShellViewModel {
     }
 
     pub fn workspace_sftp_top_spacer_height_px(&self) -> f32 {
-        self.workspace_sftp_render_cache()
-            .map(|cache| cache.top_spacer_height_px as f32)
-            .unwrap_or(0.0)
+        0.0
     }
 
     pub fn workspace_sftp_bottom_spacer_height_px(&self) -> f32 {
-        self.workspace_sftp_render_cache()
-            .map(|cache| cache.bottom_spacer_height_px as f32)
-            .unwrap_or(0.0)
+        0.0
     }
 
     pub fn mark_workspace_sftp_render_clean(&mut self) -> bool {

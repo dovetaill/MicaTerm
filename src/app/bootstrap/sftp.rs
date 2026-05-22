@@ -170,7 +170,7 @@ pub(super) fn sync_sftp_panel_state(window: &AppWindow, state: &mut ShellViewMod
     let dirty_row_indices = if force_full_resync {
         Vec::new()
     } else {
-        state.active_sftp_panel_render_dirty_indices().to_vec()
+        state.active_sftp_panel_render_dirty_indices()
     };
     if force_full_resync || !dirty_row_indices.is_empty() {
         sync_sftp_panel_items_model(
@@ -256,7 +256,7 @@ pub(super) fn sync_workspace_sftp_state(window: &AppWindow, state: &mut ShellVie
     let dirty_row_indices = if force_full_resync {
         Vec::new()
     } else {
-        state.workspace_sftp_render_dirty_indices().to_vec()
+        state.workspace_sftp_render_dirty_indices()
     };
     if force_full_resync || !dirty_row_indices.is_empty() {
         sync_sftp_panel_items_model(
