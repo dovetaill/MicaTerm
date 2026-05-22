@@ -284,7 +284,7 @@ export component SftpWorkspaceHost inherits Rectangle {
     callback workspace-sftp-path-submitted(string);
     callback workspace-sftp-breadcrumb-clicked(string);
     callback workspace-sftp-viewport-changed(length, length);
-    callback workspace-sftp-item-selected(string);
+    callback workspace-sftp-item-selected(string, bool, bool);
     callback workspace-sftp-item-activated(string, string);
     callback workspace-sftp-context-menu-requested(string, string, length, length);
     callback workspace-sftp-upload-requested();
@@ -1321,16 +1321,18 @@ export component SftpWorkspaceHost inherits Rectangle {
                                     width: parent.width;
                                     height: parent.height;
 
-                                    clicked => {
-                                        root.workspace-sftp-item-selected(item.id);
-                                    }
-
                                     double-clicked => {
                                         root.workspace-sftp-item-activated(item.id, item.kind);
                                     }
 
                                     pointer-event(event) => {
-                                        if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                                        if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                                            root.workspace-sftp-item-selected(
+                                                item.id,
+                                                event.modifiers.control,
+                                                event.modifiers.shift,
+                                            );
+                                        } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
                                             root.workspace-sftp-context-menu-requested(
                                                 item.id,
                                                 item.kind == "parent-directory"

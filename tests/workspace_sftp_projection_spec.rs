@@ -83,6 +83,7 @@ fn sample_workspace_sftp_session(
             ),
         ],
         selected_entry_ids: vec!["/srv/app/releases/release.tar.gz".into()],
+        selection_anchor_entry_id: Some("/srv/app/releases/release.tar.gz".into()),
         last_error: None,
         active_request_id: None,
         sort_state: Default::default(),
@@ -144,6 +145,7 @@ fn root_scroll_fixture_session(current_path: &str) -> FileBrowserSession {
             })
             .collect(),
         selected_entry_ids: vec![],
+        selection_anchor_entry_id: None,
         last_error: None,
         active_request_id: None,
         sort_state: Default::default(),
@@ -458,6 +460,91 @@ fn workspace_sftp_row_height_contract_matches_the_slint_host() {
             && host.contains("in property <length> workspace-sftp-row-height: 40px;")
             && host.contains("height: root.workspace-sftp-row-height;"),
         "workspace virtualization must project one 40px row-height contract from Rust into Slint so the render math and the host row boxes cannot drift apart"
+    );
+}
+
+#[test]
+fn workspace_sftp_selection_state_contract_exposes_anchor_and_modifier_aware_selection_flow() {
+    let browser_session =
+        fs::read_to_string("src/app/sftp/browser_session.rs").expect("read browser session");
+    let sftp_view_model =
+        fs::read_to_string("src/shell/view_model/sftp.rs").expect("read sftp view model");
+    let bootstrap = fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read sftp bootstrap");
+
+    assert!(
+        browser_session.contains("pub selection_anchor_entry_id: Option<String>,"),
+        "workspace SFTP sessions should retain a selection anchor so Shift+click can select a contiguous range inside the current directory order"
+    );
+    assert!(
+        sftp_view_model.contains("pub fn select_sftp_panel_entry_with_modifiers(")
+            && sftp_view_model.contains("ctrl: bool,")
+            && sftp_view_model.contains("shift: bool,"),
+        "the SFTP view-model should expose one modifier-aware selection reducer instead of forcing bootstrap to reimplement click, Ctrl+click, and Shift+click behavior ad hoc"
+    );
+    assert!(
+        bootstrap.contains("state.select_sftp_panel_entry_with_modifiers("),
+        "workspace bootstrap should route row selection through the shared modifier-aware reducer instead of hard-wiring every click to single-select"
+    );
+}
+
+#[test]
+fn workspace_sftp_ctrl_click_toggles_entries_without_collapsing_to_single_select() {
+    let session = root_scroll_fixture_session("/");
+    let sftp_tab = WorkspaceTab::sftp(
+        "tab-files-ctrl",
+        session.file_browser_session_id.clone(),
+        "Files: Root",
+    );
+    let mut view_model = ShellViewModel::default();
+    view_model.set_file_browser_session(session);
+    view_model.set_workspace_tabs(vec![sftp_tab]);
+
+    assert!(view_model.select_sftp_panel_entry_with_modifiers("root-boot", false, false));
+    assert_eq!(
+        view_model.workspace_sftp_selected_entry_ids(),
+        ["root-boot"],
+        "plain click should keep the workspace selection anchored to the clicked row"
+    );
+
+    assert!(view_model.select_sftp_panel_entry_with_modifiers("root-home", true, false));
+    assert_eq!(
+        view_model.workspace_sftp_selected_entry_ids(),
+        ["root-boot", "root-home"],
+        "Ctrl+click should add the clicked row to the existing workspace selection instead of replacing it"
+    );
+
+    assert!(view_model.select_sftp_panel_entry_with_modifiers("root-boot", true, false));
+    assert_eq!(
+        view_model.workspace_sftp_selected_entry_ids(),
+        ["root-home"],
+        "Ctrl+click on an already selected row should toggle just that row off without clearing the remaining selection"
+    );
+}
+
+#[test]
+fn workspace_sftp_shift_click_selects_a_contiguous_range_from_the_anchor() {
+    let session = root_scroll_fixture_session("/");
+    let sftp_tab = WorkspaceTab::sftp(
+        "tab-files-shift",
+        session.file_browser_session_id.clone(),
+        "Files: Root",
+    );
+    let mut view_model = ShellViewModel::default();
+    view_model.set_file_browser_session(session);
+    view_model.set_workspace_tabs(vec![sftp_tab]);
+
+    assert!(view_model.select_sftp_panel_entry_with_modifiers("root-boot", false, false));
+    assert!(view_model.select_sftp_panel_entry_with_modifiers("root-home", false, true));
+
+    assert_eq!(
+        view_model.workspace_sftp_selected_entry_ids(),
+        ["root-boot", "root-dev", "root-etc", "root-home"],
+        "Shift+click should select the contiguous rendered range from the current anchor to the clicked row"
+    );
+    assert_eq!(
+        view_model.workspace_sftp_selected_row_count(),
+        4,
+        "range selection should project every selected row into the workspace row-count summary"
     );
 }
 

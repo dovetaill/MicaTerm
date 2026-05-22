@@ -2,6 +2,7 @@
 
 use super::*;
 use chrono::{DateTime, Utc};
+use std::collections::HashSet;
 
 const QUICK_BROWSER_SFTP_ROW_HEIGHT_PX: u32 = 44;
 const WORKSPACE_SFTP_ROW_HEIGHT_PX: u32 = 40;
@@ -34,6 +35,44 @@ fn normalized_sftp_panel_viewport_offset_px(viewport_y: f32) -> u32 {
 
 fn normalized_sftp_panel_viewport_height_px(visible_height: f32) -> u32 {
     visible_height.max(0.0).round() as u32
+}
+
+fn ordered_sftp_selection(
+    projected_entry_ids: &[String],
+    selected_entry_ids: impl IntoIterator<Item = String>,
+) -> Vec<String> {
+    let selected_entry_ids = selected_entry_ids.into_iter().collect::<HashSet<_>>();
+    projected_entry_ids
+        .iter()
+        .filter(|entry_id| selected_entry_ids.contains(entry_id.as_str()))
+        .cloned()
+        .collect()
+}
+
+fn normalized_sftp_selection_anchor(
+    session: &FileBrowserSession,
+    projected_entry_ids: &[String],
+) -> Option<String> {
+    session
+        .selection_anchor_entry_id
+        .as_ref()
+        .filter(|entry_id| {
+            projected_entry_ids
+                .iter()
+                .any(|projected_id| projected_id == *entry_id)
+        })
+        .cloned()
+        .or_else(|| {
+            session
+                .selected_entry_ids
+                .iter()
+                .find(|entry_id| {
+                    projected_entry_ids
+                        .iter()
+                        .any(|projected_id| projected_id == *entry_id)
+                })
+                .cloned()
+        })
 }
 
 fn recompute_sftp_panel_virtual_window(render_cache: &mut SftpPanelRenderCache) -> bool {
@@ -159,8 +198,18 @@ impl ShellViewModel {
         self.show_global_menu = false;
     }
 
-    pub fn set_file_browser_session(&mut self, session: FileBrowserSession) {
+    pub fn set_file_browser_session(&mut self, mut session: FileBrowserSession) {
         let projection = self.build_sftp_panel_projection(&session);
+        let projected_entry_ids = projection
+            .iter()
+            .map(|entry| entry.id.clone())
+            .collect::<Vec<_>>();
+        session.selected_entry_ids = ordered_sftp_selection(
+            projected_entry_ids.as_slice(),
+            session.selected_entry_ids.clone(),
+        );
+        session.selection_anchor_entry_id =
+            normalized_sftp_selection_anchor(&session, projected_entry_ids.as_slice());
         let row_height_px =
             self.sftp_panel_row_height_px_for_session(session.file_browser_session_id.as_str());
         let previous_render_cache = self
@@ -449,11 +498,110 @@ impl ShellViewModel {
         true
     }
 
-    pub fn select_sftp_panel_entry(&mut self, entry_id: &str) -> bool {
-        if !self.replace_active_sftp_selection(vec![entry_id.to_string()]) {
+    fn set_active_sftp_selection_anchor(&mut self, next_anchor: Option<String>) -> bool {
+        let Some(state) = self.active_sftp_session_state_mut() else {
+            return false;
+        };
+        if state.selection_anchor_entry_id == next_anchor {
             return false;
         }
-        self.context_target_asset_id = Some(entry_id.to_string());
+        state.selection_anchor_entry_id = next_anchor;
+        true
+    }
+
+    pub fn select_sftp_panel_entry(&mut self, entry_id: &str) -> bool {
+        self.select_sftp_panel_entry_with_modifiers(entry_id, false, false)
+    }
+
+    pub fn select_sftp_panel_entry_with_modifiers(
+        &mut self,
+        entry_id: &str,
+        ctrl: bool,
+        shift: bool,
+    ) -> bool {
+        let Some(active_session_id) = self.active_file_browser_session_id().map(str::to_string)
+        else {
+            return false;
+        };
+        let Some(state) = self.file_browser_sessions.get(active_session_id.as_str()) else {
+            return false;
+        };
+        let projected_entry_ids = self
+            .sftp_panel_projection_cache
+            .get(active_session_id.as_str())
+            .map(|projection| {
+                projection
+                    .iter()
+                    .map(|entry| entry.id.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| {
+                self.build_sftp_panel_projection(state)
+                    .into_iter()
+                    .map(|entry| entry.id)
+                    .collect::<Vec<_>>()
+            });
+        let Some(target_index) = projected_entry_ids
+            .iter()
+            .position(|projected_id| projected_id == entry_id)
+        else {
+            return false;
+        };
+
+        let current_selection = ordered_sftp_selection(
+            projected_entry_ids.as_slice(),
+            state.selected_entry_ids.clone(),
+        );
+        let current_selection_set = current_selection.iter().cloned().collect::<HashSet<_>>();
+        let current_anchor =
+            normalized_sftp_selection_anchor(state, projected_entry_ids.as_slice());
+
+        let (next_selection, next_anchor) = if shift {
+            let anchor_id = current_anchor.unwrap_or_else(|| entry_id.to_string());
+            let anchor_index = projected_entry_ids
+                .iter()
+                .position(|projected_id| projected_id == &anchor_id)
+                .unwrap_or(target_index);
+            let range_start = anchor_index.min(target_index);
+            let range_end = anchor_index.max(target_index);
+            let range_selection = projected_entry_ids[range_start..=range_end].to_vec();
+            let next_selection = if ctrl {
+                ordered_sftp_selection(
+                    projected_entry_ids.as_slice(),
+                    current_selection_set
+                        .into_iter()
+                        .chain(range_selection.iter().cloned()),
+                )
+            } else {
+                range_selection
+            };
+            (next_selection, Some(anchor_id))
+        } else if ctrl {
+            let mut next_selection_set = current_selection_set;
+            if !next_selection_set.remove(entry_id) {
+                next_selection_set.insert(entry_id.to_string());
+            }
+            let next_selection =
+                ordered_sftp_selection(projected_entry_ids.as_slice(), next_selection_set);
+            let next_anchor = if next_selection
+                .iter()
+                .any(|selected_id| selected_id == entry_id)
+            {
+                Some(entry_id.to_string())
+            } else {
+                next_selection.last().cloned()
+            };
+            (next_selection, next_anchor)
+        } else {
+            (vec![entry_id.to_string()], Some(entry_id.to_string()))
+        };
+
+        let selection_changed = self.replace_active_sftp_selection(next_selection.clone());
+        let anchor_changed = self.set_active_sftp_selection_anchor(next_anchor);
+        if !selection_changed && !anchor_changed {
+            return false;
+        }
+        self.context_target_asset_id = next_selection.first().cloned();
         true
     }
 
@@ -878,9 +1026,7 @@ impl ShellViewModel {
 
     pub fn workspace_sftp_toolbar_disabled_reason(&self) -> &'static str {
         match self.active_workspace_sftp_session().map(|state| state.mode) {
-            Some(SftpPanelMode::Disconnected | SftpPanelMode::Error) => {
-                "Reconnect to browse files"
-            }
+            Some(SftpPanelMode::Disconnected | SftpPanelMode::Error) => "Reconnect to browse files",
             _ => "",
         }
     }
@@ -1050,6 +1196,7 @@ impl ShellViewModel {
         if !self.replace_active_sftp_selection(next_selection) {
             return false;
         }
+        let _ = self.set_active_sftp_selection_anchor(first_selected_id.clone());
         self.context_target_asset_id = first_selected_id;
         true
     }
@@ -1637,6 +1784,7 @@ impl ShellViewModel {
             if let Some(browser_session) = self.file_browser_sessions.get_mut(&browser_session_id) {
                 browser_session.navigate_manual(remote_dir);
                 browser_session.selected_entry_ids.clear();
+                browser_session.selection_anchor_entry_id = None;
                 browser_session.last_error = None;
             }
             let _ = self.schedule_sftp_panel_viewport_reset(browser_session_id.as_str());

@@ -3027,13 +3027,13 @@ pub(super) fn bind_sftp_callbacks(
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
-    window.on_workspace_sftp_item_selected(move |entry_id| {
+    window.on_workspace_sftp_item_selected(move |entry_id, ctrl, shift| {
         if entry_id.as_str() == SFTP_PARENT_ITEM_ID {
             return;
         }
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        if state.select_sftp_panel_entry(entry_id.as_str()) {
+        if state.select_sftp_panel_entry_with_modifiers(entry_id.as_str(), ctrl, shift) {
             super::sync_workspace_session_state_with_manager(
                 &window,
                 &mut state,

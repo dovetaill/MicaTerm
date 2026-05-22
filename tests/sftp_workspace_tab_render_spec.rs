@@ -56,6 +56,7 @@ fn workspace_pane_source_branches_to_sftp_workspace_host() {
         "workspace-sftp-path: root.workspace-sftp-path;",
         "workspace-sftp-items: root.workspace-sftp-items;",
         "workspace-sftp-selected-entry-ids: root.workspace-sftp-selected-entry-ids;",
+        "workspace-sftp-item-selected(item-id, ctrl, shift) => {",
         "workspace-sftp-back-requested => {",
         "workspace-sftp-path-submitted(path) => {",
         "workspace-sftp-item-activated(item-id, item-kind) => {",
@@ -76,12 +77,15 @@ fn app_window_source_threads_workspace_sftp_contract_into_workspace_pane() {
         "in-out property <[SftpBreadcrumbItem]> workspace-sftp-breadcrumb-items: [];",
         "callback workspace-sftp-path-submitted(string);",
         "callback workspace-sftp-breadcrumb-clicked(string);",
+        "callback workspace-sftp-item-selected(string, bool, bool);",
         "workspace-sftp-breadcrumb-items: root.workspace-sftp-breadcrumb-items;",
         "workspace-sftp-path-submitted(path) => {",
         "root.workspace-sftp-path-submitted(path);",
         "workspace-sftp-breadcrumb-clicked(path) => {",
         "root.workspace-sftp-breadcrumb-clicked(path);",
         "workspace-sftp-item-activated(item-id, item-kind) => {",
+        "workspace-sftp-item-selected(item-id, ctrl, shift) => {",
+        "root.workspace-sftp-item-selected(item-id, ctrl, shift);",
         "workspace-sftp-context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {",
     ] {
         assert!(
@@ -221,6 +225,40 @@ fn workspace_row_context_menu_maps_rows_to_sftp_target_kinds() {
             && source.contains("\"sftp-directory\"")
             && source.contains("\"sftp-file\""),
         "workspace row right-clicks should translate row kinds into the shared SFTP context-target ids instead of forwarding raw `directory`/`file` kinds into the assets menu router"
+    );
+}
+
+#[test]
+fn workspace_selection_modifier_contract_threads_ctrl_and_shift_across_the_workspace_chain() {
+    let host =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+    let workspace_pane =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let bootstrap = fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read sftp bootstrap");
+
+    assert!(
+        host.contains("callback workspace-sftp-item-selected(string, bool, bool);")
+            && host.contains("event.modifiers.control")
+            && host.contains("event.modifiers.shift")
+            && host.contains("root.workspace-sftp-item-selected("),
+        "workspace rows should emit ctrl/shift modifier state from the host instead of collapsing every click into an unqualified single-select callback"
+    );
+    assert!(
+        workspace_pane.contains("callback workspace-sftp-item-selected(string, bool, bool);")
+            && workspace_pane.contains("workspace-sftp-item-selected(item-id, ctrl, shift) => {")
+            && workspace_pane.contains("root.workspace-sftp-item-selected(item-id, ctrl, shift);"),
+        "WorkspacePane should forward ctrl/shift selection modifiers all the way through the workspace host contract"
+    );
+    assert!(
+        app_window.contains("callback workspace-sftp-item-selected(string, bool, bool);")
+            && app_window.contains("workspace-sftp-item-selected(item-id, ctrl, shift) => {")
+            && app_window.contains("root.workspace-sftp-item-selected(item-id, ctrl, shift);"),
+        "AppWindow should keep the same ctrl/shift selection callback shape so bootstrap can distinguish click, Ctrl+click, and Shift+click"
+    );
+    assert!(
+        bootstrap.contains("window.on_workspace_sftp_item_selected(move |entry_id, ctrl, shift| {"),
+        "bootstrap should receive the ctrl/shift selection modifiers instead of only an item id"
     );
 }
 
@@ -474,31 +512,27 @@ fn workspace_compact_width_hides_optional_size_column_before_name_column_is_clip
     app.show().expect("show app window");
     slint::platform::update_timers_and_animations();
 
-    let name_header = ElementHandle::find_by_element_id(
-        &app,
-        "SftpWorkspaceHost::workspace-table-header-name",
-    )
-    .chain(ElementHandle::find_by_element_id(
-        &app,
-        "workspace-table-header-name",
-    ))
-    .next()
-    .expect("workspace name header");
+    let name_header =
+        ElementHandle::find_by_element_id(&app, "SftpWorkspaceHost::workspace-table-header-name")
+            .chain(ElementHandle::find_by_element_id(
+                &app,
+                "workspace-table-header-name",
+            ))
+            .next()
+            .expect("workspace name header");
 
     assert!(
         name_header.size().width >= 160.0,
         "compact workspace widths should protect the primary Name column instead of letting optional columns squeeze it down to an unreadable stub"
     );
 
-    let size_header = ElementHandle::find_by_element_id(
-        &app,
-        "SftpWorkspaceHost::workspace-table-header-size",
-    )
-    .chain(ElementHandle::find_by_element_id(
-        &app,
-        "workspace-table-header-size",
-    ))
-    .next();
+    let size_header =
+        ElementHandle::find_by_element_id(&app, "SftpWorkspaceHost::workspace-table-header-size")
+            .chain(ElementHandle::find_by_element_id(
+                &app,
+                "workspace-table-header-size",
+            ))
+            .next();
 
     assert!(
         size_header.is_none(),
@@ -588,11 +622,17 @@ fn workspace_statusbar_compacts_idle_transfer_copy_instead_of_repeating_toolbar_
     assert!(
         host.contains("function statusbar-binding-summary() -> string {")
             && host.contains("root.workspace-sftp-binding-label == \"Follow / Linked\"")
-            && host.contains("root.workspace-width-tier() == \"wide\" ? \"Follow / Linked\" : \"Follow\"")
+            && host.contains(
+                "root.workspace-width-tier() == \"wide\" ? \"Follow / Linked\" : \"Follow\""
+            )
             && host.contains("root.workspace-sftp-binding-label == \"Locked / Manual\"")
-            && host.contains("root.workspace-width-tier() == \"wide\" ? \"Locked / Manual\" : \"Locked\"")
+            && host.contains(
+                "root.workspace-width-tier() == \"wide\" ? \"Locked / Manual\" : \"Locked\""
+            )
             && host.contains("function transfer-entry-width() -> length {")
-            && host.contains("return root.workspace-width-tier() == \"wide\" ? \"No transfers\" : \"\";")
+            && host.contains(
+                "return root.workspace-width-tier() == \"wide\" ? \"No transfers\" : \"\";"
+            )
             && !host.contains("return \"Transfer Center\";"),
         "workspace status chrome should collapse verbose binding copy and stop repeating the toolbar's `Transfer Center` CTA in the idle footer"
     );

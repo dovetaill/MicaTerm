@@ -653,7 +653,7 @@ export component AppWindow inherits Window {
     callback workspace-sftp-path-submitted(string);
     callback workspace-sftp-breadcrumb-clicked(string);
     callback workspace-sftp-viewport-changed(length, length);
-    callback workspace-sftp-item-selected(string);
+    callback workspace-sftp-item-selected(string, bool, bool);
     callback workspace-sftp-item-activated(string, string);
     callback workspace-sftp-context-menu-requested(string, string, length, length);
     callback workspace-sftp-upload-requested();
@@ -1361,8 +1361,8 @@ export component AppWindow inherits Window {
                             root.workspace-sftp-viewport-changed(viewport_y, visible_height);
                         }
 
-                        workspace-sftp-item-selected(item-id) => {
-                            root.workspace-sftp-item-selected(item-id);
+                        workspace-sftp-item-selected(item-id, ctrl, shift) => {
+                            root.workspace-sftp-item-selected(item-id, ctrl, shift);
                         }
 
                         workspace-sftp-item-activated(item-id, item-kind) => {
