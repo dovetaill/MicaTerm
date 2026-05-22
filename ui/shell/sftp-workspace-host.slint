@@ -1309,7 +1309,9 @@ export component SftpWorkspaceHost inherits Rectangle {
                                         if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
                                             root.workspace-sftp-context-menu-requested(
                                                 item.id,
-                                                item.kind,
+                                                item.kind == "parent-directory"
+                                                    ? "sftp-blank"
+                                                    : item.kind == "directory" ? "sftp-directory" : "sftp-file",
                                                 self.mouse-x + self.absolute-position.x,
                                                 self.mouse-y + self.absolute-position.y,
                                             );

@@ -2482,6 +2482,7 @@ pub(super) fn bind_sftp_callbacks(
                 anchor_x,
                 anchor_y,
             );
+            super::assets_keychain::sync_assets_toolbar_state(&window, &state);
             super::assets_keychain::update_context_menu_placement(&window, &mut state);
             super::assets_keychain::sync_assets_context_menu_state(&window, &state);
         },
@@ -2999,6 +3000,7 @@ pub(super) fn bind_sftp_callbacks(
                 anchor_x,
                 anchor_y,
             );
+            super::assets_keychain::sync_assets_toolbar_state(&window, &state);
             super::assets_keychain::update_context_menu_placement(&window, &mut state);
             super::assets_keychain::sync_assets_context_menu_state(&window, &state);
         },

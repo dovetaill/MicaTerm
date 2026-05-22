@@ -211,6 +211,20 @@ fn sftp_workspace_host_source_wires_workspace_only_interactions() {
 }
 
 #[test]
+fn workspace_row_context_menu_maps_rows_to_sftp_target_kinds() {
+    let source =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    assert!(
+        source.contains("item.kind == \"parent-directory\"")
+            && source.contains("\"sftp-blank\"")
+            && source.contains("\"sftp-directory\"")
+            && source.contains("\"sftp-file\""),
+        "workspace row right-clicks should translate row kinds into the shared SFTP context-target ids instead of forwarding raw `directory`/`file` kinds into the assets menu router"
+    );
+}
+
+#[test]
 fn workspace_breadcrumb_shell_click_requests_path_edit_mode() {
     i_slint_backend_testing::init_no_event_loop();
 

@@ -6901,6 +6901,14 @@ fn context_menu_item_enabled(app: &AppWindow, action_id: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn context_menu_item_ids(app: &AppWindow) -> Vec<String> {
+    let items = app.get_assets_context_menu_primary_items();
+    (0..items.row_count())
+        .filter_map(|index| items.row_data(index))
+        .map(|item| item.id.to_string())
+        .collect()
+}
+
 #[test]
 fn bootstrap_exposes_shell_default_window_budget() {
     assert_eq!(app_title(), "Mica Term");
@@ -14892,6 +14900,68 @@ fn workspace_sftp_expand_navigation_and_reconnect_drive_real_directory_reads() {
             "/srv/app".to_string(),
         ],
         "workspace SFTP should drive real background read_dir calls for expand, navigation, and reconnect instead of only mutating a local view-model shell"
+    );
+}
+
+#[test]
+fn workspace_sftp_context_menu_closes_assets_create_popover_before_showing_sftp_actions() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(DelayedReadRecordingSftpLauncher {
+            state: sftp_state,
+            read_delay_by_path: Arc::new(BTreeMap::new()),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_sftp_panel_mode().as_str() == "ready"
+    });
+
+    app.invoke_sftp_panel_expand_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "sftp"
+            && app.get_workspace_sftp_items().row_count() > 1
+    });
+
+    app.invoke_toggle_assets_create_menu_requested();
+    flush_runtime_projection();
+    assert!(
+        app.get_asset_create_menu_open(),
+        "precondition: the assets create popover should be visible before the workspace right-click tries to replace it"
+    );
+
+    app.invoke_workspace_sftp_context_menu_requested(
+        "entry-logs".into(),
+        "sftp-directory".into(),
+        96.0,
+        128.0,
+    );
+    flush_runtime_projection();
+
+    assert!(
+        !app.get_asset_create_menu_open(),
+        "opening a workspace SFTP context menu should close the assets create popover in the live window state before the SFTP menu is shown"
+    );
+
+    let action_ids = context_menu_item_ids(&app);
+    assert!(
+        action_ids.iter().any(|id| id == "open-remote"),
+        "workspace directory context menus should expose SFTP file actions after the create popover is dismissed"
+    );
+    assert!(
+        !action_ids.iter().any(|id| id == "new-ssh-connection"),
+        "workspace directory context menus must not regress to the assets create menu contents after the right-click"
     );
 }
 
