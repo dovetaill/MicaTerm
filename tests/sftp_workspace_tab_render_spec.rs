@@ -395,6 +395,35 @@ fn workspace_ctrl_l_requests_path_edit_mode() {
 }
 
 #[test]
+fn workspace_ctrl_a_routes_to_select_all_sftp_local_action() {
+    let workspace_pane =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+
+    assert!(
+        workspace_pane
+            .contains("event.modifiers.control && !event.modifiers.shift && !event.modifiers.alt")
+            && workspace_pane.contains(
+                "(event.text == \"a\" || event.text == \"A\" || event.text == \"\\u{1}\")"
+            )
+            && workspace_pane.contains("root.local-action-requested(\"select-all-sftp\");"),
+        "workspace SFTP should claim Ctrl+A on the hidden workspace shortcut anchor and route it through the existing local-action pipeline instead of leaving select-all trapped in the context menu only"
+    );
+}
+
+#[test]
+fn workspace_blank_area_left_click_routes_to_clear_selection_local_action() {
+    let source =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    assert!(
+        source.contains(
+            "if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {"
+        ) && source.contains("root.local-action-requested(\"clear-selection-sftp\");"),
+        "clicking the blank workspace file area should clear the current SFTP selection through the shared local-action channel instead of leaving stale rows selected until another file is clicked"
+    );
+}
+
+#[test]
 fn workspace_path_escape_is_a_cancel_instead_of_a_hidden_resubmit() {
     let source =
         fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");

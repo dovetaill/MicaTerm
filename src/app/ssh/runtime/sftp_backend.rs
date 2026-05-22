@@ -70,7 +70,10 @@ impl SftpBackend for RusshSftpBackend {
                     permissions_label: metadata
                         .permissions
                         .map(|permissions| FilePermissions::from(permissions).to_string()),
-                    owner_label: metadata.user.clone().or_else(|| metadata.uid.map(|id| id.to_string())),
+                    owner_label: metadata
+                        .user
+                        .clone()
+                        .or_else(|| metadata.uid.map(|id| id.to_string())),
                     group_label: metadata
                         .group
                         .clone()

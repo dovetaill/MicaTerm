@@ -1105,7 +1105,9 @@ export component SftpWorkspaceHost inherits Rectangle {
                             height: parent.height;
 
                             pointer-event(event) => {
-                                if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                                    root.local-action-requested("clear-selection-sftp");
+                                } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
                                     root.workspace-sftp-context-menu-requested(
                                         "",
                                         "sftp-blank",

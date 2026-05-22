@@ -29,9 +29,9 @@ fn cloned_workspace_browser_keeps_snapshot_but_resets_follow_and_request_identit
         kind: SftpDirectoryEntryKind::Directory,
         modified_unix_seconds: None,
         size_bytes: None,
-    permissions_label: None,
-    owner_label: None,
-    group_label: None,
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
     }];
 
     let expanded = quick.clone_for_workspace();

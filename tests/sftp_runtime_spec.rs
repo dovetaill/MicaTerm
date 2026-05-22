@@ -100,9 +100,9 @@ impl SftpBackend for RecordingBackend {
                 kind: SftpDirectoryEntryKind::Directory,
                 modified_unix_seconds: None,
                 size_bytes: None,
-            permissions_label: None,
-            owner_label: None,
-            group_label: None,
+                permissions_label: None,
+                owner_label: None,
+                group_label: None,
             }])
         })
     }

@@ -242,9 +242,7 @@ impl ShellViewModel {
         self.dismiss_active_asset_rename();
         self.close_context_menu();
         self.close_asset_create_menu();
-        self.asset_modal_state = Some(AssetModalState::SftpNewFolder {
-            draft_name,
-        });
+        self.asset_modal_state = Some(AssetModalState::SftpNewFolder { draft_name });
     }
 
     pub fn open_sftp_new_file_modal(&mut self) {
@@ -262,9 +260,7 @@ impl ShellViewModel {
         self.dismiss_active_asset_rename();
         self.close_context_menu();
         self.close_asset_create_menu();
-        self.asset_modal_state = Some(AssetModalState::SftpNewFile {
-            draft_name,
-        });
+        self.asset_modal_state = Some(AssetModalState::SftpNewFile { draft_name });
     }
 
     pub fn open_new_snippet_modal(&mut self, parent_package_id: Option<String>) {

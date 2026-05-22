@@ -292,9 +292,9 @@ impl ShellViewModel {
 
     pub fn right_panel_display_policy(&self) -> RightPanelDisplayPolicy {
         if self.right_panel_view == RightPanelView::Sftp
-            && self.active_workspace_tab().is_some_and(|tab| {
-                tab.kind == crate::shell::tabs::WorkspaceTabKind::Sftp
-            })
+            && self
+                .active_workspace_tab()
+                .is_some_and(|tab| tab.kind == crate::shell::tabs::WorkspaceTabKind::Sftp)
         {
             return RightPanelDisplayPolicy::PolicyHiddenForSftpWorkspace;
         }

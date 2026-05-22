@@ -8193,6 +8193,32 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
                 );
             }
+            "select-all-sftp" => {
+                if state.active_workspace_sftp_session().is_none() {
+                    return;
+                }
+                if state.select_all_sftp_entries() {
+                    sync_workspace_tabs_with_manager(
+                        &window,
+                        &mut state,
+                        &mut workspace_follow_tracker_ref.borrow_mut(),
+                        session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+                    );
+                }
+            }
+            "clear-selection-sftp" => {
+                if state.active_workspace_sftp_session().is_none() {
+                    return;
+                }
+                if state.clear_active_sftp_selection() {
+                    sync_workspace_tabs_with_manager(
+                        &window,
+                        &mut state,
+                        &mut workspace_follow_tracker_ref.borrow_mut(),
+                        session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+                    );
+                }
+            }
             action_id if action_id.starts_with("copy-connection-field:") => {
                 let value = action_id
                     .split_once(':')

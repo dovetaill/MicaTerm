@@ -241,6 +241,10 @@ export component WorkspacePane inherits Rectangle {
                 && (event.text == "l" || event.text == "L" || event.text == "\u{c}")) {
                 root.workspace-sftp-path-edit-requested();
                 accept
+            } else if (event.modifiers.control && !event.modifiers.shift && !event.modifiers.alt
+                && (event.text == "a" || event.text == "A" || event.text == "\u{1}")) {
+                root.local-action-requested("select-all-sftp");
+                accept
             } else {
                 reject
             }

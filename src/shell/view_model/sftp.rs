@@ -513,6 +513,18 @@ impl ShellViewModel {
         self.select_sftp_panel_entry_with_modifiers(entry_id, false, false)
     }
 
+    pub fn clear_active_sftp_selection(&mut self) -> bool {
+        let selection_changed = self.replace_active_sftp_selection(Vec::new());
+        let anchor_changed = self.set_active_sftp_selection_anchor(None);
+        let target_changed = if self.context_target_asset_id.is_some() {
+            self.context_target_asset_id = None;
+            true
+        } else {
+            false
+        };
+        selection_changed || anchor_changed || target_changed
+    }
+
     pub fn select_sftp_panel_entry_with_modifiers(
         &mut self,
         entry_id: &str,

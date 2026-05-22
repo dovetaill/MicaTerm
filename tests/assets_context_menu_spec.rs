@@ -461,6 +461,10 @@ fn removed_planned_ssh_actions_no_longer_exist_in_keyboard_dispatch_tree() {
             selected_directory_count: 0,
         },
     );
-    assert!(!roots.iter().any(|node| node.id == "proxy-chrome-via-server"));
+    assert!(
+        !roots
+            .iter()
+            .any(|node| node.id == "proxy-chrome-via-server")
+    );
     assert!(!roots.iter().any(|node| node.id == "upload-ssh-public-key"));
 }
