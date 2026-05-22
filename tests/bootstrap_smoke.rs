@@ -32,7 +32,8 @@ use mica_term::app::bootstrap::{
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_terminal_defaults,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_transfer_store,
     build_shared_app_credential_store_for_paths, default_window_size,
-    install_url_open_handler_for_test, workspace_sftp_path_edit_shortcut_matches,
+    install_url_open_handler_for_test, workspace_sftp_clear_selection_shortcut_matches,
+    workspace_sftp_path_edit_shortcut_matches, workspace_sftp_select_all_shortcut_matches,
 };
 use mica_term::app::keychain::KeychainCatalog;
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
@@ -15075,6 +15076,33 @@ fn workspace_sftp_local_select_all_action_selects_every_entry() {
                 .expect("selected workspace sftp entry id")
                 .as_str(),
             "entry-logs"
+        );
+    });
+}
+
+#[test]
+fn workspace_sftp_native_shortcut_contract_covers_select_all_and_escape_clear() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+        let bootstrap_source =
+            fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap source");
+        let windowing_source =
+            fs::read_to_string("src/app/bootstrap/windowing.rs").expect("read windowing source");
+
+        assert!(
+            workspace_sftp_select_all_shortcut_matches("a", true, false, false)
+                && workspace_sftp_select_all_shortcut_matches("\u{1}", false, false, false)
+                && !workspace_sftp_select_all_shortcut_matches("a", false, false, false)
+                && workspace_sftp_clear_selection_shortcut_matches("escape", false, false, false)
+                && !workspace_sftp_clear_selection_shortcut_matches("escape", true, false, false)
+                && bootstrap_source.contains("fn workspace_sftp_select_all_shortcut(")
+                && bootstrap_source.contains("fn workspace_sftp_clear_selection_shortcut(")
+                && windowing_source.contains("Some(\"select-all-sftp\")")
+                && windowing_source.contains("Some(\"clear-selection-sftp\")")
+                && windowing_source.contains(
+                    "window.invoke_workspace_session_local_action_requested(action_id.into());"
+                ),
+            "workspace SFTP should claim Ctrl+A and Escape at the native windowing layer so the packaged app does not depend solely on hidden Slint focus state for select-all and clear-selection"
         );
     });
 }

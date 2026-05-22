@@ -633,6 +633,44 @@ fn workspace_sftp_path_edit_shortcut(
     }
 }
 
+fn workspace_sftp_select_all_shortcut(
+    key: &slint::winit_030::winit::keyboard::Key,
+    modifiers: NativeTerminalModifierState,
+) -> bool {
+    if modifiers.shift || modifiers.alt {
+        return false;
+    }
+
+    match key {
+        slint::winit_030::winit::keyboard::Key::Character(text) => {
+            workspace_sftp_select_all_shortcut_matches(
+                text.as_str(),
+                modifiers.ctrl,
+                modifiers.shift,
+                modifiers.alt,
+            )
+        }
+        _ => false,
+    }
+}
+
+fn workspace_sftp_clear_selection_shortcut(
+    key: &slint::winit_030::winit::keyboard::Key,
+    modifiers: NativeTerminalModifierState,
+) -> bool {
+    match key {
+        slint::winit_030::winit::keyboard::Key::Named(
+            slint::winit_030::winit::keyboard::NamedKey::Escape,
+        ) => workspace_sftp_clear_selection_shortcut_matches(
+            "escape",
+            modifiers.ctrl,
+            modifiers.shift,
+            modifiers.alt,
+        ),
+        _ => false,
+    }
+}
+
 pub fn workspace_sftp_path_edit_shortcut_matches(
     key: &str,
     ctrl: bool,
@@ -640,6 +678,24 @@ pub fn workspace_sftp_path_edit_shortcut_matches(
     alt: bool,
 ) -> bool {
     ctrl && !shift && !alt && (key.eq_ignore_ascii_case("l") || key == "\u{c}")
+}
+
+pub fn workspace_sftp_select_all_shortcut_matches(
+    key: &str,
+    ctrl: bool,
+    shift: bool,
+    alt: bool,
+) -> bool {
+    !shift && !alt && ((ctrl && key.eq_ignore_ascii_case("a")) || key == "\u{1}")
+}
+
+pub fn workspace_sftp_clear_selection_shortcut_matches(
+    key: &str,
+    ctrl: bool,
+    shift: bool,
+    alt: bool,
+) -> bool {
+    !ctrl && !shift && !alt && key.eq_ignore_ascii_case("escape")
 }
 
 pub fn app_title() -> &'static str {

@@ -400,13 +400,22 @@ fn workspace_ctrl_a_routes_to_select_all_sftp_local_action() {
         fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
 
     assert!(
-        workspace_pane
-            .contains("event.modifiers.control && !event.modifiers.shift && !event.modifiers.alt")
-            && workspace_pane.contains(
-                "(event.text == \"a\" || event.text == \"A\" || event.text == \"\\u{1}\")"
-            )
+        workspace_pane.contains("event.text == \"\\u{1}\"")
+            && workspace_pane.contains("(event.text == \"a\" || event.text == \"A\")")
             && workspace_pane.contains("root.local-action-requested(\"select-all-sftp\");"),
-        "workspace SFTP should claim Ctrl+A on the hidden workspace shortcut anchor and route it through the existing local-action pipeline instead of leaving select-all trapped in the context menu only"
+        "workspace SFTP should claim Ctrl+A on the hidden workspace shortcut anchor for both native control-code delivery and modifier-backed letter delivery instead of leaving select-all trapped in the context menu only"
+    );
+}
+
+#[test]
+fn workspace_escape_routes_to_clear_selection_sftp_local_action() {
+    let workspace_pane =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+
+    assert!(
+        workspace_pane.contains("event.text == Key.Escape")
+            && workspace_pane.contains("root.local-action-requested(\"clear-selection-sftp\");"),
+        "workspace SFTP should claim plain Escape on the hidden workspace shortcut anchor and route it through the shared clear-selection action instead of leaving stale multi-select state with no keyboard dismissal path"
     );
 }
 

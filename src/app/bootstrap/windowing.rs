@@ -68,6 +68,24 @@ pub(super) fn bind_windows_window_state_tracking(
                     && !key_event.repeat
                     && !is_synthetic
                     && workspace_sftp_path_edit_shortcut(&key_event.logical_key, modifier_snapshot);
+                let sftp_local_action_shortcut = if key_event.state
+                    == winit::event::ElementState::Pressed
+                    && !key_event.repeat
+                    && !is_synthetic
+                {
+                    if workspace_sftp_select_all_shortcut(&key_event.logical_key, modifier_snapshot) {
+                        Some("select-all-sftp")
+                    } else if workspace_sftp_clear_selection_shortcut(
+                        &key_event.logical_key,
+                        modifier_snapshot,
+                    ) {
+                        Some("clear-selection-sftp")
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
                 drop(modifier_state);
 
                 if let Some(shortcut) = clipboard_shortcut {
@@ -108,6 +126,17 @@ pub(super) fn bind_windows_window_state_tracking(
                         && !window.get_active_workspace_session_id().is_empty()
                     {
                         window.invoke_workspace_sftp_path_edit_requested();
+                        return EventResult::PreventDefault;
+                    }
+                }
+
+                if let Some(action_id) = sftp_local_action_shortcut {
+                    let window = handle.unwrap();
+                    if window.get_workspace_session_host_mode() == "sftp"
+                        && !window.get_active_workspace_session_id().is_empty()
+                        && !window.get_workspace_sftp_path_editing()
+                    {
+                        window.invoke_workspace_session_local_action_requested(action_id.into());
                         return EventResult::PreventDefault;
                     }
                 }
