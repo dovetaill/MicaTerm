@@ -324,8 +324,8 @@ export component SftpWorkspaceHost inherits Rectangle {
         return "compact";
     }
 
-    function workspace-toolbar-actions-compact() -> bool {
-        return root.width < 1120px;
+    function workspace-toolbar-action-labels-visible() -> bool {
+        return root.workspace-width-tier() == "wide";
     }
 
     function content-state-visible() -> bool {
@@ -438,6 +438,16 @@ export component SftpWorkspaceHost inherits Rectangle {
             : "" + root.workspace-sftp-selected-entry-ids.length + " selected";
     }
 
+    function statusbar-binding-summary() -> string {
+        if root.workspace-sftp-binding-label == "Follow / Linked" {
+            return root.workspace-width-tier() == "wide" ? "Follow / Linked" : "Follow";
+        }
+        if root.workspace-sftp-binding-label == "Locked / Manual" {
+            return root.workspace-width-tier() == "wide" ? "Locked / Manual" : "Locked";
+        }
+        return root.workspace-sftp-binding-label == "" ? "SFTP" : root.workspace-sftp-binding-label;
+    }
+
     function toolbar-disabled-reason() -> string {
         return root.workspace-sftp-toolbar-disabled-reason;
     }
@@ -452,7 +462,21 @@ export component SftpWorkspaceHost inherits Rectangle {
         if root.transfer-queue-active > 0 {
             return "" + root.transfer-queue-active + " active";
         }
-        return "Transfer Center";
+        return root.workspace-width-tier() == "wide" ? "No transfers" : "";
+    }
+
+    function transfer-entry-width() -> length {
+        if root.transfer-entry-label() == "" {
+            return 28px;
+        }
+        return root.workspace-width-tier() == "wide" ? 128px : 96px;
+    }
+
+    function transfer-entry-icon-x() -> length {
+        if root.transfer-entry-label() == "" {
+            return (root.transfer-entry-width() - 14px) / 2;
+        }
+        return 20px;
     }
 
     function transfer-entry-surface() -> brush {
@@ -834,9 +858,9 @@ export component SftpWorkspaceHost inherits Rectangle {
                 }
 
                 upload-button := WorkspaceActionButton {
-                    width: root.workspace-toolbar-actions-compact() ? 30px : 108px;
+                    width: root.workspace-toolbar-action-labels-visible() ? 108px : 30px;
                     icon-source: root.arrow-upload-icon;
-                    label: root.workspace-toolbar-actions-compact() ? "" : "Upload";
+                    label: root.workspace-toolbar-action-labels-visible() ? "Upload" : "";
                     tooltip-text: "Upload files or folders";
                     disabled-tooltip-text: root.toolbar-disabled-reason();
                     tooltip-source-id: "workspace-sftp-upload";
@@ -854,9 +878,9 @@ export component SftpWorkspaceHost inherits Rectangle {
                 }
 
                 new-folder-button := WorkspaceActionButton {
-                    width: root.workspace-toolbar-actions-compact() ? 30px : 126px;
+                    width: root.workspace-toolbar-action-labels-visible() ? 126px : 30px;
                     icon-source: root.folder-icon;
-                    label: root.workspace-toolbar-actions-compact() ? "" : "New Folder";
+                    label: root.workspace-toolbar-action-labels-visible() ? "New Folder" : "";
                     tooltip-text: "Create folder";
                     disabled-tooltip-text: root.toolbar-disabled-reason();
                     tooltip-source-id: "workspace-sftp-new-folder";
@@ -874,9 +898,9 @@ export component SftpWorkspaceHost inherits Rectangle {
                 }
 
                 transfer-center-button := WorkspaceActionButton {
-                    width: root.workspace-toolbar-actions-compact() ? 30px : 150px;
+                    width: root.workspace-toolbar-action-labels-visible() ? 150px : 30px;
                     icon-source: root.arrow-upload-icon;
-                    label: root.workspace-toolbar-actions-compact() ? "" : "Transfer Center";
+                    label: root.workspace-toolbar-action-labels-visible() ? "Transfer Center" : "";
                     tooltip-text: "Open Transfer Center";
                     tooltip-source-id: "workspace-sftp-transfer-center";
                     enabled: true;
@@ -1502,7 +1526,7 @@ export component SftpWorkspaceHost inherits Rectangle {
                 Text {
                     width: min(self.preferred-width, 160px);
                     height: parent.height;
-                    text: root.workspace-sftp-binding-label == "" ? "SFTP" : root.workspace-sftp-binding-label;
+                    text: root.statusbar-binding-summary();
                     font-family: AppTypography.ui-font-family;
                     font-size: AppTypography.ui-font-size-caption;
                     font-weight: AppTypography.ui-font-weight-regular;
@@ -1513,7 +1537,7 @@ export component SftpWorkspaceHost inherits Rectangle {
                 }
 
                 transfer-entry := Rectangle {
-                    width: 160px;
+                    width: root.transfer-entry-width();
                     height: 20px;
                     y: (parent.height - self.height) / 2;
                     border-radius: 4px;
@@ -1529,7 +1553,7 @@ export component SftpWorkspaceHost inherits Rectangle {
                     accessible-role: AccessibleRole.button;
                     accessible-label: "Open transfer center";
 
-                    Rectangle {
+                    if root.transfer-entry-label() != "" : Rectangle {
                         x: 8px;
                         y: (parent.height - self.height) / 2;
                         width: 6px;
@@ -1539,7 +1563,7 @@ export component SftpWorkspaceHost inherits Rectangle {
                     }
 
                     Image {
-                        x: 20px;
+                        x: root.transfer-entry-icon-x();
                         y: (parent.height - self.height) / 2;
                         width: 14px;
                         height: 14px;
@@ -1548,7 +1572,7 @@ export component SftpWorkspaceHost inherits Rectangle {
                         colorize: root.transfer-entry-accent();
                     }
 
-                    Text {
+                    if root.transfer-entry-label() != "" : Text {
                         x: 40px;
                         y: 0px;
                         width: parent.width - 48px;

@@ -447,12 +447,19 @@ fn workspace_toolbar_action_width_tiers_switch_between_full_labels_and_icon_only
         fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
 
     assert!(
-        host.contains("function workspace-toolbar-actions-compact() -> bool {")
+        host.contains("function workspace-toolbar-action-labels-visible() -> bool {")
+            && host.contains("return root.workspace-width-tier() == \"wide\";")
             && host.contains("transfer-center-button := WorkspaceActionButton {")
-            && host.contains("label: root.workspace-toolbar-actions-compact() ? \"\" : \"Upload\";")
-            && host.contains("label: root.workspace-toolbar-actions-compact() ? \"\" : \"New Folder\";")
-            && host.contains("label: root.workspace-toolbar-actions-compact() ? \"\" : \"Transfer Center\";"),
-        "workspace toolbar actions should fall back from full labels to icon-only affordances instead of truncating labels like `New Folder` into broken half-words"
+            && host
+                .contains("label: root.workspace-toolbar-action-labels-visible() ? \"Upload\" : \"\";")
+            && host.contains(
+                "label: root.workspace-toolbar-action-labels-visible() ? \"New Folder\" : \"\";",
+            )
+            && host.contains(
+                "label: root.workspace-toolbar-action-labels-visible() ? \"Transfer Center\" : \"\";",
+            )
+            && !host.contains("return root.width < 1120px;"),
+        "workspace toolbar actions should align with the shared width tiers so medium-width workspaces fall back to icon-only affordances before labels overflow or clip"
     );
 }
 
@@ -562,7 +569,7 @@ fn workspace_statusbar_contract_keeps_connection_counts_path_binding_and_transfe
         "text: root.statusbar-item-count();",
         "text: root.statusbar-selection-count();",
         "text: root.workspace-sftp-path == \"\" ? \"/\" : root.workspace-sftp-path;",
-        "text: root.workspace-sftp-binding-label == \"\" ? \"SFTP\" : root.workspace-sftp-binding-label;",
+        "text: root.statusbar-binding-summary();",
         "transfer-entry := Rectangle {",
         "text: root.transfer-entry-label();",
     ] {
@@ -571,6 +578,24 @@ fn workspace_statusbar_contract_keeps_connection_counts_path_binding_and_transfe
             "workspace status bar should keep the full contract `{contract}` visible instead of collapsing semantics into a single vague footer label"
         );
     }
+}
+
+#[test]
+fn workspace_statusbar_compacts_idle_transfer_copy_instead_of_repeating_toolbar_ctas() {
+    let host =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    assert!(
+        host.contains("function statusbar-binding-summary() -> string {")
+            && host.contains("root.workspace-sftp-binding-label == \"Follow / Linked\"")
+            && host.contains("root.workspace-width-tier() == \"wide\" ? \"Follow / Linked\" : \"Follow\"")
+            && host.contains("root.workspace-sftp-binding-label == \"Locked / Manual\"")
+            && host.contains("root.workspace-width-tier() == \"wide\" ? \"Locked / Manual\" : \"Locked\"")
+            && host.contains("function transfer-entry-width() -> length {")
+            && host.contains("return root.workspace-width-tier() == \"wide\" ? \"No transfers\" : \"\";")
+            && !host.contains("return \"Transfer Center\";"),
+        "workspace status chrome should collapse verbose binding copy and stop repeating the toolbar's `Transfer Center` CTA in the idle footer"
+    );
 }
 
 #[test]
