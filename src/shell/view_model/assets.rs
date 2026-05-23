@@ -421,10 +421,15 @@ impl ShellViewModel {
     }
 
     pub fn open_sftp_rename_entry_modal(&mut self, entry_id: String) {
-        let Some(entry) = self
-            .context_menu_sftp_session()
-            .and_then(|state| state.entries.iter().find(|entry| entry.id == entry_id))
-            .cloned()
+        let Some((file_browser_session_id, entry)) =
+            self.context_menu_sftp_session().and_then(|state| {
+                state
+                    .entries
+                    .iter()
+                    .find(|entry| entry.id == entry_id)
+                    .cloned()
+                    .map(|entry| (state.file_browser_session_id.clone(), entry))
+            })
         else {
             return;
         };
@@ -435,6 +440,7 @@ impl ShellViewModel {
         let _ = self.replace_context_menu_sftp_selection(vec![entry.id.clone()]);
         self.context_target_asset_id = Some(entry.id.clone());
         self.asset_modal_state = Some(AssetModalState::SftpRenameEntry {
+            file_browser_session_id,
             entry_id: entry.id,
             original_name: entry.name.clone(),
             draft_name: entry.name,

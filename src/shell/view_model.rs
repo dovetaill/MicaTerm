@@ -451,6 +451,7 @@ pub enum AssetModalState {
         draft_name: String,
     },
     SftpRenameEntry {
+        file_browser_session_id: String,
         entry_id: String,
         original_name: String,
         draft_name: String,

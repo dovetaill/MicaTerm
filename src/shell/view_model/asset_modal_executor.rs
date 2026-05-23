@@ -24,12 +24,16 @@ impl ShellViewModel {
                     == AssetNameValidation::Valid
             }
             Some(AssetModalState::SftpRenameEntry {
+                file_browser_session_id,
                 entry_id,
                 draft_name,
                 ..
             }) => {
-                self.sftp_name_validation(draft_name, Some(entry_id.as_str()))
-                    == AssetNameValidation::Valid
+                self.sftp_name_validation_for_session(
+                    file_browser_session_id,
+                    draft_name,
+                    Some(entry_id.as_str()),
+                ) == AssetNameValidation::Valid
             }
             Some(AssetModalState::SftpDeleteEntriesConfirm { .. }) => true,
             Some(AssetModalState::DeleteAssetConfirm { .. }) => true,
@@ -369,23 +373,42 @@ impl ShellViewModel {
                 (parent_id, ConsoleAssetKind::SshConnection, label, payload)
             }
             AssetModalState::SftpRenameEntry {
+                file_browser_session_id,
                 entry_id,
                 draft_name,
                 ..
             } => {
-                if self.sftp_name_validation(&draft_name, Some(entry_id.as_str()))
-                    != AssetNameValidation::Valid
+                if self.sftp_name_validation_for_session(
+                    file_browser_session_id.as_str(),
+                    &draft_name,
+                    Some(entry_id.as_str()),
+                ) != AssetNameValidation::Valid
                 {
                     return false;
                 }
-                if self.active_sftp_linked_terminal_session_id().is_none() {
-                    return false;
-                }
-
-                let Some(entry) = self.active_sftp_entry(entry_id.as_str()).cloned() else {
+                let Some((entry, refresh_path, linked_terminal_session_id)) = self
+                    .file_browser_sessions
+                    .get(file_browser_session_id.as_str())
+                    .and_then(|state| {
+                        state
+                            .entries
+                            .iter()
+                            .find(|entry| entry.id == entry_id)
+                            .cloned()
+                            .map(|entry| {
+                                (
+                                    entry,
+                                    state.current_path.clone(),
+                                    state.linked_terminal_session_id.clone(),
+                                )
+                            })
+                    })
+                else {
                     return false;
                 };
-                let refresh_path = self.active_sftp_path();
+                if linked_terminal_session_id.is_none() {
+                    return false;
+                }
                 let next_name = draft_name.trim().to_string();
                 let next_path = sftp_child_path(refresh_path.as_str(), next_name.as_str());
                 self.pending_sftp_context_action = Some(PendingSftpContextAction::RenameEntry {

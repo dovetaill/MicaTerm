@@ -58,15 +58,10 @@ fn workspace_and_quick_browser_modes_view_model(
     quick_browser_path: &str,
     quick_browser_mode: SftpPanelMode,
 ) -> ShellViewModel {
-    let workspace_session = FileBrowserSession {
-        file_browser_session_id: "browser-workspace".into(),
-        host_profile_ref: HostProfileRef::with_label("asset-prod", "Interserver"),
-        linked_terminal_session_id: Some(Uuid::new_v4().to_string()),
-        mode: workspace_mode,
-        follow_mode: SftpFollowMode::ManualBrowse,
-        current_path: workspace_path.into(),
-        history: SftpPathHistory::with_initial(workspace_path),
-        entries: vec![SftpDirectoryEntry {
+    workspace_and_quick_browser_entries_view_model(
+        workspace_path,
+        workspace_mode,
+        vec![SftpDirectoryEntry {
             id: "entry-wwwroot".into(),
             name: "wwwroot".into(),
             path: format!("{workspace_path}/wwwroot"),
@@ -77,6 +72,39 @@ fn workspace_and_quick_browser_modes_view_model(
             owner_label: None,
             group_label: None,
         }],
+        quick_browser_path,
+        quick_browser_mode,
+        vec![SftpDirectoryEntry {
+            id: "entry-app".into(),
+            name: "app".into(),
+            path: format!("{quick_browser_path}/app"),
+            kind: SftpDirectoryEntryKind::Directory,
+            modified_unix_seconds: None,
+            size_bytes: None,
+            permissions_label: None,
+            owner_label: None,
+            group_label: None,
+        }],
+    )
+}
+
+fn workspace_and_quick_browser_entries_view_model(
+    workspace_path: &str,
+    workspace_mode: SftpPanelMode,
+    workspace_entries: Vec<SftpDirectoryEntry>,
+    quick_browser_path: &str,
+    quick_browser_mode: SftpPanelMode,
+    quick_browser_entries: Vec<SftpDirectoryEntry>,
+) -> ShellViewModel {
+    let workspace_session = FileBrowserSession {
+        file_browser_session_id: "browser-workspace".into(),
+        host_profile_ref: HostProfileRef::with_label("asset-prod", "Interserver"),
+        linked_terminal_session_id: Some(Uuid::new_v4().to_string()),
+        mode: workspace_mode,
+        follow_mode: SftpFollowMode::ManualBrowse,
+        current_path: workspace_path.into(),
+        history: SftpPathHistory::with_initial(workspace_path),
+        entries: workspace_entries,
         selected_entry_ids: vec![],
         selection_anchor_entry_id: None,
         last_error: None,
@@ -92,19 +120,12 @@ fn workspace_and_quick_browser_modes_view_model(
         follow_mode: SftpFollowMode::FollowCwd,
         current_path: quick_browser_path.into(),
         history: SftpPathHistory::with_initial(quick_browser_path),
-        entries: vec![SftpDirectoryEntry {
-            id: "entry-app".into(),
-            name: "app".into(),
-            path: format!("{quick_browser_path}/app"),
-            kind: SftpDirectoryEntryKind::Directory,
-            modified_unix_seconds: None,
-            size_bytes: None,
-            permissions_label: None,
-            owner_label: None,
-            group_label: None,
-        }],
-        selected_entry_ids: vec!["entry-app".into()],
-        selection_anchor_entry_id: Some("entry-app".into()),
+        selected_entry_ids: quick_browser_entries
+            .first()
+            .map(|entry| vec![entry.id.clone()])
+            .unwrap_or_default(),
+        selection_anchor_entry_id: quick_browser_entries.first().map(|entry| entry.id.clone()),
+        entries: quick_browser_entries,
         last_error: None,
         active_request_id: None,
         sort_state: Default::default(),
@@ -913,6 +934,82 @@ fn workspace_context_menu_mutability_prefers_the_workspace_surface_mode() {
     assert!(
         state.context_menu_selection().target_mutable,
         "workspace blank menus should stay mutable when the workspace surface is ready even if the quick browser happens to be disconnected"
+    );
+}
+
+#[test]
+fn quick_browser_rename_modal_stays_bound_to_the_originating_surface_session() {
+    let mut state = workspace_and_quick_browser_entries_view_model(
+        "/home",
+        SftpPanelMode::Ready,
+        vec![SftpDirectoryEntry {
+            id: "entry-wwwroot".into(),
+            name: "wwwroot".into(),
+            path: "/home/wwwroot".into(),
+            kind: SftpDirectoryEntryKind::Directory,
+            modified_unix_seconds: None,
+            size_bytes: None,
+            permissions_label: None,
+            owner_label: None,
+            group_label: None,
+        }],
+        "/srv/app",
+        SftpPanelMode::Ready,
+        vec![
+            SftpDirectoryEntry {
+                id: "entry-logs".into(),
+                name: "logs".into(),
+                path: "/srv/app/logs".into(),
+                kind: SftpDirectoryEntryKind::Directory,
+                modified_unix_seconds: None,
+                size_bytes: None,
+                permissions_label: None,
+                owner_label: None,
+                group_label: None,
+            },
+            SftpDirectoryEntry {
+                id: "entry-logs-archive".into(),
+                name: "logs-archive".into(),
+                path: "/srv/app/logs-archive".into(),
+                kind: SftpDirectoryEntryKind::Directory,
+                modified_unix_seconds: None,
+                size_bytes: None,
+                permissions_label: None,
+                owner_label: None,
+                group_label: None,
+            },
+        ],
+    );
+
+    state.open_context_menu_for_surface(
+        mica_term::shell::context_menu::ContextMenuSurface::QuickBrowserSftp,
+        ContextTargetKind::SftpDirectory,
+        Some("entry-logs".into()),
+        84.0,
+        112.0,
+    );
+    state.handle_context_menu_leaf_action("rename-sftp-entry");
+    state.update_rename_asset_modal_name("logs-archive".into());
+    assert_eq!(
+        state.asset_rename_modal_validation_message(),
+        "Name already exists in this folder.",
+        "SFTP rename validation should stay bound to the quick-browser session that opened the modal instead of switching to the active workspace session"
+    );
+
+    state.update_rename_asset_modal_name("logs-current".into());
+    assert!(
+        state.confirm_asset_modal(),
+        "confirming a quick-browser rename should keep working even while a workspace SFTP tab is active elsewhere"
+    );
+    assert_eq!(
+        state.take_pending_sftp_context_action(),
+        Some(
+            mica_term::shell::view_model::PendingSftpContextAction::RenameEntry {
+                from: "/srv/app/logs".into(),
+                to: "/srv/app/logs-current".into(),
+                refresh_path: "/srv/app".into(),
+            }
+        )
     );
 }
 

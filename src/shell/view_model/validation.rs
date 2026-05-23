@@ -3,6 +3,32 @@
 use super::*;
 
 impl ShellViewModel {
+    pub(super) fn sftp_name_validation_for_session(
+        &self,
+        file_browser_session_id: &str,
+        draft_name: &str,
+        editing_entry_id: Option<&str>,
+    ) -> AssetNameValidation {
+        let trimmed = draft_name.trim();
+        if trimmed.is_empty() {
+            return AssetNameValidation::Empty;
+        }
+
+        let duplicate = self
+            .file_browser_sessions
+            .get(file_browser_session_id)
+            .into_iter()
+            .flat_map(|state| state.entries.iter())
+            .filter(|entry| Some(entry.id.as_str()) != editing_entry_id)
+            .any(|entry| entry.name.trim() == trimmed);
+
+        if duplicate {
+            AssetNameValidation::Duplicate
+        } else {
+            AssetNameValidation::Valid
+        }
+    }
+
     pub(super) fn create_asset_modal_validation(
         &self,
         parent_id: Option<&str>,
@@ -42,20 +68,14 @@ impl ShellViewModel {
         draft_name: &str,
         editing_entry_id: Option<&str>,
     ) -> AssetNameValidation {
-        let trimmed = draft_name.trim();
-        if trimmed.is_empty() {
-            return AssetNameValidation::Empty;
-        }
-
-        let duplicate = self
-            .active_sftp_session_state()
-            .into_iter()
-            .flat_map(|state| state.entries.iter())
-            .filter(|entry| Some(entry.id.as_str()) != editing_entry_id)
-            .any(|entry| entry.name.trim() == trimmed);
-
-        if duplicate {
-            AssetNameValidation::Duplicate
+        if let Some(file_browser_session_id) = self.active_file_browser_session_id() {
+            self.sftp_name_validation_for_session(
+                file_browser_session_id,
+                draft_name,
+                editing_entry_id,
+            )
+        } else if draft_name.trim().is_empty() {
+            AssetNameValidation::Empty
         } else {
             AssetNameValidation::Valid
         }
@@ -71,12 +91,15 @@ impl ShellViewModel {
                 self.rename_asset_modal_validation(asset_id, draft_name),
             ),
             Some(AssetModalState::SftpRenameEntry {
+                file_browser_session_id,
                 entry_id,
                 draft_name,
                 ..
-            }) => asset_name_validation_message(
-                self.sftp_name_validation(draft_name, Some(entry_id.as_str())),
-            ),
+            }) => asset_name_validation_message(self.sftp_name_validation_for_session(
+                file_browser_session_id,
+                draft_name,
+                Some(entry_id.as_str()),
+            )),
             _ => String::new(),
         }
     }

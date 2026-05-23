@@ -14031,6 +14031,78 @@ fn sftp_rename_dispatches_backend_rename_instead_of_local_relabel() {
 }
 
 #[test]
+fn quick_browser_rename_stays_bound_to_the_right_panel_session_while_workspace_sftp_is_active() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(DelayedReadRecordingSftpLauncher {
+            state: sftp_state.clone(),
+            read_delay_by_path: Arc::new(BTreeMap::new()),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_sftp_panel_path().as_str() == "/srv/app"
+    });
+
+    app.invoke_sftp_panel_expand_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "sftp"
+            && app.get_workspace_sftp_path().as_str() == "/srv/app"
+    });
+
+    app.invoke_workspace_sftp_path_submitted("/srv/app/releases".into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_sftp_path().as_str() == "/srv/app/releases"
+            && app.get_sftp_panel_path().as_str() == "/srv/app"
+    });
+
+    app.invoke_sftp_panel_context_menu_requested(
+        "entry-logs".into(),
+        "sftp-directory".into(),
+        80.0,
+        120.0,
+    );
+    app.invoke_assets_context_menu_action_invoked("rename-sftp-entry".into());
+    assert!(
+        app.get_asset_rename_modal_open(),
+        "the shared rename modal should still open from the quick-browser row even while the workspace SFTP tab is focused"
+    );
+    app.invoke_asset_rename_modal_name_changed("logs-current".into());
+    app.invoke_confirm_asset_rename_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        sftp_state
+            .rename_calls
+            .lock()
+            .expect("lock sftp rename calls")
+            .len()
+            == 1
+    });
+
+    assert_eq!(
+        sftp_state.take_rename_calls(),
+        vec![(
+            "/srv/app/logs".to_string(),
+            "/srv/app/logs-current".to_string()
+        )],
+        "a quick-browser rename should dispatch against the right-panel session path instead of being cancelled or rebound to the active workspace path"
+    );
+}
+
+#[test]
 fn sftp_delete_dispatches_backend_remove_and_requires_confirmation() {
     let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
