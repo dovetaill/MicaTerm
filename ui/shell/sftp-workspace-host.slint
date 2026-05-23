@@ -1072,8 +1072,11 @@ export component SftpWorkspaceHost inherits Rectangle {
                     y: 0px;
                     width: parent.width;
                     height: parent.height;
+                    viewport-width: scroll-body.width;
+                    viewport-height: scroll-body.height;
                     viewport-y <=> root.workspace-sftp-viewport-y;
                     viewport-x: 0px;
+                    mouse-drag-pan-enabled: false;
                     horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
                     vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
 
@@ -1092,6 +1095,10 @@ export component SftpWorkspaceHost inherits Rectangle {
                     }
 
                     changed visible-width => {
+                        root.workspace-sftp-viewport-changed(self.viewport-y, self.visible-height);
+                    }
+
+                    scrolled => {
                         root.workspace-sftp-viewport-changed(self.viewport-y, self.visible-height);
                     }
 

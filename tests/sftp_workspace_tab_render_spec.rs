@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use i_slint_backend_testing::ElementHandle;
-use mica_term::{AppWindow, SftpBreadcrumbItem};
+use mica_term::{AppWindow, SftpBreadcrumbItem, SftpPanelItem};
 use slint::platform::{PointerEventButton, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition, ModelRc, PhysicalSize, VecModel};
 
@@ -25,6 +25,40 @@ fn click_element(app: &AppWindow, element: &ElementHandle) {
         button: PointerEventButton::Left,
     });
     slint::platform::update_timers_and_animations();
+}
+
+fn workspace_fixture_rows(count: usize) -> Vec<SftpPanelItem> {
+    (0..count)
+        .map(|index| {
+            let kind = if index % 5 == 0 { "directory" } else { "file" };
+            SftpPanelItem {
+                id: format!("entry-{index}").into(),
+                name: format!("row-{index:02}").into(),
+                meta_label: if kind == "directory" {
+                    "Folder".into()
+                } else {
+                    "File".into()
+                },
+                type_label: if kind == "directory" {
+                    "Folder".into()
+                } else {
+                    "File".into()
+                },
+                modified_label: "2026-05-23 12:00".into(),
+                size_label: if kind == "directory" {
+                    "".into()
+                } else {
+                    "4 KB".into()
+                },
+                permissions_label: "rwxr-xr-x".into(),
+                owner_label: "deploy".into(),
+                group_label: "deploy".into(),
+                icon_kind: kind.into(),
+                kind: kind.into(),
+                selected: false,
+            }
+        })
+        .collect()
 }
 
 #[test]
@@ -212,6 +246,69 @@ fn sftp_workspace_host_source_wires_workspace_only_interactions() {
             "SFTP workspace host should wire interactive contract `{contract}` instead of remaining a passive shell"
         );
     }
+}
+
+#[test]
+fn sftp_workspace_host_source_pins_scrollview_to_the_full_workspace_content_height() {
+    let source =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    for contract in [
+        "viewport-width: scroll-body.width;",
+        "viewport-height: scroll-body.height;",
+        "mouse-drag-pan-enabled: false;",
+        "scrolled => {",
+        "height: max(list-host.visible-height, root.workspace-sftp-total-content-height);",
+    ] {
+        assert!(
+            source.contains(contract),
+            "workspace SFTP list host should freeze scroll contract `{contract}` so packaged builds use the full content extent instead of truncating the directory to a partial viewport slice"
+        );
+    }
+}
+
+#[test]
+fn workspace_sftp_ready_list_scrolls_when_the_directory_is_taller_than_the_viewport() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().expect("create app window");
+    app.window().set_size(PhysicalSize::new(1280, 780));
+    app.set_workspace_session_host_mode("sftp".into());
+    app.set_workspace_session_state("ready".into());
+    app.set_workspace_session_title("Files: Prod Bastion".into());
+    app.set_workspace_sftp_host_label("Prod Bastion".into());
+    app.set_workspace_sftp_path("/".into());
+    app.set_workspace_sftp_actions_enabled(true);
+    app.set_workspace_sftp_row_height(40.0);
+    app.set_workspace_sftp_total_row_count(32);
+    app.set_workspace_sftp_total_content_height(32.0 * 40.0);
+    app.set_workspace_sftp_items(ModelRc::new(VecModel::from(workspace_fixture_rows(32))));
+
+    app.show().expect("show app window");
+    app.window()
+        .dispatch_event(WindowEvent::WindowActiveChanged(true));
+    slint::platform::update_timers_and_animations();
+
+    let list_host = ElementHandle::find_by_element_id(&app, "SftpWorkspaceHost::list-host")
+        .chain(ElementHandle::find_by_element_id(&app, "list-host"))
+        .next()
+        .expect("workspace list host");
+    let position = LogicalPosition::new(
+        list_host.absolute_position().x + list_host.size().width / 2.0,
+        list_host.absolute_position().y + list_host.size().height / 2.0,
+    );
+    app.window().dispatch_event(WindowEvent::PointerMoved { position });
+    app.window().dispatch_event(WindowEvent::PointerScrolled {
+        position,
+        delta_x: 0.0,
+        delta_y: -240.0,
+    });
+    slint::platform::update_timers_and_animations();
+
+    assert!(
+        app.get_workspace_sftp_viewport_y() < 0.0,
+        "scrolling a tall workspace SFTP directory should move the controlled viewport away from the top instead of leaving the packaged workspace stuck on a partial row slice"
+    );
 }
 
 #[test]
