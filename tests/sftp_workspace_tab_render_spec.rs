@@ -615,24 +615,26 @@ fn workspace_toolbar_disabled_reason_must_keep_hover_tooltips_alive() {
 }
 
 #[test]
-fn workspace_toolbar_action_width_tiers_switch_between_full_labels_and_icon_only() {
+fn workspace_toolbar_actions_stay_icon_only_to_match_the_compact_shell_chrome() {
     let host =
         fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
 
     assert!(
-        host.contains("function workspace-toolbar-action-labels-visible() -> bool {")
-            && host.contains("return root.workspace-width-tier() == \"wide\";")
+        host.contains("upload-button := WorkspaceActionButton {")
+            && host.contains("new-folder-button := WorkspaceActionButton {")
             && host.contains("transfer-center-button := WorkspaceActionButton {")
-            && host
-                .contains("label: root.workspace-toolbar-action-labels-visible() ? \"Upload\" : \"\";")
-            && host.contains(
+            && !host.contains("function workspace-toolbar-action-labels-visible() -> bool {")
+            && !host.contains("label: root.workspace-toolbar-action-labels-visible() ? \"Upload\" : \"\";")
+            && !host.contains(
                 "label: root.workspace-toolbar-action-labels-visible() ? \"New Folder\" : \"\";",
             )
-            && host.contains(
+            && !host.contains(
                 "label: root.workspace-toolbar-action-labels-visible() ? \"Transfer Center\" : \"\";",
             )
-            && !host.contains("return root.width < 1120px;"),
-        "workspace toolbar actions should align with the shared width tiers so medium-width workspaces fall back to icon-only affordances before labels overflow or clip"
+            && host.contains("tooltip-text: \"Upload files or folders\";")
+            && host.contains("tooltip-text: \"Create folder\";")
+            && host.contains("tooltip-text: \"Open Transfer Center\";"),
+        "workspace toolbar should keep the right-edge actions icon-only with tooltip semantics in the compact shell chrome instead of re-expanding text labels at wide widths"
     );
 }
 
@@ -729,7 +731,7 @@ fn workspace_statusbar_item_count_must_not_use_the_visible_row_slice_length() {
 }
 
 #[test]
-fn workspace_statusbar_contract_keeps_connection_counts_path_binding_and_transfer_entry_visible() {
+fn workspace_statusbar_contract_keeps_only_connection_counts_selection_and_path_visible() {
     let host =
         fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
 
@@ -738,97 +740,61 @@ fn workspace_statusbar_contract_keeps_connection_counts_path_binding_and_transfe
         "text: root.statusbar-item-count();",
         "text: root.statusbar-selection-count();",
         "text: root.workspace-sftp-path == \"\" ? \"/\" : root.workspace-sftp-path;",
-        "text: root.statusbar-binding-summary();",
-        "transfer-entry := Rectangle {",
-        "text: root.transfer-entry-label();",
     ] {
         assert!(
             host.contains(contract),
-            "workspace status bar should keep the full contract `{contract}` visible instead of collapsing semantics into a single vague footer label"
+            "workspace status bar should keep the core contract `{contract}` visible instead of collapsing state, counts, and path into a vague footer label"
         );
     }
-}
-
-#[test]
-fn workspace_statusbar_compacts_idle_transfer_copy_instead_of_repeating_toolbar_ctas() {
-    let host =
-        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
-
     assert!(
-        host.contains("function statusbar-binding-summary() -> string {")
-            && host.contains("root.workspace-sftp-binding-label == \"Follow / Linked\"")
-            && host.contains(
-                "root.workspace-width-tier() == \"wide\" ? \"Follow / Linked\" : \"Follow\""
-            )
-            && host.contains("root.workspace-sftp-binding-label == \"Locked / Manual\"")
-            && host.contains(
-                "root.workspace-width-tier() == \"wide\" ? \"Locked / Manual\" : \"Locked\""
-            )
-            && host.contains("function transfer-entry-width() -> length {")
-            && host.contains(
-                "return root.workspace-width-tier() == \"wide\" ? \"No transfers\" : \"\";"
-            )
-            && !host.contains("return \"Transfer Center\";"),
-        "workspace status chrome should collapse verbose binding copy and stop repeating the toolbar's `Transfer Center` CTA in the idle footer"
+        !host.contains("text: root.statusbar-binding-summary();")
+            && !host.contains("transfer-entry := Rectangle {")
+            && !host.contains("text: root.transfer-entry-label();"),
+        "workspace status bar should stop repeating binding and transfer-center copy that already exists elsewhere in the shell chrome"
     );
 }
 
 #[test]
-fn workspace_transfer_center_contract_threads_from_app_window_into_sftp_workspace_host() {
+fn workspace_statusbar_drops_redundant_binding_and_transfer_helpers() {
+    let host =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    assert!(
+        !host.contains("function statusbar-binding-summary() -> string {")
+            && !host.contains("function transfer-entry-width() -> length {")
+            && !host.contains("function transfer-entry-label() -> string {")
+            && !host.contains("function transfer-entry-icon-x() -> length {")
+            && !host.contains("function transfer-entry-surface() -> brush {")
+            && !host.contains("function transfer-entry-border() -> brush {")
+            && !host.contains("function transfer-entry-accent() -> brush {"),
+        "workspace footer should not keep helper plumbing for redundant binding or transfer entry copy once the compact shell removes those footer affordances"
+    );
+}
+
+#[test]
+fn workspace_transfer_center_callback_stays_wired_without_threading_footer_queue_state() {
     let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
     let workspace_pane =
         fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
 
     assert!(
         app_window.contains(
-            "workspace-sftp-items: root.workspace-sftp-items;\n                        transfer-center-open: root.transfer-center-open;\n                        transfer-queue-active: root.transfer-queue-active;\n                        transfer-queue-failed: root.transfer-queue-failed;\n                        transfer-queue-current-session: root.transfer-queue-current-session;"
-        ),
-        "AppWindow should thread transfer-center visibility and queue summary state into WorkspacePane so the productized SFTP workspace can expose a lightweight transfer entry even while the duplicate quick browser stays policy-hidden"
-    );
-    assert!(
-        app_window.contains(
             "workspace-sftp-retry-requested => {\n                            root.workspace-sftp-retry-requested();\n                        }\n\n                        open-transfer-center-requested => {\n                            root.open-transfer-center-requested();\n                        }"
         ),
-        "AppWindow should forward the workspace transfer-entry callback into the existing global Transfer Center toggle instead of inventing a second transfer surface"
+        "AppWindow should keep forwarding the workspace transfer-center callback into the global transfer center toggle"
     );
-
-    for contract in [
-        "in property <bool> transfer-center-open: false;",
-        "in property <int> transfer-queue-active: 0;",
-        "in property <int> transfer-queue-failed: 0;",
-        "in property <int> transfer-queue-current-session: 0;",
-        "callback open-transfer-center-requested();",
-        "transfer-center-open: root.transfer-center-open;",
-        "transfer-queue-active: root.transfer-queue-active;",
-        "transfer-queue-failed: root.transfer-queue-failed;",
-        "transfer-queue-current-session: root.transfer-queue-current-session;",
-        "open-transfer-center-requested => {",
-        "root.open-transfer-center-requested();",
-    ] {
-        assert!(
-            workspace_pane.contains(contract),
-            "WorkspacePane should thread workspace transfer contract `{contract}` into SftpWorkspaceHost so the host can expose a lightweight global queue entry"
-        );
-    }
-}
-
-#[test]
-fn sftp_workspace_host_source_exposes_a_lightweight_transfer_center_entry() {
-    let source =
-        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
-
-    for contract in [
-        "in property <bool> transfer-center-open: false;",
-        "in property <int> transfer-queue-active: 0;",
-        "in property <int> transfer-queue-failed: 0;",
-        "in property <int> transfer-queue-current-session: 0;",
-        "callback open-transfer-center-requested();",
-        "transfer-entry :=",
-        "root.open-transfer-center-requested();",
-    ] {
-        assert!(
-            source.contains(contract),
-            "SFTP workspace host should expose transfer-entry contract `{contract}` so upload/download activity can stay reachable from the workspace surface after the right-side duplicate browser is policy-hidden"
-        );
-    }
+    assert!(
+        !app_window.contains("transfer-center-open: root.transfer-center-open;\n                        transfer-queue-active: root.transfer-queue-active;\n                        transfer-queue-failed: root.transfer-queue-failed;\n                        transfer-queue-current-session: root.transfer-queue-current-session;"),
+        "AppWindow should stop threading footer-only transfer queue state into WorkspacePane once the workspace footer no longer renders a transfer entry"
+    );
+    assert!(
+        workspace_pane.contains("callback open-transfer-center-requested();")
+            && workspace_pane.contains("open-transfer-center-requested => {")
+            && workspace_pane.contains("root.open-transfer-center-requested();")
+            && !workspace_pane.contains("in property <bool> transfer-center-open: false;")
+            && !workspace_pane.contains("in property <int> transfer-queue-active: 0;")
+            && !workspace_pane.contains("in property <int> transfer-queue-failed: 0;")
+            && !workspace_pane.contains("in property <int> transfer-queue-current-session: 0;"),
+        "WorkspacePane should keep the toolbar callback but drop the footer transfer-summary properties once the main workspace stops rendering a transfer badge in the status bar"
+    );
 }

@@ -258,10 +258,6 @@ export component SftpWorkspaceHost inherits Rectangle {
     in property <[SftpPanelItem]> workspace-sftp-items: [];
     in property <[string]> workspace-sftp-selected-entry-ids: [];
     in property <[SftpBreadcrumbItem]> workspace-sftp-breadcrumb-items: [];
-    in property <bool> transfer-center-open: false;
-    in property <int> transfer-queue-active: 0;
-    in property <int> transfer-queue-failed: 0;
-    in property <int> transfer-queue-current-session: 0;
     in property <color> workspace-session-frame-surface: ThemeTokens.terminal-frame-background;
     in property <color> workspace-session-frame-border: ThemeTokens.divider-subtle;
     in property <color> shell-separator: ThemeTokens.separator;
@@ -322,10 +318,6 @@ export component SftpWorkspaceHost inherits Rectangle {
             return "medium";
         }
         return "compact";
-    }
-
-    function workspace-toolbar-action-labels-visible() -> bool {
-        return root.workspace-width-tier() == "wide";
     }
 
     function content-state-visible() -> bool {
@@ -438,81 +430,8 @@ export component SftpWorkspaceHost inherits Rectangle {
             : "" + root.workspace-sftp-selected-entry-ids.length + " selected";
     }
 
-    function statusbar-binding-summary() -> string {
-        if root.workspace-sftp-binding-label == "Follow / Linked" {
-            return root.workspace-width-tier() == "wide" ? "Follow / Linked" : "Follow";
-        }
-        if root.workspace-sftp-binding-label == "Locked / Manual" {
-            return root.workspace-width-tier() == "wide" ? "Locked / Manual" : "Locked";
-        }
-        return root.workspace-sftp-binding-label == "" ? "SFTP" : root.workspace-sftp-binding-label;
-    }
-
     function toolbar-disabled-reason() -> string {
         return root.workspace-sftp-toolbar-disabled-reason;
-    }
-
-    function transfer-entry-label() -> string {
-        if root.transfer-queue-failed > 0 {
-            return "" + root.transfer-queue-failed + " need attention";
-        }
-        if root.transfer-queue-current-session > 0 {
-            return "" + root.transfer-queue-current-session + " in this session";
-        }
-        if root.transfer-queue-active > 0 {
-            return "" + root.transfer-queue-active + " active";
-        }
-        return root.workspace-width-tier() == "wide" ? "No transfers" : "";
-    }
-
-    function transfer-entry-width() -> length {
-        if root.transfer-entry-label() == "" {
-            return 28px;
-        }
-        return root.workspace-width-tier() == "wide" ? 128px : 96px;
-    }
-
-    function transfer-entry-icon-x() -> length {
-        if root.transfer-entry-label() == "" {
-            return (root.transfer-entry-width() - 14px) / 2;
-        }
-        return 20px;
-    }
-
-    function transfer-entry-surface() -> brush {
-        if root.transfer-center-open {
-            return ThemeTokens.control-active-surface;
-        }
-        if root.transfer-queue-failed > 0 {
-            return ThemeTokens.status-error-surface;
-        }
-        if root.transfer-queue-active > 0 {
-            return ThemeTokens.status-busy-surface;
-        }
-        return ThemeTokens.status-pill-surface;
-    }
-
-    function transfer-entry-border() -> brush {
-        if root.transfer-center-open {
-            return root.shell-focus-ring;
-        }
-        if root.transfer-queue-failed > 0 {
-            return ThemeTokens.status-error-accent;
-        }
-        if root.transfer-queue-active > 0 {
-            return ThemeTokens.status-busy-accent;
-        }
-        return ThemeTokens.status-pill-border;
-    }
-
-    function transfer-entry-accent() -> brush {
-        if root.transfer-queue-failed > 0 {
-            return ThemeTokens.status-error-accent;
-        }
-        if root.transfer-queue-active > 0 {
-            return ThemeTokens.status-busy-accent;
-        }
-        return root.shell-accent;
     }
 
     width: 100%;
@@ -858,9 +777,9 @@ export component SftpWorkspaceHost inherits Rectangle {
                 }
 
                 upload-button := WorkspaceActionButton {
-                    width: root.workspace-toolbar-action-labels-visible() ? 108px : 30px;
+                    width: 30px;
                     icon-source: root.arrow-upload-icon;
-                    label: root.workspace-toolbar-action-labels-visible() ? "Upload" : "";
+                    label: "";
                     tooltip-text: "Upload files or folders";
                     disabled-tooltip-text: root.toolbar-disabled-reason();
                     tooltip-source-id: "workspace-sftp-upload";
@@ -878,9 +797,9 @@ export component SftpWorkspaceHost inherits Rectangle {
                 }
 
                 new-folder-button := WorkspaceActionButton {
-                    width: root.workspace-toolbar-action-labels-visible() ? 126px : 30px;
+                    width: 30px;
                     icon-source: root.folder-icon;
-                    label: root.workspace-toolbar-action-labels-visible() ? "New Folder" : "";
+                    label: "";
                     tooltip-text: "Create folder";
                     disabled-tooltip-text: root.toolbar-disabled-reason();
                     tooltip-source-id: "workspace-sftp-new-folder";
@@ -898,9 +817,9 @@ export component SftpWorkspaceHost inherits Rectangle {
                 }
 
                 transfer-center-button := WorkspaceActionButton {
-                    width: root.workspace-toolbar-action-labels-visible() ? 150px : 30px;
+                    width: 30px;
                     icon-source: root.arrow-upload-icon;
-                    label: root.workspace-toolbar-action-labels-visible() ? "Transfer Center" : "";
+                    label: "";
                     tooltip-text: "Open Transfer Center";
                     tooltip-source-id: "workspace-sftp-transfer-center";
                     enabled: true;
@@ -1532,79 +1451,6 @@ export component SftpWorkspaceHost inherits Rectangle {
                     color: root.shell-text-muted;
                     vertical-alignment: center;
                     overflow: elide;
-                }
-
-                Text {
-                    width: min(self.preferred-width, 160px);
-                    height: parent.height;
-                    text: root.statusbar-binding-summary();
-                    font-family: AppTypography.ui-font-family;
-                    font-size: AppTypography.ui-font-size-caption;
-                    font-weight: AppTypography.ui-font-weight-regular;
-                    color: root.shell-text-secondary;
-                    vertical-alignment: center;
-                    horizontal-alignment: right;
-                    overflow: elide;
-                }
-
-                transfer-entry := Rectangle {
-                    width: root.transfer-entry-width();
-                    height: 20px;
-                    y: (parent.height - self.height) / 2;
-                    border-radius: 4px;
-                    border-width: 1px;
-                    border-color: root.transfer-entry-border();
-                    background: root.transfer-center-open
-                        ? ThemeTokens.control-active-surface
-                        : transfer-entry-touch.pressed
-                            ? ThemeTokens.control-active-surface
-                            : transfer-entry-touch.has-hover
-                                ? ThemeTokens.control-hover-surface
-                                : root.transfer-entry-surface();
-                    accessible-role: AccessibleRole.button;
-                    accessible-label: "Open transfer center";
-
-                    if root.transfer-entry-label() != "" : Rectangle {
-                        x: 8px;
-                        y: (parent.height - self.height) / 2;
-                        width: 6px;
-                        height: 6px;
-                        border-radius: 3px;
-                        background: root.transfer-entry-accent();
-                    }
-
-                    Image {
-                        x: root.transfer-entry-icon-x();
-                        y: (parent.height - self.height) / 2;
-                        width: 14px;
-                        height: 14px;
-                        source: root.arrow-upload-icon;
-                        image-fit: contain;
-                        colorize: root.transfer-entry-accent();
-                    }
-
-                    if root.transfer-entry-label() != "" : Text {
-                        x: 40px;
-                        y: 0px;
-                        width: parent.width - 48px;
-                        height: parent.height;
-                        text: root.transfer-entry-label();
-                        font-family: AppTypography.ui-font-family;
-                        font-size: AppTypography.ui-font-size-caption;
-                        font-weight: AppTypography.ui-font-weight-semibold;
-                        color: root.shell-text-primary;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-
-                    transfer-entry-touch := TouchArea {
-                        width: parent.width;
-                        height: parent.height;
-
-                        clicked => {
-                            root.open-transfer-center-requested();
-                        }
-                    }
                 }
             }
         }
