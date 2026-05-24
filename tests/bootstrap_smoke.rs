@@ -1108,6 +1108,13 @@ struct DelayedReadRecordingSftpLauncher {
     read_delay_by_path: Arc<BTreeMap<String, Duration>>,
 }
 
+#[derive(Clone)]
+struct FixtureSftpLauncher {
+    state: RecordingSftpState,
+    cwd: String,
+    responses: Arc<BTreeMap<String, Vec<SftpDirectoryEntry>>>,
+}
+
 struct RecordingSftpBackend {
     responses: BTreeMap<String, Vec<SftpDirectoryEntry>>,
     state: RecordingSftpState,
@@ -2332,6 +2339,39 @@ impl SessionRuntimeLauncher for DelayedReadRecordingSftpLauncher {
                 runtime: SftpRuntimeHandle::new(Arc::new(DelayedRecordingSftpBackend {
                     responses,
                     read_delay_by_path,
+                    state,
+                })),
+            }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SessionRuntimeLauncher for FixtureSftpLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        _session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let state = self.state.clone();
+        let cwd = self.cwd.clone();
+        let responses = (*self.responses).clone();
+        Box::pin(async move {
+            state.set_event_tx(event_tx.clone());
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::CurrentDirectoryChanged(cwd.into()));
+            Ok(Box::new(RecordingSftpRuntimeControl {
+                runtime: SftpRuntimeHandle::new(Arc::new(RecordingSftpBackend {
+                    responses,
                     state,
                 })),
             }) as Box<dyn SessionRuntimeControl>)
@@ -4455,6 +4495,57 @@ fn drag_within_first_terminal_cell(app: &AppWindow) {
     });
     app.window()
         .dispatch_event(WindowEvent::PointerMoved { position: drag_end });
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position: drag_end,
+        button: PointerEventButton::Left,
+    });
+}
+
+fn workspace_sftp_row_center(
+    app: &AppWindow,
+    row_index: usize,
+) -> LogicalPosition {
+    let titlebar_height = app.get_layout_titlebar_height();
+    let main_workspace_x = app.get_layout_main_workspace_x();
+    let tab_strip_height = 36.0;
+    let vertical_padding = 14.0;
+    let section_spacing = 10.0;
+    let header_height = 46.0;
+    let toolbar_height = 42.0;
+    let table_header_height = 34.0;
+    let row_height = app.get_workspace_sftp_row_height();
+    let row_center_y = titlebar_height
+        + tab_strip_height
+        + vertical_padding
+        + header_height
+        + section_spacing
+        + toolbar_height
+        + section_spacing
+        + table_header_height
+        + (row_height * (row_index as f32 + 0.5));
+
+    LogicalPosition::new(main_workspace_x + 64.0, row_center_y)
+}
+
+fn drag_workspace_sftp_rows(
+    app: &AppWindow,
+    start_row_index: usize,
+    end_row_index: usize,
+) {
+    let drag_start = workspace_sftp_row_center(app, start_row_index);
+    let drag_end = workspace_sftp_row_center(app, end_row_index);
+
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: drag_start,
+    });
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position: drag_start,
+        button: PointerEventButton::Left,
+    });
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: drag_end,
+    });
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
     app.window().dispatch_event(WindowEvent::PointerReleased {
         position: drag_end,
         button: PointerEventButton::Left,
@@ -15263,6 +15354,97 @@ fn workspace_sftp_local_select_all_action_selects_every_entry() {
                 .expect("selected workspace sftp entry id")
                 .as_str(),
             "entry-logs"
+        );
+    });
+}
+
+#[test]
+fn workspace_sftp_pointer_drag_selects_a_contiguous_range_live() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+        let app = AppWindow::new().unwrap();
+        let sftp_state = RecordingSftpState::default();
+        bind_with_launcher(
+            &app,
+            None,
+            Arc::new(FixtureSftpLauncher {
+                state: sftp_state,
+                cwd: "/srv/app".into(),
+                responses: Arc::new(BTreeMap::from([(
+                    "/srv/app".to_string(),
+                    vec![
+                        SftpDirectoryEntry {
+                            id: "entry-alpha".into(),
+                            name: "alpha".into(),
+                            path: "/srv/app/alpha".into(),
+                            kind: SftpDirectoryEntryKind::Directory,
+                            modified_unix_seconds: Some(1_775_012_700),
+                            size_bytes: None,
+                            permissions_label: None,
+                            owner_label: None,
+                            group_label: None,
+                        },
+                        SftpDirectoryEntry {
+                            id: "entry-bravo".into(),
+                            name: "bravo".into(),
+                            path: "/srv/app/bravo".into(),
+                            kind: SftpDirectoryEntryKind::Directory,
+                            modified_unix_seconds: Some(1_775_012_780),
+                            size_bytes: None,
+                            permissions_label: None,
+                            owner_label: None,
+                            group_label: None,
+                        },
+                        SftpDirectoryEntry {
+                            id: "entry-charlie".into(),
+                            name: "charlie".into(),
+                            path: "/srv/app/charlie".into(),
+                            kind: SftpDirectoryEntryKind::Directory,
+                            modified_unix_seconds: Some(1_775_012_860),
+                            size_bytes: None,
+                            permissions_label: None,
+                            owner_label: None,
+                            group_label: None,
+                        },
+                    ],
+                )])),
+            }),
+        );
+
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.into());
+        flush_runtime_projection();
+        app.invoke_open_sftp_panel_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_sftp_panel_mode().as_str() == "ready"
+        });
+
+        app.invoke_sftp_panel_expand_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_workspace_session_host_mode().as_str() == "sftp"
+                && app.get_workspace_sftp_items().row_count() == 4
+        });
+
+        drag_workspace_sftp_rows(&app, 1, 3);
+        flush_runtime_projection();
+
+        let selected_ids = app.get_workspace_sftp_selected_entry_ids();
+        let selected = (0..selected_ids.row_count())
+            .filter_map(|index| selected_ids.row_data(index))
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            selected,
+            vec![
+                "entry-alpha".to_string(),
+                "entry-bravo".to_string(),
+                "entry-charlie".to_string(),
+            ],
+            "live pointer drag in the workspace SFTP table should extend the range selection across every row the pointer crosses instead of collapsing to the anchor row"
         );
     });
 }
