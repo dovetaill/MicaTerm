@@ -229,6 +229,8 @@ pub(super) fn sync_workspace_sftp_state(window: &AppWindow, state: &mut ShellVie
     window.set_workspace_sftp_total_content_height(state.workspace_sftp_total_content_height_px());
     window.set_workspace_sftp_top_spacer_height(state.workspace_sftp_top_spacer_height_px());
     window.set_workspace_sftp_bottom_spacer_height(state.workspace_sftp_bottom_spacer_height_px());
+    window.set_workspace_sftp_sort_column(state.workspace_sftp_sort_column_id().into());
+    window.set_workspace_sftp_sort_direction(state.workspace_sftp_sort_direction_id().into());
 
     let breadcrumb_items = project_sftp_breadcrumb_items(state.workspace_sftp_path().as_str());
     sync_vec_model(
@@ -3006,6 +3008,23 @@ pub(super) fn bind_sftp_callbacks(
             super::assets_keychain::sync_assets_context_menu_state(&window, &state);
         },
     );
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
+    window.on_workspace_sftp_sort_requested(move |column_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.toggle_workspace_sftp_sort_column(column_id.as_str()) {
+            super::sync_workspace_session_state_with_manager(
+                &window,
+                &mut state,
+                &mut workspace_follow_tracker_ref.borrow_mut(),
+                session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+            );
+        }
+    });
 
     let state = Rc::clone(view_model);
     let handle = window.as_weak();

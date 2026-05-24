@@ -38,6 +38,8 @@ export component WorkspacePane inherits Rectangle {
     in property <[SftpBreadcrumbItem]> workspace-sftp-breadcrumb-items: [];
     in property <[string]> workspace-sftp-selected-entry-ids: [];
     in property <[SftpPanelItem]> workspace-sftp-items: [];
+    in property <string> workspace-sftp-sort-column: "default";
+    in property <string> workspace-sftp-sort-direction: "none";
     in property <string> workspace-session-render-mode: "bitmap";
     in property <string> workspace-session-connection-headline: "";
     in property <string> workspace-session-connection-visual-state: "";
@@ -174,6 +176,7 @@ export component WorkspacePane inherits Rectangle {
     callback workspace-sftp-item-selected(string, bool, bool);
     callback workspace-sftp-item-activated(string, string);
     callback workspace-sftp-context-menu-requested(string, string, length, length);
+    callback workspace-sftp-sort-requested(string);
     callback workspace-sftp-upload-requested();
     callback workspace-sftp-new-folder-requested();
     callback workspace-sftp-retry-requested();
@@ -349,6 +352,8 @@ export component WorkspacePane inherits Rectangle {
                 workspace-sftp-breadcrumb-items: root.workspace-sftp-breadcrumb-items;
                 workspace-sftp-selected-entry-ids: root.workspace-sftp-selected-entry-ids;
                 workspace-sftp-items: root.workspace-sftp-items;
+                workspace-sftp-sort-column: root.workspace-sftp-sort-column;
+                workspace-sftp-sort-direction: root.workspace-sftp-sort-direction;
                 workspace-session-frame-surface: root.workspace-session-frame-surface;
                 workspace-session-frame-border: root.workspace-session-frame-border;
                 shell-separator: root.shell-separator;
@@ -412,6 +417,10 @@ export component WorkspacePane inherits Rectangle {
 
                 workspace-sftp-context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {
                     root.workspace-sftp-context-menu-requested(item-id, item-kind, anchor-x, anchor-y);
+                }
+
+                workspace-sftp-sort-requested(column-id) => {
+                    root.workspace-sftp-sort-requested(column-id);
                 }
 
                 workspace-sftp-upload-requested => {

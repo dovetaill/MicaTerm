@@ -347,6 +347,78 @@ fn workspace_sftp_projection_rows_preserve_productized_icon_and_metadata_contrac
 }
 
 #[test]
+fn workspace_sftp_header_sort_toggles_active_workspace_projection_between_asc_and_desc() {
+    let mut session =
+        sample_workspace_sftp_session(SftpPanelMode::Ready, SftpFollowMode::ManualBrowse);
+    session.entries = vec![
+        sample_sftp_entry(
+            "/srv/app/releases/zeta.log",
+            "zeta.log",
+            "/srv/app/releases/zeta.log",
+            SftpDirectoryEntryKind::File,
+            Some(1_777_000_003),
+            Some(100),
+            None,
+            None,
+            None,
+        ),
+        sample_sftp_entry(
+            "/srv/app/releases/alpha.log",
+            "alpha.log",
+            "/srv/app/releases/alpha.log",
+            SftpDirectoryEntryKind::File,
+            Some(1_777_000_001),
+            Some(10),
+            None,
+            None,
+            None,
+        ),
+    ];
+    session.selected_entry_ids.clear();
+    session.selection_anchor_entry_id = None;
+    let sftp_tab = WorkspaceTab::sftp(
+        "tab-files-1",
+        session.file_browser_session_id.clone(),
+        "Files: Prod",
+    );
+    let mut view_model = ShellViewModel::default();
+    view_model.set_file_browser_session(session);
+    view_model.set_workspace_tabs(vec![sftp_tab]);
+
+    assert_eq!(view_model.workspace_sftp_sort_column_id(), "default");
+    assert_eq!(view_model.workspace_sftp_sort_direction_id(), "none");
+
+    assert!(view_model.toggle_workspace_sftp_sort_column("size"));
+    assert_eq!(view_model.workspace_sftp_sort_column_id(), "size");
+    assert_eq!(view_model.workspace_sftp_sort_direction_id(), "asc");
+    assert_eq!(
+        workspace_sftp_non_parent_names(&view_model),
+        vec!["alpha.log", "zeta.log"]
+    );
+
+    assert!(view_model.toggle_workspace_sftp_sort_column("size"));
+    assert_eq!(view_model.workspace_sftp_sort_column_id(), "size");
+    assert_eq!(view_model.workspace_sftp_sort_direction_id(), "desc");
+    assert_eq!(
+        workspace_sftp_non_parent_names(&view_model),
+        vec!["zeta.log", "alpha.log"]
+    );
+
+    assert!(view_model.toggle_workspace_sftp_sort_column("size"));
+    assert_eq!(view_model.workspace_sftp_sort_column_id(), "size");
+    assert_eq!(view_model.workspace_sftp_sort_direction_id(), "asc");
+}
+
+fn workspace_sftp_non_parent_names(view_model: &ShellViewModel) -> Vec<String> {
+    view_model
+        .workspace_sftp_render_rows()
+        .iter()
+        .filter(|row| row.kind != "parent-directory")
+        .map(|row| row.name.to_string())
+        .collect()
+}
+
+#[test]
 fn active_sftp_workspace_summary_prefers_live_host_status_and_binding_metadata() {
     let session =
         sample_workspace_sftp_session(SftpPanelMode::Loading, SftpFollowMode::ManualBrowse);

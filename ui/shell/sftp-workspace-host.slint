@@ -258,6 +258,8 @@ export component SftpWorkspaceHost inherits Rectangle {
     in property <[SftpPanelItem]> workspace-sftp-items: [];
     in property <[string]> workspace-sftp-selected-entry-ids: [];
     in property <[SftpBreadcrumbItem]> workspace-sftp-breadcrumb-items: [];
+    in property <string> workspace-sftp-sort-column: "default";
+    in property <string> workspace-sftp-sort-direction: "none";
     in property <color> workspace-session-frame-surface: ThemeTokens.terminal-frame-background;
     in property <color> workspace-session-frame-border: ThemeTokens.divider-subtle;
     in property <color> shell-separator: ThemeTokens.separator;
@@ -283,6 +285,7 @@ export component SftpWorkspaceHost inherits Rectangle {
     callback workspace-sftp-item-selected(string, bool, bool);
     callback workspace-sftp-item-activated(string, string);
     callback workspace-sftp-context-menu-requested(string, string, length, length);
+    callback workspace-sftp-sort-requested(string);
     callback workspace-sftp-upload-requested();
     callback workspace-sftp-new-folder-requested();
     callback workspace-sftp-retry-requested();
@@ -322,6 +325,13 @@ export component SftpWorkspaceHost inherits Rectangle {
             return "medium";
         }
         return "compact";
+    }
+
+    function workspace-sort-suffix(column-id: string) -> string {
+        if root.workspace-sftp-sort-column != column-id {
+            return "";
+        }
+        return root.workspace-sftp-sort-direction == "desc" ? " v" : " ^";
     }
 
     function content-state-visible() -> bool {
@@ -872,28 +882,46 @@ export component SftpWorkspaceHost inherits Rectangle {
                             y: 0px;
                             width: parent.width - 8px;
                             height: parent.height;
-                            text: "Name";
+                            text: "Name" + root.workspace-sort-suffix("name");
                             font-family: AppTypography.ui-font-family;
                             font-size: AppTypography.ui-font-size-caption;
                             font-weight: AppTypography.ui-font-weight-semibold;
                             color: root.shell-text-secondary;
                             vertical-alignment: center;
                         }
+
+                        header-sort-name-touch := TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+
+                            clicked => {
+                                root.workspace-sftp-sort-requested("name");
+                            }
+                        }
                     }
 
-                    if root.workspace-width-tier() != "compact" : Rectangle {
+                    if root.workspace-width-tier() != "compact" : workspace-table-header-type := Rectangle {
                         width: 90px;
                         background: transparent;
 
                         Text {
                             width: parent.width;
                             height: parent.height;
-                            text: "Type";
+                            text: "Type" + root.workspace-sort-suffix("type");
                             font-family: AppTypography.ui-font-family;
                             font-size: AppTypography.ui-font-size-caption;
                             font-weight: AppTypography.ui-font-weight-semibold;
                             color: root.shell-text-secondary;
                             vertical-alignment: center;
+                        }
+
+                        header-sort-type-touch := TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+
+                            clicked => {
+                                root.workspace-sftp-sort-requested("type");
+                            }
                         }
                     }
 
@@ -904,29 +932,47 @@ export component SftpWorkspaceHost inherits Rectangle {
                         Text {
                             width: parent.width;
                             height: parent.height;
-                            text: "Size";
+                            text: "Size" + root.workspace-sort-suffix("size");
                             font-family: AppTypography.ui-font-family;
                             font-size: AppTypography.ui-font-size-caption;
                             font-weight: AppTypography.ui-font-weight-semibold;
                             color: root.shell-text-secondary;
                             vertical-alignment: center;
                         }
+
+                        header-sort-size-touch := TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+
+                            clicked => {
+                                root.workspace-sftp-sort-requested("size");
+                            }
+                        }
                     }
 
-                    if root.workspace-width-tier() != "compact" : Rectangle {
+                    if root.workspace-width-tier() != "compact" : workspace-table-header-modified := Rectangle {
                         width: 154px;
                         background: transparent;
 
                         Text {
                             width: parent.width;
                             height: parent.height;
-                            text: "Modified";
+                            text: "Modified" + root.workspace-sort-suffix("modified");
                             font-family: AppTypography.ui-font-family;
                             font-size: AppTypography.ui-font-size-caption;
                             font-weight: AppTypography.ui-font-weight-semibold;
                             color: root.shell-text-secondary;
                             vertical-alignment: center;
                             overflow: elide;
+                        }
+
+                        header-sort-modified-touch := TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+
+                            clicked => {
+                                root.workspace-sftp-sort-requested("modified");
+                            }
                         }
                     }
 

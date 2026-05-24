@@ -1093,6 +1093,22 @@ impl ShellViewModel {
             .unwrap_or("none")
     }
 
+    pub fn workspace_sftp_sort_column_id(&self) -> &'static str {
+        self.active_workspace_sftp_session()
+            .map(|state| state.sort_state)
+            .and_then(|sort_state| sort_state.column)
+            .map(FileBrowserSortColumn::id)
+            .unwrap_or("default")
+    }
+
+    pub fn workspace_sftp_sort_direction_id(&self) -> &'static str {
+        self.active_workspace_sftp_session()
+            .map(|state| state.sort_state)
+            .and_then(|sort_state| sort_state.direction)
+            .map(FileBrowserSortDirection::id)
+            .unwrap_or("none")
+    }
+
     pub fn cycle_sftp_panel_sort(&mut self, column_id: &str) -> bool {
         let Some(column) = FileBrowserSortColumn::from_id(column_id) else {
             return false;
@@ -1186,6 +1202,37 @@ impl ShellViewModel {
             return false;
         }
         state.sort_state = next_sort_state;
+        self.refresh_sftp_panel_projection_cache(session_id.as_str())
+    }
+
+    pub fn toggle_workspace_sftp_sort_column(&mut self, column_id: &str) -> bool {
+        let Some(column) = FileBrowserSortColumn::from_id(column_id) else {
+            return false;
+        };
+        let Some(session_id) = self
+            .active_workspace_sftp_session()
+            .map(|state| state.file_browser_session_id.clone())
+        else {
+            return false;
+        };
+        let Some(state) = self.file_browser_sessions.get_mut(session_id.as_str()) else {
+            return false;
+        };
+        let next_direction = match state.sort_state {
+            FileBrowserSortState {
+                column: Some(active_column),
+                direction: Some(FileBrowserSortDirection::Asc),
+            } if active_column == column => FileBrowserSortDirection::Desc,
+            FileBrowserSortState {
+                column: Some(active_column),
+                direction: Some(FileBrowserSortDirection::Desc),
+            } if active_column == column => FileBrowserSortDirection::Asc,
+            _ => FileBrowserSortDirection::Asc,
+        };
+        state.sort_state = FileBrowserSortState {
+            column: Some(column),
+            direction: Some(next_direction),
+        };
         self.refresh_sftp_panel_projection_cache(session_id.as_str())
     }
 

@@ -297,7 +297,8 @@ fn workspace_sftp_ready_list_scrolls_when_the_directory_is_taller_than_the_viewp
         list_host.absolute_position().x + list_host.size().width / 2.0,
         list_host.absolute_position().y + list_host.size().height / 2.0,
     );
-    app.window().dispatch_event(WindowEvent::PointerMoved { position });
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position });
     app.window().dispatch_event(WindowEvent::PointerScrolled {
         position,
         delta_x: 0.0,
@@ -653,6 +654,58 @@ fn workspace_toolbar_actions_stay_icon_only_to_match_the_compact_shell_chrome() 
             && host.contains("tooltip-text: \"Create folder\";")
             && host.contains("tooltip-text: \"Open Transfer Center\";"),
         "workspace toolbar should keep the right-edge actions icon-only with tooltip semantics in the compact shell chrome instead of re-expanding text labels at wide widths"
+    );
+}
+
+#[test]
+fn workspace_table_headers_route_sort_requests_and_project_sort_state() {
+    let host =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+    let workspace_pane =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let bootstrap = fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
+
+    for contract in [
+        "in property <string> workspace-sftp-sort-column: \"default\";",
+        "in property <string> workspace-sftp-sort-direction: \"none\";",
+        "callback workspace-sftp-sort-requested(string);",
+        "function workspace-sort-suffix(column-id: string) -> string {",
+        "text: \"Name\" + root.workspace-sort-suffix(\"name\");",
+        "root.workspace-sftp-sort-requested(\"name\");",
+        "root.workspace-sftp-sort-requested(\"size\");",
+        "root.workspace-sftp-sort-requested(\"modified\");",
+    ] {
+        assert!(
+            host.contains(contract),
+            "workspace SFTP host should expose clickable sortable headers through `{contract}`"
+        );
+    }
+    for contract in [
+        "workspace-sftp-sort-column: root.workspace-sftp-sort-column;",
+        "workspace-sftp-sort-direction: root.workspace-sftp-sort-direction;",
+        "workspace-sftp-sort-requested(column-id) => {",
+        "root.workspace-sftp-sort-requested(column-id);",
+    ] {
+        assert!(
+            workspace_pane.contains(contract) && app_window.contains(contract),
+            "workspace sort contract `{contract}` should be threaded through WorkspacePane and AppWindow"
+        );
+    }
+    assert!(
+        app_window.contains("in-out property <string> workspace-sftp-sort-column: \"default\";")
+            && app_window
+                .contains("in-out property <string> workspace-sftp-sort-direction: \"none\";")
+            && app_window.contains("callback workspace-sftp-sort-requested(string);"),
+        "AppWindow should own runtime workspace sort state and a header-click callback"
+    );
+    assert!(
+        bootstrap.contains(
+            "window.set_workspace_sftp_sort_column(state.workspace_sftp_sort_column_id().into());"
+        ) && bootstrap.contains(
+            "window.set_workspace_sftp_sort_direction(state.workspace_sftp_sort_direction_id().into());"
+        ) && bootstrap.contains("window.on_workspace_sftp_sort_requested(move |column_id| {"),
+        "bootstrap should synchronize workspace sort state and handle header sort requests"
     );
 }
 
