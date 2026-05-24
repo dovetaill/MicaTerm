@@ -348,7 +348,7 @@ fn sftp_targets_resolve_expected_action_sets() {
             .find(|node| node.id == "open-local")
             .expect("open-local action")
             .label,
-        "Open File"
+        "Open Local Copy"
     );
     assert_eq!(
         file_actions
@@ -356,7 +356,7 @@ fn sftp_targets_resolve_expected_action_sets() {
             .find(|node| node.id == "edit-locally")
             .expect("edit-locally action")
             .label,
-        "Edit Locally"
+        "Edit & Sync Back"
     );
     assert!(file_ids.contains(&"download"));
     assert!(file_ids.contains(&"copy-file-path"));
