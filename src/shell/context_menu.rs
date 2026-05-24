@@ -708,14 +708,14 @@ fn resolve_sftp_directory_actions(selection: &SelectionContext) -> Vec<ContextMe
     vec![
         action_with_state(
             "open-remote",
-            "Open",
+            "Open Folder",
             "folder-open",
             selection_state(selection),
             false,
         ),
         action_with_state(
             "open-in-new-sftp-tab",
-            "Open in New SFTP Tab",
+            "Open Folder in New SFTP Tab",
             "panel-right-expand",
             planned_selection_state(selection),
             false,
@@ -832,7 +832,7 @@ fn resolve_sftp_file_actions(selection: &SelectionContext) -> Vec<ContextMenuAct
     vec![
         action_with_state(
             "open-local",
-            "Open",
+            "Open File",
             "document",
             selection_state(selection),
             false,

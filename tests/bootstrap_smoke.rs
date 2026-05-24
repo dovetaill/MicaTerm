@@ -6910,6 +6910,14 @@ fn context_menu_item_ids(app: &AppWindow) -> Vec<String> {
         .collect()
 }
 
+fn context_menu_item_labels(app: &AppWindow) -> Vec<(String, String)> {
+    let items = app.get_assets_context_menu_primary_items();
+    (0..items.row_count())
+        .filter_map(|index| items.row_data(index))
+        .map(|item| (item.id.to_string(), item.label.to_string()))
+        .collect()
+}
+
 #[test]
 fn bootstrap_exposes_shell_default_window_budget() {
     assert_eq!(app_title(), "Mica Term");
@@ -15035,6 +15043,81 @@ fn workspace_sftp_context_menu_closes_assets_create_popover_before_showing_sftp_
     assert!(
         !action_ids.iter().any(|id| id == "new-ssh-connection"),
         "workspace directory context menus must not regress to the assets create menu contents after the right-click"
+    );
+}
+
+#[test]
+fn workspace_sftp_directory_and_file_context_menus_expose_distinct_live_labels() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(DelayedReadRecordingSftpLauncher {
+            state: sftp_state,
+            read_delay_by_path: Arc::new(BTreeMap::new()),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_sftp_panel_mode().as_str() == "ready"
+    });
+
+    app.invoke_sftp_panel_expand_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "sftp"
+            && app.get_workspace_sftp_path().as_str() == "/srv/app"
+    });
+
+    app.invoke_workspace_sftp_context_menu_requested(
+        "entry-logs".into(),
+        "sftp-directory".into(),
+        96.0,
+        128.0,
+    );
+    flush_runtime_projection();
+    let directory_labels = context_menu_item_labels(&app);
+
+    app.invoke_close_assets_context_menu_requested();
+    flush_runtime_projection();
+
+    app.invoke_workspace_sftp_path_submitted("/srv/app/releases".into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_sftp_path().as_str() == "/srv/app/releases"
+    });
+
+    app.invoke_workspace_sftp_context_menu_requested(
+        "entry-release".into(),
+        "sftp-file".into(),
+        96.0,
+        128.0,
+    );
+    flush_runtime_projection();
+    let file_labels = context_menu_item_labels(&app);
+
+    assert!(
+        directory_labels
+            .iter()
+            .any(|(id, label)| id == "open-remote" && label == "Open Folder")
+            && directory_labels.iter().any(|(id, label)| {
+                id == "open-in-new-sftp-tab" && label == "Open Folder in New SFTP Tab"
+            })
+            && file_labels
+                .iter()
+                .any(|(id, label)| id == "open-local" && label == "Open File")
+            && file_labels
+                .iter()
+                .any(|(id, label)| id == "edit-locally" && label == "Edit Locally"),
+        "live workspace SFTP menus should make directory and file affordances visually distinct instead of showing two nearly identical generic menus"
     );
 }
 

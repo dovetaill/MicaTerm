@@ -294,6 +294,22 @@ fn sftp_targets_resolve_expected_action_sets() {
     assert_eq!(
         folder_actions
             .iter()
+            .find(|node| node.id == "open-remote")
+            .expect("open-remote action")
+            .label,
+        "Open Folder"
+    );
+    assert_eq!(
+        folder_actions
+            .iter()
+            .find(|node| node.id == "open-in-new-sftp-tab")
+            .expect("open-in-new-sftp-tab action")
+            .label,
+        "Open Folder in New SFTP Tab"
+    );
+    assert_eq!(
+        folder_actions
+            .iter()
             .find(|node| node.id == "download")
             .expect("download action")
             .state,
@@ -341,7 +357,7 @@ fn sftp_targets_resolve_expected_action_sets() {
             .find(|node| node.id == "open-local")
             .expect("open-local action")
             .label,
-        "Open"
+        "Open File"
     );
     assert_eq!(
         file_actions
