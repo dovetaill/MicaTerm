@@ -673,13 +673,6 @@ fn resolve_sftp_blank_area_actions(selection: &SelectionContext) -> Vec<ContextM
             false,
         ),
         action_with_state(
-            "show-hidden-sftp",
-            "Show Hidden Files",
-            "list",
-            planned_mutable_state(selection),
-            false,
-        ),
-        action_with_state(
             "copy-current-path",
             "Copy Current Path",
             "copy",
@@ -1100,13 +1093,6 @@ fn planned_selection_state(selection: &SelectionContext) -> ContextMenuActionSta
     }
 }
 
-fn planned_mutable_state(selection: &SelectionContext) -> ContextMenuActionState {
-    if selection.target_mutable {
-        ContextMenuActionState::Planned
-    } else {
-        ContextMenuActionState::Disabled
-    }
-}
 
 fn action_with_state(
     id: &'static str,

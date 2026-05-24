@@ -227,14 +227,6 @@ fn sftp_targets_resolve_expected_action_sets() {
         ContextMenuActionState::Disabled
     );
     assert_eq!(
-        blank_actions
-            .iter()
-            .find(|node| node.id == "show-hidden-sftp")
-            .expect("show-hidden-sftp action")
-            .state,
-        ContextMenuActionState::Planned
-    );
-    assert_eq!(
         blank_ids,
         vec![
             "new-file",
@@ -247,7 +239,6 @@ fn sftp_targets_resolve_expected_action_sets() {
             "sort-name",
             "sort-size",
             "sort-modified",
-            "show-hidden-sftp",
             "copy-current-path",
             "open-sftp-workspace",
         ]

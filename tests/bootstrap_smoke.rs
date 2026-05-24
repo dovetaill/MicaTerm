@@ -13473,6 +13473,38 @@ fn sftp_context_menu_refresh_dispatches_a_real_directory_reload() {
 }
 
 #[test]
+fn sftp_blank_area_menu_drops_the_stale_show_hidden_toggle() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher { state: sftp_state }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+
+    app.invoke_open_sftp_panel_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_sftp_panel_mode().as_str() == "ready"
+    });
+
+    app.invoke_sftp_panel_context_menu_requested("".into(), "sftp-blank".into(), 64.0, 96.0);
+    flush_runtime_projection();
+
+    let action_ids = context_menu_item_ids(&app);
+    assert!(
+        !action_ids.iter().any(|id| id == "show-hidden-sftp"),
+        "the blank-area SFTP menu should stop advertising a stale `Show Hidden Files` toggle once hidden entries are treated as part of the default listing model"
+    );
+}
+
+#[test]
 fn revisiting_a_previous_remote_path_keeps_its_cached_snapshot_visible_while_refreshing() {
     let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
