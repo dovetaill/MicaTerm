@@ -1640,8 +1640,9 @@ pub(super) fn apply_pending_sftp_context_action(
             from,
             to,
             refresh_path,
+            linked_terminal_session_id,
         } => {
-            let Some(session_id) = active_sftp_terminal_session_uuid(state) else {
+            let Some(session_id) = Uuid::parse_str(linked_terminal_session_id.as_str()).ok() else {
                 return false;
             };
             let runtime_handle = async_runtime

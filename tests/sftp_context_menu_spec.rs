@@ -996,6 +996,11 @@ fn quick_browser_rename_modal_stays_bound_to_the_originating_surface_session() {
         112.0,
     );
     state.handle_context_menu_leaf_action("rename-sftp-entry");
+    let quick_terminal_session_id = state
+        .file_browser_sessions
+        .get("browser-quick")
+        .and_then(|session| session.linked_terminal_session_id.clone())
+        .expect("quick browser linked terminal session id");
     state.update_rename_asset_modal_name("logs-archive".into());
     assert_eq!(
         state.asset_rename_modal_validation_message(),
@@ -1015,8 +1020,28 @@ fn quick_browser_rename_modal_stays_bound_to_the_originating_surface_session() {
                 from: "/srv/app/logs".into(),
                 to: "/srv/app/logs-current".into(),
                 refresh_path: "/srv/app".into(),
+                linked_terminal_session_id: quick_terminal_session_id,
             }
         )
+    );
+}
+
+#[test]
+fn sftp_rename_execution_keeps_the_originating_terminal_session_id() {
+    let view_model =
+        fs::read_to_string("src/shell/view_model/asset_modal_executor.rs").expect("read executor");
+    let bootstrap = fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
+
+    assert!(
+        view_model.contains("linked_terminal_session_id,")
+            && view_model.contains("PendingSftpContextAction::RenameEntry {")
+            && view_model.contains("linked_terminal_session_id,"),
+        "SFTP rename confirmation should enqueue the terminal session id captured from the browser session that opened the rename modal"
+    );
+    assert!(
+        bootstrap.contains("RenameEntry {\n            from,\n            to,\n            refresh_path,\n            linked_terminal_session_id,")
+            && bootstrap.contains("Uuid::parse_str(linked_terminal_session_id.as_str())"),
+        "SFTP rename execution should use the captured terminal session id instead of resolving whichever SFTP surface is active when the modal is confirmed"
     );
 }
 

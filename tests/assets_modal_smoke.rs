@@ -1426,6 +1426,62 @@ fn blocking_modal_children_bind_overlay_parent_dimensions() {
 }
 
 #[test]
+fn rename_modal_copy_is_projected_for_assets_and_sftp_without_asset_label_leakage() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let rename_modal =
+        fs::read_to_string("ui/components/assets-rename-modal.slint").expect("read rename modal");
+    let bootstrap =
+        fs::read_to_string("src/app/bootstrap/assets_keychain.rs").expect("read assets bootstrap");
+
+    for contract in [
+        "in-out property <string> asset-rename-modal-dialog-title: \"Rename Asset\";",
+        "in-out property <string> asset-rename-modal-subtitle:",
+        "in-out property <string> asset-rename-modal-field-label:",
+        "in-out property <string> asset-rename-modal-field-helper:",
+        "in-out property <string> asset-rename-modal-input-helper:",
+        "dialog-title: root.asset-rename-modal-dialog-title;",
+        "subtitle: root.asset-rename-modal-subtitle;",
+        "field-label: root.asset-rename-modal-field-label;",
+        "field-helper: root.asset-rename-modal-field-helper;",
+        "input-helper: root.asset-rename-modal-input-helper;",
+    ] {
+        assert!(
+            app_window.contains(contract),
+            "AppWindow should project rename modal copy through `{contract}` instead of hardcoding asset-only strings into every rename surface"
+        );
+    }
+    for contract in [
+        "in property <string> subtitle:",
+        "in property <string> field-label:",
+        "in property <string> field-helper:",
+        "in property <string> input-helper:",
+        "subtitle: root.subtitle;",
+        "text: root.field-label;",
+        "text: root.field-helper;",
+        ": root.input-helper;",
+    ] {
+        assert!(
+            rename_modal.contains(contract),
+            "AssetsRenameModal should accept generic rename copy through `{contract}` so SFTP rename does not render asset-specific labels"
+        );
+    }
+    for contract in [
+        "window.set_asset_rename_modal_dialog_title(\"Rename Remote Item\".into());",
+        "window.set_asset_rename_modal_field_label(\"Remote name\".into());",
+    ] {
+        assert!(
+            bootstrap.contains(contract),
+            "SFTP rename modal sync should set remote-file copy through `{contract}`"
+        );
+    }
+    assert!(
+        bootstrap.contains("window.set_asset_rename_modal_input_helper(")
+            && bootstrap.contains("\"Applied to the selected remote file or folder.\""),
+        "SFTP rename modal sync should set a remote-file helper instead of the asset-tree helper"
+    );
+}
+
+#[test]
 fn ssh_form_field_contract_allows_horizontal_rows_to_shrink_without_overflow() {
     let chrome = fs::read_to_string("ui/components/modal-chrome.slint").expect("read modal chrome");
 

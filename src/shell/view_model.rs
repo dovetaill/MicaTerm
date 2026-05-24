@@ -659,6 +659,7 @@ pub enum PendingSftpContextAction {
         from: String,
         to: String,
         refresh_path: String,
+        linked_terminal_session_id: String,
     },
     DeleteEntries {
         entries: Vec<SftpDirectoryEntry>,

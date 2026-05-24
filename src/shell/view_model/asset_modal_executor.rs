@@ -406,15 +406,16 @@ impl ShellViewModel {
                 else {
                     return false;
                 };
-                if linked_terminal_session_id.is_none() {
+                let Some(linked_terminal_session_id) = linked_terminal_session_id else {
                     return false;
-                }
+                };
                 let next_name = draft_name.trim().to_string();
                 let next_path = sftp_child_path(refresh_path.as_str(), next_name.as_str());
                 self.pending_sftp_context_action = Some(PendingSftpContextAction::RenameEntry {
                     from: entry.path,
                     to: next_path,
                     refresh_path,
+                    linked_terminal_session_id,
                 });
                 self.context_target_asset_id = Some(entry_id);
                 self.asset_modal_state = None;

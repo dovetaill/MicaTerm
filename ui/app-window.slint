@@ -200,6 +200,11 @@ export component AppWindow inherits Window {
     in-out property <string> asset-snippet-modal-package-selected-label: "";
     in-out property <string> asset-snippet-package-modal-name: "";
     in-out property <bool> asset-rename-modal-open: false;
+    in-out property <string> asset-rename-modal-dialog-title: "Rename Asset";
+    in-out property <string> asset-rename-modal-subtitle: "Rename the selected asset without breaking the surrounding workspace flow.";
+    in-out property <string> asset-rename-modal-field-label: "Asset label";
+    in-out property <string> asset-rename-modal-field-helper: "Use a stable name so the tree, search results, and quick actions stay easy to scan.";
+    in-out property <string> asset-rename-modal-input-helper: "Shown in the asset tree and related context menus.";
     in-out property <string> asset-rename-modal-name: "";
     in-out property <string> asset-rename-modal-validation-message: "";
     in-out property <bool> asset-rename-modal-can-confirm: false;
@@ -2750,7 +2755,11 @@ export component AppWindow inherits Window {
             width: asset-rename-modal-shell.content-width;
             height: asset-rename-modal-shell.content-height;
             focus-sequence: root.blocking-modal-focus-sequence;
-            dialog-title: "Rename Asset";
+            dialog-title: root.asset-rename-modal-dialog-title;
+            subtitle: root.asset-rename-modal-subtitle;
+            field-label: root.asset-rename-modal-field-label;
+            field-helper: root.asset-rename-modal-field-helper;
+            input-helper: root.asset-rename-modal-input-helper;
             item-name: root.asset-rename-modal-name;
             validation-message: root.asset-rename-modal-validation-message;
             can-confirm: root.asset-rename-modal-can-confirm;
