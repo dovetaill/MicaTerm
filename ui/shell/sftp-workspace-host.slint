@@ -292,6 +292,8 @@ export component SftpWorkspaceHost inherits Rectangle {
     callback tooltip-close-requested(string);
 
     private property <length> list-visible-height: 0px;
+    private property <bool> drag-select-active: false;
+    private property <int> drag-select-last-index: -1;
     private property <image> arrow-hook-up-left-icon: @image-url("../../assets/icons/fluent/arrow-hook-up-left-20-regular.svg");
     private property <image> arrow-collapse-all-icon: @image-url("../../assets/icons/fluent/arrow-collapse-all-20-regular.svg");
     private property <image> arrow-expand-all-icon: @image-url("../../assets/icons/fluent/arrow-expand-all-20-regular.svg");
@@ -1058,7 +1060,7 @@ export component SftpWorkspaceHost inherits Rectangle {
                             width: parent.width;
                             spacing: 0px;
 
-                            for item in root.workspace-sftp-items : Rectangle {
+                            for item[index] in root.workspace-sftp-items : Rectangle {
                                 width: parent.width;
                                 height: root.workspace-sftp-row-height;
                                 background: item.selected ? root.shell-sidebar-item-selected
@@ -1255,11 +1257,24 @@ export component SftpWorkspaceHost inherits Rectangle {
 
                                     pointer-event(event) => {
                                         if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                                            root.drag-select-active = true;
+                                            root.drag-select-last-index = index;
                                             root.workspace-sftp-item-selected(
                                                 item.id,
                                                 event.modifiers.control,
                                                 event.modifiers.shift,
                                             );
+                                        } else if event.kind == PointerEventKind.move && self.pressed && root.drag-select-active {
+                                            let row-offset = Math.floor((self.mouse-y / 1px) / (root.workspace-sftp-row-height / 1px));
+                                            let hovered-index = Math.max(0, Math.min(root.workspace-sftp-items.length - 1, index + row-offset));
+                                            if hovered-index != root.drag-select-last-index {
+                                                root.drag-select-last-index = hovered-index;
+                                                root.workspace-sftp-item-selected(
+                                                    root.workspace-sftp-items[hovered-index].id,
+                                                    false,
+                                                    true,
+                                                );
+                                            }
                                         } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
                                             root.workspace-sftp-context-menu-requested(
                                                 item.id,
@@ -1269,6 +1284,12 @@ export component SftpWorkspaceHost inherits Rectangle {
                                                 self.mouse-x + self.absolute-position.x,
                                                 self.mouse-y + self.absolute-position.y,
                                             );
+                                        } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                                            root.drag-select-active = false;
+                                            root.drag-select-last-index = -1;
+                                        } else if event.kind == PointerEventKind.cancel {
+                                            root.drag-select-active = false;
+                                            root.drag-select-last-index = -1;
                                         }
                                     }
                                 }

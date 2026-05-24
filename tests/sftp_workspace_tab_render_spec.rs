@@ -530,6 +530,24 @@ fn workspace_blank_area_left_click_routes_to_clear_selection_local_action() {
 }
 
 #[test]
+fn workspace_pointer_drag_reuses_the_existing_range_selection_anchor_contract() {
+    let source =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    assert!(
+        source.contains("for item[index] in root.workspace-sftp-items : Rectangle {")
+            && source.contains("private property <bool> drag-select-active: false;")
+            && source.contains("private property <int> drag-select-last-index: -1;")
+            && source.contains("event.kind == PointerEventKind.move && self.pressed")
+            && source.contains("root.drag-select-last-index = hovered-index;")
+            && source.contains("root.workspace-sftp-items[hovered-index].id")
+            && source.contains("false,")
+            && source.contains("true,"),
+        "workspace SFTP rows should extend selection across pointer drags by reusing the existing shift-range selection anchor instead of treating every drag as a dead single-click gesture"
+    );
+}
+
+#[test]
 fn workspace_path_escape_is_a_cancel_instead_of_a_hidden_resubmit() {
     let source =
         fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
