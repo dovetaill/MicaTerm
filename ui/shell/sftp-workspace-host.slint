@@ -294,6 +294,8 @@ export component SftpWorkspaceHost inherits Rectangle {
     private property <length> list-visible-height: 0px;
     private property <bool> drag-select-active: false;
     private property <int> drag-select-last-index: -1;
+    private property <length> workspace-shell-inset: 16px;
+    private property <length> workspace-shell-vertical-inset: 14px;
     private property <image> arrow-hook-up-left-icon: @image-url("../../assets/icons/fluent/arrow-hook-up-left-20-regular.svg");
     private property <image> arrow-collapse-all-icon: @image-url("../../assets/icons/fluent/arrow-collapse-all-20-regular.svg");
     private property <image> arrow-expand-all-icon: @image-url("../../assets/icons/fluent/arrow-expand-all-20-regular.svg");
@@ -441,12 +443,10 @@ export component SftpWorkspaceHost inherits Rectangle {
     background: root.workspace-session-frame-surface;
 
     VerticalLayout {
-        width: parent.width;
-        height: parent.height;
-        padding-left: 16px;
-        padding-right: 16px;
-        padding-top: 14px;
-        padding-bottom: 14px;
+        x: root.workspace-shell-inset;
+        y: root.workspace-shell-vertical-inset;
+        width: max(0px, parent.width - root.workspace-shell-inset * 2);
+        height: max(0px, parent.height - root.workspace-shell-vertical-inset * 2);
         spacing: 10px;
 
         workspace-header := Rectangle {

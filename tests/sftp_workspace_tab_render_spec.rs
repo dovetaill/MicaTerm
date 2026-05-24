@@ -657,6 +657,21 @@ fn workspace_toolbar_actions_stay_icon_only_to_match_the_compact_shell_chrome() 
 }
 
 #[test]
+fn workspace_sftp_shell_insets_do_not_let_toolbar_actions_clip_the_right_edge() {
+    let host =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+
+    assert!(
+        host.contains("private property <length> workspace-shell-inset: 16px;")
+            && host.contains("width: max(0px, parent.width - root.workspace-shell-inset * 2);")
+            && host.contains("x: root.workspace-shell-inset;")
+            && !host.contains("padding-left: 16px;")
+            && !host.contains("padding-right: 16px;"),
+        "workspace SFTP should express its chrome inset as an explicit content width so toolbar actions such as Open Transfer Center cannot be laid out past the right edge"
+    );
+}
+
+#[test]
 fn workspace_compact_width_hides_optional_size_column_before_name_column_is_clipped() {
     i_slint_backend_testing::init_no_event_loop();
 
