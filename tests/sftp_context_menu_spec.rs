@@ -310,7 +310,6 @@ fn sftp_targets_resolve_expected_action_sets() {
     assert_eq!(
         file_ids,
         vec![
-            "open-local",
             "edit-locally",
             "download",
             "rename-sftp-entry",
@@ -323,14 +322,6 @@ fn sftp_targets_resolve_expected_action_sets() {
             "permissions-sftp",
             "properties",
         ]
-    );
-    assert_eq!(
-        file_actions
-            .iter()
-            .find(|node| node.id == "open-local")
-            .expect("open-local action")
-            .label,
-        "Open Local Copy"
     );
     assert_eq!(
         file_actions
@@ -412,21 +403,21 @@ fn sftp_targets_resolve_expected_action_sets() {
 }
 
 #[test]
-fn sftp_file_context_menu_contract_exposes_open_and_edit_locally_actions() {
+fn sftp_file_context_menu_contract_keeps_edit_locally_without_duplicate_open_local() {
     let dispatcher_source = fs::read_to_string("src/shell/view_model/context_menu_dispatcher.rs")
         .expect("read context menu dispatcher");
     let context_menu_source =
         fs::read_to_string("src/shell/context_menu.rs").expect("read context menu source");
 
     assert!(
-        context_menu_source.contains("\"open-local\"")
+        !context_menu_source.contains("\"open-local\"")
             && context_menu_source.contains("\"edit-locally\""),
-        "the file context menu should expose separate action ids for local open and edit-locally"
+        "the file context menu should rely on double-click for plain local-open and expose only the distinct edit-and-sync-back action"
     );
     assert!(
-        dispatcher_source.contains("\"open-local\"")
+        !dispatcher_source.contains("\"open-local\"")
             && dispatcher_source.contains("\"edit-locally\""),
-        "the context-menu dispatcher should route both local-open and edit-locally actions"
+        "the context-menu dispatcher should stop routing the retired local-open menu action while keeping edit-locally"
     );
     assert!(
         !context_menu_source.contains("\"open-with-remote\""),
@@ -458,7 +449,7 @@ fn sftp_row_context_menus_do_not_mix_in_blank_area_create_actions() {
 
     assert!(folder_actions.iter().any(|node| node.id == "open-remote"));
     assert!(!folder_actions.iter().any(|node| node.id == "open-local"));
-    assert!(file_actions.iter().any(|node| node.id == "open-local"));
+    assert!(!file_actions.iter().any(|node| node.id == "open-local"));
     assert!(file_actions.iter().any(|node| node.id == "edit-locally"));
     assert!(!file_actions.iter().any(|node| node.id == "open-remote"));
 }

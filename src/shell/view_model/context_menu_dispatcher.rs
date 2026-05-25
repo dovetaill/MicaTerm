@@ -258,13 +258,6 @@ impl ShellViewModel {
                     self.close_context_menu();
                 }
             }
-            "open-local" => {
-                if let Some(entry_id) = self.context_target_asset_id.clone() {
-                    self.pending_sftp_context_action =
-                        Some(PendingSftpContextAction::OpenLocal { entry_id });
-                    self.close_context_menu();
-                }
-            }
             "edit-locally" => {
                 if let Some(entry_id) = self.context_target_asset_id.clone() {
                     self.pending_sftp_context_action =

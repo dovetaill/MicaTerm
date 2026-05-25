@@ -640,9 +640,6 @@ pub enum PendingSftpContextAction {
     OpenRemote {
         entry_id: String,
     },
-    OpenLocal {
-        entry_id: String,
-    },
     EditLocally {
         entry_id: String,
     },

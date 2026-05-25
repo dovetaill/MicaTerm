@@ -789,13 +789,6 @@ fn resolve_sftp_directory_actions(selection: &SelectionContext) -> Vec<ContextMe
 fn resolve_sftp_file_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
     vec![
         action_with_state(
-            "open-local",
-            "Open Local Copy",
-            "document",
-            selection_state(selection),
-            false,
-        ),
-        action_with_state(
             "edit-locally",
             "Edit & Sync Back",
             "document-code",

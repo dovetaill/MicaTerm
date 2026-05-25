@@ -1560,21 +1560,6 @@ pub(super) fn apply_pending_sftp_context_action(
                 browser_result_tx,
             )
         }
-        PendingSftpContextAction::OpenLocal { entry_id } => {
-            let Some(entry) = state.active_sftp_entry(entry_id.as_str()).cloned() else {
-                return false;
-            };
-            let Some(session_id) = active_sftp_terminal_session_uuid(state) else {
-                return false;
-            };
-            entry.kind == SftpDirectoryEntryKind::File
-                && queue_sftp_local_file_action(
-                    &session_bridge.manager,
-                    session_id,
-                    entry.path.as_str(),
-                    crate::app::sftp::SftpOpenAction::DownloadAndOpen,
-                )
-        }
         PendingSftpContextAction::EditLocally { entry_id } => {
             let Some(entry) = state.active_sftp_entry(entry_id.as_str()).cloned() else {
                 return false;

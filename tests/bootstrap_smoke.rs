@@ -15393,13 +15393,11 @@ fn workspace_sftp_directory_and_file_context_menus_expose_distinct_live_labels()
             && directory_labels.iter().any(|(id, label)| {
                 id == "open-in-new-sftp-tab" && label == "Open Folder in New SFTP Tab"
             })
-            && file_labels
-                .iter()
-                .any(|(id, label)| id == "open-local" && label == "Open Local Copy")
+            && !file_labels.iter().any(|(id, _)| id == "open-local")
             && file_labels
                 .iter()
                 .any(|(id, label)| id == "edit-locally" && label == "Edit & Sync Back"),
-        "live workspace SFTP menus should make directory and file affordances visually distinct instead of showing two nearly identical generic menus"
+        "live workspace SFTP menus should keep directory and file affordances distinct while avoiding a duplicate Open Local Copy entry when double-click already opens files"
     );
 }
 
