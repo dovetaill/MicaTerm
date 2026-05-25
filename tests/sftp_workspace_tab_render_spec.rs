@@ -725,6 +725,22 @@ fn workspace_sftp_shell_insets_do_not_let_toolbar_actions_clip_the_right_edge() 
 }
 
 #[test]
+fn workspace_sftp_and_tab_chrome_clip_to_their_owned_bounds() {
+    let host =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
+    let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
+
+    assert!(
+        host.contains("workspace-toolbar := Rectangle {\n            width: parent.width;\n            height: 42px;\n            clip: true;"),
+        "workspace SFTP toolbar should clip its own chrome so right-edge actions cannot visually overrun the main workspace"
+    );
+    assert!(
+        tabbar.contains("export component TabBar inherits Rectangle {") && tabbar.contains("clip: true;"),
+        "workspace tabbar should clip overflowing tab chips/new-tab chrome instead of drawing XFTP/tab controls beyond the available workspace width"
+    );
+}
+
+#[test]
 fn workspace_compact_width_hides_optional_size_column_before_name_column_is_clipped() {
     i_slint_backend_testing::init_no_event_loop();
 

@@ -530,6 +530,7 @@ export component SftpWorkspaceHost inherits Rectangle {
         workspace-toolbar := Rectangle {
             width: parent.width;
             height: 42px;
+            clip: true;
             border-radius: 6px;
             border-width: 1px;
             border-color: root.workspace-session-frame-border;
