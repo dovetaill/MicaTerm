@@ -1311,7 +1311,7 @@ export component SftpWorkspaceHost inherits Rectangle {
                                                 event.modifiers.control,
                                                 event.modifiers.shift,
                                             );
-                                        } else if event.kind == PointerEventKind.move && self.pressed && root.drag-select-active {
+                                        } else if event.kind == PointerEventKind.move && root.drag-select-active {
                                             let row-offset = Math.floor((self.mouse-y / 1px) / (root.workspace-sftp-row-height / 1px));
                                             let hovered-index = Math.max(0, Math.min(root.workspace-sftp-items.length - 1, index + row-offset));
                                             if hovered-index != root.drag-select-last-index {
