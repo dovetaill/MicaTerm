@@ -255,15 +255,10 @@ fn sftp_targets_resolve_expected_action_sets() {
             "open-remote",
             "open-in-new-sftp-tab",
             "download",
-            "upload-files",
-            "upload-folder",
-            "new-folder",
-            "new-file",
             "rename-sftp-entry",
             "delete-sftp-entry",
             "copy-sftp-entry",
             "cut-sftp-entry",
-            "paste-sftp",
             "copy-folder-path",
             "refresh-sftp",
             "open-terminal-here",
@@ -306,14 +301,6 @@ fn sftp_targets_resolve_expected_action_sets() {
             .state,
         ContextMenuActionState::Enabled
     );
-    assert_eq!(
-        folder_actions
-            .iter()
-            .find(|node| node.id == "paste-sftp")
-            .expect("paste-sftp action")
-            .state,
-        ContextMenuActionState::Disabled
-    );
 
     let file_actions = resolve_action_tree(
         ContextTargetKind::SftpFile,
@@ -326,15 +313,10 @@ fn sftp_targets_resolve_expected_action_sets() {
             "open-local",
             "edit-locally",
             "download",
-            "upload-files",
-            "upload-folder",
-            "new-folder",
-            "new-file",
             "rename-sftp-entry",
             "delete-sftp-entry",
             "copy-sftp-entry",
             "cut-sftp-entry",
-            "paste-sftp",
             "copy-file-path",
             "copy-file-name",
             "refresh-sftp",
@@ -369,23 +351,14 @@ fn sftp_targets_resolve_expected_action_sets() {
             .state,
         ContextMenuActionState::Enabled
     );
-    for action_id in [
-        "upload-files",
-        "upload-folder",
-        "new-folder",
-        "new-file",
-        "refresh-sftp",
-    ] {
-        assert_eq!(
-            file_actions
-                .iter()
-                .find(|node| node.id == action_id)
-                .unwrap_or_else(|| panic!("missing `{action_id}` action"))
-                .state,
-            ContextMenuActionState::Enabled,
-            "workspace-style SFTP file menus should keep `{action_id}` available via the shared dispatcher instead of forcing users back to a blank-area-only action path"
-        );
-    }
+    assert_eq!(
+        file_actions
+            .iter()
+            .find(|node| node.id == "refresh-sftp")
+            .expect("refresh-sftp action")
+            .state,
+        ContextMenuActionState::Enabled
+    );
     assert_eq!(
         file_actions
             .iter()
@@ -394,23 +367,14 @@ fn sftp_targets_resolve_expected_action_sets() {
             .state,
         ContextMenuActionState::Disabled
     );
-    for action_id in [
-        "upload-files",
-        "upload-folder",
-        "new-folder",
-        "new-file",
-        "refresh-sftp",
-    ] {
-        assert_eq!(
-            folder_actions
-                .iter()
-                .find(|node| node.id == action_id)
-                .unwrap_or_else(|| panic!("missing `{action_id}` action"))
-                .state,
-            ContextMenuActionState::Enabled,
-            "workspace-style SFTP directory menus should keep `{action_id}` close to the selected row while still routing through the existing pending-action and modal system"
-        );
-    }
+    assert_eq!(
+        folder_actions
+            .iter()
+            .find(|node| node.id == "refresh-sftp")
+            .expect("refresh-sftp action")
+            .state,
+        ContextMenuActionState::Enabled
+    );
 
     let multi_actions = resolve_action_tree(
         ContextTargetKind::SftpMultiSelection,
@@ -468,6 +432,35 @@ fn sftp_file_context_menu_contract_exposes_open_and_edit_locally_actions() {
         !context_menu_source.contains("\"open-with-remote\""),
         "the default SFTP file context menu should stop advertising the legacy remote editor action"
     );
+}
+
+#[test]
+fn sftp_row_context_menus_do_not_mix_in_blank_area_create_actions() {
+    let folder_actions = resolve_action_tree(
+        ContextTargetKind::SftpDirectory,
+        &ready_directory_selection(vec!["entry-app"]),
+    );
+    let file_actions = resolve_action_tree(
+        ContextTargetKind::SftpFile,
+        &ready_file_selection(vec!["entry-release"]),
+    );
+
+    for action_id in ["upload-files", "upload-folder", "new-folder", "new-file", "paste-sftp"] {
+        assert!(
+            !folder_actions.iter().any(|node| node.id == action_id),
+            "folder row context menus should not expose blank-area action `{action_id}` because it operates on the current directory, not the clicked folder"
+        );
+        assert!(
+            !file_actions.iter().any(|node| node.id == action_id),
+            "file row context menus should not expose blank-area action `{action_id}` because it makes file and folder menus look identical"
+        );
+    }
+
+    assert!(folder_actions.iter().any(|node| node.id == "open-remote"));
+    assert!(!folder_actions.iter().any(|node| node.id == "open-local"));
+    assert!(file_actions.iter().any(|node| node.id == "open-local"));
+    assert!(file_actions.iter().any(|node| node.id == "edit-locally"));
+    assert!(!file_actions.iter().any(|node| node.id == "open-remote"));
 }
 
 #[test]
