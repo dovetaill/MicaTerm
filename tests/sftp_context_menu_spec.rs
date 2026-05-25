@@ -742,6 +742,101 @@ fn sftp_create_rename_and_delete_confirmations_do_not_mutate_projected_entries_l
 }
 
 #[test]
+fn sftp_rename_rejects_path_fragments_reserved_names_and_unchanged_names() {
+    let mut state = active_sftp_view_model(vec![SftpDirectoryEntry {
+        id: "entry-release".into(),
+        name: "release.tar.gz".into(),
+        path: "/srv/app/release.tar.gz".into(),
+        kind: SftpDirectoryEntryKind::File,
+        modified_unix_seconds: None,
+        size_bytes: Some(14 * 1024),
+        permissions_label: None,
+        owner_label: None,
+        group_label: None,
+    }]);
+
+    state.open_context_menu_for_target(
+        ContextTargetKind::SftpFile,
+        Some("entry-release".into()),
+        80.0,
+        120.0,
+    );
+    state.handle_context_menu_leaf_action("rename-sftp-entry");
+
+    for invalid_name in ["release.tar.gz", "nested/name.txt", ".", "..", "bad\0name"] {
+        state.update_rename_asset_modal_name(invalid_name.into());
+        assert!(
+            !state.can_confirm_asset_modal(),
+            "SFTP rename should disable confirmation for invalid remote name `{invalid_name:?}`"
+        );
+        assert!(
+            !state.asset_rename_modal_validation_message().is_empty(),
+            "SFTP rename should explain why `{invalid_name:?}` cannot be used"
+        );
+    }
+
+    state.update_rename_asset_modal_name("release-v2.tar.gz".into());
+    assert!(state.can_confirm_asset_modal());
+}
+
+#[test]
+fn sftp_rename_requires_an_originating_terminal_session_before_save_is_enabled() {
+    let session = FileBrowserSession {
+        file_browser_session_id: "browser-orphan".into(),
+        host_profile_ref: HostProfileRef::with_label("asset-prod", "Interserver"),
+        linked_terminal_session_id: None,
+        mode: SftpPanelMode::Ready,
+        follow_mode: SftpFollowMode::ManualBrowse,
+        current_path: "/srv/app".into(),
+        history: SftpPathHistory::with_initial("/srv/app"),
+        entries: vec![SftpDirectoryEntry {
+            id: "entry-release".into(),
+            name: "release.tar.gz".into(),
+            path: "/srv/app/release.tar.gz".into(),
+            kind: SftpDirectoryEntryKind::File,
+            modified_unix_seconds: None,
+            size_bytes: Some(14 * 1024),
+            permissions_label: None,
+            owner_label: None,
+            group_label: None,
+        }],
+        selected_entry_ids: vec![],
+        selection_anchor_entry_id: None,
+        last_error: None,
+        active_request_id: None,
+        sort_state: Default::default(),
+        column_layout: Default::default(),
+    };
+    let sftp_tab = WorkspaceTab::sftp(
+        "tab-files-orphan",
+        session.file_browser_session_id.clone(),
+        "Files: Orphan",
+    );
+    let mut state = ShellViewModel::default();
+    state.set_file_browser_session(session);
+    state.set_workspace_tabs(vec![sftp_tab]);
+
+    state.open_context_menu_for_target(
+        ContextTargetKind::SftpFile,
+        Some("entry-release".into()),
+        80.0,
+        120.0,
+    );
+    state.handle_context_menu_leaf_action("rename-sftp-entry");
+    state.update_rename_asset_modal_name("release-v2.tar.gz".into());
+
+    assert!(
+        !state.can_confirm_asset_modal(),
+        "SFTP rename Save should be disabled before an originating linked terminal session is available"
+    );
+    assert!(
+        !state.confirm_asset_modal(),
+        "confirming an orphaned SFTP rename should not silently enqueue a backend action"
+    );
+    assert_eq!(state.take_pending_sftp_context_action(), None);
+}
+
+#[test]
 fn unsupported_sftp_actions_render_disabled_reasons() {
     let blank_actions = resolve_action_tree(
         ContextTargetKind::SftpBlankArea,

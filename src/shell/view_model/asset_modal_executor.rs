@@ -28,13 +28,15 @@ impl ShellViewModel {
                 entry_id,
                 draft_name,
                 ..
-            }) => {
-                self.sftp_name_validation_for_session(
+            }) => self
+                .file_browser_sessions
+                .get(file_browser_session_id)
+                .is_some_and(|session| session.linked_terminal_session_id.is_some())
+                && self.sftp_name_validation_for_session(
                     file_browser_session_id,
                     draft_name,
                     Some(entry_id.as_str()),
-                ) == AssetNameValidation::Valid
-            }
+                ) == AssetNameValidation::Valid,
             Some(AssetModalState::SftpDeleteEntriesConfirm { .. }) => true,
             Some(AssetModalState::DeleteAssetConfirm { .. }) => true,
             None => false,

@@ -13,6 +13,22 @@ impl ShellViewModel {
         if trimmed.is_empty() {
             return AssetNameValidation::Empty;
         }
+        if trimmed == "." || trimmed == ".." || trimmed.contains('/') || trimmed.contains('\0') {
+            return AssetNameValidation::Invalid;
+        }
+
+        let unchanged = editing_entry_id
+            .and_then(|entry_id| {
+                self.file_browser_sessions
+                    .get(file_browser_session_id)?
+                    .entries
+                    .iter()
+                    .find(|entry| entry.id == entry_id)
+            })
+            .is_some_and(|entry| entry.name.trim() == trimmed);
+        if unchanged {
+            return AssetNameValidation::Unchanged;
+        }
 
         let duplicate = self
             .file_browser_sessions

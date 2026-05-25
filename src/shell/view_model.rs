@@ -1983,6 +1983,8 @@ fn asset_name_validation_message(validation: AssetNameValidation) -> String {
         AssetNameValidation::Valid => String::new(),
         AssetNameValidation::Empty => "Name is required.".into(),
         AssetNameValidation::Duplicate => "Name already exists in this folder.".into(),
+        AssetNameValidation::Invalid => "Use a single remote item name, not a path.".into(),
+        AssetNameValidation::Unchanged => "Name is unchanged.".into(),
     }
 }
 

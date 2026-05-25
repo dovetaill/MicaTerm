@@ -152,6 +152,8 @@ pub enum AssetNameValidation {
     Valid,
     Empty,
     Duplicate,
+    Invalid,
+    Unchanged,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
