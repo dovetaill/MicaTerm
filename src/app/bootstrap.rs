@@ -6471,6 +6471,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 sftp::sync_right_panel_state(&window, &mut state);
             }
 
+            let workspace_sftp_browser_changed = workspace_sftp_open_changed
+                || workspace_sftp_retry_changed
+                || sftp_result_changed
+                || sftp_result_changed_after_quick_queue
+                || sftp_result_changed_after_queue;
             let workspace_sftp_projection_delta = if workspace_sftp_open_changed
                 || workspace_sftp_retry_changed
                 || sftp_result_changed
@@ -6494,6 +6499,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 if workspace_sftp_projection_delta.sftp_changed {
                     sftp::sync_right_panel_state(&window, &mut state);
                 }
+            }
+            if workspace_sftp_browser_changed {
+                sftp::sync_workspace_sftp_state(&window, &mut state);
             }
 
             let now = Instant::now();

@@ -107,6 +107,21 @@ fn sync_sftp_panel_items_model(
     }
 }
 
+fn sftp_panel_items_model_matches_rows(
+    current: &ModelRc<SftpPanelItem>,
+    rows: &[crate::shell::view_model::SftpPanelRenderRow],
+) -> bool {
+    if current.row_count() != rows.len() {
+        return false;
+    }
+
+    rows.iter().enumerate().all(|(index, row)| {
+        current
+            .row_data(index)
+            .is_some_and(|item| item.id.as_str() == row.id && item.selected == row.selected)
+    })
+}
+
 fn project_sftp_breadcrumb_items(path: &str) -> Vec<SftpBreadcrumbItem> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -165,8 +180,11 @@ pub(super) fn sync_sftp_panel_state(window: &AppWindow, state: &mut ShellViewMod
     window.set_sftp_panel_drop_target_active(state.quick_browser_drop_target_active());
 
     let active_session_id = state.quick_browser_session_id().map(str::to_owned);
+    let active_rows = state.active_sftp_panel_render_rows();
+    let current_items = window.get_sftp_panel_items();
     let force_full_resync = active_session_id != state.sftp_panel_last_rendered_session_id
-        || state.active_sftp_panel_render_requires_full_resync();
+        || state.active_sftp_panel_render_requires_full_resync()
+        || !sftp_panel_items_model_matches_rows(&current_items, active_rows);
     let dirty_row_indices = if force_full_resync {
         Vec::new()
     } else {
@@ -174,8 +192,8 @@ pub(super) fn sync_sftp_panel_state(window: &AppWindow, state: &mut ShellViewMod
     };
     if force_full_resync || !dirty_row_indices.is_empty() {
         sync_sftp_panel_items_model(
-            window.get_sftp_panel_items(),
-            state.active_sftp_panel_render_rows(),
+            current_items,
+            active_rows,
             dirty_row_indices.as_slice(),
             force_full_resync,
             |model| window.set_sftp_panel_items(model),
@@ -253,8 +271,11 @@ pub(super) fn sync_workspace_sftp_state(window: &AppWindow, state: &mut ShellVie
     let active_session_id = state
         .active_workspace_sftp_session()
         .map(|session| session.file_browser_session_id.clone());
+    let workspace_rows = state.workspace_sftp_render_rows();
+    let current_items = window.get_workspace_sftp_items();
     let force_full_resync = active_session_id != state.workspace_sftp_last_rendered_session_id
-        || state.workspace_sftp_render_requires_full_resync();
+        || state.workspace_sftp_render_requires_full_resync()
+        || !sftp_panel_items_model_matches_rows(&current_items, workspace_rows);
     let dirty_row_indices = if force_full_resync {
         Vec::new()
     } else {
@@ -262,8 +283,8 @@ pub(super) fn sync_workspace_sftp_state(window: &AppWindow, state: &mut ShellVie
     };
     if force_full_resync || !dirty_row_indices.is_empty() {
         sync_sftp_panel_items_model(
-            window.get_workspace_sftp_items(),
-            state.workspace_sftp_render_rows(),
+            current_items,
+            workspace_rows,
             dirty_row_indices.as_slice(),
             force_full_resync,
             |model| window.set_workspace_sftp_items(model),

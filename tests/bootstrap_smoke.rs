@@ -15107,6 +15107,165 @@ fn workspace_sftp_expand_navigation_and_reconnect_drive_real_directory_reads() {
     );
 }
 
+fn fixture_dir_entry(parent: &str, name: &str, index: u64) -> SftpDirectoryEntry {
+    let path = if parent == "/" {
+        format!("/{name}")
+    } else {
+        format!("{parent}/{name}")
+    };
+    SftpDirectoryEntry {
+        id: format!("entry-{name}"),
+        name: name.into(),
+        path,
+        kind: SftpDirectoryEntryKind::Directory,
+        modified_unix_seconds: Some(1_775_012_000 + index),
+        size_bytes: None,
+        permissions_label: Some("drwxr-xr-x".into()),
+        owner_label: Some("root".into()),
+        group_label: Some("root".into()),
+    }
+}
+
+fn workspace_sftp_item_names(app: &AppWindow) -> Vec<String> {
+    (0..app.get_workspace_sftp_items().row_count())
+        .filter_map(|index| app.get_workspace_sftp_items().row_data(index))
+        .map(|row| row.name.to_string())
+        .collect::<Vec<_>>()
+}
+
+#[test]
+fn workspace_sftp_background_reads_sync_full_rows_for_each_remote_path() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+        let root_names = vec![
+            "admin",
+            "bin",
+            "boot",
+            "dev",
+            "etc",
+            "home",
+            "initrd.img",
+            "initrd.img.old",
+            "lib",
+            "lib32",
+            "lib64",
+            "lost+found",
+            "media",
+            "mnt",
+            "opt",
+            "proc",
+            "root",
+            "run",
+            "sbin",
+            "srv",
+            "sys",
+            "tmp",
+            "usr",
+            "var",
+            "vmlinuz",
+            "vmlinuz.old",
+        ];
+        let home_names = vec!["deploy", "git", "ubuntu", "wwwroot"];
+        let wwwroot_names = vec![
+            ".well-known",
+            "api",
+            "assets",
+            "backups",
+            "logs",
+            "mica-term",
+            "public",
+            "tmp",
+            "www.example.com",
+        ];
+
+        let root_entries = root_names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| fixture_dir_entry("/", name, index as u64))
+            .collect::<Vec<_>>();
+        let home_entries = home_names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| fixture_dir_entry("/home", name, index as u64))
+            .collect::<Vec<_>>();
+        let wwwroot_entries = wwwroot_names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| fixture_dir_entry("/home/wwwroot", name, index as u64))
+            .collect::<Vec<_>>();
+
+        let app = AppWindow::new().unwrap();
+        let sftp_state = RecordingSftpState::default();
+        bind_with_launcher(
+            &app,
+            None,
+            Arc::new(FixtureSftpLauncher {
+                state: sftp_state,
+                cwd: "/".into(),
+                responses: Arc::new(BTreeMap::from([
+                    ("/".to_string(), root_entries),
+                    ("/home".to_string(), home_entries),
+                    ("/home/wwwroot".to_string(), wwwroot_entries),
+                ])),
+            }),
+        );
+
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.into());
+        flush_runtime_projection();
+        app.invoke_open_sftp_panel_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_sftp_panel_mode().as_str() == "ready"
+        });
+
+        app.invoke_sftp_panel_expand_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_workspace_session_host_mode().as_str() == "sftp"
+                && app.get_workspace_sftp_path().as_str() == "/"
+                && app.get_workspace_sftp_items().row_count() == root_names.len()
+        });
+        let names = workspace_sftp_item_names(&app);
+        assert_eq!(names.len(), root_names.len(), "root rows should be complete");
+        assert_eq!(names.first().map(String::as_str), Some("admin"));
+        assert_eq!(names.last().map(String::as_str), Some("vmlinuz.old"));
+        assert!(
+            names.iter().any(|name| name == "home"),
+            "root rows should include /home instead of rendering only a middle slice"
+        );
+
+        app.invoke_workspace_sftp_path_submitted("/home".into());
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_workspace_sftp_path().as_str() == "/home"
+                && app.get_workspace_sftp_items().row_count() == home_names.len() + 1
+        });
+        let names = workspace_sftp_item_names(&app);
+        assert_eq!(names.first().map(String::as_str), Some(".."));
+        assert!(
+            home_names.iter().all(|expected| names.iter().any(|name| name == expected)),
+            "/home rows should sync the full backend result plus parent entry"
+        );
+
+        app.invoke_workspace_sftp_path_submitted("/home/wwwroot".into());
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_workspace_sftp_path().as_str() == "/home/wwwroot"
+                && app.get_workspace_sftp_items().row_count() == wwwroot_names.len() + 1
+        });
+        let names = workspace_sftp_item_names(&app);
+        assert_eq!(names.first().map(String::as_str), Some(".."));
+        assert!(
+            wwwroot_names
+                .iter()
+                .all(|expected| names.iter().any(|name| name == expected)),
+            "/home/wwwroot rows should sync the full backend result instead of carrying a partial previous model"
+        );
+    });
+}
+
 #[test]
 fn workspace_sftp_context_menu_closes_assets_create_popover_before_showing_sftp_actions() {
     let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
