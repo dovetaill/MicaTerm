@@ -215,11 +215,16 @@ impl ShellViewModel {
         let previous_render_cache = self
             .sftp_panel_render_cache
             .get(session.file_browser_session_id.as_str());
+        let path_changed = self
+            .file_browser_sessions
+            .get(session.file_browser_session_id.as_str())
+            .is_some_and(|previous| previous.current_path != session.current_path);
         let render_cache = self.build_sftp_panel_render_cache(
             &session,
             projection.as_slice(),
             previous_render_cache,
             row_height_px,
+            path_changed,
         );
         self.sftp_panel_projection_cache
             .insert(session.file_browser_session_id.clone(), projection);
@@ -257,6 +262,7 @@ impl ShellViewModel {
         projection: &[SftpDirectoryEntry],
         previous_render_cache: Option<&SftpPanelRenderCache>,
         row_height_px: u32,
+        path_changed: bool,
     ) -> SftpPanelRenderCache {
         let selected_entry_ids = session
             .selected_entry_ids
@@ -281,11 +287,12 @@ impl ShellViewModel {
         let pending_viewport_reset = previous_render_cache
             .map(|cache| cache.pending_viewport_reset)
             .unwrap_or(false);
+        let reset_viewport = path_changed || pending_viewport_reset;
         let mut render_cache = SftpPanelRenderCache {
             rows,
             row_index_by_entry_id,
             row_height_px,
-            viewport_offset_px: if pending_viewport_reset {
+            viewport_offset_px: if reset_viewport {
                 0
             } else {
                 previous_render_cache
@@ -329,6 +336,7 @@ impl ShellViewModel {
                 projection.as_slice(),
                 self.sftp_panel_render_cache.get(file_browser_session_id),
                 row_height_px,
+                false,
             ),
         );
         true

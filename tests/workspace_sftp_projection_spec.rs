@@ -732,3 +732,62 @@ fn workspace_sftp_refresh_completion_resets_the_controlled_viewport_to_the_top()
         "refresh completion should keep the full workspace row set projected so the rebuilt directory listing remains fully scrollable"
     );
 }
+
+#[test]
+fn workspace_sftp_background_path_change_resets_stale_viewport_to_the_top() {
+    let mut session = root_scroll_fixture_session("/");
+    let sftp_tab = WorkspaceTab::sftp(
+        "tab-files-follow",
+        session.file_browser_session_id.clone(),
+        "Files: Follow",
+    );
+    let mut view_model = ShellViewModel::default();
+    view_model.set_file_browser_session(session.clone());
+    view_model.set_workspace_tabs(vec![sftp_tab]);
+
+    assert!(
+        view_model.update_workspace_sftp_viewport(-5.0 * 40.0, 160.0),
+        "fixture should reproduce the stale mid-directory viewport seen in packaged builds"
+    );
+    assert!(
+        view_model.workspace_sftp_viewport_y() < 0.0,
+        "workspace viewport should be scrolled before the background path change arrives"
+    );
+
+    session.current_path = "/home".into();
+    session.history = SftpPathHistory::with_initial("/home");
+    session.entries = [
+        "admin",
+        "deploy",
+        "wwwroot",
+        "zzz-last",
+    ]
+    .iter()
+    .map(|name| {
+        sample_sftp_entry(
+            &format!("home-{name}"),
+            name,
+            &format!("/home/{name}"),
+            SftpDirectoryEntryKind::Directory,
+            Some(1_777_000_000),
+            None,
+            Some("rwxr-xr-x"),
+            Some("root"),
+            Some("root"),
+        )
+    })
+    .collect();
+
+    view_model.set_file_browser_session(session);
+
+    assert_eq!(
+        view_model.workspace_sftp_viewport_y(),
+        0.0,
+        "background/session-driven SFTP path changes must not preserve a stale scrolled viewport from the previous directory"
+    );
+    assert_eq!(
+        workspace_sftp_non_parent_names(&view_model),
+        vec!["admin", "deploy", "wwwroot", "zzz-last"],
+        "the new directory should still project its complete row set after the viewport reset"
+    );
+}
