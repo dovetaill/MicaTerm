@@ -620,18 +620,8 @@ pub(super) fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel)
             window.set_asset_folder_modal_name("".into());
             clear_asset_snippet_modal_fields(window);
             window.set_asset_rename_modal_open(true);
-            window.set_asset_rename_modal_dialog_title("Rename Asset".into());
-            window.set_asset_rename_modal_subtitle(
-                "Rename the selected asset without breaking the surrounding workspace flow.".into(),
-            );
-            window.set_asset_rename_modal_field_label("Asset label".into());
-            window.set_asset_rename_modal_field_helper(
-                "Use a stable name so the tree, search results, and quick actions stay easy to scan."
-                    .into(),
-            );
-            window.set_asset_rename_modal_input_helper(
-                "Shown in the asset tree and related context menus.".into(),
-            );
+            window.set_asset_rename_modal_dialog_title("Rename".into());
+            window.set_asset_rename_modal_field_label("Name".into());
             window.set_asset_rename_modal_name(draft_name.clone().into());
             window.set_asset_rename_modal_validation_message(
                 state.asset_rename_modal_validation_message().into(),
@@ -654,17 +644,8 @@ pub(super) fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel)
             window.set_asset_folder_modal_name("".into());
             clear_asset_snippet_modal_fields(window);
             window.set_asset_rename_modal_open(true);
-            window.set_asset_rename_modal_dialog_title("Rename Remote Item".into());
-            window.set_asset_rename_modal_subtitle(
-                "Rename the selected remote file or folder on the SFTP host.".into(),
-            );
-            window.set_asset_rename_modal_field_label("Remote name".into());
-            window.set_asset_rename_modal_field_helper(
-                "Use a valid filename for the current remote directory.".into(),
-            );
-            window.set_asset_rename_modal_input_helper(
-                "Applied to the selected remote file or folder.".into(),
-            );
+            window.set_asset_rename_modal_dialog_title("Rename".into());
+            window.set_asset_rename_modal_field_label("Name".into());
             window.set_asset_rename_modal_name(draft_name.clone().into());
             window.set_asset_rename_modal_validation_message(
                 state.asset_rename_modal_validation_message().into(),

@@ -1,6 +1,5 @@
 import {
     DialogActionButton,
-    DialogSectionCard,
     DialogTextField,
     ModalFooterBar,
     ModalHeaderBar,
@@ -8,11 +7,8 @@ import {
 import { ThemeTokens } from "../theme/tokens.slint";
 
 export component AssetsRenameModal inherits Rectangle {
-    in property <string> dialog-title: "Rename Asset";
-    in property <string> subtitle: "Rename the selected asset without breaking the surrounding workspace flow.";
-    in property <string> field-label: "Asset label";
-    in property <string> field-helper: "Use a stable name so the tree, search results, and quick actions stay easy to scan.";
-    in property <string> input-helper: "Shown in the asset tree and related context menus.";
+    in property <string> dialog-title: "Rename";
+    in property <string> field-label: "Name";
     in property <string> item-name;
     in property <string> validation-message;
     in property <bool> can-confirm;
@@ -30,6 +26,7 @@ export component AssetsRenameModal inherits Rectangle {
 
     public function focus-input() {
         name-field.focus-input();
+        name-field.select-all();
     }
 
     changed focus-sequence => {
@@ -56,7 +53,7 @@ export component AssetsRenameModal inherits Rectangle {
             y: 0px;
             width: parent.width;
             title: root.dialog-title;
-            subtitle: root.subtitle;
+            subtitle: "";
             prominent: true;
 
             close-requested => {
@@ -89,50 +86,25 @@ export component AssetsRenameModal inherits Rectangle {
 
             VerticalLayout {
                 x: 14px;
-                y: 14px;
+                y: 16px;
                 width: parent.width - 28px;
                 spacing: 0px;
 
-                DialogSectionCard {
+                name-field := DialogTextField {
                     width: parent.width;
-                    spacing: 12px;
-                    surface: ThemeTokens.modal-section-surface;
+                    label: root.field-label;
+                    required: true;
+                    value: root.item-name;
+                    invalid: root.validation-message != "";
+                    helper-text: root.validation-message;
 
-                    Text {
-                        width: parent.width;
-                        text: root.field-label;
-                        color: ThemeTokens.text-primary;
-                        font-size: 13px;
-                        font-weight: 700;
-                        overflow: elide;
+                    value-changed(value) => {
+                        root.name-changed(value);
                     }
 
-                    Text {
-                        width: parent.width;
-                        text: root.field-helper;
-                        color: ThemeTokens.text-muted;
-                        font-size: 11px;
-                        wrap: word-wrap;
-                    }
-
-                    name-field := DialogTextField {
-                        width: parent.width;
-                        label: "New name";
-                        required: true;
-                        value: root.item-name;
-                        invalid: root.validation-message != "";
-                        helper-text: root.validation-message != ""
-                            ? root.validation-message
-                            : root.input-helper;
-
-                        value-changed(value) => {
-                            root.name-changed(value);
-                        }
-
-                        submitted => {
-                            if root.can-confirm {
-                                root.confirm-requested();
-                            }
+                    submitted => {
+                        if root.can-confirm {
+                            root.confirm-requested();
                         }
                     }
                 }

@@ -949,7 +949,10 @@ fn blocking_modal_children_own_shared_asset_modal_chrome_contract() {
     assert!(ssh.contains("footer := ModalFooterBar {"));
     assert!(rename.contains("header := ModalHeaderBar {"));
     assert!(rename.contains("footer := ModalFooterBar {"));
-    assert!(rename.contains("DialogSectionCard"));
+    assert!(
+        !rename.contains("DialogSectionCard"),
+        "rename should stay a simple one-field dialog instead of using the heavier asset form card"
+    );
     assert!(rename.contains("DialogTextField"));
     assert!(delete.contains("header := ModalHeaderBar {"));
     assert!(delete.contains("footer := ModalFooterBar {"));
@@ -1117,7 +1120,10 @@ fn remaining_old_dialogs_adopt_shared_modal_chrome_contract() {
     }
 
     assert!(rename.contains("DialogTextField"));
-    assert!(rename.contains("DialogSectionCard"));
+    assert!(
+        !rename.contains("DialogSectionCard"),
+        "rename should stay a simple one-field dialog instead of using the heavier asset form card"
+    );
     assert!(delete.contains("DialogSectionCard"));
     assert!(host_key.contains("DialogSectionCard"));
     assert!(
@@ -1426,7 +1432,7 @@ fn blocking_modal_children_bind_overlay_parent_dimensions() {
 }
 
 #[test]
-fn rename_modal_copy_is_projected_for_assets_and_sftp_without_asset_label_leakage() {
+fn rename_modal_is_a_simple_name_input_for_assets_and_sftp() {
     let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
     let rename_modal =
         fs::read_to_string("ui/components/assets-rename-modal.slint").expect("read rename modal");
@@ -1434,50 +1440,78 @@ fn rename_modal_copy_is_projected_for_assets_and_sftp_without_asset_label_leakag
         fs::read_to_string("src/app/bootstrap/assets_keychain.rs").expect("read assets bootstrap");
 
     for contract in [
-        "in-out property <string> asset-rename-modal-dialog-title: \"Rename Asset\";",
-        "in-out property <string> asset-rename-modal-subtitle:",
-        "in-out property <string> asset-rename-modal-field-label:",
-        "in-out property <string> asset-rename-modal-field-helper:",
-        "in-out property <string> asset-rename-modal-input-helper:",
+        "in-out property <string> asset-rename-modal-dialog-title: \"Rename\";",
         "dialog-title: root.asset-rename-modal-dialog-title;",
+        "item-name: root.asset-rename-modal-name;",
+        "validation-message: root.asset-rename-modal-validation-message;",
+    ] {
+        assert!(
+            app_window.contains(contract),
+            "AppWindow should keep the shared rename modal contract minimal through `{contract}`"
+        );
+    }
+
+    for removed_contract in [
+        "asset-rename-modal-subtitle",
+        "asset-rename-modal-field-helper",
+        "asset-rename-modal-input-helper",
         "subtitle: root.asset-rename-modal-subtitle;",
-        "field-label: root.asset-rename-modal-field-label;",
         "field-helper: root.asset-rename-modal-field-helper;",
         "input-helper: root.asset-rename-modal-input-helper;",
     ] {
         assert!(
-            app_window.contains(contract),
-            "AppWindow should project rename modal copy through `{contract}` instead of hardcoding asset-only strings into every rename surface"
+            !app_window.contains(removed_contract),
+            "AppWindow should not project over-explained rename copy through `{removed_contract}`"
         );
     }
+
     for contract in [
-        "in property <string> subtitle:",
         "in property <string> field-label:",
+        "label: root.field-label;",
+        "helper-text: root.validation-message;",
+        "name-field.select-all();",
+    ] {
+        assert!(
+            rename_modal.contains(contract),
+            "AssetsRenameModal should keep only the editable name field behavior through `{contract}`"
+        );
+    }
+
+    for removed_contract in [
+        "DialogSectionCard",
+        "in property <string> subtitle:",
         "in property <string> field-helper:",
         "in property <string> input-helper:",
-        "subtitle: root.subtitle;",
         "text: root.field-label;",
         "text: root.field-helper;",
         ": root.input-helper;",
     ] {
         assert!(
-            rename_modal.contains(contract),
-            "AssetsRenameModal should accept generic rename copy through `{contract}` so SFTP rename does not render asset-specific labels"
+            !rename_modal.contains(removed_contract),
+            "AssetsRenameModal should not render over-explained rename chrome through `{removed_contract}`"
         );
     }
-    for contract in [
-        "window.set_asset_rename_modal_dialog_title(\"Rename Remote Item\".into());",
-        "window.set_asset_rename_modal_field_label(\"Remote name\".into());",
+
+    for removed_copy in [
+        "Rename Remote Item",
+        "Remote name",
+        "Rename the selected remote file or folder on the SFTP host.",
+        "Use a valid filename for the current remote directory.",
+        "Applied to the selected remote file or folder.",
+        "Rename the selected asset without breaking the surrounding workspace flow.",
+        "Use a stable name so the tree, search results, and quick actions stay easy to scan.",
+        "Shown in the asset tree and related context menus.",
     ] {
         assert!(
-            bootstrap.contains(contract),
-            "SFTP rename modal sync should set remote-file copy through `{contract}`"
+            !bootstrap.contains(removed_copy),
+            "rename sync should not project verbose or surface-specific copy `{removed_copy}`"
         );
     }
+
     assert!(
-        bootstrap.contains("window.set_asset_rename_modal_input_helper(")
-            && bootstrap.contains("\"Applied to the selected remote file or folder.\""),
-        "SFTP rename modal sync should set a remote-file helper instead of the asset-tree helper"
+        bootstrap.contains("window.set_asset_rename_modal_dialog_title(\"Rename\".into());")
+            && bootstrap.contains("window.set_asset_rename_modal_field_label(\"Name\".into());"),
+        "rename sync should use the same simple title and field label for asset and SFTP rename"
     );
 }
 

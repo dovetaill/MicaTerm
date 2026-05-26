@@ -227,9 +227,14 @@ if grep -F 'footer-divider := Rectangle {' "$FOLDER_MODAL" >/dev/null; then
   echo "folder modal footer must not draw a dedicated footer divider" >&2
   exit 1
 fi
-grep -F 'in property <string> dialog-title: "Rename Asset";' "$RENAME_MODAL" >/dev/null
+grep -F 'in property <string> dialog-title: "Rename";' "$RENAME_MODAL" >/dev/null
 grep -F 'header := ModalHeaderBar {' "$RENAME_MODAL" >/dev/null
 grep -F 'footer := ModalFooterBar {' "$RENAME_MODAL" >/dev/null
+grep -F 'DialogTextField {' "$RENAME_MODAL" >/dev/null
+if grep -F 'DialogSectionCard' "$RENAME_MODAL" >/dev/null; then
+  echo "rename modal must stay a simple single-field dialog, not a heavy asset card" >&2
+  exit 1
+fi
 grep -F 'in property <string> dialog-title: "Delete Asset";' "$DELETE_MODAL" >/dev/null
 grep -F 'header := ModalHeaderBar {' "$DELETE_MODAL" >/dev/null
 grep -F 'footer := ModalFooterBar {' "$DELETE_MODAL" >/dev/null

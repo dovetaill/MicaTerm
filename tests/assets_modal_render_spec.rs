@@ -206,7 +206,7 @@ fn write_ppm(buffer: &SharedPixelBuffer<Rgb8Pixel>, path: impl AsRef<Path>) {
 }
 
 #[test]
-fn rename_modal_renders_shared_section_field_and_footer_actions() {
+fn rename_modal_renders_simple_name_field_and_footer_actions() {
     let modal = blocking_modal_rect(420, 230);
     let buffer = render_app(|app| {
         app.set_asset_rename_modal_open(true);
@@ -215,7 +215,7 @@ fn rename_modal_renders_shared_section_field_and_footer_actions() {
     });
 
     let modal_surface = pixel_at(&buffer, modal.x + 10, modal.y + 10);
-    let body_card_pixels = count_distinct_pixels(
+    let body_field_pixels = count_distinct_pixels(
         &buffer,
         modal.x + 24,
         modal.y + 78,
@@ -236,8 +236,8 @@ fn rename_modal_renders_shared_section_field_and_footer_actions() {
     );
 
     assert!(
-        body_card_pixels >= 2200,
-        "rename modal should render a visible shared section-backed body surface, only found {body_card_pixels} distinct pixels"
+        body_field_pixels >= 1200,
+        "rename modal should render a visible simple name field without the old heavy section card, only found {body_field_pixels} distinct pixels"
     );
     assert!(
         footer_panel_pixels >= 1000,
