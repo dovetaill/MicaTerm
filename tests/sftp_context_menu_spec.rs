@@ -9,7 +9,8 @@ use mica_term::app::sftp::{
 };
 use mica_term::app::ssh::session_manager::{EnhancedSessionState, SessionHandle, SessionState};
 use mica_term::shell::context_menu::{
-    ContextMenuActionState, ContextTargetKind, SelectionContext, resolve_action_tree,
+    ContextMenuActionState, ContextMenuSurface, ContextTargetKind, SelectionContext,
+    resolve_action_tree, resolve_action_tree_for_surface,
 };
 use mica_term::shell::tabs::WorkspaceTab;
 use mica_term::shell::view_model::{AssetModalState, ShellViewModel};
@@ -399,6 +400,46 @@ fn sftp_targets_resolve_expected_action_sets() {
             .expect("copy-sftp-entry action")
             .state,
         ContextMenuActionState::Disabled
+    );
+}
+
+#[test]
+fn workspace_sftp_blank_menu_drops_quick_browser_only_sort_and_open_workspace_actions() {
+    let selection = ready_selection_with_clipboard(vec![], true);
+
+    let workspace_actions = resolve_action_tree_for_surface(
+        ContextMenuSurface::WorkspaceSftp,
+        ContextTargetKind::SftpBlankArea,
+        &selection,
+    );
+    let workspace_ids: Vec<_> = workspace_actions.iter().map(|node| node.id).collect();
+    assert_eq!(
+        workspace_ids,
+        vec![
+            "new-file",
+            "new-folder",
+            "upload-files",
+            "upload-folder",
+            "paste-sftp",
+            "select-all-sftp",
+            "refresh-sftp",
+            "copy-current-path",
+        ],
+        "workspace SFTP blank-area menu should keep file operations but remove sorting and the self-referential open-in-workspace action because sorting already lives in the table header"
+    );
+
+    let quick_browser_actions = resolve_action_tree_for_surface(
+        ContextMenuSurface::QuickBrowserSftp,
+        ContextTargetKind::SftpBlankArea,
+        &selection,
+    );
+    let quick_browser_ids: Vec<_> = quick_browser_actions.iter().map(|node| node.id).collect();
+    assert!(
+        quick_browser_ids.contains(&"open-sftp-workspace")
+            && quick_browser_ids.contains(&"sort-name")
+            && quick_browser_ids.contains(&"sort-size")
+            && quick_browser_ids.contains(&"sort-modified"),
+        "quick-browser SFTP blank-area menu should keep its expand and compact sorting actions instead of being constrained by workspace-only table-header behavior"
     );
 }
 

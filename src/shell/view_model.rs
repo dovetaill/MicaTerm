@@ -42,7 +42,7 @@ use crate::shell::assets::{
 };
 use crate::shell::context_menu::{
     ContextMenuActionNode, ContextMenuActionState, ContextMenuSurface, ContextTargetKind,
-    SelectionContext, resolve_action_tree,
+    SelectionContext, resolve_action_tree, resolve_action_tree_for_surface,
 };
 use crate::shell::keychain::{
     KeychainDeleteError, KeychainItemKind, create_keychain_node, delete_keychain_node,

@@ -592,6 +592,15 @@ fn update_native_terminal_modifier_state(
     }
 }
 
+fn update_native_terminal_modifier_state_from_modifiers(
+    modifiers: &mut NativeTerminalModifierState,
+    modifiers_state: slint::winit_030::winit::keyboard::ModifiersState,
+) {
+    modifiers.ctrl = modifiers_state.control_key();
+    modifiers.shift = modifiers_state.shift_key();
+    modifiers.alt = modifiers_state.alt_key();
+}
+
 fn native_terminal_clipboard_shortcut(
     key: &slint::winit_030::winit::keyboard::Key,
     modifiers: NativeTerminalModifierState,

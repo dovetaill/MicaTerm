@@ -46,6 +46,14 @@ pub(super) fn bind_windows_window_state_tracking(
                 *modifiers.borrow_mut() = NativeTerminalModifierState::default();
             }
 
+            if let winit::event::WindowEvent::ModifiersChanged(modifier_event) = event {
+                let mut modifier_state = modifiers.borrow_mut();
+                update_native_terminal_modifier_state_from_modifiers(
+                    &mut modifier_state,
+                    modifier_event.state(),
+                );
+            }
+
             if let winit::event::WindowEvent::KeyboardInput {
                 event: key_event,
                 is_synthetic,
@@ -73,7 +81,8 @@ pub(super) fn bind_windows_window_state_tracking(
                     && !key_event.repeat
                     && !is_synthetic
                 {
-                    if workspace_sftp_select_all_shortcut(&key_event.logical_key, modifier_snapshot) {
+                    if workspace_sftp_select_all_shortcut(&key_event.logical_key, modifier_snapshot)
+                    {
                         Some("select-all-sftp")
                     } else if workspace_sftp_clear_selection_shortcut(
                         &key_event.logical_key,

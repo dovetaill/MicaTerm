@@ -430,7 +430,14 @@ impl ShellViewModel {
             return Vec::new();
         };
 
-        resolve_action_tree(target_kind, &self.context_menu_selection())
+        match self.context_menu_surface {
+            Some(surface) => resolve_action_tree_for_surface(
+                surface,
+                target_kind,
+                &self.context_menu_selection(),
+            ),
+            None => resolve_action_tree(target_kind, &self.context_menu_selection()),
+        }
     }
 }
 

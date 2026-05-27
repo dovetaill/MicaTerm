@@ -133,6 +133,19 @@ pub fn resolve_action_tree(
     }
 }
 
+pub fn resolve_action_tree_for_surface(
+    surface: ContextMenuSurface,
+    target: ContextTargetKind,
+    selection: &SelectionContext,
+) -> Vec<ContextMenuActionNode> {
+    match (surface, target) {
+        (ContextMenuSurface::WorkspaceSftp, ContextTargetKind::SftpBlankArea) => {
+            resolve_workspace_sftp_blank_area_actions(selection)
+        }
+        _ => resolve_action_tree(target, selection),
+    }
+}
+
 pub fn visible_columns_for_path(
     roots: &[ContextMenuActionNode],
     open_path: &[usize],
@@ -697,6 +710,69 @@ fn resolve_sftp_blank_area_actions(selection: &SelectionContext) -> Vec<ContextM
     ]
 }
 
+fn resolve_workspace_sftp_blank_area_actions(
+    selection: &SelectionContext,
+) -> Vec<ContextMenuActionNode> {
+    vec![
+        action_with_state(
+            "new-file",
+            "New File",
+            "document",
+            sftp_mutable_state(selection),
+            false,
+        ),
+        action_with_state(
+            "new-folder",
+            "New Folder",
+            "folder",
+            sftp_mutable_state(selection),
+            false,
+        ),
+        action_with_state(
+            "upload-files",
+            "Upload Files...",
+            "arrow-upload",
+            sftp_mutable_state(selection),
+            false,
+        ),
+        action_with_state(
+            "upload-folder",
+            "Upload Folder...",
+            "arrow-upload",
+            sftp_mutable_state(selection),
+            false,
+        ),
+        action_with_state(
+            "paste-sftp",
+            "Paste",
+            "clipboard",
+            ContextMenuActionState::Disabled,
+            true,
+        ),
+        action_with_state(
+            "select-all-sftp",
+            "Select All",
+            "add-square-multiple",
+            sftp_mutable_state(selection),
+            false,
+        ),
+        action_with_state(
+            "refresh-sftp",
+            "Refresh",
+            "arrow-clockwise",
+            sftp_mutable_state(selection),
+            true,
+        ),
+        action_with_state(
+            "copy-current-path",
+            "Copy Current Path",
+            "copy",
+            sftp_mutable_state(selection),
+            true,
+        ),
+    ]
+}
+
 fn resolve_sftp_directory_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
     vec![
         action_with_state(
@@ -1000,6 +1076,14 @@ fn selection_state(selection: &SelectionContext) -> ContextMenuActionState {
     }
 }
 
+fn sftp_mutable_state(selection: &SelectionContext) -> ContextMenuActionState {
+    if selection.target_mutable {
+        ContextMenuActionState::Enabled
+    } else {
+        ContextMenuActionState::Disabled
+    }
+}
+
 fn mutable_selection_state(selection: &SelectionContext) -> ContextMenuActionState {
     if selection.has_selection() && selection.target_mutable {
         ContextMenuActionState::Enabled
@@ -1015,7 +1099,6 @@ fn planned_selection_state(selection: &SelectionContext) -> ContextMenuActionSta
         ContextMenuActionState::Disabled
     }
 }
-
 
 fn action_with_state(
     id: &'static str,

@@ -15634,6 +15634,28 @@ fn workspace_sftp_native_shortcut_contract_covers_select_all_and_escape_clear() 
 }
 
 #[test]
+fn workspace_sftp_native_shortcuts_track_winit_modifier_change_events() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+        let bootstrap_source =
+            fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap source");
+        let windowing_source =
+            fs::read_to_string("src/app/bootstrap/windowing.rs").expect("read windowing source");
+
+        assert!(
+            bootstrap_source.contains("fn update_native_terminal_modifier_state_from_modifiers(")
+                && bootstrap_source.contains("modifiers_state.control_key()")
+                && bootstrap_source.contains("modifiers_state.shift_key()")
+                && bootstrap_source.contains("modifiers_state.alt_key()")
+                && windowing_source.contains("WindowEvent::ModifiersChanged(modifier_event)")
+                && windowing_source
+                    .contains("update_native_terminal_modifier_state_from_modifiers("),
+            "workspace SFTP Ctrl+A and Escape should use winit ModifiersChanged as the source of truth so stale key-press modifier tracking cannot block select-all or clear-selection in packaged builds"
+        );
+    });
+}
+
+#[test]
 fn workspace_sftp_local_clear_selection_action_clears_the_current_selection() {
     run_with_large_test_stack(|| {
         let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
