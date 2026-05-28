@@ -1,7 +1,9 @@
 //! Bootstrap assets and keychain binder module.
 
 use super::*;
-use crate::shell::context_menu::context_menu_column_width_for_items;
+use crate::shell::context_menu::{
+    context_menu_column_width_for_items, resolve_action_tree_for_surface,
+};
 
 pub(super) fn sync_sidebar_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_show_assets_sidebar(state.show_assets_sidebar);
@@ -66,7 +68,12 @@ fn context_menu_roots_for(state: &ShellViewModel) -> Vec<ContextMenuActionNode> 
         return Vec::new();
     }
 
-    resolve_action_tree(target_kind, &selection_context_for(state))
+    match state.context_menu_surface {
+        Some(surface) => {
+            resolve_action_tree_for_surface(surface, target_kind, &selection_context_for(state))
+        }
+        None => resolve_action_tree(target_kind, &selection_context_for(state)),
+    }
 }
 
 fn context_menu_columns_for(state: &ShellViewModel) -> [Vec<ContextMenuActionNode>; 3] {

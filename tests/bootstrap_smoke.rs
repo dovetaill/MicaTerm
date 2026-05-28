@@ -15707,6 +15707,84 @@ fn workspace_sftp_local_clear_selection_action_clears_the_current_selection() {
 }
 
 #[test]
+fn workspace_sftp_context_menu_select_all_can_be_cleared_by_blank_click() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+        let app = AppWindow::new().unwrap();
+        let sftp_state = RecordingSftpState::default();
+        bind_with_launcher(
+            &app,
+            None,
+            Arc::new(DelayedReadRecordingSftpLauncher {
+                state: sftp_state,
+                read_delay_by_path: Arc::new(BTreeMap::new()),
+            }),
+        );
+
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.into());
+        flush_runtime_projection();
+        app.invoke_open_sftp_panel_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_sftp_panel_mode().as_str() == "ready"
+        });
+
+        app.invoke_sftp_panel_expand_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_workspace_session_host_mode().as_str() == "sftp"
+                && app.get_workspace_sftp_items().row_count() > 1
+        });
+
+        app.invoke_workspace_sftp_context_menu_requested(
+            "".into(),
+            "sftp-blank".into(),
+            128.0,
+            180.0,
+        );
+        flush_runtime_projection();
+        assert!(
+            app.get_assets_context_menu_open(),
+            "precondition: workspace blank right-click should open the shared context-menu overlay"
+        );
+
+        app.invoke_assets_context_menu_action_invoked("select-all-sftp".into());
+        flush_runtime_projection();
+        assert_eq!(
+            app.get_workspace_sftp_selected_entry_ids().row_count(),
+            1,
+            "precondition: selecting all from the workspace SFTP context menu should select the visible remote entries"
+        );
+        assert!(
+            !app.get_assets_context_menu_open(),
+            "select-all from the context menu should close the shared menu before the next blank click is handled"
+        );
+
+        let blank_position = workspace_sftp_row_center(&app, 3);
+        app.window().dispatch_event(WindowEvent::PointerMoved {
+            position: blank_position,
+        });
+        app.window().dispatch_event(WindowEvent::PointerPressed {
+            position: blank_position,
+            button: PointerEventButton::Left,
+        });
+        app.window().dispatch_event(WindowEvent::PointerReleased {
+            position: blank_position,
+            button: PointerEventButton::Left,
+        });
+        flush_runtime_projection();
+
+        assert_eq!(
+            app.get_workspace_sftp_selected_entry_ids().row_count(),
+            0,
+            "after context-menu select-all, clicking workspace SFTP blank space should clear the selected entries"
+        );
+    });
+}
+
+#[test]
 fn workspace_sftp_path_submit_normalizes_extra_slashes_before_navigation() {
     run_with_large_test_stack(|| {
         let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();

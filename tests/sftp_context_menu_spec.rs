@@ -1169,11 +1169,18 @@ fn sftp_rename_execution_keeps_the_originating_terminal_session_id() {
 fn bootstrap_routes_workspace_and_quick_browser_context_menus_through_distinct_sftp_surfaces() {
     let bootstrap_sftp =
         fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
+    let assets_keychain =
+        fs::read_to_string("src/app/bootstrap/assets_keychain.rs").expect("read assets keychain");
 
     assert!(
         bootstrap_sftp.contains("ContextMenuSurface::QuickBrowserSftp")
             && bootstrap_sftp.contains("ContextMenuSurface::WorkspaceSftp"),
         "bootstrap should open quick-browser and workspace SFTP context menus through explicit surface ids so selection, mutability, and copied paths cannot bleed across surfaces"
+    );
+    assert!(
+        assets_keychain.contains("resolve_action_tree_for_surface(")
+            && assets_keychain.contains("state.context_menu_surface"),
+        "the shared context-menu overlay projection and action lookup should use the same surface-aware resolver as the dispatcher; otherwise workspace SFTP can still render quick-browser-only items like sorting or Open in SFTP Workspace"
     );
 }
 

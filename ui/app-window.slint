@@ -815,6 +815,8 @@ export component AppWindow inherits Window {
     changed assets-context-menu-open => {
         if root.assets-context-menu-open {
             assets-context-menu-overlay.focus-menu();
+        } else if !root.assets-context-menu-open && root.workspace-session-host-mode == "sftp" && !root.workspace-sftp-path-editing {
+            main-workspace.restore-primary-focus();
         }
     }
 

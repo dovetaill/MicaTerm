@@ -518,6 +518,24 @@ fn workspace_escape_routes_to_clear_selection_sftp_local_action() {
 }
 
 #[test]
+fn workspace_sftp_context_menu_close_restores_shortcut_focus_for_escape_clear() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+
+    let assets_context_menu_open_block = app_window
+        .split("changed assets-context-menu-open => {")
+        .nth(1)
+        .and_then(|rest| rest.split("changed workspace-tab-context-menu-open => {").next())
+        .expect("assets context-menu open change block");
+
+    assert!(
+        assets_context_menu_open_block.contains(
+            "if !root.assets-context-menu-open && root.workspace-session-host-mode == \"sftp\""
+        ) && assets_context_menu_open_block.contains("main-workspace.restore-primary-focus();"),
+        "closing the shared context-menu overlay after a workspace SFTP action should restore the hidden workspace shortcut focus so plain Escape can clear context-menu selections"
+    );
+}
+
+#[test]
 fn workspace_blank_area_left_click_routes_to_clear_selection_local_action() {
     let source =
         fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
