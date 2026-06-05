@@ -486,7 +486,7 @@ fn workspace_ctrl_l_requests_path_edit_mode() {
     assert!(
         app_window.contains("public function focus-workspace-primary()")
             && app_window.contains("main-workspace.restore-primary-focus();")
-            && workspace_pane.contains("workspace-sftp-shortcut-anchor := TextInput {")
+            && workspace_pane.contains("workspace-sftp-shortcut-anchor := FocusScope {")
             && workspace_pane.contains("root.workspace-sftp-path-edit-requested();"),
         "Ctrl+L should have a dedicated workspace shortcut-focus handoff and callback route instead of depending on the hidden terminal-only input path"
     );

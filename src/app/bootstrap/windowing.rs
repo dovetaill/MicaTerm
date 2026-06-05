@@ -131,9 +131,7 @@ pub(super) fn bind_windows_window_state_tracking(
 
                 if sftp_path_edit_shortcut {
                     let window = handle.unwrap();
-                    if window.get_workspace_session_host_mode() == "sftp"
-                        && !window.get_active_workspace_session_id().is_empty()
-                    {
+                    if window.get_workspace_session_host_mode() == "sftp" {
                         window.invoke_workspace_sftp_path_edit_requested();
                         return EventResult::PreventDefault;
                     }
@@ -142,7 +140,6 @@ pub(super) fn bind_windows_window_state_tracking(
                 if let Some(action_id) = sftp_local_action_shortcut {
                     let window = handle.unwrap();
                     if window.get_workspace_session_host_mode() == "sftp"
-                        && !window.get_active_workspace_session_id().is_empty()
                         && !window.get_workspace_sftp_path_editing()
                     {
                         window.invoke_workspace_session_local_action_requested(action_id.into());

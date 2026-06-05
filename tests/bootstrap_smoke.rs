@@ -4348,6 +4348,7 @@ fn dispatch_text_key_chord(app: &AppWindow, key_text: &str, ctrl: bool, shift: b
 
 fn dispatch_named_key_chord(app: &AppWindow, key_name: &str, ctrl: bool, shift: bool, alt: bool) {
     let key_text = match key_name {
+        "escape" => Key::Escape.into(),
         "left" => Key::LeftArrow.into(),
         "right" => Key::RightArrow.into(),
         "up" => Key::UpArrow.into(),
@@ -4406,6 +4407,14 @@ fn focus_workspace_terminal(app: &AppWindow) {
         position,
         button: PointerEventButton::Left,
     });
+}
+
+fn focus_workspace_sftp_shortcuts(app: &AppWindow) {
+    app.window()
+        .dispatch_event(WindowEvent::WindowActiveChanged(true));
+    app.invoke_focus_workspace_primary();
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(20));
+    slint::platform::update_timers_and_animations();
 }
 
 fn select_terminal_welcome_span(app: &AppWindow) {
@@ -15416,6 +15425,7 @@ fn workspace_sftp_ctrl_l_enters_path_editing() {
                 read_delay_by_path: Arc::new(BTreeMap::new()),
             }),
         );
+        app.show().expect("show app window");
 
         let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
         app.invoke_asset_activated(ssh_id.into());
@@ -15459,7 +15469,116 @@ fn workspace_sftp_ctrl_l_enters_path_editing() {
 }
 
 #[test]
+fn workspace_sftp_ctrl_l_key_dispatch_enters_path_editing() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+        let app = AppWindow::new().unwrap();
+        let sftp_state = RecordingSftpState::default();
+        bind_with_launcher(
+            &app,
+            None,
+            Arc::new(DelayedReadRecordingSftpLauncher {
+                state: sftp_state,
+                read_delay_by_path: Arc::new(BTreeMap::new()),
+            }),
+        );
+        app.show().expect("show app window");
+
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.into());
+        flush_runtime_projection();
+        app.invoke_open_sftp_panel_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_sftp_panel_mode().as_str() == "ready"
+        });
+
+        app.invoke_sftp_panel_expand_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_workspace_session_host_mode().as_str() == "sftp"
+        });
+
+        assert!(
+            !app.get_workspace_sftp_path_editing(),
+            "workspace SFTP should start in breadcrumb viewing mode before Ctrl+L is dispatched"
+        );
+
+        focus_workspace_sftp_shortcuts(&app);
+        dispatch_text_key_chord(&app, "l", true, false, false);
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_workspace_sftp_path_editing()
+        });
+
+        assert!(
+            app.get_workspace_sftp_path_editing(),
+            "dispatching Ctrl+L against the live window should enter workspace SFTP path editing instead of only working through direct callback invocation"
+        );
+    });
+}
+
+#[test]
 fn workspace_sftp_local_select_all_action_selects_every_entry() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+        let app = AppWindow::new().unwrap();
+        let sftp_state = RecordingSftpState::default();
+        bind_with_launcher(
+            &app,
+            None,
+            Arc::new(DelayedReadRecordingSftpLauncher {
+                state: sftp_state,
+                read_delay_by_path: Arc::new(BTreeMap::new()),
+            }),
+        );
+        app.show().expect("show app window");
+
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.into());
+        flush_runtime_projection();
+        app.invoke_open_sftp_panel_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_sftp_panel_mode().as_str() == "ready"
+        });
+
+        app.invoke_sftp_panel_expand_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_workspace_session_host_mode().as_str() == "sftp"
+                && app.get_workspace_sftp_items().row_count() > 1
+        });
+
+        assert_eq!(
+            app.get_workspace_sftp_selected_entry_ids().row_count(),
+            0,
+            "workspace SFTP should start with no selected entries before the local select-all action runs"
+        );
+
+        app.invoke_workspace_session_local_action_requested("select-all-sftp".into());
+        flush_runtime_projection();
+
+        let selected_ids = app.get_workspace_sftp_selected_entry_ids();
+        assert_eq!(
+            selected_ids.row_count(),
+            1,
+            "workspace-local select-all should select every real remote entry in the current directory"
+        );
+        assert_eq!(
+            selected_ids
+                .row_data(0)
+                .expect("selected workspace sftp entry id")
+                .as_str(),
+            "entry-logs"
+        );
+    });
+}
+
+#[test]
+fn workspace_sftp_ctrl_a_key_dispatch_selects_every_entry() {
     run_with_large_test_stack(|| {
         let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
@@ -15493,17 +15612,21 @@ fn workspace_sftp_local_select_all_action_selects_every_entry() {
         assert_eq!(
             app.get_workspace_sftp_selected_entry_ids().row_count(),
             0,
-            "workspace SFTP should start with no selected entries before the local select-all action runs"
+            "workspace SFTP should start with no selected entries before Ctrl+A is dispatched"
         );
 
-        app.invoke_workspace_session_local_action_requested("select-all-sftp".into());
-        flush_runtime_projection();
+        focus_workspace_sftp_shortcuts(&app);
+        dispatch_text_key_chord(&app, "a", true, false, false);
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_workspace_sftp_selected_entry_ids().row_count() == 1
+        });
 
         let selected_ids = app.get_workspace_sftp_selected_entry_ids();
         assert_eq!(
             selected_ids.row_count(),
             1,
-            "workspace-local select-all should select every real remote entry in the current directory"
+            "dispatching Ctrl+A should select every real remote entry in the current workspace directory"
         );
         assert_eq!(
             selected_ids
@@ -15702,6 +15825,61 @@ fn workspace_sftp_local_clear_selection_action_clears_the_current_selection() {
             app.get_workspace_sftp_selected_entry_ids().row_count(),
             0,
             "workspace-local clear-selection should drop the current SFTP selection instead of leaving stale rows highlighted"
+        );
+    });
+}
+
+#[test]
+fn workspace_sftp_escape_key_dispatch_clears_selection() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+        let app = AppWindow::new().unwrap();
+        let sftp_state = RecordingSftpState::default();
+        bind_with_launcher(
+            &app,
+            None,
+            Arc::new(DelayedReadRecordingSftpLauncher {
+                state: sftp_state,
+                read_delay_by_path: Arc::new(BTreeMap::new()),
+            }),
+        );
+
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.into());
+        flush_runtime_projection();
+        app.invoke_open_sftp_panel_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_sftp_panel_mode().as_str() == "ready"
+        });
+
+        app.invoke_sftp_panel_expand_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_workspace_session_host_mode().as_str() == "sftp"
+                && app.get_workspace_sftp_items().row_count() > 1
+        });
+
+        app.invoke_workspace_sftp_item_selected("entry-logs".into(), false, false);
+        flush_runtime_projection();
+        assert_eq!(
+            app.get_workspace_sftp_selected_entry_ids().row_count(),
+            1,
+            "precondition: workspace row selection should be active before Escape is dispatched"
+        );
+
+        focus_workspace_sftp_shortcuts(&app);
+        dispatch_named_key_chord(&app, "escape", false, false, false);
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_workspace_sftp_selected_entry_ids().row_count() == 0
+        });
+
+        assert_eq!(
+            app.get_workspace_sftp_selected_entry_ids().row_count(),
+            0,
+            "dispatching Escape against the live window should clear the current workspace SFTP selection instead of only working through direct local-action invocation"
         );
     });
 }
