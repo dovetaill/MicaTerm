@@ -15142,6 +15142,14 @@ fn workspace_sftp_item_names(app: &AppWindow) -> Vec<String> {
         .collect::<Vec<_>>()
 }
 
+fn selected_workspace_sftp_item_names(app: &AppWindow) -> Vec<String> {
+    (0..app.get_workspace_sftp_items().row_count())
+        .filter_map(|index| app.get_workspace_sftp_items().row_data(index))
+        .filter(|row| row.selected)
+        .map(|row| row.name.to_string())
+        .collect::<Vec<_>>()
+}
+
 #[test]
 fn workspace_sftp_background_reads_sync_full_rows_for_each_remote_path() {
     run_with_large_test_stack(|| {
@@ -15725,6 +15733,120 @@ fn workspace_sftp_pointer_drag_selects_a_contiguous_range_live() {
                 "entry-charlie".to_string(),
             ],
             "live pointer drag in the workspace SFTP table should extend the range selection across every row the pointer crosses instead of collapsing to the anchor row"
+        );
+    });
+}
+
+#[test]
+fn workspace_sftp_right_click_selection_does_not_leave_a_stale_previous_highlight() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+        let app = AppWindow::new().unwrap();
+        let sftp_state = RecordingSftpState::default();
+        bind_with_launcher(
+            &app,
+            None,
+            Arc::new(FixtureSftpLauncher {
+                state: sftp_state,
+                cwd: "/srv/app".into(),
+                responses: Arc::new(BTreeMap::from([(
+                    "/srv/app".to_string(),
+                    vec![
+                        SftpDirectoryEntry {
+                            id: "entry-alpha".into(),
+                            name: "alpha".into(),
+                            path: "/srv/app/alpha".into(),
+                            kind: SftpDirectoryEntryKind::Directory,
+                            modified_unix_seconds: Some(1_775_012_700),
+                            size_bytes: None,
+                            permissions_label: None,
+                            owner_label: None,
+                            group_label: None,
+                        },
+                        SftpDirectoryEntry {
+                            id: "entry-bravo".into(),
+                            name: "bravo".into(),
+                            path: "/srv/app/bravo".into(),
+                            kind: SftpDirectoryEntryKind::Directory,
+                            modified_unix_seconds: Some(1_775_012_780),
+                            size_bytes: None,
+                            permissions_label: None,
+                            owner_label: None,
+                            group_label: None,
+                        },
+                        SftpDirectoryEntry {
+                            id: "entry-charlie".into(),
+                            name: "charlie".into(),
+                            path: "/srv/app/charlie".into(),
+                            kind: SftpDirectoryEntryKind::Directory,
+                            modified_unix_seconds: Some(1_775_012_860),
+                            size_bytes: None,
+                            permissions_label: None,
+                            owner_label: None,
+                            group_label: None,
+                        },
+                    ],
+                )])),
+            }),
+        );
+
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.into());
+        flush_runtime_projection();
+        app.invoke_open_sftp_panel_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_sftp_panel_mode().as_str() == "ready"
+        });
+
+        app.invoke_sftp_panel_expand_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_workspace_session_host_mode().as_str() == "sftp"
+                && app.get_workspace_sftp_items().row_count() == 4
+        });
+
+        app.invoke_workspace_sftp_item_selected("entry-alpha".into(), false, false);
+        flush_runtime_projection();
+        assert_eq!(
+            selected_workspace_sftp_item_names(&app),
+            vec!["alpha".to_string()],
+            "precondition: selecting the first workspace SFTP row should highlight only that row before the context-menu flow starts"
+        );
+
+        app.invoke_workspace_sftp_context_menu_requested(
+            "entry-bravo".into(),
+            "sftp-directory".into(),
+            96.0,
+            128.0,
+        );
+        flush_runtime_projection();
+        assert!(
+            app.get_assets_context_menu_open(),
+            "precondition: right-clicking a workspace SFTP row should open the shared context-menu overlay"
+        );
+
+        app.invoke_close_assets_context_menu_requested();
+        flush_runtime_projection();
+
+        app.invoke_workspace_sftp_item_selected("entry-charlie".into(), false, false);
+        flush_runtime_projection();
+
+        let selected_ids = app.get_workspace_sftp_selected_entry_ids();
+        let selected_ids = (0..selected_ids.row_count())
+            .filter_map(|index| selected_ids.row_data(index))
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            selected_ids,
+            vec!["entry-charlie".to_string()],
+            "after a right-click retargets the workspace SFTP selection, the live selection model should keep tracking only the latest clicked row"
+        );
+        assert_eq!(
+            selected_workspace_sftp_item_names(&app),
+            vec!["charlie".to_string()],
+            "a workspace SFTP right-click must not leave the previously highlighted row painted as selected after the next click chooses a different entry"
         );
     });
 }

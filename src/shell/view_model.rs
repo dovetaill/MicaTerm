@@ -1424,14 +1424,12 @@ impl ShellViewModel {
                                 .any(|selected_id| selected_id == &target_id)
                         }) => {}
                 Some(target_id) => {
-                    if let Some(state) = self.context_menu_sftp_session_mut() {
-                        state.selected_entry_ids = vec![target_id.clone()];
-                    }
+                    let _ = self.replace_context_menu_sftp_selection(vec![target_id.clone()]);
+                    let _ = self.set_active_sftp_selection_anchor(Some(target_id));
                 }
                 None => {
-                    if let Some(state) = self.context_menu_sftp_session_mut() {
-                        state.selected_entry_ids.clear();
-                    }
+                    let _ = self.replace_context_menu_sftp_selection(Vec::new());
+                    let _ = self.set_active_sftp_selection_anchor(None);
                 }
             }
             return;

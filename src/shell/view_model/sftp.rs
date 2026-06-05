@@ -506,7 +506,7 @@ impl ShellViewModel {
         true
     }
 
-    fn set_active_sftp_selection_anchor(&mut self, next_anchor: Option<String>) -> bool {
+    pub(super) fn set_active_sftp_selection_anchor(&mut self, next_anchor: Option<String>) -> bool {
         let Some(state) = self.active_sftp_session_state_mut() else {
             return false;
         };

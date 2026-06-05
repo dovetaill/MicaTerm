@@ -2491,6 +2491,7 @@ pub(super) fn bind_sftp_callbacks(
                 anchor_x,
                 anchor_y,
             );
+            sync_right_panel_state(&window, &mut state);
             super::assets_keychain::sync_assets_toolbar_state(&window, &state);
             super::assets_keychain::update_context_menu_placement(&window, &mut state);
             super::assets_keychain::sync_assets_context_menu_state(&window, &state);
@@ -2994,6 +2995,8 @@ pub(super) fn bind_sftp_callbacks(
 
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
     window.on_workspace_sftp_context_menu_requested(
         move |target_id, target_kind, anchor_x, anchor_y| {
             let window = handle.unwrap();
@@ -3008,6 +3011,12 @@ pub(super) fn bind_sftp_callbacks(
                 },
                 anchor_x,
                 anchor_y,
+            );
+            super::sync_workspace_session_state_with_manager(
+                &window,
+                &mut state,
+                &mut workspace_follow_tracker_ref.borrow_mut(),
+                session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
             super::assets_keychain::sync_assets_toolbar_state(&window, &state);
             super::assets_keychain::update_context_menu_placement(&window, &mut state);
