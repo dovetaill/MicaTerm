@@ -1677,6 +1677,25 @@ struct WorkspaceScrollInput {
     alt: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LauncherSshOpenIntent {
+    RecentConnection,
+    SavedSshPicker,
+}
+
+impl LauncherSshOpenIntent {
+    fn session_mode(self) -> OpenSessionMode {
+        OpenSessionMode::ForceNewTab
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingLauncherActivation {
+    intent: LauncherSshOpenIntent,
+    asset_id: String,
+    requested_at: Instant,
+}
+
 fn open_session_with_profile(
     state: &mut ShellViewModel,
     bridge: &ShellSessionBridge,
@@ -1804,13 +1823,6 @@ fn attempt_open_session_with_profile(
     profile: ConnectionProfile,
     mode: OpenSessionMode,
 ) -> anyhow::Result<()> {
-    if matches!(mode, OpenSessionMode::ActivateExisting)
-        && let Some(asset_id) = profile.asset_id.as_deref()
-        && target_session_id_for_asset(state, asset_id).is_some()
-    {
-        return open_session_with_profile(state, bridge, profile, mode);
-    }
-
     open_session_with_profile(state, bridge, profile.clone(), mode).inspect_err(|err| {
         show_failed_session_tab(state, &profile, err.to_string());
     })
@@ -1842,6 +1854,35 @@ fn register_asset_click(
     }
 
     should_activate
+}
+
+fn register_launcher_activation(
+    tracker: &Rc<RefCell<Option<PendingLauncherActivation>>>,
+    intent: LauncherSshOpenIntent,
+    asset_id: &str,
+    now: Instant,
+) -> bool {
+    const DUPLICATE_GESTURE_WINDOW: Duration = Duration::from_millis(350);
+
+    let should_skip = tracker
+        .borrow()
+        .as_ref()
+        .map(|pending| {
+            pending.intent == intent
+                && pending.asset_id == asset_id
+                && now.duration_since(pending.requested_at) <= DUPLICATE_GESTURE_WINDOW
+        })
+        .unwrap_or(false);
+
+    if !should_skip {
+        tracker.borrow_mut().replace(PendingLauncherActivation {
+            intent,
+            asset_id: asset_id.to_string(),
+            requested_at: now,
+        });
+    }
+
+    should_skip
 }
 
 fn activate_asset(
@@ -1910,11 +1951,8 @@ fn open_saved_ssh_asset_from_quick_launch(
     session_bridge: Option<&ShellSessionBridge>,
     pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
     asset_id: &str,
-    mode: OpenSessionMode,
+    intent: LauncherSshOpenIntent,
 ) {
-    let had_existing_session = matches!(mode, OpenSessionMode::ActivateExisting)
-        && target_session_id_for_asset(state, asset_id).is_some();
-
     match runtime_profile_for_saved_asset(state, asset_id) {
         Ok(profile) => {
             if let Some(session_bridge) = session_bridge {
@@ -1923,7 +1961,7 @@ fn open_saved_ssh_asset_from_quick_launch(
                     session_bridge,
                     pending_host_key_approval,
                     profile,
-                    mode,
+                    intent.session_mode(),
                 ) {
                     tracing::error!(
                         target: "app.quick_launch",
@@ -1931,7 +1969,7 @@ fn open_saved_ssh_asset_from_quick_launch(
                         error = %err,
                         "failed to open saved ssh asset from quick launch"
                     );
-                } else if had_existing_session || state.ssh_host_key_prompt_state.is_none() {
+                } else if state.ssh_host_key_prompt_state.is_none() {
                     state.record_recent_saved_ssh_asset(asset_id);
                 }
             } else {
@@ -1962,6 +2000,7 @@ fn activate_saved_ssh_picker_asset(
     state: &mut ShellViewModel,
     session_bridge: Option<&ShellSessionBridge>,
     pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
+    launcher_activation_tracker: &Rc<RefCell<Option<PendingLauncherActivation>>>,
     workspace_follow_tracker: &Rc<RefCell<WorkspaceFollowTracker>>,
     asset_id: &str,
 ) {
@@ -1973,6 +2012,15 @@ fn activate_saved_ssh_picker_asset(
         }
         Some(ConsoleAssetKind::SshConnection) => {}
         _ => return,
+    }
+
+    if register_launcher_activation(
+        launcher_activation_tracker,
+        LauncherSshOpenIntent::SavedSshPicker,
+        asset_id,
+        Instant::now(),
+    ) {
+        return;
     }
 
     state.close_saved_ssh_picker();
@@ -1987,7 +2035,7 @@ fn activate_saved_ssh_picker_asset(
         session_bridge,
         pending_host_key_approval,
         asset_id,
-        OpenSessionMode::ActivateExisting,
+        LauncherSshOpenIntent::SavedSshPicker,
     );
     sync_welcome_quick_launch_state(window, state);
     sync_workspace_tabs_with_manager(
@@ -2108,20 +2156,6 @@ fn drain_ssh_modal_background_messages(
     }
 
     changed
-}
-
-fn target_session_id_for_asset(state: &ShellViewModel, asset_id: &str) -> Option<String> {
-    state
-        .active_workspace_tab()
-        .filter(|tab| tab.asset_id == asset_id)
-        .map(|tab| tab.session_id.clone())
-        .or_else(|| {
-            state
-                .workspace_tabs()
-                .iter()
-                .find(|tab| tab.asset_id == asset_id)
-                .map(|tab| tab.session_id.clone())
-        })
 }
 
 fn close_session_by_id(
@@ -6214,6 +6248,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         Rc::new(RefCell::new(None::<PendingWorkspacePasteWarning>));
     let asset_click_tracker = Rc::new(RefCell::new(None::<PendingAssetClick>));
     let pending_double_click_activation = Rc::new(RefCell::new(None::<String>));
+    let launcher_activation_tracker =
+        Rc::new(RefCell::new(None::<PendingLauncherActivation>));
     WORKSPACE_RUNTIME_PROFILE.with(|runtime_profile| {
         *runtime_profile.borrow_mut() = Some(profile);
     });
@@ -7529,10 +7565,19 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let quick_launch_store_ref = quick_launch_store.clone();
+    let launcher_activation_tracker_ref = Rc::clone(&launcher_activation_tracker);
     window.on_welcome_quick_launch_connect_requested(move |asset_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        if register_launcher_activation(
+            &launcher_activation_tracker_ref,
+            LauncherSshOpenIntent::RecentConnection,
+            asset_id.as_str(),
+            Instant::now(),
+        ) {
+            return;
+        }
         if state
             .active_workspace_tab()
             .is_some_and(|tab| tab.is_launcher())
@@ -7544,7 +7589,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             session_bridge_ref.as_deref(),
             &pending_host_key_approval_ref,
             asset_id.as_str(),
-            OpenSessionMode::ActivateExisting,
+            LauncherSshOpenIntent::RecentConnection,
         );
         sync_welcome_quick_launch_state(&window, &state);
         sync_workspace_tabs_with_manager(
@@ -7626,6 +7671,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let quick_launch_store_ref = quick_launch_store.clone();
+    let launcher_activation_tracker_ref = Rc::clone(&launcher_activation_tracker);
     window.on_open_saved_ssh_modal_asset_activated(move |asset_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
@@ -7635,6 +7681,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             &mut state,
             session_bridge_ref.as_deref(),
             &pending_host_key_approval_ref,
+            &launcher_activation_tracker_ref,
             &workspace_follow_tracker_ref,
             asset_id.as_str(),
         );
@@ -7648,6 +7695,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let quick_launch_store_ref = quick_launch_store.clone();
+    let launcher_activation_tracker_ref = Rc::clone(&launcher_activation_tracker);
     window.on_open_saved_ssh_modal_activate_selection_requested(move || {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
@@ -7663,6 +7711,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             &mut state,
             session_bridge_ref.as_deref(),
             &pending_host_key_approval_ref,
+            &launcher_activation_tracker_ref,
             &workspace_follow_tracker_ref,
             asset_id.as_str(),
         );

@@ -4613,6 +4613,10 @@ fn workspace_tab_snapshot(app: &AppWindow) -> Vec<(String, String)> {
         .collect()
 }
 
+fn workspace_tab_title_matches_connection(title: &str, display_name: &str) -> bool {
+    title == display_name || title.starts_with(&format!("{display_name}("))
+}
+
 fn create_root_snippet(app: &AppWindow, name: &str, script: &str) -> String {
     app.invoke_sidebar_destination_selected("snippets".into());
     app.invoke_assets_create_action_selected("new-snippet".into());
@@ -8597,7 +8601,8 @@ fn active_recent_connection_row_opens_fresh_session_for_connected_asset() {
         );
         assert!(
             tabs.iter().any(|(tab_id, title)| {
-                tab_id == &active_session_id && title.as_str() == "Prod Bastion"
+                tab_id == &active_session_id
+                    && workspace_tab_title_matches_connection(title.as_str(), "Prod Bastion")
             }),
             "the launcher recent activation should create a second tab for the same SSH asset"
         );
@@ -9072,7 +9077,8 @@ fn launcher_picker_activation_opens_fresh_session_for_connected_asset() {
         );
         assert!(
             tabs.iter().any(|(tab_id, title)| {
-                tab_id == &active_session_id && title.as_str() == "DB Admin"
+                tab_id == &active_session_id
+                    && workspace_tab_title_matches_connection(title.as_str(), "DB Admin")
             }),
             "launcher picker should create a new terminal tab for the already-connected SSH asset"
         );
@@ -9124,7 +9130,8 @@ fn launcher_picker_primary_open_request_opens_fresh_session_for_connected_asset(
         );
         assert!(
             tabs.iter().any(|(tab_id, title)| {
-                tab_id == &active_session_id && title.as_str() == "DB Admin"
+                tab_id == &active_session_id
+                    && workspace_tab_title_matches_connection(title.as_str(), "DB Admin")
             }),
             "primary open should add a new DB Admin session tab"
         );
@@ -9174,7 +9181,8 @@ fn launcher_picker_duplicate_activation_requests_only_create_one_fresh_session()
         );
         assert!(
             tabs.iter().any(|(tab_id, title)| {
-                tab_id == &active_session_id && title.as_str() == "DB Admin"
+                tab_id == &active_session_id
+                    && workspace_tab_title_matches_connection(title.as_str(), "DB Admin")
             }),
             "the duplicated picker gesture should create one replacement session tab"
         );
@@ -9219,7 +9227,8 @@ fn launcher_recent_duplicate_activation_requests_only_create_one_fresh_session()
         );
         assert!(
             tabs.iter().any(|(tab_id, title)| {
-                tab_id == &active_session_id && title.as_str() == "Prod Bastion"
+                tab_id == &active_session_id
+                    && workspace_tab_title_matches_connection(title.as_str(), "Prod Bastion")
             }),
             "the duplicated launcher recent gesture should create one replacement session tab"
         );
