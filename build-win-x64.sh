@@ -7,6 +7,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_NAME="${APP_NAME:-$(awk -F'\"' '/^name = / { print $2; exit }' "$ROOT_DIR/Cargo.toml")}"
+PROFILE="${PROFILE:-release}"
+DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
+PUBLISH_DIR="${PUBLISH_DIR:-/var/www/html}"
 
 usage() {
   cat <<'EOF'
@@ -32,6 +36,7 @@ Linux-host Windows GNU package:
 
 Outputs:
   dist/mica-term-x86_64-pc-windows-msvc-release-skia.zip
+  /var/www/html/mica-term-x86_64-pc-windows-msvc-release-skia.zip
 
 Parallel override:
   BUILD_JOBS=<positive integer> ./build-win-x64.sh
@@ -68,7 +73,34 @@ export MICA_TERM_VERIFICATION_FONT_PX_MATRIX="12,13,14,15"
 export MICA_TERM_PACKAGE_PORTABLE=1
 export PACKAGE_FLAVOR_SUFFIX="-skia"
 
+ARCHIVE_STEM="${APP_NAME}-${TARGET}-${PROFILE}${PACKAGE_FLAVOR_SUFFIX}"
+ARCHIVE_PATH="$DIST_DIR/${ARCHIVE_STEM}.zip"
+
 echo "==> Text renderer path: ${MICA_TERM_EXPECTED_TEXT_RENDERER_PATH} -> ${MICA_TERM_TEXT_RENDERER_FALLBACK_PATH}"
 echo "==> Verification matrix: DPI ${MICA_TERM_VERIFICATION_DPI_SCALE_MATRIX}; font px ${MICA_TERM_VERIFICATION_FONT_PX_MATRIX}"
 
-exec "$ROOT_DIR/build-desktop.sh" "$@"
+publish_archive() {
+  local source_archive="$1"
+  local publish_dir="$2"
+  local publish_archive="$publish_dir/$(basename "$source_archive")"
+  local host_os
+
+  host_os="$(uname -s)"
+  if [[ "$host_os" != "Linux" && "$publish_dir" == "/var/www/html" ]]; then
+    echo "==> Publish step skipped on $host_os host: $publish_archive"
+    return 0
+  fi
+
+  [[ -f "$source_archive" ]] || {
+    echo "error: expected archive not found: $source_archive" >&2
+    exit 1
+  }
+
+  mkdir -p "$publish_dir"
+  rm -f "$publish_archive"
+  cp "$source_archive" "$publish_archive"
+  echo "==> Published archive: $publish_archive"
+}
+
+"$ROOT_DIR/build-desktop.sh" "$@"
+publish_archive "$ARCHIVE_PATH" "$PUBLISH_DIR"

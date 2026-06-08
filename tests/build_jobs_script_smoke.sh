@@ -303,12 +303,27 @@ for invalid_jobs in 0 -1 abc; do
 done
 
 wrapper_target_log="$TMP_ROOT/wrapper-target.log"
+wrapper_target_out="$TMP_ROOT/wrapper-target.out"
+publish_dir="$TMP_ROOT/publish"
+publish_archive="$publish_dir/mica-term-x86_64-pc-windows-msvc-release-skia.zip"
 : > "$wrapper_target_log"
+mkdir -p "$publish_dir"
+printf 'stale symlink target\n' > "$TMP_ROOT/stale-archive.zip"
+ln -s "$TMP_ROOT/stale-archive.zip" "$publish_archive"
 env "${COMMON_ENV[@]}" \
   FAKE_CARGO_LOG="$wrapper_target_log" \
   FAKE_UNAME=Linux \
   DIST_DIR="$PROJECT_DIR/out-wrapper" \
   BUILD_JOBS=32 \
-  bash "$PROJECT_DIR/build-win-x64.sh" >/dev/null
+  PUBLISH_DIR="$publish_dir" \
+  bash "$PROJECT_DIR/build-win-x64.sh" >"$wrapper_target_out"
 
 grep -F -- 'xwin build --release --target x86_64-pc-windows-msvc --locked --no-default-features --features slint-renderer-skia,terminal-native-renderer --jobs 32' "$wrapper_target_log" >/dev/null
+[[ -f "$PROJECT_DIR/out-wrapper/mica-term-x86_64-pc-windows-msvc-release-skia.zip" ]]
+[[ -f "$publish_archive" ]]
+[[ ! -L "$publish_archive" ]]
+cmp -s \
+  "$PROJECT_DIR/out-wrapper/mica-term-x86_64-pc-windows-msvc-release-skia.zip" \
+  "$publish_archive"
+grep -F 'Published archive:' "$wrapper_target_out" >/dev/null
+grep -F "$publish_archive" "$wrapper_target_out" >/dev/null
