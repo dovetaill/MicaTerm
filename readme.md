@@ -33,8 +33,10 @@ Project planning is in `docs/plans/`.
 - `./build-win-x64.sh`
   - Windows Skia mainline wrapper
   - Default target: `x86_64-pc-windows-msvc`
-  - Host requirement: Windows MSVC shell or Git Bash environment
-  - Linux-host alternative: `./build-win-x64-software.sh`
+  - Host requirement: Windows MSVC shell / Git Bash, or Linux + `cargo-xwin` + `clang`
+  - Explicit parallel override examples:
+    - `BUILD_JOBS=32 ./build-win-x64.sh`
+    - `BUILD_JOBS=$(nproc) ./build-win-x64.sh`
   - Outputs:
     `dist/mica-term-x86_64-pc-windows-msvc-release-skia.zip`
 - `./build-win-x64-software.sh`
@@ -47,8 +49,14 @@ Project planning is in `docs/plans/`.
 
 Notes:
 
-- `./build-win-x64.sh` packages the Windows Skia route as `winit-skia-software` on `x86_64-pc-windows-msvc`.
+- Cargo already builds in parallel by default.
+- `BUILD_JOBS` is the repo wrapper's explicit override knob and maps directly to `cargo --jobs <N>`.
+- If `BUILD_JOBS` is unset, `./build-desktop.sh`, `./build-win-x64.sh`, and `./build-win-x64-software.sh` keep the previous behavior and do not append `--jobs`.
+- If you already set `CARGO_BUILD_JOBS`, the repo entrypoints still recommend using `BUILD_JOBS` as the wrapper-level override.
+- `./build-win-x64.sh` defaults to the Windows MSVC Skia mainline package on `x86_64-pc-windows-msvc`; it is not the GNU entrypoint.
+- `./build-win-x64.sh` packages the Windows Skia route as `winit-skia` on `x86_64-pc-windows-msvc`.
 - `./build-win-x64-software.sh` packages the Windows compatibility route as `winit-software`.
+- `./build-win-x64-software.sh` remains the default Windows GNU wrapper entrypoint.
 - Generic development builds stay on the default packaged fallback unless a wrapper injects build flavor and renderer environment variables.
 - `./build-release.sh` remains the aggregate Linux x64 + Windows GNU release entrypoint, with the Windows leg routed through `./build-win-x64-software.sh` because `rust-skia` does not ship `x86_64-pc-windows-gnu` Skia binaries.
 - `[patch.crates-io]` in `Cargo.toml` still points to the vendored `i-slint-backend-winit` backend so the Windows partial-visibility fix stays active.
