@@ -32,6 +32,9 @@ Linux-host Windows GNU package:
 
 Outputs:
   dist/mica-term-x86_64-pc-windows-msvc-release-skia.zip
+
+Parallel override:
+  BUILD_JOBS=<positive integer> ./build-win-x64.sh
 EOF
 }
 

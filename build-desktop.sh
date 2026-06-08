@@ -41,6 +41,7 @@ Environment overrides:
   DIST_DIR=<output directory>
   CARGO_FEATURES=<space or comma separated cargo features>
   CARGO_NO_DEFAULT_FEATURES=1
+  BUILD_JOBS=<positive integer>  map to cargo --jobs <N>
   MICA_TERM_PACKAGE_PORTABLE=1  create .mica-term-portable in staged Windows packages
   CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=<gnu linker path>
   CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=<linux arm64 linker path>
@@ -77,6 +78,25 @@ require_cmd() {
 require_cargo_xwin() {
   cargo xwin --version >/dev/null 2>&1 || \
     fail "Linux-host Windows MSVC packaging requires cargo-xwin. Install it with: cargo install cargo-xwin"
+}
+
+BUILD_JOBS_LOG="default"
+BUILD_JOBS_ARGS=()
+
+resolve_build_jobs() {
+  local raw_jobs="${BUILD_JOBS:-}"
+
+  if [[ -z "$raw_jobs" ]]; then
+    BUILD_JOBS_LOG="default"
+    BUILD_JOBS_ARGS=()
+    return 0
+  fi
+
+  [[ "$raw_jobs" =~ ^[1-9][0-9]*$ ]] || \
+    fail "BUILD_JOBS must be a positive integer, got '$raw_jobs'"
+
+  BUILD_JOBS_LOG="BUILD_JOBS=$raw_jobs -> --jobs $raw_jobs"
+  BUILD_JOBS_ARGS=(--jobs "$raw_jobs")
 }
 
 stage_bundled_font_licenses() {
@@ -336,6 +356,8 @@ fi
 
 [[ -f "$ROOT_DIR/Cargo.toml" ]] || fail "Cargo.toml not found in $ROOT_DIR"
 
+resolve_build_jobs
+
 require_cmd cargo
 require_cmd rustup
 
@@ -446,6 +468,25 @@ fi
 if [[ -n "${CARGO_FEATURES:-}" ]]; then
   CARGO_BUILD_ARGS+=(--features "$CARGO_FEATURES")
 fi
+
+if [[ "${#BUILD_JOBS_ARGS[@]}" -gt 0 ]]; then
+  CARGO_BUILD_ARGS+=("${BUILD_JOBS_ARGS[@]}")
+fi
+
+BUILD_FEATURES_LOG="default"
+if [[ "${CARGO_NO_DEFAULT_FEATURES:-0}" == "1" && -n "${CARGO_FEATURES:-}" ]]; then
+  BUILD_FEATURES_LOG="$CARGO_FEATURES (no-default-features)"
+elif [[ "${CARGO_NO_DEFAULT_FEATURES:-0}" == "1" ]]; then
+  BUILD_FEATURES_LOG="none (no-default-features)"
+elif [[ -n "${CARGO_FEATURES:-}" ]]; then
+  BUILD_FEATURES_LOG="$CARGO_FEATURES"
+fi
+
+echo "==> build driver: ${CARGO_BUILD_CMD[*]}"
+echo "==> build target: $TARGET"
+echo "==> build profile: $PROFILE"
+echo "==> build features: $BUILD_FEATURES_LOG"
+echo "==> build jobs: $BUILD_JOBS_LOG"
 
 "${CARGO_BUILD_CMD[@]}" "${CARGO_BUILD_ARGS[@]}"
 
