@@ -15,6 +15,7 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
+use i_slint_backend_testing::ElementHandle;
 use mica_term::AppWindow;
 use mica_term::app::assets_catalog::{
     ASSET_CATALOG_SCHEMA_VERSION, AssetCatalogRepository, PersistedAssetCatalog,
@@ -15150,6 +15151,22 @@ fn selected_workspace_sftp_item_names(app: &AppWindow) -> Vec<String> {
         .collect::<Vec<_>>()
 }
 
+fn workspace_sftp_selection_status_text(app: &AppWindow) -> String {
+    ElementHandle::find_by_element_id(
+        app,
+        "SftpWorkspaceHost::workspace-statusbar-selection-text",
+    )
+    .chain(ElementHandle::find_by_element_id(
+        app,
+        "workspace-statusbar-selection-text",
+    ))
+    .next()
+    .expect("workspace selection status text")
+    .accessible_value()
+    .expect("workspace selection status accessible value")
+    .to_string()
+}
+
 #[test]
 fn workspace_sftp_background_reads_sync_full_rows_for_each_remote_path() {
     run_with_large_test_stack(|| {
@@ -16688,6 +16705,118 @@ fn workspace_sftp_path_submit_normalizes_extra_slashes_before_navigation() {
                 "/srv/app/releases".to_string(),
             ],
             "workspace path submit should normalize extra slashes before issuing the real SFTP navigation request so the controller/session path stays canonical"
+        );
+    });
+}
+
+#[test]
+fn workspace_sftp_blank_right_click_clears_selection_before_showing_blank_menu() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+        let app = AppWindow::new().unwrap();
+        let sftp_state = RecordingSftpState::default();
+        bind_with_launcher(
+            &app,
+            None,
+            Arc::new(FixtureSftpLauncher {
+                state: sftp_state,
+                cwd: "/srv/app".into(),
+                responses: Arc::new(BTreeMap::from([(
+                    "/srv/app".to_string(),
+                    vec![
+                        SftpDirectoryEntry {
+                            id: "entry-alpha".into(),
+                            name: "alpha".into(),
+                            path: "/srv/app/alpha".into(),
+                            kind: SftpDirectoryEntryKind::Directory,
+                            modified_unix_seconds: Some(1_775_012_700),
+                            size_bytes: None,
+                            permissions_label: None,
+                            owner_label: None,
+                            group_label: None,
+                        },
+                        SftpDirectoryEntry {
+                            id: "entry-bravo".into(),
+                            name: "bravo".into(),
+                            path: "/srv/app/bravo".into(),
+                            kind: SftpDirectoryEntryKind::Directory,
+                            modified_unix_seconds: Some(1_775_012_780),
+                            size_bytes: None,
+                            permissions_label: None,
+                            owner_label: None,
+                            group_label: None,
+                        },
+                    ],
+                )])),
+            }),
+        );
+
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.into());
+        flush_runtime_projection();
+        app.invoke_open_sftp_panel_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_sftp_panel_mode().as_str() == "ready"
+        });
+
+        app.invoke_sftp_panel_expand_requested();
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            app.get_workspace_session_host_mode().as_str() == "sftp"
+                && app.get_workspace_sftp_items().row_count() == 3
+        });
+
+        app.invoke_workspace_sftp_item_selected("entry-alpha".into(), false, false);
+        flush_runtime_projection();
+        assert_eq!(
+            app.get_workspace_sftp_selected_entry_ids().row_count(),
+            1,
+            "precondition: selecting a workspace SFTP row should establish a live single-selection before the blank-area context menu is opened"
+        );
+        assert_eq!(
+            selected_workspace_sftp_item_names(&app),
+            vec!["alpha".to_string()],
+            "precondition: the selected row should still be visually highlighted before blank-area right-click clears it"
+        );
+        assert_eq!(
+            workspace_sftp_selection_status_text(&app),
+            "1 selected".to_string(),
+            "precondition: the workspace SFTP status bar should report the active selection count before the blank-area menu clears it"
+        );
+
+        app.invoke_workspace_sftp_context_menu_requested(
+            "".into(),
+            "sftp-blank".into(),
+            128.0,
+            180.0,
+        );
+        flush_runtime_projection();
+
+        assert!(
+            app.get_assets_context_menu_open(),
+            "blank-area right-click should still open the shared context-menu overlay after clearing the active selection"
+        );
+        assert_eq!(
+            app.get_workspace_sftp_selected_entry_ids().row_count(),
+            0,
+            "blank-area right-click should clear the live workspace SFTP selection before the blank menu stays open"
+        );
+        assert!(
+            selected_workspace_sftp_item_names(&app).is_empty(),
+            "blank-area right-click should also clear the visible row highlight instead of leaving stale selected rows painted behind the blank menu"
+        );
+        assert_eq!(
+            workspace_sftp_selection_status_text(&app),
+            "No selection".to_string(),
+            "after the blank-area menu opens, the workspace SFTP status bar should immediately fall back to `No selection` so the chrome matches the cleared selection model"
+        );
+
+        let action_ids = context_menu_item_ids(&app);
+        assert!(
+            action_ids.iter().any(|id| id == "refresh-sftp"),
+            "blank-area right-click should keep exposing the directory-scoped SFTP menu once selection has been cleared"
         );
     });
 }
