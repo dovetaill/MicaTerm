@@ -30,7 +30,7 @@ import { ConsoleAssetItem } from "shell/assets-sidebar.slint";
 import { RightPanel, SftpPanelItem } from "shell/right-panel.slint";
 import { SftpBreadcrumbItem } from "shell/sftp-workspace-host.slint";
 import { Sidebar, SidebarNavItem } from "shell/sidebar.slint";
-import { ConnectionProgressDiagnosticRow, ConnectionProgressFieldRow, ConnectionProgressHopRow, ConnectionProgressStepRow, TerminalCommandBlockRow, TerminalOverviewMarkerRow } from "shell/terminal-session-host.slint";
+import { ConnectionProgressDiagnosticRow, ConnectionProgressFieldRow, ConnectionProgressHopRow, ConnectionProgressStepRow, TerminalCommandBlockRow, TerminalGestureSelectionRange, TerminalOverviewMarkerRow } from "shell/terminal-session-host.slint";
 import { WorkspaceTabItem } from "shell/tabbar.slint";
 import { Titlebar } from "shell/titlebar.slint";
 import { TransferCenter, TransferCenterItem } from "shell/transfer-center.slint";
@@ -643,6 +643,7 @@ export component AppWindow inherits Window {
     callback workspace-session-resize-requested(int, int);
     callback workspace-session-normalize-hit-col(int, int) -> int;
     callback workspace-session-normalize-selection-hit-col(int, int) -> int;
+    callback workspace-session-resolve-selection-gesture-range(int, int, int, int, int) -> TerminalGestureSelectionRange;
     callback workspace-session-copy-selection-requested(int, int, int, int);
     callback workspace-session-selection-changed();
     callback workspace-session-paste-requested();
@@ -1308,6 +1309,16 @@ export component AppWindow inherits Window {
 
                         normalize-selection-hit-col(row, col) => {
                             return root.workspace-session-normalize-selection-hit-col(row, col);
+                        }
+
+                        resolve-selection-gesture-range(mode, anchor-row, anchor-col, focus-row, focus-col) => {
+                            return root.workspace-session-resolve-selection-gesture-range(
+                                mode,
+                                anchor-row,
+                                anchor-col,
+                                focus-row,
+                                focus-col,
+                            );
                         }
 
                         copy-selection-requested(start-row, start-col, end-row, end-col) => {

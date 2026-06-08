@@ -259,6 +259,43 @@ pub(super) fn normalize_active_workspace_selection_hit_col(
         .unwrap_or(col.max(0))
 }
 
+pub(super) fn resolve_active_workspace_selection_gesture_range(
+    state: &ShellViewModel,
+    gesture_mode: i32,
+    anchor_row: i32,
+    anchor_col: i32,
+    focus_row: i32,
+    focus_col: i32,
+) -> crate::TerminalGestureSelectionRange {
+    let Some(surface) = state.active_workspace_terminal_surface() else {
+        let safe_anchor_row = anchor_row.max(0);
+        let safe_anchor_col = anchor_col.max(0);
+        let safe_focus_row = focus_row.max(0);
+        let safe_focus_col = focus_col.max(0);
+        return crate::TerminalGestureSelectionRange {
+            start_row: safe_anchor_row.min(safe_focus_row),
+            start_col: safe_anchor_col.min(safe_focus_col),
+            end_row: safe_anchor_row.max(safe_focus_row),
+            end_col: safe_anchor_col.max(safe_focus_col),
+        };
+    };
+
+    let range = surface.selection_gesture_range(
+        crate::app::ssh::runtime::TerminalSelectionGestureMode::from_code(gesture_mode),
+        anchor_row.max(0) as u32,
+        anchor_col.max(0) as u32,
+        focus_row.max(0) as u32,
+        focus_col.max(0) as u32,
+    );
+
+    crate::TerminalGestureSelectionRange {
+        start_row: i32::try_from(range.start_row).unwrap_or(i32::MAX),
+        start_col: i32::try_from(range.start_col).unwrap_or(i32::MAX),
+        end_row: i32::try_from(range.end_row).unwrap_or(i32::MAX),
+        end_col: i32::try_from(range.end_col).unwrap_or(i32::MAX),
+    }
+}
+
 pub(super) fn openable_url_at_active_workspace_surface(
     state: &ShellViewModel,
     row: u32,

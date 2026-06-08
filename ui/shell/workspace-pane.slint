@@ -6,7 +6,7 @@ import { SftpPanelItem } from "./right-panel.slint";
 import { SftpWorkspaceHost } from "./sftp-workspace-host.slint";
 import { SftpBreadcrumbItem } from "./sftp-workspace-host.slint";
 import { TabBar, WorkspaceTabItem } from "./tabbar.slint";
-import { ConnectionProgressDiagnosticRow, ConnectionProgressFieldRow, ConnectionProgressHopRow, ConnectionProgressStepRow, TerminalCommandBlockRow, TerminalOverviewMarkerRow, TerminalSessionHost } from "./terminal-session-host.slint";
+import { ConnectionProgressDiagnosticRow, ConnectionProgressFieldRow, ConnectionProgressHopRow, ConnectionProgressStepRow, TerminalCommandBlockRow, TerminalGestureSelectionRange, TerminalOverviewMarkerRow, TerminalSessionHost } from "./terminal-session-host.slint";
 
 export component WorkspacePane inherits Rectangle {
     in property <[WorkspaceTabItem]> workspace-tab-items: [];
@@ -149,6 +149,7 @@ export component WorkspacePane inherits Rectangle {
     callback surface-resize-requested(int, int);
     callback normalize-hit-col(int, int) -> int;
     callback normalize-selection-hit-col(int, int) -> int;
+    callback resolve-selection-gesture-range(int, int, int, int, int) -> TerminalGestureSelectionRange;
     callback copy-selection-requested(int, int, int, int);
     callback selection-changed();
     callback paste-requested();
@@ -525,6 +526,10 @@ export component WorkspacePane inherits Rectangle {
 
                 normalize-selection-hit-col(row, col) => {
                     return root.normalize-selection-hit-col(row, col);
+                }
+
+                resolve-selection-gesture-range(mode, anchor-row, anchor-col, focus-row, focus-col) => {
+                    return root.resolve-selection-gesture-range(mode, anchor-row, anchor-col, focus-row, focus-col);
                 }
 
                 copy-selection-requested(start-row, start-col, end-row, end-col) => {

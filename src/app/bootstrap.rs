@@ -8789,6 +8789,21 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     });
 
     let state = Rc::clone(&view_model);
+    window.on_workspace_session_resolve_selection_gesture_range(
+        move |gesture_mode, anchor_row, anchor_col, focus_row, focus_col| {
+            let state = state.borrow();
+            workspace_terminal::resolve_active_workspace_selection_gesture_range(
+                &state,
+                gesture_mode,
+                anchor_row,
+                anchor_col,
+                focus_row,
+                focus_col,
+            )
+        },
+    );
+
+    let state = Rc::clone(&view_model);
     let session_bridge_copy_ref = session_bridge.clone();
     window.on_workspace_session_copy_selection_requested(
         move |start_row, start_col, end_row, end_col| {
