@@ -8668,11 +8668,14 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         );
     });
 
+    let state = Rc::clone(&view_model);
     let window_handle = window.as_weak();
     window.on_workspace_session_context_menu_open_changed(move |_open| {
         let Some(window) = window_handle.upgrade() else {
             return;
         };
+        let state = state.borrow();
+        workspace_terminal::sync_active_workspace_terminal_selection_projection(&window, &state);
         sync_workspace_native_terminal_surface_geometry(&window);
     });
 

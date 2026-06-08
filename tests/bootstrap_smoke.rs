@@ -4569,6 +4569,38 @@ fn triple_click_terminal_cell(app: &AppWindow, row: u32, col: f32) {
     click_terminal_position(app, position);
 }
 
+fn open_terminal_context_menu(app: &AppWindow, position: LogicalPosition) {
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position });
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position,
+        button: PointerEventButton::Right,
+    });
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position,
+        button: PointerEventButton::Right,
+    });
+    settle_terminal_projection();
+}
+
+fn choose_terminal_context_menu_copy(app: &AppWindow, menu_origin: LogicalPosition) {
+    let copy_row_position = LogicalPosition::new(menu_origin.x + 20.0, menu_origin.y + 24.0);
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: copy_row_position,
+    });
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position: copy_row_position,
+        button: PointerEventButton::Left,
+    });
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position: copy_row_position,
+        button: PointerEventButton::Left,
+    });
+    settle_terminal_projection();
+}
+
 fn drag_within_first_terminal_cell(app: &AppWindow) {
     let drag_start = LogicalPosition::new(
         app.get_layout_workspace_session_native_surface_x()
@@ -12855,6 +12887,187 @@ fn workspace_terminal_triple_click_selects_the_current_visual_row() {
         app.get_workspace_session_selection_end_col(),
         app.get_workspace_session_cols(),
         "triple-click row selection should span through the row's visual width so copy can read the whole row"
+    );
+}
+
+#[test]
+fn workspace_terminal_ctrl_shift_c_copies_double_click_token_selection_text() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text("", slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("clear clipboard");
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TerminalGestureLauncher {
+            line: "hello-world/path.txt",
+            mouse_grabbed: false,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    double_click_terminal_cell(&app, 0, 8.0);
+    settle_terminal_projection();
+    dispatch_text_key_chord(&app, "C", true, true, false);
+
+    let copied = i_slint_backend_selector::with_platform(|platform| {
+        Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
+    })
+    .expect("read clipboard");
+
+    assert_eq!(
+        copied.as_deref(),
+        Some("hello-world/path.txt"),
+        "Ctrl+Shift+C should copy the Rust-owned token selection text exactly instead of collapsing back to a caret-sized or delimiter-split copy"
+    );
+}
+
+#[test]
+fn workspace_terminal_context_menu_copy_uses_triple_click_visual_row_text() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text("", slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("clear clipboard");
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TerminalGestureLauncher {
+            line: "triple click row",
+            mouse_grabbed: false,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    triple_click_terminal_cell(&app, 0, 4.0);
+    settle_terminal_projection();
+
+    let menu_origin = terminal_cell_center_position(&app, 0, 4.0);
+    open_terminal_context_menu(&app, menu_origin);
+    choose_terminal_context_menu_copy(&app, menu_origin);
+
+    let copied = i_slint_backend_selector::with_platform(|platform| {
+        Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
+    })
+    .expect("read clipboard");
+
+    assert_eq!(
+        copied.as_deref(),
+        Some("triple click row"),
+        "right-click Copy should reuse the visual-row selection range and trim trailing terminal padding instead of copying a full-width padded line"
+    );
+}
+
+#[test]
+fn workspace_terminal_context_menu_copy_keeps_wide_char_selection_single_copy() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text("", slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("clear clipboard");
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TerminalGestureLauncher {
+            line: "条 abc",
+            mouse_grabbed: false,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    double_click_terminal_cell(&app, 0, 1.0);
+    settle_terminal_projection();
+
+    let menu_origin = terminal_cell_center_position(&app, 0, 1.0);
+    open_terminal_context_menu(&app, menu_origin);
+    choose_terminal_context_menu_copy(&app, menu_origin);
+
+    let copied = i_slint_backend_selector::with_platform(|platform| {
+        Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
+    })
+    .expect("read clipboard");
+
+    assert_eq!(
+        copied.as_deref(),
+        Some("条"),
+        "Copy should treat a wide-character token as a single glyph when the selection was created from its trailing cell instead of duplicating or fragmenting the cluster"
+    );
+}
+
+#[test]
+fn workspace_terminal_context_menu_copy_restores_rust_truth_after_host_props_are_clobbered() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text("", slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("clear clipboard");
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+    select_terminal_welcome_span(&app);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "precondition: selection should exist before the host mirror is clobbered"
+    );
+
+    app.set_workspace_session_selection_active(false);
+    app.set_workspace_session_selection_start_row(-1);
+    app.set_workspace_session_selection_start_col(-1);
+    app.set_workspace_session_selection_end_row(-1);
+    app.set_workspace_session_selection_end_col(-1);
+
+    let menu_origin = terminal_interaction_position(&app);
+    open_terminal_context_menu(&app, menu_origin);
+    choose_terminal_context_menu_copy(&app, menu_origin);
+
+    let copied = i_slint_backend_selector::with_platform(|platform| {
+        Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
+    })
+    .expect("read clipboard");
+
+    assert!(
+        copied
+            .as_deref()
+            .is_some_and(|text| text.contains("welcome")),
+        "right-click Copy should rehydrate the host mirror from the Rust-owned selection truth before dispatch so stale mirror resets do not silently disable copy"
     );
 }
 
