@@ -259,6 +259,104 @@ pub(super) fn normalize_active_workspace_selection_hit_col(
         .unwrap_or(col.max(0))
 }
 
+fn workspace_terminal_selection_from_window(
+    window: &AppWindow,
+    surface: &TerminalSurfaceState,
+) -> Option<crate::app::terminal_model::WorkspaceTerminalSelection> {
+    if !window.get_workspace_session_selection_active() {
+        return None;
+    }
+
+    let start_row = window.get_workspace_session_selection_start_row();
+    let start_col = window.get_workspace_session_selection_start_col();
+    let end_row = window.get_workspace_session_selection_end_row();
+    let end_col = window.get_workspace_session_selection_end_col();
+    if start_row < 0 || start_col < 0 || end_row < 0 || end_col < 0 {
+        return None;
+    }
+
+    Some(
+        crate::app::terminal_model::WorkspaceTerminalSelection::from_surface(
+            surface,
+            crate::app::terminal_model::TerminalSelectionModel::new(
+                start_row as u32,
+                start_col as u32,
+                end_row as u32,
+                end_col as u32,
+            ),
+        ),
+    )
+}
+
+pub(super) fn sync_active_workspace_terminal_selection_from_window(
+    window: &AppWindow,
+    state: &mut ShellViewModel,
+) -> bool {
+    let next = state
+        .active_workspace_terminal_surface()
+        .and_then(|surface| workspace_terminal_selection_from_window(window, surface));
+    state.set_workspace_terminal_selection(next)
+}
+
+pub(super) fn clear_invalid_active_workspace_terminal_selection(
+    state: &mut ShellViewModel,
+) -> bool {
+    let Some(surface) = state.active_workspace_terminal_surface() else {
+        return false;
+    };
+    if state
+        .active_workspace_terminal_selection()
+        .is_some_and(|selection| !selection.matches_surface(surface))
+    {
+        state.clear_active_workspace_terminal_selection()
+    } else {
+        false
+    }
+}
+
+pub(super) fn active_workspace_terminal_selection(
+    state: &ShellViewModel,
+) -> Option<crate::app::terminal_model::WorkspaceTerminalSelection> {
+    let surface = state.active_workspace_terminal_surface()?;
+    state
+        .active_workspace_terminal_selection()
+        .filter(|selection| selection.matches_surface(surface))
+}
+
+pub(super) fn active_workspace_terminal_selection_buffer_range(
+    state: &ShellViewModel,
+) -> Option<crate::app::terminal_model::TerminalSelectionModel> {
+    active_workspace_terminal_selection(state).map(|selection| selection.range)
+}
+
+pub(super) fn sync_active_workspace_terminal_selection_projection(
+    window: &AppWindow,
+    state: &ShellViewModel,
+) {
+    let selection = active_workspace_terminal_selection_buffer_range(state);
+    window.set_workspace_session_selection_active(selection.is_some());
+    window.set_workspace_session_selection_start_row(
+        selection
+            .map(|selection| i32::try_from(selection.start_row).unwrap_or(i32::MAX))
+            .unwrap_or(-1),
+    );
+    window.set_workspace_session_selection_start_col(
+        selection
+            .map(|selection| i32::try_from(selection.start_col).unwrap_or(i32::MAX))
+            .unwrap_or(-1),
+    );
+    window.set_workspace_session_selection_end_row(
+        selection
+            .map(|selection| i32::try_from(selection.end_row).unwrap_or(i32::MAX))
+            .unwrap_or(-1),
+    );
+    window.set_workspace_session_selection_end_col(
+        selection
+            .map(|selection| i32::try_from(selection.end_col).unwrap_or(i32::MAX))
+            .unwrap_or(-1),
+    );
+}
+
 pub(super) fn resolve_active_workspace_selection_gesture_range(
     state: &ShellViewModel,
     gesture_mode: i32,
@@ -806,20 +904,35 @@ pub(super) fn forward_active_workspace_copy_selection(
         return;
     };
 
-    let start_row = start_row.max(0) as u32;
-    let start_col = start_col.max(0) as u32;
-    let end_row = end_row.max(0) as u32;
-    let end_col = end_col.max(0) as u32;
+    let selection = active_workspace_terminal_selection_buffer_range(state).unwrap_or_else(|| {
+        crate::app::terminal_model::TerminalSelectionModel::new(
+            start_row.max(0) as u32,
+            start_col.max(0) as u32,
+            end_row.max(0) as u32,
+            end_col.max(0) as u32,
+        )
+    });
     let text = active_workspace_session_uuid(state)
         .zip(bridge)
         .and_then(|(session_id, bridge)| {
             bridge
                 .manager
-                .selection_text_from_buffer_rows(session_id, start_row, start_col, end_row, end_col)
+                .selection_text_from_buffer_rows(
+                    session_id,
+                    selection.start_row,
+                    selection.start_col,
+                    selection.end_row,
+                    selection.end_col,
+                )
                 .ok()
         })
         .unwrap_or_else(|| {
-            surface.selection_text_from_buffer_rows(start_row, start_col, end_row, end_col)
+            surface.selection_text_from_buffer_rows(
+                selection.start_row,
+                selection.start_col,
+                selection.end_row,
+                selection.end_col,
+            )
         });
     if text.is_empty() {
         return;

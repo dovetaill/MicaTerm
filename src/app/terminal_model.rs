@@ -96,6 +96,99 @@ pub struct TerminalSelectionModel {
     pub end_col: u32,
 }
 
+impl TerminalSelectionModel {
+    pub fn new(start_row: u32, start_col: u32, end_row: u32, end_col: u32) -> Self {
+        if (start_row, start_col) <= (end_row, end_col) {
+            Self {
+                start_row,
+                start_col,
+                end_row,
+                end_col,
+            }
+        } else {
+            Self {
+                start_row: end_row,
+                start_col: end_col,
+                end_row: start_row,
+                end_col: start_col,
+            }
+        }
+    }
+
+    pub fn row_bounds(self, row: u32, cols: u32) -> Option<(u32, u32)> {
+        if cols == 0 || row < self.start_row || row > self.end_row {
+            return None;
+        }
+
+        let start_col = if row == self.start_row {
+            self.start_col.min(cols)
+        } else {
+            0
+        };
+        let end_col_exclusive = if row == self.end_row {
+            self.end_col.min(cols)
+        } else {
+            cols
+        };
+        if start_col >= end_col_exclusive {
+            return None;
+        }
+
+        Some((start_col, end_col_exclusive))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WorkspaceTerminalSelection {
+    pub session_id: Uuid,
+    pub range: TerminalSelectionModel,
+    pub rows: u32,
+    pub cols: u32,
+    pub alternate_screen_active: bool,
+}
+
+impl WorkspaceTerminalSelection {
+    pub fn from_surface(surface: &TerminalSurfaceState, range: TerminalSelectionModel) -> Self {
+        Self {
+            session_id: surface.session_id,
+            range,
+            rows: surface.rows,
+            cols: surface.cols,
+            alternate_screen_active: surface.alternate_screen_active,
+        }
+    }
+
+    pub fn matches_surface(&self, surface: &TerminalSurfaceState) -> bool {
+        self.session_id == surface.session_id
+            && self.rows == surface.rows
+            && self.cols == surface.cols
+            && self.alternate_screen_active == surface.alternate_screen_active
+    }
+
+    pub fn project_to_viewport(
+        self,
+        surface: &TerminalSurfaceState,
+    ) -> Option<TerminalSelectionModel> {
+        if !self.matches_surface(surface) {
+            return None;
+        }
+
+        let range = surface.project_buffer_selection_to_viewport(
+            self.range.start_row,
+            self.range.start_col,
+            self.range.end_row,
+            self.range.end_col,
+        )?;
+
+        Some(TerminalSelectionModel::new(
+            range.start_row,
+            range.start_col,
+            range.end_row,
+            range.end_col,
+        ))
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerminalPaletteModel {
     pub default_fg_rgba: u32,
@@ -108,6 +201,14 @@ impl TerminalModelFrame {
     pub fn from_surface(
         surface: &TerminalSurfaceState,
         previous: Option<&TerminalModelFrame>,
+    ) -> Self {
+        Self::from_surface_with_selection(surface, previous, None)
+    }
+
+    pub fn from_surface_with_selection(
+        surface: &TerminalSurfaceState,
+        previous: Option<&TerminalModelFrame>,
+        selection: Option<TerminalSelectionModel>,
     ) -> Self {
         let row_meta = surface
             .visible_rows
@@ -145,7 +246,14 @@ impl TerminalModelFrame {
                 .unwrap_or_else(|| (String::new(), false));
             let cells = row_cells.remove(&row_index).unwrap_or_default();
             let content_hash = hash_row_content(&text, wrapped, &cells);
-            let row_hash = hash_row(row_index, &text, wrapped, &cells, palette);
+            let row_hash = hash_row(
+                row_index,
+                &text,
+                wrapped,
+                &cells,
+                palette,
+                selection.and_then(|selection| selection.row_bounds(row_index, surface.cols)),
+            );
             rows.push(TerminalModelRow {
                 row_index,
                 text,
@@ -185,7 +293,7 @@ impl TerminalModelFrame {
                 fg_rgba: surface.cursor.fg_rgba,
                 bg_rgba: surface.cursor.bg_rgba,
             },
-            selection: None,
+            selection,
             palette,
             viewport_offset_lines: surface.viewport_offset_lines,
             viewport_max_offset_lines: surface.viewport_max_offset_lines,
@@ -300,6 +408,8 @@ impl TerminalModelFrame {
                     row.wrapped,
                     &row.cells,
                     self.palette,
+                    self.selection
+                        .and_then(|selection| selection.row_bounds(row.row_index, self.grid_cols)),
                 );
                 let previous_hash = previous
                     .and_then(|frame| frame.rows.get(row.row_index as usize))
@@ -335,6 +445,7 @@ fn hash_row(
     wrapped: bool,
     cells: &[TerminalModelCell],
     palette: TerminalPaletteModel,
+    selection: Option<(u32, u32)>,
 ) -> u64 {
     let mut hasher = DefaultHasher::new();
     row_index.hash(&mut hasher);
@@ -342,6 +453,7 @@ fn hash_row(
     palette.default_bg_rgba.hash(&mut hasher);
     palette.row_bg_even_rgba.hash(&mut hasher);
     palette.row_bg_odd_rgba.hash(&mut hasher);
+    selection.hash(&mut hasher);
     hash_row_content_into(&mut hasher, text, wrapped, cells);
     hasher.finish()
 }

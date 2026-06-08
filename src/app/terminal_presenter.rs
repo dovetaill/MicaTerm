@@ -25,6 +25,7 @@ use crate::app::terminal_font::{
 use crate::app::terminal_layout::{TerminalTextShaper, TextShaper};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_model::TerminalModelFrame;
+use crate::app::terminal_model::TerminalSelectionModel;
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::wgpu_renderer::{
     PreparedBackgroundRun, PreparedColorGlyphDraw, PreparedMonochromeGlyphDraw,
@@ -436,8 +437,19 @@ impl TerminalPresenter for BitmapAtlasPresenter {
         surface: &SurfaceState,
         options: TerminalPresentationOptions,
     ) -> Result<PresentedTerminalFrame> {
-        let source_frame =
-            TerminalModelFrame::from_surface(surface, self.previous_source_frame.as_ref());
+        let selection_model = options.selection.map(|selection| {
+            TerminalSelectionModel::new(
+                selection.start_row,
+                selection.start_col,
+                selection.end_row,
+                selection.end_col,
+            )
+        });
+        let source_frame = TerminalModelFrame::from_surface_with_selection(
+            surface,
+            self.previous_source_frame.as_ref(),
+            selection_model,
+        );
         let mut frame_model = source_frame.clone();
         let semantic_annotations = analyze_semantic_annotations_with_settings(
             &frame_model,
@@ -700,8 +712,19 @@ fn prepare_native_terminal_frame_with_diagnostics(
 ) -> Result<(NativeTerminalFrame, TerminalPrepareDiagnostics)> {
     let prepare_started = Instant::now();
     let model_started = Instant::now();
-    let source_frame =
-        TerminalModelFrame::from_surface(surface, context.previous_source_frame.as_ref());
+    let selection_model = options.selection.map(|selection| {
+        TerminalSelectionModel::new(
+            selection.start_row,
+            selection.start_col,
+            selection.end_row,
+            selection.end_col,
+        )
+    });
+    let source_frame = TerminalModelFrame::from_surface_with_selection(
+        surface,
+        context.previous_source_frame.as_ref(),
+        selection_model,
+    );
     let mut frame_model = source_frame.clone();
     let model_frame_us = model_started.elapsed().as_micros() as u64;
     let semantic_overlays = if frame_model.alternate_screen_active {
@@ -752,7 +775,7 @@ fn prepare_native_terminal_frame_with_diagnostics(
         context.font_system,
     )?;
     let renderer_prepare_us = renderer_prepare_started.elapsed().as_micros() as u64;
-    let selection = options.selection;
+    let selection = frame_model.selection;
     let selection_state = match selection {
         Some(selection) => NativeSelectionFrameState {
             active: true,
@@ -955,7 +978,7 @@ impl From<PreparedUnderlineRun> for NativeUnderlineRun {
 
 #[cfg(feature = "terminal-native-renderer")]
 fn selection_overlay_rects(
-    selection: TerminalAtlasSelection,
+    selection: TerminalSelectionModel,
     cols: u32,
     overlay_rgba: u32,
 ) -> Vec<NativeSelectionRect> {

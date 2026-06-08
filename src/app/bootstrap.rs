@@ -2644,47 +2644,20 @@ fn workspace_session_uses_host_selection_overlay(window: &AppWindow) -> bool {
     window.get_workspace_session_render_mode().as_str() == TerminalRenderMode::Bitmap.as_str()
 }
 
-fn workspace_terminal_selection_boundary_changed(
-    window: &AppWindow,
-    surface: &TerminalSurfaceState,
-) -> bool {
-    window.get_workspace_session_alternate_screen_active() != surface.alternate_screen_active
-        || window.get_workspace_session_rows().max(0) as u32 != surface.rows
-        || window.get_workspace_session_cols().max(0) as u32 != surface.cols
-}
-
 fn active_workspace_terminal_selection(
-    window: &AppWindow,
+    state: &ShellViewModel,
     surface: &TerminalSurfaceState,
 ) -> Option<TerminalAtlasSelection> {
-    if !window.get_workspace_session_selection_active() {
-        return None;
-    }
-    if workspace_terminal_selection_boundary_changed(window, surface) {
-        return None;
-    }
-
-    let start_row = window.get_workspace_session_selection_start_row();
-    let start_col = window.get_workspace_session_selection_start_col();
-    let end_row = window.get_workspace_session_selection_end_row();
-    let end_col = window.get_workspace_session_selection_end_col();
-    if start_row < 0 || start_col < 0 || end_row < 0 || end_col < 0 {
-        return None;
-    }
-
-    let range = surface.project_buffer_selection_to_viewport(
-        start_row as u32,
-        start_col as u32,
-        end_row as u32,
-        end_col as u32,
-    )?;
-
-    Some(TerminalAtlasSelection::new(
-        range.start_row,
-        range.start_col,
-        range.end_row,
-        range.end_col,
-    ))
+    workspace_terminal::active_workspace_terminal_selection(state)
+        .and_then(|selection| selection.project_to_viewport(surface))
+        .map(|selection| {
+            TerminalAtlasSelection::new(
+                selection.start_row,
+                selection.start_col,
+                selection.end_row,
+                selection.end_col,
+            )
+        })
 }
 
 enum WorkspaceTerminalLinkMouseDecision {
@@ -4366,6 +4339,7 @@ fn sync_workspace_session_state_with_manager(
             projected_theme_for(state.theme_mode, state.theme_variant)
         },
     );
+    workspace_terminal::clear_invalid_active_workspace_terminal_selection(state);
     sync_workspace_terminal_surface_projection_only(window, state);
     sync_workspace_connection_progress_state(window, state, manager);
 
@@ -4484,13 +4458,14 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
     } else {
         None
     };
+    workspace_terminal::sync_active_workspace_terminal_selection_projection(window, state);
 
     if let Some(surface) = state.active_workspace_terminal_surface() {
         window.set_workspace_session_alternate_screen_active(surface.alternate_screen_active);
         let selection = if workspace_session_uses_host_selection_overlay(window) {
             None
         } else {
-            active_workspace_terminal_selection(window, surface)
+            active_workspace_terminal_selection(state, surface)
         };
         let selection_overlay_rgba =
             terminal_selection_overlay_rgba(state.theme_mode, state.theme_variant);
@@ -6248,8 +6223,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         Rc::new(RefCell::new(None::<PendingWorkspacePasteWarning>));
     let asset_click_tracker = Rc::new(RefCell::new(None::<PendingAssetClick>));
     let pending_double_click_activation = Rc::new(RefCell::new(None::<String>));
-    let launcher_activation_tracker =
-        Rc::new(RefCell::new(None::<PendingLauncherActivation>));
+    let launcher_activation_tracker = Rc::new(RefCell::new(None::<PendingLauncherActivation>));
     WORKSPACE_RUNTIME_PROFILE.with(|runtime_profile| {
         *runtime_profile.borrow_mut() = Some(profile);
     });
@@ -8764,10 +8738,13 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let Some(window) = window_handle.upgrade() else {
             return;
         };
+        let mut state = state.borrow_mut();
+        workspace_terminal::sync_active_workspace_terminal_selection_from_window(
+            &window, &mut state,
+        );
         if workspace_session_uses_host_selection_overlay(&window) {
             return;
         }
-        let mut state = state.borrow_mut();
         sync_workspace_session_state_with_manager(
             &window,
             &mut state,
@@ -10323,6 +10300,48 @@ mod tests {
                 window.get_workspace_session_render_mode().as_str(),
                 "bitmap"
             );
+        });
+    }
+
+    #[test]
+    fn bitmap_workspace_selection_projection_restores_host_mirror_from_rust_truth() {
+        with_bitmap_workspace_presenter_on_large_stack_for_test(|| {
+            let (window, mut state, mut follow_tracker) =
+                seeded_bitmap_workspace_terminal_state_for_test();
+            let surface = state
+                .active_workspace_terminal_surface()
+                .cloned()
+                .expect("active bitmap surface");
+            state.set_workspace_terminal_selection(Some(
+                crate::app::terminal_model::WorkspaceTerminalSelection::from_surface(
+                    &surface,
+                    crate::app::terminal_model::TerminalSelectionModel::new(0, 0, 0, 1),
+                ),
+            ));
+
+            sync_workspace_session_state(&window, &mut state, &mut follow_tracker);
+
+            assert!(
+                window.get_workspace_session_selection_active(),
+                "bitmap projection should mirror the Rust-owned terminal selection into the host selection properties before the local overlay paints"
+            );
+            assert_eq!(window.get_workspace_session_selection_start_row(), 0);
+            assert_eq!(window.get_workspace_session_selection_end_col(), 1);
+
+            window.set_workspace_session_selection_active(false);
+            window.set_workspace_session_selection_start_row(-1);
+            window.set_workspace_session_selection_start_col(-1);
+            window.set_workspace_session_selection_end_row(-1);
+            window.set_workspace_session_selection_end_col(-1);
+
+            sync_workspace_session_state(&window, &mut state, &mut follow_tracker);
+
+            assert!(
+                window.get_workspace_session_selection_active(),
+                "bitmap projection should restore the host-side mirror from Rust-owned selection truth during the next sync instead of dropping the live overlay when the Slint properties are clobbered"
+            );
+            assert_eq!(window.get_workspace_session_selection_start_row(), 0);
+            assert_eq!(window.get_workspace_session_selection_end_col(), 1);
         });
     }
 

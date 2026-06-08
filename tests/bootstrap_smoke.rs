@@ -4600,10 +4600,7 @@ fn drag_within_first_terminal_cell(app: &AppWindow) {
     });
 }
 
-fn workspace_sftp_row_center(
-    app: &AppWindow,
-    row_index: usize,
-) -> LogicalPosition {
+fn workspace_sftp_row_center(app: &AppWindow, row_index: usize) -> LogicalPosition {
     let titlebar_height = app.get_layout_titlebar_height();
     let main_workspace_x = app.get_layout_main_workspace_x();
     let tab_strip_height = 36.0;
@@ -4626,11 +4623,7 @@ fn workspace_sftp_row_center(
     LogicalPosition::new(main_workspace_x + 64.0, row_center_y)
 }
 
-fn drag_workspace_sftp_rows(
-    app: &AppWindow,
-    start_row_index: usize,
-    end_row_index: usize,
-) {
+fn drag_workspace_sftp_rows(app: &AppWindow, start_row_index: usize, end_row_index: usize) {
     let drag_start = workspace_sftp_row_center(app, start_row_index);
     let drag_end = workspace_sftp_row_center(app, end_row_index);
 
@@ -4641,9 +4634,8 @@ fn drag_workspace_sftp_rows(
         position: drag_start,
         button: PointerEventButton::Left,
     });
-    app.window().dispatch_event(WindowEvent::PointerMoved {
-        position: drag_end,
-    });
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position: drag_end });
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
     app.window().dispatch_event(WindowEvent::PointerReleased {
         position: drag_end,
@@ -8669,7 +8661,10 @@ fn active_recent_connection_row_opens_fresh_session_for_connected_asset() {
 
         app.invoke_workspace_new_tab_requested();
         assert_eq!(app.get_workspace_tab_items().row_count(), 2);
-        assert_eq!(app.get_active_workspace_session_id().as_str(), "workspace-launcher");
+        assert_eq!(
+            app.get_active_workspace_session_id().as_str(),
+            "workspace-launcher"
+        );
 
         app.invoke_welcome_quick_launch_connect_requested(ssh_id.into());
         settle_terminal_projection();
@@ -8696,7 +8691,8 @@ fn active_recent_connection_row_opens_fresh_session_for_connected_asset() {
             "the launcher recent activation should create a second tab for the same SSH asset"
         );
         assert!(
-            tabs.iter().all(|(tab_id, _)| tab_id.as_str() != "workspace-launcher"),
+            tabs.iter()
+                .all(|(tab_id, _)| tab_id.as_str() != "workspace-launcher"),
             "the launcher placeholder tab should be taken over by the new session instead of surviving alongside terminal tabs"
         );
     });
@@ -9172,7 +9168,8 @@ fn launcher_picker_activation_opens_fresh_session_for_connected_asset() {
             "launcher picker should create a new terminal tab for the already-connected SSH asset"
         );
         assert!(
-            tabs.iter().all(|(tab_id, _)| tab_id.as_str() != "workspace-launcher"),
+            tabs.iter()
+                .all(|(tab_id, _)| tab_id.as_str() != "workspace-launcher"),
             "the launcher tab should be replaced by the new session after picker activation"
         );
     });
@@ -11546,6 +11543,61 @@ fn workspace_terminal_selection_rows_stay_bound_to_buffer_when_scrolling() {
         "scrolling the viewport should not rewrite the selected buffer row to a new viewport-local coordinate"
     );
     assert_eq!(app.get_workspace_session_selection_end_row(), 5);
+}
+
+#[test]
+fn workspace_terminal_selection_restores_from_rust_truth_after_native_host_props_are_clobbered() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+    select_terminal_welcome_span(&app);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "precondition: native workspace selection should be active before the host mirror is clobbered"
+    );
+    let expected_start_row = app.get_workspace_session_selection_start_row();
+    let expected_start_col = app.get_workspace_session_selection_start_col();
+    let expected_end_row = app.get_workspace_session_selection_end_row();
+    let expected_end_col = app.get_workspace_session_selection_end_col();
+
+    app.set_workspace_session_selection_active(false);
+    app.set_workspace_session_selection_start_row(-1);
+    app.set_workspace_session_selection_start_col(-1);
+    app.set_workspace_session_selection_end_row(-1);
+    app.set_workspace_session_selection_end_col(-1);
+
+    app.invoke_workspace_session_search_query_changed("welcome".into());
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "workspace terminal selection should restore from the Rust-owned truth during the next projection sync instead of disappearing when the host-side mirror properties get reset"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_row(),
+        expected_start_row
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_col(),
+        expected_start_col
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_end_row(),
+        expected_end_row
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_end_col(),
+        expected_end_col
+    );
 }
 
 #[test]
@@ -15746,19 +15798,16 @@ fn selected_workspace_sftp_item_names(app: &AppWindow) -> Vec<String> {
 }
 
 fn workspace_sftp_selection_status_text(app: &AppWindow) -> String {
-    ElementHandle::find_by_element_id(
-        app,
-        "SftpWorkspaceHost::workspace-statusbar-selection-text",
-    )
-    .chain(ElementHandle::find_by_element_id(
-        app,
-        "workspace-statusbar-selection-text",
-    ))
-    .next()
-    .expect("workspace selection status text")
-    .accessible_value()
-    .expect("workspace selection status accessible value")
-    .to_string()
+    ElementHandle::find_by_element_id(app, "SftpWorkspaceHost::workspace-statusbar-selection-text")
+        .chain(ElementHandle::find_by_element_id(
+            app,
+            "workspace-statusbar-selection-text",
+        ))
+        .next()
+        .expect("workspace selection status text")
+        .accessible_value()
+        .expect("workspace selection status accessible value")
+        .to_string()
 }
 
 #[test]
@@ -15856,7 +15905,11 @@ fn workspace_sftp_background_reads_sync_full_rows_for_each_remote_path() {
                 && app.get_workspace_sftp_items().row_count() == root_names.len()
         });
         let names = workspace_sftp_item_names(&app);
-        assert_eq!(names.len(), root_names.len(), "root rows should be complete");
+        assert_eq!(
+            names.len(),
+            root_names.len(),
+            "root rows should be complete"
+        );
         assert_eq!(names.first().map(String::as_str), Some("admin"));
         assert_eq!(names.last().map(String::as_str), Some("vmlinuz.old"));
         assert!(
@@ -15873,7 +15926,9 @@ fn workspace_sftp_background_reads_sync_full_rows_for_each_remote_path() {
         let names = workspace_sftp_item_names(&app);
         assert_eq!(names.first().map(String::as_str), Some(".."));
         assert!(
-            home_names.iter().all(|expected| names.iter().any(|name| name == expected)),
+            home_names
+                .iter()
+                .all(|expected| names.iter().any(|name| name == expected)),
             "/home rows should sync the full backend result plus parent entry"
         );
 

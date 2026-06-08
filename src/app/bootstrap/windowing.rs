@@ -102,18 +102,21 @@ pub(super) fn bind_windows_window_state_tracking(
                     if window.get_workspace_session_host_mode() == "terminal"
                         && !window.get_active_workspace_session_id().is_empty()
                     {
+                        let state = state.borrow();
                         match shortcut {
                             NativeTerminalClipboardShortcut::Copy
-                                if window.get_workspace_session_selection_active() =>
+                                if super::workspace_terminal::active_workspace_terminal_selection_buffer_range(
+                                    &state,
+                                )
+                                .is_some() =>
                             {
-                                let state = state.borrow();
                                 workspace_terminal::forward_active_workspace_copy_selection(
                                     &state,
                                     session_bridge.as_deref(),
-                                    window.get_workspace_session_selection_start_row(),
-                                    window.get_workspace_session_selection_start_col(),
-                                    window.get_workspace_session_selection_end_row(),
-                                    window.get_workspace_session_selection_end_col(),
+                                    -1,
+                                    -1,
+                                    -1,
+                                    -1,
                                 );
                                 return EventResult::PreventDefault;
                             }

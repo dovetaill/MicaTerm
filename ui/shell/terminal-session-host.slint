@@ -925,18 +925,18 @@ export component TerminalSessionHost inherits Rectangle {
     }
 
     function sync-selection-state() {
-        let next-active = root.has-selection();
-        let next-start-row = next-active ? root.normalized-selection-start-row() : -1;
-        let next-start-col = next-active ? root.normalized-selection-start-col() : -1;
-        let next-end-row = next-active ? root.normalized-selection-end-row() : -1;
-        let next-end-col = next-active ? root.normalized-selection-end-col() : -1;
+        let next-active = root.local-selection-active();
+        let next-start-row = next-active ? root.local-normalized-selection-start-row() : -1;
+        let next-start-col = next-active ? root.local-normalized-selection-start-col() : -1;
+        let next-end-row = next-active ? root.local-normalized-selection-end-row() : -1;
+        let next-end-col = next-active ? root.local-normalized-selection-end-col() : -1;
         let changed = root.selection-active != next-active
             || root.selection-start-row != next-start-row
             || root.selection-start-col != next-start-col
             || root.selection-end-row != next-end-row
             || root.selection-end-col != next-end-col;
 
-        if root.has-selection() {
+        if root.local-selection-active() {
             root.selection-active = next-active;
             root.selection-start-row = next-start-row;
             root.selection-start-col = next-start-col;
@@ -972,43 +972,84 @@ export component TerminalSessionHost inherits Rectangle {
             && !root.context-menu-open;
     }
 
-    function has-selection() -> bool {
+    function local-selection-active() -> bool {
         return root.selection-anchor-row >= 0
             && root.selection-focus-row >= 0
-            && (root.ordered-selection-start-row() != root.ordered-selection-end-row()
-                || root.ordered-selection-start-col() != root.ordered-selection-end-col());
+            && (root.local-ordered-selection-start-row() != root.local-ordered-selection-end-row()
+                || root.local-ordered-selection-start-col() != root.local-ordered-selection-end-col());
+    }
+
+    function local-ordered-selection-start-row() -> int {
+        return root.selection-anchor-row < root.selection-focus-row
+            || (root.selection-anchor-row == root.selection-focus-row
+                && root.selection-anchor-col <= root.selection-focus-col)
+            ? root.selection-anchor-row
+            : root.selection-focus-row;
+    }
+
+    function local-ordered-selection-start-col() -> int {
+        return root.selection-anchor-row < root.selection-focus-row
+            || (root.selection-anchor-row == root.selection-focus-row
+                && root.selection-anchor-col <= root.selection-focus-col)
+            ? root.selection-anchor-col
+            : root.selection-focus-col;
+    }
+
+    function local-ordered-selection-end-row() -> int {
+        return root.selection-anchor-row > root.selection-focus-row
+            || (root.selection-anchor-row == root.selection-focus-row
+                && root.selection-anchor-col > root.selection-focus-col)
+            ? root.selection-anchor-row
+            : root.selection-focus-row;
+    }
+
+    function local-ordered-selection-end-col() -> int {
+        return root.selection-anchor-row > root.selection-focus-row
+            || (root.selection-anchor-row == root.selection-focus-row
+                && root.selection-anchor-col > root.selection-focus-col)
+            ? root.selection-anchor-col
+            : root.selection-focus-col;
+    }
+
+    function local-normalized-selection-start-row() -> int {
+        return root.local-ordered-selection-start-row();
+    }
+
+    function local-normalized-selection-start-col() -> int {
+        return root.local-ordered-selection-start-col();
+    }
+
+    function local-normalized-selection-end-row() -> int {
+        return root.local-ordered-selection-end-row();
+    }
+
+    function local-normalized-selection-end-col() -> int {
+        return root.local-ordered-selection-end-col();
+    }
+
+    function has-selection() -> bool {
+        return root.selection-active
+            && root.selection-start-row >= 0
+            && root.selection-start-col >= 0
+            && root.selection-end-row >= root.selection-start-row
+            && (root.selection-start-row != root.selection-end-row
+                || root.selection-start-col != root.selection-end-col);
     }
 
     function ordered-selection-start-row() -> int {
-        return root.selection-anchor-row < root.selection-focus-row
-            || (root.selection-anchor-row == root.selection-focus-row
-                && root.selection-anchor-col <= root.selection-focus-col)
-            ? root.selection-anchor-row
-            : root.selection-focus-row;
+        return root.selection-start-row;
     }
 
     function ordered-selection-start-col() -> int {
-        return root.selection-anchor-row < root.selection-focus-row
-            || (root.selection-anchor-row == root.selection-focus-row
-                && root.selection-anchor-col <= root.selection-focus-col)
-            ? root.selection-anchor-col
-            : root.selection-focus-col;
+        return root.selection-start-col;
     }
 
     function ordered-selection-end-row() -> int {
-        return root.selection-anchor-row > root.selection-focus-row
-            || (root.selection-anchor-row == root.selection-focus-row
-                && root.selection-anchor-col > root.selection-focus-col)
-            ? root.selection-anchor-row
-            : root.selection-focus-row;
+        return root.selection-end-row;
     }
 
     function ordered-selection-end-col() -> int {
-        return root.selection-anchor-row > root.selection-focus-row
-            || (root.selection-anchor-row == root.selection-focus-row
-                && root.selection-anchor-col > root.selection-focus-col)
-            ? root.selection-anchor-col
-            : root.selection-focus-col;
+        return root.selection-end-col;
     }
 
     function normalized-selection-start-row() -> int {

@@ -73,6 +73,43 @@ impl ShellViewModel {
         self.active_workspace_terminal_surface = surface;
     }
 
+    pub fn workspace_terminal_selection(&self) -> Option<WorkspaceTerminalSelection> {
+        self.workspace_terminal_selection
+    }
+
+    pub fn active_workspace_terminal_selection(&self) -> Option<WorkspaceTerminalSelection> {
+        let surface = self.active_workspace_terminal_surface()?;
+        self.workspace_terminal_selection
+            .filter(|selection| selection.session_id == surface.session_id)
+    }
+
+    pub fn set_workspace_terminal_selection(
+        &mut self,
+        selection: Option<WorkspaceTerminalSelection>,
+    ) -> bool {
+        if self.workspace_terminal_selection == selection {
+            return false;
+        }
+
+        self.workspace_terminal_selection = selection;
+        true
+    }
+
+    pub fn clear_active_workspace_terminal_selection(&mut self) -> bool {
+        let Some(surface) = self.active_workspace_terminal_surface() else {
+            return false;
+        };
+        if self
+            .workspace_terminal_selection
+            .is_some_and(|selection| selection.session_id == surface.session_id)
+        {
+            self.workspace_terminal_selection = None;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn active_workspace_tab(&self) -> Option<&WorkspaceTab> {
         let active_id = self.active_workspace_tab_id.as_deref()?;
         self.workspace_tab_by_id(active_id)
