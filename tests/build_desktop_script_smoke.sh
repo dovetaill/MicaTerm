@@ -29,6 +29,7 @@ grep -F "aarch64-pc-windows-msvc" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "dist/<app>-<target>-<profile><package flavor suffix>.tar.gz" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "dist/<app>-<target>-<profile><package flavor suffix>.zip" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "MICA_TERM_PACKAGE_PORTABLE=1" <<<"$HELP_OUTPUT" >/dev/null
+grep -F "BUILD_JOBS=<positive integer>" <<<"$HELP_OUTPUT" >/dev/null
 
 grep -F 'require_cmd nasm' "$SCRIPT_PATH" >/dev/null
 grep -F 'choose_clang_command' "$SCRIPT_PATH" >/dev/null

@@ -26,6 +26,7 @@ grep -F "packaged native present path: rendering-notifier" <<<"$HELP_OUTPUT" >/d
 grep -F "runtime fallback chain: winit-skia+d3d -> winit-skia-software -> winit-software" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "./build-win-x64-software.sh" <<<"$HELP_OUTPUT" >/dev/null
 grep -F ".zip" <<<"$HELP_OUTPUT" >/dev/null
+grep -F "BUILD_JOBS" <<<"$HELP_OUTPUT" >/dev/null
 
 grep -F 'Windows wrapper target:' "$SCRIPT_PATH" >/dev/null
 grep -F 'TARGET="${TARGET:-x86_64-pc-windows-msvc}"' "$SCRIPT_PATH" >/dev/null
