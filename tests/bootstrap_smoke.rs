@@ -4602,6 +4602,17 @@ fn find_console_asset_id(app: &AppWindow, label: &str) -> String {
         .unwrap_or_else(|| panic!("expected console asset `{label}`"))
 }
 
+fn workspace_tab_snapshot(app: &AppWindow) -> Vec<(String, String)> {
+    let items = app.get_workspace_tab_items();
+    (0..items.row_count())
+        .filter_map(|index| {
+            items
+                .row_data(index)
+                .map(|row| (row.tab_id.to_string(), row.title.to_string()))
+        })
+        .collect()
+}
+
 fn create_root_snippet(app: &AppWindow, name: &str, script: &str) -> String {
     app.invoke_sidebar_destination_selected("snippets".into());
     app.invoke_assets_create_action_selected("new-snippet".into());
@@ -8551,7 +8562,7 @@ fn asset_activation_records_saved_ssh_into_new_tab_recent_items() {
 }
 
 #[test]
-fn active_recent_connection_row_returns_to_existing_tab_without_duplicate_session() {
+fn active_recent_connection_row_opens_fresh_session_for_connected_asset() {
     run_with_large_test_stack(|| {
         let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
@@ -8565,20 +8576,35 @@ fn active_recent_connection_row_returns_to_existing_tab_without_duplicate_sessio
 
         app.invoke_workspace_new_tab_requested();
         assert_eq!(app.get_workspace_tab_items().row_count(), 2);
+        assert_eq!(app.get_active_workspace_session_id().as_str(), "workspace-launcher");
 
         app.invoke_welcome_quick_launch_connect_requested(ssh_id.into());
+        settle_terminal_projection();
 
-        assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-        assert_eq!(
-            app.get_active_workspace_session_id().as_str(),
-            existing_session_id.as_str()
+        let active_session_id = app.get_active_workspace_session_id().to_string();
+        let tabs = workspace_tab_snapshot(&app);
+        assert_eq!(tabs.len(), 2);
+        assert_ne!(
+            active_session_id.as_str(),
+            existing_session_id.as_str(),
+            "launcher recent should open a fresh session instead of focusing the existing terminal"
         );
-        let active_tab = app
-            .get_workspace_tab_items()
-            .row_data(0)
-            .expect("existing tab after active recent row click");
-        assert_eq!(active_tab.tab_id.as_str(), existing_session_id.as_str());
-        assert_eq!(active_tab.title.as_str(), "Prod Bastion");
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &existing_session_id && title.as_str() == "Prod Bastion"
+            }),
+            "the original terminal session should remain open after launcher recent creates a new tab"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &active_session_id && title.as_str() == "Prod Bastion"
+            }),
+            "the launcher recent activation should create a second tab for the same SSH asset"
+        );
+        assert!(
+            tabs.iter().all(|(tab_id, _)| tab_id.as_str() != "workspace-launcher"),
+            "the launcher placeholder tab should be taken over by the new session instead of surviving alongside terminal tabs"
+        );
     });
 }
 
@@ -9010,43 +9036,65 @@ fn duplicate_ssh_tabs_keep_resolved_titles_and_reuse_suffix_gaps() {
 }
 
 #[test]
-fn launcher_picker_activation_replaces_launcher_tab_and_closes_modal() {
+fn launcher_picker_activation_opens_fresh_session_for_connected_asset() {
     run_with_large_test_stack(|| {
         let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
         let app = AppWindow::new().unwrap();
-        bind_with_fake_sessions(&app, None);
+        bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
 
         let ssh_id = create_root_ssh(&app, "DB Admin", "10.0.0.24");
+        app.invoke_asset_activated(ssh_id.clone().into());
+        settle_terminal_projection();
+        let existing_session_id = app.get_active_workspace_session_id().to_string();
 
         app.invoke_workspace_new_tab_requested();
         app.invoke_welcome_open_saved_ssh_requested();
         assert!(app.get_open_saved_ssh_modal_open());
 
         app.invoke_open_saved_ssh_modal_asset_activated(ssh_id.into());
+        settle_terminal_projection();
 
         assert!(!app.get_open_saved_ssh_modal_open());
-        assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-        let item = app
-            .get_workspace_tab_items()
-            .row_data(0)
-            .expect("workspace tab after picker activation");
-        assert_ne!(item.tab_id.as_str(), "workspace-launcher");
-        assert_eq!(item.title.as_str(), "DB Admin");
+        let active_session_id = app.get_active_workspace_session_id().to_string();
+        let tabs = workspace_tab_snapshot(&app);
+        assert_eq!(tabs.len(), 2);
+        assert_ne!(
+            active_session_id.as_str(),
+            existing_session_id.as_str(),
+            "launcher picker double-click should open a fresh session instead of focusing the existing terminal"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &existing_session_id && title.as_str() == "DB Admin"
+            }),
+            "launcher picker should keep the original terminal session tab alive"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &active_session_id && title.as_str() == "DB Admin"
+            }),
+            "launcher picker should create a new terminal tab for the already-connected SSH asset"
+        );
+        assert!(
+            tabs.iter().all(|(tab_id, _)| tab_id.as_str() != "workspace-launcher"),
+            "the launcher tab should be replaced by the new session after picker activation"
+        );
     });
 }
 
 #[test]
-fn launcher_picker_primary_open_request_activates_the_selected_saved_ssh() {
+fn launcher_picker_primary_open_request_opens_fresh_session_for_connected_asset() {
     run_with_large_test_stack(|| {
         let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
         let app = AppWindow::new().unwrap();
-        bind_with_fake_sessions(&app, None);
+        bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
 
-        create_root_ssh(&app, "Prod Bastion", "10.0.0.10");
-        create_root_ssh(&app, "DB Admin", "10.0.0.24");
-        let ssh_id = find_console_asset_id(&app, "DB Admin");
+        let ssh_id = create_root_ssh(&app, "DB Admin", "10.0.0.24");
+        app.invoke_asset_activated(ssh_id.clone().into());
+        settle_terminal_projection();
+        let existing_session_id = app.get_active_workspace_session_id().to_string();
 
         app.invoke_workspace_new_tab_requested();
         app.invoke_welcome_open_saved_ssh_requested();
@@ -9057,14 +9105,124 @@ fn launcher_picker_primary_open_request_activates_the_selected_saved_ssh() {
         assert!(app.get_open_saved_ssh_modal_can_open_selection());
 
         app.invoke_open_saved_ssh_modal_activate_selection_requested();
+        settle_terminal_projection();
 
         assert!(!app.get_open_saved_ssh_modal_open());
-        assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-        let item = app
-            .get_workspace_tab_items()
-            .row_data(0)
-            .expect("workspace tab after picker primary open");
-        assert_eq!(item.title.as_str(), "DB Admin");
+        let active_session_id = app.get_active_workspace_session_id().to_string();
+        let tabs = workspace_tab_snapshot(&app);
+        assert_eq!(tabs.len(), 2);
+        assert_ne!(
+            active_session_id.as_str(),
+            existing_session_id.as_str(),
+            "launcher picker primary open should create a fresh session for the selected SSH asset"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &existing_session_id && title.as_str() == "DB Admin"
+            }),
+            "primary open should keep the existing DB Admin session tab"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &active_session_id && title.as_str() == "DB Admin"
+            }),
+            "primary open should add a new DB Admin session tab"
+        );
+    });
+}
+
+#[test]
+fn launcher_picker_duplicate_activation_requests_only_create_one_fresh_session() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+        let app = AppWindow::new().unwrap();
+        bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+
+        let ssh_id = create_root_ssh(&app, "DB Admin", "10.0.0.24");
+        app.invoke_asset_activated(ssh_id.clone().into());
+        settle_terminal_projection();
+        let existing_session_id = app.get_active_workspace_session_id().to_string();
+
+        app.invoke_workspace_new_tab_requested();
+        app.invoke_welcome_open_saved_ssh_requested();
+        assert!(app.get_open_saved_ssh_modal_open());
+
+        app.invoke_open_saved_ssh_modal_asset_selected(ssh_id.clone().into());
+        app.invoke_open_saved_ssh_modal_asset_activated(ssh_id.into());
+        app.invoke_open_saved_ssh_modal_activate_selection_requested();
+        settle_terminal_projection();
+
+        assert!(!app.get_open_saved_ssh_modal_open());
+        let active_session_id = app.get_active_workspace_session_id().to_string();
+        let tabs = workspace_tab_snapshot(&app);
+        assert_eq!(
+            tabs.len(),
+            2,
+            "a duplicated picker gesture should yield exactly one extra session tab"
+        );
+        assert_ne!(
+            active_session_id.as_str(),
+            existing_session_id.as_str(),
+            "the duplicated picker gesture should still end on one fresh session"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &existing_session_id && title.as_str() == "DB Admin"
+            }),
+            "the original session must stay present after the duplicated picker gesture"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &active_session_id && title.as_str() == "DB Admin"
+            }),
+            "the duplicated picker gesture should create one replacement session tab"
+        );
+    });
+}
+
+#[test]
+fn launcher_recent_duplicate_activation_requests_only_create_one_fresh_session() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+        let app = AppWindow::new().unwrap();
+        bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.clone().into());
+        settle_terminal_projection();
+        let existing_session_id = app.get_active_workspace_session_id().to_string();
+
+        app.invoke_workspace_new_tab_requested();
+        app.invoke_welcome_quick_launch_connect_requested(ssh_id.clone().into());
+        app.invoke_welcome_quick_launch_connect_requested(ssh_id.into());
+        settle_terminal_projection();
+
+        let active_session_id = app.get_active_workspace_session_id().to_string();
+        let tabs = workspace_tab_snapshot(&app);
+        assert_eq!(
+            tabs.len(),
+            2,
+            "a duplicated launcher recent gesture should yield exactly one extra session tab"
+        );
+        assert_ne!(
+            active_session_id.as_str(),
+            existing_session_id.as_str(),
+            "the duplicated launcher recent gesture should still end on one fresh session"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &existing_session_id && title.as_str() == "Prod Bastion"
+            }),
+            "the original Prod Bastion session must stay present after the duplicated recent gesture"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &active_session_id && title.as_str() == "Prod Bastion"
+            }),
+            "the duplicated launcher recent gesture should create one replacement session tab"
+        );
     });
 }
 
