@@ -540,6 +540,41 @@ fn terminal_host_selection_hit_testing_routes_half_cell_boundaries_through_rust_
 }
 
 #[test]
+fn terminal_host_declares_double_and_triple_click_selection_gestures() {
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        terminal_host.contains("private property <int> selection-click-streak: 0;"),
+        "TerminalSessionHost should track pointer click streak state so double-click and triple-click can map to stable local selection gestures"
+    );
+    assert!(
+        terminal_host.contains("private property <int> selection-gesture-mode: 0;"),
+        "TerminalSessionHost should expose a gesture mode state so follow-up drags can keep token vs row expansion semantics instead of falling back to plain range drag"
+    );
+    assert!(
+        terminal_host.contains("if event.kind == PointerEventKind.down && event.button == PointerEventButton.left && root.selection-click-streak == 2")
+            && terminal_host.contains("if event.kind == PointerEventKind.down && event.button == PointerEventButton.left && root.selection-click-streak >= 3"),
+        "TerminalSessionHost should branch double-click and triple-click pointer-down events into dedicated gesture handling instead of treating every click as a plain drag anchor"
+    );
+}
+
+#[test]
+fn terminal_host_uses_shift_override_before_mouse_grabbed_forwarding() {
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        terminal_host.contains("if root.session-mouse-grabbed && !event.modifiers.shift {"),
+        "mouse-grabbed terminals should only keep remote pointer ownership while Shift is not pressed so users still have a stable local selection escape hatch"
+    );
+    assert!(
+        !terminal_host.contains("if root.session-mouse-grabbed {"),
+        "TerminalSessionHost should not unconditionally forward left-click gestures once the runtime grabs the mouse because that blocks Shift+drag/double/triple local selection overrides"
+    );
+}
+
+#[test]
 fn terminal_host_uses_startup_safe_font_stack_and_stable_clipboard_shortcut_tokens() {
     let terminal_host =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");

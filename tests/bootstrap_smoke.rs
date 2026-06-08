@@ -857,6 +857,23 @@ struct LinkInteractionLauncherState {
     forwarded_mouse_inputs: Arc<Mutex<Vec<TerminalMouseInput>>>,
 }
 
+impl LinkInteractionLauncherState {
+    fn take_forwarded_mouse_inputs(&self) -> Vec<TerminalMouseInput> {
+        std::mem::take(
+            &mut *self
+                .forwarded_mouse_inputs
+                .lock()
+                .expect("lock forwarded mouse inputs"),
+        )
+    }
+}
+
+#[derive(Clone)]
+struct TerminalGestureLauncher {
+    line: &'static str,
+    mouse_grabbed: bool,
+}
+
 #[derive(Clone)]
 struct LinkInteractionLauncher {
     state: LinkInteractionLauncherState,
@@ -2931,6 +2948,34 @@ impl SessionRuntimeLauncher for SelectionBoundaryLauncher {
     }
 }
 
+impl SessionRuntimeLauncher for TerminalGestureLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let line = self.line;
+        let mouse_grabbed = self.mouse_grabbed;
+        Box::pin(async move {
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let mut surface = terminal_surface_with_cells(session_id, 1, 24, 80, vec![line.into()]);
+            surface.mouse_grabbed = mouse_grabbed;
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
+            Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
 impl SessionRuntimeLauncher for ScrollbackCopyLauncher {
     fn launch(
         &self,
@@ -4478,6 +4523,50 @@ fn drag_terminal_padding_into_grid(app: &AppWindow) {
         position: drag_end,
         button: PointerEventButton::Left,
     });
+}
+
+fn terminal_cell_center_position(app: &AppWindow, row: u32, col: f32) -> LogicalPosition {
+    LogicalPosition::new(
+        app.get_layout_workspace_session_native_surface_x()
+            + (app.get_workspace_session_cell_width() * (col + 0.5)),
+        app.get_layout_titlebar_height()
+            + app.get_layout_workspace_session_native_surface_y()
+            + (app.get_workspace_session_cell_height() * (row as f32 + 0.5)),
+    )
+}
+
+fn click_terminal_position(app: &AppWindow, position: LogicalPosition) {
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position,
+        button: PointerEventButton::Left,
+    });
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position,
+        button: PointerEventButton::Left,
+    });
+}
+
+fn double_click_terminal_cell(app: &AppWindow, row: u32, col: f32) {
+    let position = terminal_cell_center_position(app, row, col);
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position });
+    click_terminal_position(app, position);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+    click_terminal_position(app, position);
+}
+
+fn triple_click_terminal_cell(app: &AppWindow, row: u32, col: f32) {
+    let position = terminal_cell_center_position(app, row, col);
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position });
+    click_terminal_position(app, position);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+    click_terminal_position(app, position);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+    click_terminal_position(app, position);
 }
 
 fn drag_within_first_terminal_cell(app: &AppWindow) {
@@ -12509,6 +12598,344 @@ fn workspace_terminal_alt_screen_ctrl_click_does_not_open_link_and_still_forward
             .len(),
         2,
         "alternate-screen sessions should keep mouse ownership so Ctrl+click still forwards to the remote terminal"
+    );
+}
+
+#[test]
+fn workspace_terminal_double_click_selects_entire_file_like_token() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TerminalGestureLauncher {
+            line: "hello-world/path.txt",
+            mouse_grabbed: false,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    double_click_terminal_cell(&app, 0, 8.0);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "double-clicking a file-like shell token should create a visible selection instead of leaving the terminal unselected"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_col(),
+        0,
+        "double-clicking inside hello-world/path.txt should snap the selection start back to the beginning of the token"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_end_col(),
+        "hello-world/path.txt".chars().count() as i32,
+        "double-clicking inside hello-world/path.txt should select the entire token width instead of collapsing to a caret-sized range"
+    );
+}
+
+#[test]
+fn workspace_terminal_double_click_selects_entire_url_token() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TerminalGestureLauncher {
+            line: "https://example.com/a/b?x=1",
+            mouse_grabbed: false,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    double_click_terminal_cell(&app, 0, 9.0);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "double-clicking inside a URL should create a visible selection instead of leaving the token fragmented under the caret"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_col(),
+        0,
+        "double-clicking inside https://example.com/a/b?x=1 should preserve the full URL start instead of splitting at :// or / boundaries"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_end_col(),
+        "https://example.com/a/b?x=1".chars().count() as i32,
+        "double-clicking inside https://example.com/a/b?x=1 should keep the entire openable token selected"
+    );
+}
+
+#[test]
+fn workspace_terminal_double_click_selects_contiguous_cjk_text() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TerminalGestureLauncher {
+            line: "连续中文片段",
+            mouse_grabbed: false,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    double_click_terminal_cell(&app, 0, 2.0);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "double-clicking inside contiguous CJK output should create a visible selection instead of behaving like a plain caret click"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_col(),
+        0,
+        "double-clicking inside contiguous CJK output should expand back to the start of the non-whitespace run"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_end_col(),
+        "连续中文片段".chars().count() as i32,
+        "double-clicking inside contiguous CJK output should select the full run without forcing Western-style delimiter splits"
+    );
+}
+
+#[test]
+fn workspace_terminal_double_click_on_wide_char_trailing_cell_normalizes_to_cluster_start() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TerminalGestureLauncher {
+            line: "条 abc",
+            mouse_grabbed: false,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    double_click_terminal_cell(&app, 0, 1.0);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "double-clicking the trailing half of a wide glyph should still create a local selection instead of collapsing into an empty hit"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_col(),
+        0,
+        "double-clicking the trailing half of a wide glyph should normalize the anchor back to the leading cell"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_end_col(),
+        2,
+        "double-clicking the trailing half of a wide glyph should keep the selection bounded to that wide cluster instead of starting from the trailing cell"
+    );
+}
+
+#[test]
+fn workspace_terminal_triple_click_selects_the_current_visual_row() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TerminalGestureLauncher {
+            line: "triple click row",
+            mouse_grabbed: false,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    triple_click_terminal_cell(&app, 0, 4.0);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "triple-clicking a terminal row should promote the gesture into a visible row selection"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_row(),
+        0,
+        "triple-click row selection should anchor on the clicked visual row"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_end_row(),
+        0,
+        "triple-click row selection should stay bound to the clicked visual row in v1 instead of expanding to wrapped logical lines"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_col(),
+        0,
+        "triple-click row selection should cover the row from column 0"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_end_col(),
+        app.get_workspace_session_cols(),
+        "triple-click row selection should span through the row's visual width so copy can read the whole row"
+    );
+}
+
+#[test]
+fn workspace_terminal_plain_double_click_stays_remote_when_mouse_is_grabbed() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let launcher_state = LinkInteractionLauncherState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(LinkInteractionLauncher {
+            state: launcher_state.clone(),
+            line: "remote mouse owner",
+            alternate_screen_active: false,
+            mouse_grabbed: true,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+    launcher_state.take_forwarded_mouse_inputs();
+
+    double_click_terminal_cell(&app, 0, 4.0);
+    settle_terminal_projection();
+
+    assert!(
+        !app.get_workspace_session_selection_active(),
+        "plain double-click should stay on the remote mouse path when mouse reporting owns the session"
+    );
+    let forwarded = launcher_state.take_forwarded_mouse_inputs();
+    assert!(
+        forwarded
+            .iter()
+            .any(|event| event.kind == TerminalMouseEventKind::Down)
+            && forwarded
+                .iter()
+                .any(|event| event.kind == TerminalMouseEventKind::Up),
+        "plain double-click under mouse_grabbed=true should keep forwarding remote mouse press/release events"
+    );
+}
+
+#[test]
+fn workspace_terminal_shift_double_click_selects_locally_even_when_mouse_is_grabbed() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let launcher_state = LinkInteractionLauncherState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(LinkInteractionLauncher {
+            state: launcher_state.clone(),
+            line: "shift/override/token",
+            alternate_screen_active: false,
+            mouse_grabbed: true,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+    launcher_state.take_forwarded_mouse_inputs();
+
+    dispatch_modifier_pressed(&app, Key::Shift);
+    double_click_terminal_cell(&app, 0, 8.0);
+    dispatch_modifier_released(&app, Key::Shift);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "Shift+double-click should force the host terminal into local selection mode even while the remote session has mouse reporting grabbed"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_col(),
+        0,
+        "Shift+double-click should select the full local token instead of keeping the mouse-grabbed path on a point hit"
+    );
+    assert_eq!(
+        launcher_state.take_forwarded_mouse_inputs().len(),
+        0,
+        "Shift+double-click should stay on the local selection path and must not leak pointer press/release events into the remote PTY"
+    );
+}
+
+#[test]
+fn workspace_terminal_native_double_click_selection_keeps_frame_contract_active() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TerminalGestureLauncher {
+            line: "native-double-click/path",
+            mouse_grabbed: false,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    let before_frame = app.get_workspace_session_native_frame_token();
+    let before_surface_seqno = app.get_workspace_session_surface_seqno();
+
+    double_click_terminal_cell(&app, 0, 9.0);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "native double-click selection should still publish an active host selection instead of collapsing to a caret-sized no-op"
+    );
+    assert_eq!(
+        app.get_workspace_session_render_mode().as_str(),
+        "native",
+        "the mainline workspace test path should stay on the retained native presenter while validating double-click selection visibility"
+    );
+    assert!(
+        before_frame > 0 && app.get_workspace_session_native_frame_token() > 0,
+        "double-click selection should keep the retained native frame contract alive before and after the selection change"
+    );
+    assert!(
+        before_surface_seqno > 0 && app.get_workspace_session_surface_seqno() > 0,
+        "double-click selection should keep a staged terminal surface frame available while native composition handles the visible selection repaint"
     );
 }
 
