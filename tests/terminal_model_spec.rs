@@ -2,7 +2,8 @@ use mica_term::app::ssh::runtime::{
     TerminalCellState, TerminalCursorShape, TerminalCursorState, TerminalRowState,
     TerminalSurfaceState,
 };
-use mica_term::app::terminal_model::TerminalModelFrame;
+use mica_term::app::terminal_model::{TerminalModelFrame, TerminalSelectionModel};
+use std::fs;
 use uuid::Uuid;
 
 fn build_surface(
@@ -327,5 +328,80 @@ fn terminal_model_tracks_viewport_stable_content_hashes_across_scrollback_shifts
     assert_eq!(
         previous.rows[1].content_hash, next.rows[2].content_hash,
         "adjacent viewport shifts should keep overlapping rows reusable even when they move to a new viewport row index"
+    );
+}
+
+#[test]
+fn terminal_model_selection_changes_mark_only_newly_covered_rows_dirty() {
+    let surface = build_surface(
+        9,
+        3,
+        8,
+        &["alpha", "bravo", "charlie"],
+        vec![
+            TerminalCellState {
+                row: 0,
+                col: 0,
+                width: 1,
+                text: "a".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xff11_1111,
+                bg_rgba: 0xff00_0000,
+            },
+            TerminalCellState {
+                row: 1,
+                col: 0,
+                width: 1,
+                text: "b".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xff22_2222,
+                bg_rgba: 0xff00_0000,
+            },
+            TerminalCellState {
+                row: 2,
+                col: 0,
+                width: 1,
+                text: "c".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xff33_3333,
+                bg_rgba: 0xff00_0000,
+            },
+        ],
+    );
+
+    let previous = TerminalModelFrame::from_surface_with_selection(
+        &surface,
+        None,
+        Some(TerminalSelectionModel::new(0, 0, 0, 8)),
+    );
+    let next = TerminalModelFrame::from_surface_with_selection(
+        &surface,
+        Some(&previous),
+        Some(TerminalSelectionModel::new(0, 0, 1, 2)),
+    );
+
+    assert_eq!(
+        next.selection,
+        Some(TerminalSelectionModel::new(0, 0, 1, 2)),
+        "selection-aware model frames should retain the current viewport selection instead of leaving the renderer-facing frame permanently empty"
+    );
+    assert_eq!(
+        next.dirty_rows,
+        vec![1],
+        "expanding the viewport selection should mark only the newly covered row dirty instead of invalidating unrelated rows when glyph content is unchanged"
+    );
+}
+
+#[test]
+fn terminal_model_source_exposes_selection_aware_frame_construction() {
+    let source = fs::read_to_string("src/app/terminal_model.rs").expect("read terminal model");
+
+    assert!(
+        source.contains("pub fn from_surface_with_selection(")
+            && !source.contains("selection: None,"),
+        "terminal model frames should expose a selection-aware constructor and stop hard-wiring selection to None so renderer/model/copy paths can share one Rust-owned terminal selection truth"
     );
 }

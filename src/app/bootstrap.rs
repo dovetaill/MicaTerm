@@ -1677,6 +1677,25 @@ struct WorkspaceScrollInput {
     alt: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LauncherSshOpenIntent {
+    RecentConnection,
+    SavedSshPicker,
+}
+
+impl LauncherSshOpenIntent {
+    fn session_mode(self) -> OpenSessionMode {
+        OpenSessionMode::ForceNewTab
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingLauncherActivation {
+    intent: LauncherSshOpenIntent,
+    asset_id: String,
+    requested_at: Instant,
+}
+
 fn open_session_with_profile(
     state: &mut ShellViewModel,
     bridge: &ShellSessionBridge,
@@ -1804,13 +1823,6 @@ fn attempt_open_session_with_profile(
     profile: ConnectionProfile,
     mode: OpenSessionMode,
 ) -> anyhow::Result<()> {
-    if matches!(mode, OpenSessionMode::ActivateExisting)
-        && let Some(asset_id) = profile.asset_id.as_deref()
-        && target_session_id_for_asset(state, asset_id).is_some()
-    {
-        return open_session_with_profile(state, bridge, profile, mode);
-    }
-
     open_session_with_profile(state, bridge, profile.clone(), mode).inspect_err(|err| {
         show_failed_session_tab(state, &profile, err.to_string());
     })
@@ -1842,6 +1854,35 @@ fn register_asset_click(
     }
 
     should_activate
+}
+
+fn register_launcher_activation(
+    tracker: &Rc<RefCell<Option<PendingLauncherActivation>>>,
+    intent: LauncherSshOpenIntent,
+    asset_id: &str,
+    now: Instant,
+) -> bool {
+    const DUPLICATE_GESTURE_WINDOW: Duration = Duration::from_millis(350);
+
+    let should_skip = tracker
+        .borrow()
+        .as_ref()
+        .map(|pending| {
+            pending.intent == intent
+                && pending.asset_id == asset_id
+                && now.duration_since(pending.requested_at) <= DUPLICATE_GESTURE_WINDOW
+        })
+        .unwrap_or(false);
+
+    if !should_skip {
+        tracker.borrow_mut().replace(PendingLauncherActivation {
+            intent,
+            asset_id: asset_id.to_string(),
+            requested_at: now,
+        });
+    }
+
+    should_skip
 }
 
 fn activate_asset(
@@ -1910,11 +1951,8 @@ fn open_saved_ssh_asset_from_quick_launch(
     session_bridge: Option<&ShellSessionBridge>,
     pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
     asset_id: &str,
-    mode: OpenSessionMode,
+    intent: LauncherSshOpenIntent,
 ) {
-    let had_existing_session = matches!(mode, OpenSessionMode::ActivateExisting)
-        && target_session_id_for_asset(state, asset_id).is_some();
-
     match runtime_profile_for_saved_asset(state, asset_id) {
         Ok(profile) => {
             if let Some(session_bridge) = session_bridge {
@@ -1923,7 +1961,7 @@ fn open_saved_ssh_asset_from_quick_launch(
                     session_bridge,
                     pending_host_key_approval,
                     profile,
-                    mode,
+                    intent.session_mode(),
                 ) {
                     tracing::error!(
                         target: "app.quick_launch",
@@ -1931,7 +1969,7 @@ fn open_saved_ssh_asset_from_quick_launch(
                         error = %err,
                         "failed to open saved ssh asset from quick launch"
                     );
-                } else if had_existing_session || state.ssh_host_key_prompt_state.is_none() {
+                } else if state.ssh_host_key_prompt_state.is_none() {
                     state.record_recent_saved_ssh_asset(asset_id);
                 }
             } else {
@@ -1962,6 +2000,7 @@ fn activate_saved_ssh_picker_asset(
     state: &mut ShellViewModel,
     session_bridge: Option<&ShellSessionBridge>,
     pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
+    launcher_activation_tracker: &Rc<RefCell<Option<PendingLauncherActivation>>>,
     workspace_follow_tracker: &Rc<RefCell<WorkspaceFollowTracker>>,
     asset_id: &str,
 ) {
@@ -1973,6 +2012,15 @@ fn activate_saved_ssh_picker_asset(
         }
         Some(ConsoleAssetKind::SshConnection) => {}
         _ => return,
+    }
+
+    if register_launcher_activation(
+        launcher_activation_tracker,
+        LauncherSshOpenIntent::SavedSshPicker,
+        asset_id,
+        Instant::now(),
+    ) {
+        return;
     }
 
     state.close_saved_ssh_picker();
@@ -1987,7 +2035,7 @@ fn activate_saved_ssh_picker_asset(
         session_bridge,
         pending_host_key_approval,
         asset_id,
-        OpenSessionMode::ActivateExisting,
+        LauncherSshOpenIntent::SavedSshPicker,
     );
     sync_welcome_quick_launch_state(window, state);
     sync_workspace_tabs_with_manager(
@@ -2108,20 +2156,6 @@ fn drain_ssh_modal_background_messages(
     }
 
     changed
-}
-
-fn target_session_id_for_asset(state: &ShellViewModel, asset_id: &str) -> Option<String> {
-    state
-        .active_workspace_tab()
-        .filter(|tab| tab.asset_id == asset_id)
-        .map(|tab| tab.session_id.clone())
-        .or_else(|| {
-            state
-                .workspace_tabs()
-                .iter()
-                .find(|tab| tab.asset_id == asset_id)
-                .map(|tab| tab.session_id.clone())
-        })
 }
 
 fn close_session_by_id(
@@ -2610,47 +2644,20 @@ fn workspace_session_uses_host_selection_overlay(window: &AppWindow) -> bool {
     window.get_workspace_session_render_mode().as_str() == TerminalRenderMode::Bitmap.as_str()
 }
 
-fn workspace_terminal_selection_boundary_changed(
-    window: &AppWindow,
-    surface: &TerminalSurfaceState,
-) -> bool {
-    window.get_workspace_session_alternate_screen_active() != surface.alternate_screen_active
-        || window.get_workspace_session_rows().max(0) as u32 != surface.rows
-        || window.get_workspace_session_cols().max(0) as u32 != surface.cols
-}
-
 fn active_workspace_terminal_selection(
-    window: &AppWindow,
+    state: &ShellViewModel,
     surface: &TerminalSurfaceState,
 ) -> Option<TerminalAtlasSelection> {
-    if !window.get_workspace_session_selection_active() {
-        return None;
-    }
-    if workspace_terminal_selection_boundary_changed(window, surface) {
-        return None;
-    }
-
-    let start_row = window.get_workspace_session_selection_start_row();
-    let start_col = window.get_workspace_session_selection_start_col();
-    let end_row = window.get_workspace_session_selection_end_row();
-    let end_col = window.get_workspace_session_selection_end_col();
-    if start_row < 0 || start_col < 0 || end_row < 0 || end_col < 0 {
-        return None;
-    }
-
-    let range = surface.project_buffer_selection_to_viewport(
-        start_row as u32,
-        start_col as u32,
-        end_row as u32,
-        end_col as u32,
-    )?;
-
-    Some(TerminalAtlasSelection::new(
-        range.start_row,
-        range.start_col,
-        range.end_row,
-        range.end_col,
-    ))
+    workspace_terminal::active_workspace_terminal_selection(state)
+        .and_then(|selection| selection.project_to_viewport(surface))
+        .map(|selection| {
+            TerminalAtlasSelection::new(
+                selection.start_row,
+                selection.start_col,
+                selection.end_row,
+                selection.end_col,
+            )
+        })
 }
 
 enum WorkspaceTerminalLinkMouseDecision {
@@ -4332,6 +4339,7 @@ fn sync_workspace_session_state_with_manager(
             projected_theme_for(state.theme_mode, state.theme_variant)
         },
     );
+    workspace_terminal::clear_invalid_active_workspace_terminal_selection(state);
     sync_workspace_terminal_surface_projection_only(window, state);
     sync_workspace_connection_progress_state(window, state, manager);
 
@@ -4450,13 +4458,14 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
     } else {
         None
     };
+    workspace_terminal::sync_active_workspace_terminal_selection_projection(window, state);
 
     if let Some(surface) = state.active_workspace_terminal_surface() {
         window.set_workspace_session_alternate_screen_active(surface.alternate_screen_active);
         let selection = if workspace_session_uses_host_selection_overlay(window) {
             None
         } else {
-            active_workspace_terminal_selection(window, surface)
+            active_workspace_terminal_selection(state, surface)
         };
         let selection_overlay_rgba =
             terminal_selection_overlay_rgba(state.theme_mode, state.theme_variant);
@@ -6214,6 +6223,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         Rc::new(RefCell::new(None::<PendingWorkspacePasteWarning>));
     let asset_click_tracker = Rc::new(RefCell::new(None::<PendingAssetClick>));
     let pending_double_click_activation = Rc::new(RefCell::new(None::<String>));
+    let launcher_activation_tracker = Rc::new(RefCell::new(None::<PendingLauncherActivation>));
     WORKSPACE_RUNTIME_PROFILE.with(|runtime_profile| {
         *runtime_profile.borrow_mut() = Some(profile);
     });
@@ -7529,10 +7539,19 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let quick_launch_store_ref = quick_launch_store.clone();
+    let launcher_activation_tracker_ref = Rc::clone(&launcher_activation_tracker);
     window.on_welcome_quick_launch_connect_requested(move |asset_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        if register_launcher_activation(
+            &launcher_activation_tracker_ref,
+            LauncherSshOpenIntent::RecentConnection,
+            asset_id.as_str(),
+            Instant::now(),
+        ) {
+            return;
+        }
         if state
             .active_workspace_tab()
             .is_some_and(|tab| tab.is_launcher())
@@ -7544,7 +7563,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             session_bridge_ref.as_deref(),
             &pending_host_key_approval_ref,
             asset_id.as_str(),
-            OpenSessionMode::ActivateExisting,
+            LauncherSshOpenIntent::RecentConnection,
         );
         sync_welcome_quick_launch_state(&window, &state);
         sync_workspace_tabs_with_manager(
@@ -7626,6 +7645,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let quick_launch_store_ref = quick_launch_store.clone();
+    let launcher_activation_tracker_ref = Rc::clone(&launcher_activation_tracker);
     window.on_open_saved_ssh_modal_asset_activated(move |asset_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
@@ -7635,6 +7655,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             &mut state,
             session_bridge_ref.as_deref(),
             &pending_host_key_approval_ref,
+            &launcher_activation_tracker_ref,
             &workspace_follow_tracker_ref,
             asset_id.as_str(),
         );
@@ -7648,6 +7669,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let quick_launch_store_ref = quick_launch_store.clone();
+    let launcher_activation_tracker_ref = Rc::clone(&launcher_activation_tracker);
     window.on_open_saved_ssh_modal_activate_selection_requested(move || {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
@@ -7663,6 +7685,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             &mut state,
             session_bridge_ref.as_deref(),
             &pending_host_key_approval_ref,
+            &launcher_activation_tracker_ref,
             &workspace_follow_tracker_ref,
             asset_id.as_str(),
         );
@@ -8645,11 +8668,14 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         );
     });
 
+    let state = Rc::clone(&view_model);
     let window_handle = window.as_weak();
     window.on_workspace_session_context_menu_open_changed(move |_open| {
         let Some(window) = window_handle.upgrade() else {
             return;
         };
+        let state = state.borrow();
+        workspace_terminal::sync_active_workspace_terminal_selection_projection(&window, &state);
         sync_workspace_native_terminal_surface_geometry(&window);
     });
 
@@ -8715,10 +8741,13 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let Some(window) = window_handle.upgrade() else {
             return;
         };
+        let mut state = state.borrow_mut();
+        workspace_terminal::sync_active_workspace_terminal_selection_from_window(
+            &window, &mut state,
+        );
         if workspace_session_uses_host_selection_overlay(&window) {
             return;
         }
-        let mut state = state.borrow_mut();
         sync_workspace_session_state_with_manager(
             &window,
             &mut state,
@@ -8738,6 +8767,21 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let state = state.borrow();
         workspace_terminal::normalize_active_workspace_selection_hit_col(&state, row, col)
     });
+
+    let state = Rc::clone(&view_model);
+    window.on_workspace_session_resolve_selection_gesture_range(
+        move |gesture_mode, anchor_row, anchor_col, focus_row, focus_col| {
+            let state = state.borrow();
+            workspace_terminal::resolve_active_workspace_selection_gesture_range(
+                &state,
+                gesture_mode,
+                anchor_row,
+                anchor_col,
+                focus_row,
+                focus_col,
+            )
+        },
+    );
 
     let state = Rc::clone(&view_model);
     let session_bridge_copy_ref = session_bridge.clone();
@@ -10259,6 +10303,48 @@ mod tests {
                 window.get_workspace_session_render_mode().as_str(),
                 "bitmap"
             );
+        });
+    }
+
+    #[test]
+    fn bitmap_workspace_selection_projection_restores_host_mirror_from_rust_truth() {
+        with_bitmap_workspace_presenter_on_large_stack_for_test(|| {
+            let (window, mut state, mut follow_tracker) =
+                seeded_bitmap_workspace_terminal_state_for_test();
+            let surface = state
+                .active_workspace_terminal_surface()
+                .cloned()
+                .expect("active bitmap surface");
+            state.set_workspace_terminal_selection(Some(
+                crate::app::terminal_model::WorkspaceTerminalSelection::from_surface(
+                    &surface,
+                    crate::app::terminal_model::TerminalSelectionModel::new(0, 0, 0, 1),
+                ),
+            ));
+
+            sync_workspace_session_state(&window, &mut state, &mut follow_tracker);
+
+            assert!(
+                window.get_workspace_session_selection_active(),
+                "bitmap projection should mirror the Rust-owned terminal selection into the host selection properties before the local overlay paints"
+            );
+            assert_eq!(window.get_workspace_session_selection_start_row(), 0);
+            assert_eq!(window.get_workspace_session_selection_end_col(), 1);
+
+            window.set_workspace_session_selection_active(false);
+            window.set_workspace_session_selection_start_row(-1);
+            window.set_workspace_session_selection_start_col(-1);
+            window.set_workspace_session_selection_end_row(-1);
+            window.set_workspace_session_selection_end_col(-1);
+
+            sync_workspace_session_state(&window, &mut state, &mut follow_tracker);
+
+            assert!(
+                window.get_workspace_session_selection_active(),
+                "bitmap projection should restore the host-side mirror from Rust-owned selection truth during the next sync instead of dropping the live overlay when the Slint properties are clobbered"
+            );
+            assert_eq!(window.get_workspace_session_selection_start_row(), 0);
+            assert_eq!(window.get_workspace_session_selection_end_col(), 1);
         });
     }
 

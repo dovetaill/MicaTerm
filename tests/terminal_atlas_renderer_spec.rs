@@ -400,6 +400,27 @@ fn atlas_renderer_selection_changes_invalidate_and_repaint_rows() -> Result<()> 
 }
 
 #[test]
+fn atlas_renderer_word_selection_repaints_only_the_token_row() -> Result<()> {
+    let surface = render_surface(4, 32, "hello-world/path.txt\r\nnext row\r\n");
+    let mut renderer = TerminalAtlasRenderer::new()?;
+
+    let _ = renderer.render(&surface)?;
+    let selected = renderer.render_with_selection(
+        &surface,
+        Some(TerminalAtlasSelection::new(0, 0, 0, 20)),
+        0x6625_63eb,
+    )?;
+
+    assert_eq!(
+        selected.rerendered_rows,
+        vec![0],
+        "double-click token selection should repaint only the affected visual row instead of dirtifying unrelated rows"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn atlas_renderer_handles_cjk_and_nerd_font_cells_without_falling_back_to_blank_rows() -> Result<()>
 {
     let surface = render_surface(4, 20, "界  maple\r\n");

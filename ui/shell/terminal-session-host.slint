@@ -81,6 +81,13 @@ export struct TerminalOverviewMarkerRow {
     kind: string,
 }
 
+export struct TerminalGestureSelectionRange {
+    start_row: int,
+    start_col: int,
+    end_row: int,
+    end_col: int,
+}
+
 component SshStatusText inherits Text {
     font-family: "Segoe UI, Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, sans-serif";
 }
@@ -368,6 +375,7 @@ export component TerminalSessionHost inherits Rectangle {
     callback surface-resize-requested(int, int);
     callback normalize-hit-col(int, int) -> int;
     callback normalize-selection-hit-col(int, int) -> int;
+    callback resolve-selection-gesture-range(int, int, int, int, int) -> TerminalGestureSelectionRange;
     callback copy-selection-requested(int, int, int, int);
     callback selection-changed();
     callback paste-requested();
@@ -413,6 +421,13 @@ export component TerminalSessionHost inherits Rectangle {
     private property <int> selection-anchor-col: -1;
     private property <int> selection-focus-row: -1;
     private property <int> selection-focus-col: -1;
+    private property <int> selection-click-streak: 0;
+    private property <int> selection-click-row: -1;
+    private property <int> selection-click-col: -1;
+    private property <bool> selection-click-window-active: false;
+    private property <int> selection-gesture-mode: 0;
+    private property <int> selection-gesture-origin-row: -1;
+    private property <int> selection-gesture-origin-col: -1;
     private property <bool> selection-drag-active: false;
     private property <bool> link-open-candidate: false;
     private property <bool> link-press-active: false;
@@ -828,25 +843,100 @@ export component TerminalSessionHost inherits Rectangle {
         root.selection-anchor-col = -1;
         root.selection-focus-row = -1;
         root.selection-focus-col = -1;
-        root.selection-drag-active = false;
+        root.reset-selection-gesture();
         root.link-open-candidate = false;
         root.link-press-active = false;
         root.sync-selection-state();
     }
 
+    function reset-selection-gesture() {
+        root.selection-gesture-mode = 0;
+        root.selection-gesture-origin-row = -1;
+        root.selection-gesture-origin-col = -1;
+        root.selection-drag-active = false;
+    }
+
+    function track-selection-click-streak(row: int, col: int) {
+        if root.selection-click-window-active
+            && root.selection-click-row == row
+            && root.selection-click-col == col {
+            root.selection-click-streak += 1;
+        } else {
+            root.selection-click-streak = 1;
+        }
+        root.selection-click-row = row;
+        root.selection-click-col = col;
+        root.selection-click-window-active = true;
+        selection-click-reset-timer.restart();
+    }
+
+    function begin-selection-gesture(mode: int, row: int, col: int) {
+        root.selection-gesture-mode = mode;
+        root.selection-gesture-origin-row = row;
+        root.selection-gesture-origin-col = col;
+        root.selection-drag-active = true;
+        if mode == 0 {
+            root.selection-anchor-row = root.viewport-row-to-buffer-row(row);
+            root.selection-anchor-col = col;
+            root.selection-focus-row = root.viewport-row-to-buffer-row(row);
+            root.selection-focus-col = col;
+            root.sync-selection-state();
+        } else {
+            root.update-selection-gesture(row, col, col);
+        }
+    }
+
+    function update-selection-gesture(row: int, col: int, selection-col: int) {
+        if root.selection-gesture-origin-row < 0 || root.selection-gesture-origin-col < 0 {
+            return;
+        }
+
+        if root.selection-gesture-mode == 0 {
+            root.selection-anchor-row = root.viewport-row-to-buffer-row(root.selection-gesture-origin-row);
+            root.selection-anchor-col = root.selection-gesture-origin-col;
+            root.selection-focus-row = root.viewport-row-to-buffer-row(row);
+            root.selection-focus-col = selection-col;
+        } else {
+            let gesture_range = root.resolve-selection-gesture-range(
+                root.selection-gesture-mode,
+                root.selection-gesture-origin-row,
+                root.selection-gesture-origin-col,
+                row,
+                col,
+            );
+            root.selection-anchor-row = gesture_range.start_row;
+            root.selection-anchor-col = gesture_range.start_col;
+            root.selection-focus-row = gesture_range.end_row;
+            root.selection-focus-col = gesture_range.end_col;
+        }
+
+        root.sync-selection-state();
+    }
+
+    function finish-selection-gesture() {
+        if root.selection-gesture-mode == 0
+            && root.selection-anchor-row == root.selection-focus-row
+            && root.selection-anchor-col == root.selection-focus-col {
+            root.clear-selection();
+            return;
+        }
+
+        root.reset-selection-gesture();
+    }
+
     function sync-selection-state() {
-        let next-active = root.has-selection();
-        let next-start-row = next-active ? root.normalized-selection-start-row() : -1;
-        let next-start-col = next-active ? root.normalized-selection-start-col() : -1;
-        let next-end-row = next-active ? root.normalized-selection-end-row() : -1;
-        let next-end-col = next-active ? root.normalized-selection-end-col() : -1;
+        let next-active = root.local-selection-active();
+        let next-start-row = next-active ? root.local-normalized-selection-start-row() : -1;
+        let next-start-col = next-active ? root.local-normalized-selection-start-col() : -1;
+        let next-end-row = next-active ? root.local-normalized-selection-end-row() : -1;
+        let next-end-col = next-active ? root.local-normalized-selection-end-col() : -1;
         let changed = root.selection-active != next-active
             || root.selection-start-row != next-start-row
             || root.selection-start-col != next-start-col
             || root.selection-end-row != next-end-row
             || root.selection-end-col != next-end-col;
 
-        if root.has-selection() {
+        if root.local-selection-active() {
             root.selection-active = next-active;
             root.selection-start-row = next-start-row;
             root.selection-start-col = next-start-col;
@@ -882,43 +972,84 @@ export component TerminalSessionHost inherits Rectangle {
             && !root.context-menu-open;
     }
 
-    function has-selection() -> bool {
+    function local-selection-active() -> bool {
         return root.selection-anchor-row >= 0
             && root.selection-focus-row >= 0
-            && (root.ordered-selection-start-row() != root.ordered-selection-end-row()
-                || root.ordered-selection-start-col() != root.ordered-selection-end-col());
+            && (root.local-ordered-selection-start-row() != root.local-ordered-selection-end-row()
+                || root.local-ordered-selection-start-col() != root.local-ordered-selection-end-col());
+    }
+
+    function local-ordered-selection-start-row() -> int {
+        return root.selection-anchor-row < root.selection-focus-row
+            || (root.selection-anchor-row == root.selection-focus-row
+                && root.selection-anchor-col <= root.selection-focus-col)
+            ? root.selection-anchor-row
+            : root.selection-focus-row;
+    }
+
+    function local-ordered-selection-start-col() -> int {
+        return root.selection-anchor-row < root.selection-focus-row
+            || (root.selection-anchor-row == root.selection-focus-row
+                && root.selection-anchor-col <= root.selection-focus-col)
+            ? root.selection-anchor-col
+            : root.selection-focus-col;
+    }
+
+    function local-ordered-selection-end-row() -> int {
+        return root.selection-anchor-row > root.selection-focus-row
+            || (root.selection-anchor-row == root.selection-focus-row
+                && root.selection-anchor-col > root.selection-focus-col)
+            ? root.selection-anchor-row
+            : root.selection-focus-row;
+    }
+
+    function local-ordered-selection-end-col() -> int {
+        return root.selection-anchor-row > root.selection-focus-row
+            || (root.selection-anchor-row == root.selection-focus-row
+                && root.selection-anchor-col > root.selection-focus-col)
+            ? root.selection-anchor-col
+            : root.selection-focus-col;
+    }
+
+    function local-normalized-selection-start-row() -> int {
+        return root.local-ordered-selection-start-row();
+    }
+
+    function local-normalized-selection-start-col() -> int {
+        return root.local-ordered-selection-start-col();
+    }
+
+    function local-normalized-selection-end-row() -> int {
+        return root.local-ordered-selection-end-row();
+    }
+
+    function local-normalized-selection-end-col() -> int {
+        return root.local-ordered-selection-end-col();
+    }
+
+    function has-selection() -> bool {
+        return root.selection-active
+            && root.selection-start-row >= 0
+            && root.selection-start-col >= 0
+            && root.selection-end-row >= root.selection-start-row
+            && (root.selection-start-row != root.selection-end-row
+                || root.selection-start-col != root.selection-end-col);
     }
 
     function ordered-selection-start-row() -> int {
-        return root.selection-anchor-row < root.selection-focus-row
-            || (root.selection-anchor-row == root.selection-focus-row
-                && root.selection-anchor-col <= root.selection-focus-col)
-            ? root.selection-anchor-row
-            : root.selection-focus-row;
+        return root.selection-start-row;
     }
 
     function ordered-selection-start-col() -> int {
-        return root.selection-anchor-row < root.selection-focus-row
-            || (root.selection-anchor-row == root.selection-focus-row
-                && root.selection-anchor-col <= root.selection-focus-col)
-            ? root.selection-anchor-col
-            : root.selection-focus-col;
+        return root.selection-start-col;
     }
 
     function ordered-selection-end-row() -> int {
-        return root.selection-anchor-row > root.selection-focus-row
-            || (root.selection-anchor-row == root.selection-focus-row
-                && root.selection-anchor-col > root.selection-focus-col)
-            ? root.selection-anchor-row
-            : root.selection-focus-row;
+        return root.selection-end-row;
     }
 
     function ordered-selection-end-col() -> int {
-        return root.selection-anchor-row > root.selection-focus-row
-            || (root.selection-anchor-row == root.selection-focus-row
-                && root.selection-anchor-col > root.selection-focus-col)
-            ? root.selection-anchor-col
-            : root.selection-focus-col;
+        return root.selection-end-col;
     }
 
     function normalized-selection-start-row() -> int {
@@ -1393,6 +1524,19 @@ export component TerminalSessionHost inherits Rectangle {
         }
     }
 
+    selection-click-reset-timer := Timer {
+        interval: 320ms;
+        running: false;
+
+        triggered => {
+            self.running = false;
+            root.selection-click-streak = 0;
+            root.selection-click-row = -1;
+            root.selection-click-col = -1;
+            root.selection-click-window-active = false;
+        }
+    }
+
     terminal-input := TextInput {
             x: 0px;
             y: 0px;
@@ -1856,7 +2000,8 @@ export component TerminalSessionHost inherits Rectangle {
                         if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
                             terminal-input.focus();
                             root.close-context-menu();
-                            if root.session-mouse-grabbed {
+                            root.track-selection-click-streak(row, col);
+                            if root.session-mouse-grabbed && !event.modifiers.shift {
                                 root.mouse-input(
                                     "down",
                                     "left",
@@ -1878,16 +2023,15 @@ export component TerminalSessionHost inherits Rectangle {
                                     event.modifiers.control,
                                     event.modifiers.alt,
                                 );
+                            } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.left && root.selection-click-streak == 2 {
+                                root.begin-selection-gesture(1, row, col);
+                            } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.left && root.selection-click-streak >= 3 {
+                                root.begin-selection-gesture(2, row, col);
                             } else {
-                                root.selection-anchor-row = root.viewport-row-to-buffer-row(row);
-                                root.selection-anchor-col = col;
-                                root.selection-focus-row = root.viewport-row-to-buffer-row(row);
-                                root.selection-focus-col = col;
-                                root.selection-drag-active = true;
-                                root.sync-selection-state();
+                                root.begin-selection-gesture(0, row, col);
                             }
                         } else if event.kind == PointerEventKind.move {
-                            if root.session-mouse-grabbed {
+                            if root.session-mouse-grabbed && !event.modifiers.shift {
                                 root.mouse-input(
                                     "move",
                                     "none",
@@ -1898,29 +2042,29 @@ export component TerminalSessionHost inherits Rectangle {
                                     event.modifiers.alt,
                                 );
                             } else {
-                                root.mouse-input(
-                                    "move",
-                                    "none",
-                                    row,
-                                    col,
-                                    event.modifiers.shift,
-                                    event.modifiers.control,
-                                    event.modifiers.alt,
-                                );
+                                if root.link-open-candidate || root.link-armed {
+                                    root.mouse-input(
+                                        "move",
+                                        "none",
+                                        row,
+                                        col,
+                                        event.modifiers.shift,
+                                        event.modifiers.control,
+                                        event.modifiers.alt,
+                                    );
+                                }
                                 if root.link-open-candidate {
                                     root.link-open-candidate = false;
                                     root.link-press-active = false;
                                 }
                                 if root.selection-drag-active {
                                     terminal-input.focus();
-                                    root.selection-focus-row = root.viewport-row-to-buffer-row(row);
-                                    root.selection-focus-col = selection-col;
-                                    root.sync-selection-state();
+                                    root.update-selection-gesture(row, col, selection-col);
                                 }
                             }
                         } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
                             terminal-input.focus();
-                            if root.session-mouse-grabbed {
+                            if root.session-mouse-grabbed && !event.modifiers.shift {
                                 root.mouse-input(
                                     "up",
                                     "left",
@@ -1943,15 +2087,11 @@ export component TerminalSessionHost inherits Rectangle {
                                     event.modifiers.alt,
                                 );
                             } else {
-                                if root.selection-anchor-row == root.selection-focus-row
-                                    && root.selection-anchor-col == root.selection-focus-col {
-                                    root.clear-selection();
-                                }
-                                root.selection-drag-active = false;
+                                root.finish-selection-gesture();
                             }
                         } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
                             terminal-input.focus();
-                            if root.session-mouse-grabbed {
+                            if root.session-mouse-grabbed && !event.modifiers.shift {
                                 root.mouse-input(
                                     "down",
                                     "right",
@@ -1967,7 +2107,7 @@ export component TerminalSessionHost inherits Rectangle {
                                     root.terminal-surface-origin-y() + self.mouse-y,
                                 );
                             }
-                        } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.right && root.session-mouse-grabbed {
+                        } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.right && root.session-mouse-grabbed && !event.modifiers.shift {
                             root.mouse-input(
                                 "up",
                                 "right",

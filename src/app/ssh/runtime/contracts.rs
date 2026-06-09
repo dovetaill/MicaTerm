@@ -137,6 +137,42 @@ pub struct TerminalViewportSelectionRange {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalSelectionGestureMode {
+    Cell,
+    Word,
+    Line,
+}
+
+impl TerminalSelectionGestureMode {
+    pub fn from_code(value: i32) -> Self {
+        match value {
+            1 => Self::Word,
+            2 => Self::Line,
+            _ => Self::Cell,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalSelectionRange {
+    pub start_row: u32,
+    pub start_col: u32,
+    pub end_row: u32,
+    pub end_col: u32,
+}
+
+impl TerminalSelectionRange {
+    pub const fn new(start_row: u32, start_col: u32, end_row: u32, end_col: u32) -> Self {
+        Self {
+            start_row,
+            start_col,
+            end_row,
+            end_col,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalKeyKind {
     Named(&'static str),
     Function(u8),
@@ -422,6 +458,150 @@ impl TerminalSurfaceState {
             .map(|cell| cell.col.saturating_add(cell.width))
             .unwrap_or(clamped_col)
     }
+
+    pub fn selection_gesture_range(
+        &self,
+        mode: TerminalSelectionGestureMode,
+        anchor_row: u32,
+        anchor_col: u32,
+        focus_row: u32,
+        focus_col: u32,
+    ) -> TerminalSelectionRange {
+        match mode {
+            TerminalSelectionGestureMode::Cell => self.cell_selection_range(
+                anchor_row,
+                anchor_col,
+                focus_row,
+                focus_col,
+            ),
+            TerminalSelectionGestureMode::Word => self.word_selection_range(
+                anchor_row,
+                anchor_col,
+                focus_row,
+                focus_col,
+            ),
+            TerminalSelectionGestureMode::Line => self.line_selection_range(anchor_row, focus_row),
+        }
+    }
+
+    pub fn expand_to_token(&self, row: u32, col: u32) -> TerminalSelectionRange {
+        if self.cols == 0 {
+            return TerminalSelectionRange::new(0, 0, 0, 0);
+        }
+
+        let safe_row = row.min(self.rows.saturating_sub(1));
+        let buffer_row = self.viewport_row_to_buffer_row(safe_row);
+        let Some((start_col, end_col)) = self.token_span_at_row_col(safe_row, col) else {
+            let safe_col = col.min(self.cols.saturating_sub(1));
+            return TerminalSelectionRange::new(
+                buffer_row,
+                safe_col,
+                buffer_row,
+                safe_col.saturating_add(1).min(self.cols),
+            );
+        };
+
+        TerminalSelectionRange::new(buffer_row, start_col, buffer_row, end_col)
+    }
+
+    fn cell_selection_range(
+        &self,
+        anchor_row: u32,
+        anchor_col: u32,
+        focus_row: u32,
+        focus_col: u32,
+    ) -> TerminalSelectionRange {
+        let start = (
+            self.viewport_row_to_buffer_row(anchor_row.min(self.rows.saturating_sub(1))),
+            anchor_col.min(self.cols),
+        );
+        let end = (
+            self.viewport_row_to_buffer_row(focus_row.min(self.rows.saturating_sub(1))),
+            focus_col.min(self.cols),
+        );
+        let ((start_row, start_col), (end_row, end_col)) = normalized_selection(start, end);
+        TerminalSelectionRange::new(start_row, start_col, end_row, end_col)
+    }
+
+    fn word_selection_range(
+        &self,
+        anchor_row: u32,
+        anchor_col: u32,
+        focus_row: u32,
+        focus_col: u32,
+    ) -> TerminalSelectionRange {
+        merge_selection_ranges(
+            self.expand_to_token(anchor_row, anchor_col),
+            self.expand_to_token(focus_row, focus_col),
+        )
+    }
+
+    fn line_selection_range(&self, anchor_row: u32, focus_row: u32) -> TerminalSelectionRange {
+        let start_row = self.viewport_row_to_buffer_row(anchor_row.min(focus_row));
+        let end_row = self.viewport_row_to_buffer_row(anchor_row.max(focus_row));
+        TerminalSelectionRange::new(start_row, 0, end_row, self.cols)
+    }
+
+    fn token_span_at_row_col(&self, row: u32, col: u32) -> Option<(u32, u32)> {
+        let row_cells = self.row_cells(row);
+        let hit_col = col.min(self.cols.saturating_sub(1));
+        let hit_index = row_cells.iter().position(|cell| {
+            hit_col >= cell.col && hit_col < cell.col.saturating_add(cell.width)
+        })?;
+        let hit_cell = row_cells[hit_index];
+
+        let Some(token_class) = selection_token_class(hit_cell) else {
+            return Some((
+                hit_cell.col,
+                hit_cell.col.saturating_add(hit_cell.width).min(self.cols),
+            ));
+        };
+
+        let mut start_col = hit_cell.col;
+        let mut end_col = hit_cell.col.saturating_add(hit_cell.width).min(self.cols);
+
+        let mut run_start_index = hit_index;
+        while run_start_index > 0 {
+            let previous = row_cells[run_start_index - 1];
+            if previous.col.saturating_add(previous.width) < start_col
+                || !cell_matches_selection_class(previous, token_class)
+            {
+                break;
+            }
+            start_col = previous.col;
+            run_start_index -= 1;
+        }
+
+        let mut run_end_index = hit_index;
+        while run_end_index + 1 < row_cells.len() {
+            let next = row_cells[run_end_index + 1];
+            if next.col > end_col || !cell_matches_selection_class(next, token_class) {
+                break;
+            }
+            end_col = next.col.saturating_add(next.width).min(self.cols);
+            run_end_index += 1;
+        }
+
+        if token_class == SelectionTokenClass::NonWhitespace {
+            let token_cells = &row_cells[run_start_index..=run_end_index];
+            if token_cells.len() > 1 && token_cells.iter().all(|cell| cell.width > 1) {
+                let logical_start = row_cells[..run_start_index].iter().count() as u32;
+                return Some((logical_start, logical_start.saturating_add(token_cells.len() as u32)));
+            }
+        }
+
+        Some((start_col, end_col))
+    }
+
+    fn row_cells(&self, row: u32) -> Vec<&TerminalCellState> {
+        let mut row_cells = self
+            .cells
+            .iter()
+            .filter(|cell| cell.row == row && !cell.text.is_empty())
+            .collect::<Vec<_>>();
+        row_cells.sort_by_key(|cell| cell.col);
+        row_cells
+    }
 }
 
 fn normalized_selection(start: (u32, u32), end: (u32, u32)) -> ((u32, u32), (u32, u32)) {
@@ -430,6 +610,72 @@ fn normalized_selection(start: (u32, u32), end: (u32, u32)) -> ((u32, u32), (u32
     } else {
         (end, start)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SelectionTokenClass {
+    Shellish,
+    NonWhitespace,
+}
+
+fn merge_selection_ranges(
+    left: TerminalSelectionRange,
+    right: TerminalSelectionRange,
+) -> TerminalSelectionRange {
+    if (left.start_row, left.start_col) <= (right.start_row, right.start_col) {
+        TerminalSelectionRange::new(
+            left.start_row,
+            left.start_col,
+            right.end_row,
+            right.end_col,
+        )
+    } else {
+        TerminalSelectionRange::new(
+            right.start_row,
+            right.start_col,
+            left.end_row,
+            left.end_col,
+        )
+    }
+}
+
+fn selection_token_class(cell: &TerminalCellState) -> Option<SelectionTokenClass> {
+    let ch = cell.text.chars().next()?;
+    if ch.is_whitespace() {
+        None
+    } else if is_shellish_token_char(ch) {
+        Some(SelectionTokenClass::Shellish)
+    } else {
+        Some(SelectionTokenClass::NonWhitespace)
+    }
+}
+
+fn cell_matches_selection_class(cell: &TerminalCellState, token_class: SelectionTokenClass) -> bool {
+    match (selection_token_class(cell), token_class) {
+        (Some(SelectionTokenClass::Shellish), SelectionTokenClass::Shellish) => true,
+        (Some(SelectionTokenClass::NonWhitespace), SelectionTokenClass::NonWhitespace) => true,
+        _ => false,
+    }
+}
+
+fn is_shellish_token_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric()
+        || matches!(
+            ch,
+            '_' | '.'
+                | '/'
+                | '\\'
+                | ':'
+                | '@'
+                | '%'
+                | '+'
+                | '='
+                | '~'
+                | '-'
+                | '#'
+                | '?'
+                | '&'
+        )
 }
 
 #[cfg(test)]

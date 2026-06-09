@@ -31,6 +31,7 @@ use crate::app::ssh::credentials::{
     ssh_credential_ref,
 };
 use crate::app::ssh::runtime::TerminalSurfaceState;
+use crate::app::terminal_model::WorkspaceTerminalSelection;
 use crate::app::terminal_semantic::OutputRuleProfile;
 use crate::app::ui_preferences::DownloadConflictDefault;
 use crate::app::window_state::WindowPlacementKind;
@@ -813,6 +814,7 @@ pub struct ShellViewModel {
     active_workspace_tab_id: Option<String>,
     active_workspace_session_id: Option<String>,
     active_workspace_terminal_surface: Option<TerminalSurfaceState>,
+    workspace_terminal_selection: Option<WorkspaceTerminalSelection>,
     workspace_terminal_search_open: bool,
     workspace_terminal_search_query: String,
     workspace_terminal_search_focus_sequence: i32,
@@ -905,6 +907,7 @@ impl Default for ShellViewModel {
             active_workspace_tab_id: None,
             active_workspace_session_id: None,
             active_workspace_terminal_surface: None,
+            workspace_terminal_selection: None,
             workspace_terminal_search_open: false,
             workspace_terminal_search_query: String::new(),
             workspace_terminal_search_focus_sequence: 0,

@@ -857,6 +857,23 @@ struct LinkInteractionLauncherState {
     forwarded_mouse_inputs: Arc<Mutex<Vec<TerminalMouseInput>>>,
 }
 
+impl LinkInteractionLauncherState {
+    fn take_forwarded_mouse_inputs(&self) -> Vec<TerminalMouseInput> {
+        std::mem::take(
+            &mut *self
+                .forwarded_mouse_inputs
+                .lock()
+                .expect("lock forwarded mouse inputs"),
+        )
+    }
+}
+
+#[derive(Clone)]
+struct TerminalGestureLauncher {
+    line: &'static str,
+    mouse_grabbed: bool,
+}
+
 #[derive(Clone)]
 struct LinkInteractionLauncher {
     state: LinkInteractionLauncherState,
@@ -2931,6 +2948,34 @@ impl SessionRuntimeLauncher for SelectionBoundaryLauncher {
     }
 }
 
+impl SessionRuntimeLauncher for TerminalGestureLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let line = self.line;
+        let mouse_grabbed = self.mouse_grabbed;
+        Box::pin(async move {
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let mut surface = terminal_surface_with_cells(session_id, 1, 24, 80, vec![line.into()]);
+            surface.mouse_grabbed = mouse_grabbed;
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
+            Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
 impl SessionRuntimeLauncher for ScrollbackCopyLauncher {
     fn launch(
         &self,
@@ -4480,6 +4525,82 @@ fn drag_terminal_padding_into_grid(app: &AppWindow) {
     });
 }
 
+fn terminal_cell_center_position(app: &AppWindow, row: u32, col: f32) -> LogicalPosition {
+    LogicalPosition::new(
+        app.get_layout_workspace_session_native_surface_x()
+            + (app.get_workspace_session_cell_width() * (col + 0.5)),
+        app.get_layout_titlebar_height()
+            + app.get_layout_workspace_session_native_surface_y()
+            + (app.get_workspace_session_cell_height() * (row as f32 + 0.5)),
+    )
+}
+
+fn click_terminal_position(app: &AppWindow, position: LogicalPosition) {
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position,
+        button: PointerEventButton::Left,
+    });
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position,
+        button: PointerEventButton::Left,
+    });
+}
+
+fn double_click_terminal_cell(app: &AppWindow, row: u32, col: f32) {
+    let position = terminal_cell_center_position(app, row, col);
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position });
+    click_terminal_position(app, position);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+    click_terminal_position(app, position);
+}
+
+fn triple_click_terminal_cell(app: &AppWindow, row: u32, col: f32) {
+    let position = terminal_cell_center_position(app, row, col);
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position });
+    click_terminal_position(app, position);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+    click_terminal_position(app, position);
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+    click_terminal_position(app, position);
+}
+
+fn open_terminal_context_menu(app: &AppWindow, position: LogicalPosition) {
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position });
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position,
+        button: PointerEventButton::Right,
+    });
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position,
+        button: PointerEventButton::Right,
+    });
+    settle_terminal_projection();
+}
+
+fn choose_terminal_context_menu_copy(app: &AppWindow, menu_origin: LogicalPosition) {
+    let copy_row_position = LogicalPosition::new(menu_origin.x + 20.0, menu_origin.y + 24.0);
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: copy_row_position,
+    });
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position: copy_row_position,
+        button: PointerEventButton::Left,
+    });
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position: copy_row_position,
+        button: PointerEventButton::Left,
+    });
+    settle_terminal_projection();
+}
+
 fn drag_within_first_terminal_cell(app: &AppWindow) {
     let drag_start = LogicalPosition::new(
         app.get_layout_workspace_session_native_surface_x()
@@ -4511,10 +4632,7 @@ fn drag_within_first_terminal_cell(app: &AppWindow) {
     });
 }
 
-fn workspace_sftp_row_center(
-    app: &AppWindow,
-    row_index: usize,
-) -> LogicalPosition {
+fn workspace_sftp_row_center(app: &AppWindow, row_index: usize) -> LogicalPosition {
     let titlebar_height = app.get_layout_titlebar_height();
     let main_workspace_x = app.get_layout_main_workspace_x();
     let tab_strip_height = 36.0;
@@ -4537,11 +4655,7 @@ fn workspace_sftp_row_center(
     LogicalPosition::new(main_workspace_x + 64.0, row_center_y)
 }
 
-fn drag_workspace_sftp_rows(
-    app: &AppWindow,
-    start_row_index: usize,
-    end_row_index: usize,
-) {
+fn drag_workspace_sftp_rows(app: &AppWindow, start_row_index: usize, end_row_index: usize) {
     let drag_start = workspace_sftp_row_center(app, start_row_index);
     let drag_end = workspace_sftp_row_center(app, end_row_index);
 
@@ -4552,9 +4666,8 @@ fn drag_workspace_sftp_rows(
         position: drag_start,
         button: PointerEventButton::Left,
     });
-    app.window().dispatch_event(WindowEvent::PointerMoved {
-        position: drag_end,
-    });
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position: drag_end });
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
     app.window().dispatch_event(WindowEvent::PointerReleased {
         position: drag_end,
@@ -4600,6 +4713,21 @@ fn find_console_asset_id(app: &AppWindow, label: &str) -> String {
                 .and_then(|row| (row.label.as_str() == label).then(|| row.id.to_string()))
         })
         .unwrap_or_else(|| panic!("expected console asset `{label}`"))
+}
+
+fn workspace_tab_snapshot(app: &AppWindow) -> Vec<(String, String)> {
+    let items = app.get_workspace_tab_items();
+    (0..items.row_count())
+        .filter_map(|index| {
+            items
+                .row_data(index)
+                .map(|row| (row.tab_id.to_string(), row.title.to_string()))
+        })
+        .collect()
+}
+
+fn workspace_tab_title_matches_connection(title: &str, display_name: &str) -> bool {
+    title == display_name || title.starts_with(&format!("{display_name}("))
 }
 
 fn create_root_snippet(app: &AppWindow, name: &str, script: &str) -> String {
@@ -8551,7 +8679,7 @@ fn asset_activation_records_saved_ssh_into_new_tab_recent_items() {
 }
 
 #[test]
-fn active_recent_connection_row_returns_to_existing_tab_without_duplicate_session() {
+fn active_recent_connection_row_opens_fresh_session_for_connected_asset() {
     run_with_large_test_stack(|| {
         let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
@@ -8565,20 +8693,40 @@ fn active_recent_connection_row_returns_to_existing_tab_without_duplicate_sessio
 
         app.invoke_workspace_new_tab_requested();
         assert_eq!(app.get_workspace_tab_items().row_count(), 2);
-
-        app.invoke_welcome_quick_launch_connect_requested(ssh_id.into());
-
-        assert_eq!(app.get_workspace_tab_items().row_count(), 1);
         assert_eq!(
             app.get_active_workspace_session_id().as_str(),
-            existing_session_id.as_str()
+            "workspace-launcher"
         );
-        let active_tab = app
-            .get_workspace_tab_items()
-            .row_data(0)
-            .expect("existing tab after active recent row click");
-        assert_eq!(active_tab.tab_id.as_str(), existing_session_id.as_str());
-        assert_eq!(active_tab.title.as_str(), "Prod Bastion");
+
+        app.invoke_welcome_quick_launch_connect_requested(ssh_id.into());
+        settle_terminal_projection();
+
+        let active_session_id = app.get_active_workspace_session_id().to_string();
+        let tabs = workspace_tab_snapshot(&app);
+        assert_eq!(tabs.len(), 2);
+        assert_ne!(
+            active_session_id.as_str(),
+            existing_session_id.as_str(),
+            "launcher recent should open a fresh session instead of focusing the existing terminal"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &existing_session_id && title.as_str() == "Prod Bastion"
+            }),
+            "the original terminal session should remain open after launcher recent creates a new tab"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &active_session_id
+                    && workspace_tab_title_matches_connection(title.as_str(), "Prod Bastion")
+            }),
+            "the launcher recent activation should create a second tab for the same SSH asset"
+        );
+        assert!(
+            tabs.iter()
+                .all(|(tab_id, _)| tab_id.as_str() != "workspace-launcher"),
+            "the launcher placeholder tab should be taken over by the new session instead of surviving alongside terminal tabs"
+        );
     });
 }
 
@@ -9010,43 +9158,67 @@ fn duplicate_ssh_tabs_keep_resolved_titles_and_reuse_suffix_gaps() {
 }
 
 #[test]
-fn launcher_picker_activation_replaces_launcher_tab_and_closes_modal() {
+fn launcher_picker_activation_opens_fresh_session_for_connected_asset() {
     run_with_large_test_stack(|| {
         let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
         let app = AppWindow::new().unwrap();
-        bind_with_fake_sessions(&app, None);
+        bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
 
         let ssh_id = create_root_ssh(&app, "DB Admin", "10.0.0.24");
+        app.invoke_asset_activated(ssh_id.clone().into());
+        settle_terminal_projection();
+        let existing_session_id = app.get_active_workspace_session_id().to_string();
 
         app.invoke_workspace_new_tab_requested();
         app.invoke_welcome_open_saved_ssh_requested();
         assert!(app.get_open_saved_ssh_modal_open());
 
         app.invoke_open_saved_ssh_modal_asset_activated(ssh_id.into());
+        settle_terminal_projection();
 
         assert!(!app.get_open_saved_ssh_modal_open());
-        assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-        let item = app
-            .get_workspace_tab_items()
-            .row_data(0)
-            .expect("workspace tab after picker activation");
-        assert_ne!(item.tab_id.as_str(), "workspace-launcher");
-        assert_eq!(item.title.as_str(), "DB Admin");
+        let active_session_id = app.get_active_workspace_session_id().to_string();
+        let tabs = workspace_tab_snapshot(&app);
+        assert_eq!(tabs.len(), 2);
+        assert_ne!(
+            active_session_id.as_str(),
+            existing_session_id.as_str(),
+            "launcher picker double-click should open a fresh session instead of focusing the existing terminal"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &existing_session_id && title.as_str() == "DB Admin"
+            }),
+            "launcher picker should keep the original terminal session tab alive"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &active_session_id
+                    && workspace_tab_title_matches_connection(title.as_str(), "DB Admin")
+            }),
+            "launcher picker should create a new terminal tab for the already-connected SSH asset"
+        );
+        assert!(
+            tabs.iter()
+                .all(|(tab_id, _)| tab_id.as_str() != "workspace-launcher"),
+            "the launcher tab should be replaced by the new session after picker activation"
+        );
     });
 }
 
 #[test]
-fn launcher_picker_primary_open_request_activates_the_selected_saved_ssh() {
+fn launcher_picker_primary_open_request_opens_fresh_session_for_connected_asset() {
     run_with_large_test_stack(|| {
         let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
         let app = AppWindow::new().unwrap();
-        bind_with_fake_sessions(&app, None);
+        bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
 
-        create_root_ssh(&app, "Prod Bastion", "10.0.0.10");
-        create_root_ssh(&app, "DB Admin", "10.0.0.24");
-        let ssh_id = find_console_asset_id(&app, "DB Admin");
+        let ssh_id = create_root_ssh(&app, "DB Admin", "10.0.0.24");
+        app.invoke_asset_activated(ssh_id.clone().into());
+        settle_terminal_projection();
+        let existing_session_id = app.get_active_workspace_session_id().to_string();
 
         app.invoke_workspace_new_tab_requested();
         app.invoke_welcome_open_saved_ssh_requested();
@@ -9057,14 +9229,127 @@ fn launcher_picker_primary_open_request_activates_the_selected_saved_ssh() {
         assert!(app.get_open_saved_ssh_modal_can_open_selection());
 
         app.invoke_open_saved_ssh_modal_activate_selection_requested();
+        settle_terminal_projection();
 
         assert!(!app.get_open_saved_ssh_modal_open());
-        assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-        let item = app
-            .get_workspace_tab_items()
-            .row_data(0)
-            .expect("workspace tab after picker primary open");
-        assert_eq!(item.title.as_str(), "DB Admin");
+        let active_session_id = app.get_active_workspace_session_id().to_string();
+        let tabs = workspace_tab_snapshot(&app);
+        assert_eq!(tabs.len(), 2);
+        assert_ne!(
+            active_session_id.as_str(),
+            existing_session_id.as_str(),
+            "launcher picker primary open should create a fresh session for the selected SSH asset"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &existing_session_id && title.as_str() == "DB Admin"
+            }),
+            "primary open should keep the existing DB Admin session tab"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &active_session_id
+                    && workspace_tab_title_matches_connection(title.as_str(), "DB Admin")
+            }),
+            "primary open should add a new DB Admin session tab"
+        );
+    });
+}
+
+#[test]
+fn launcher_picker_duplicate_activation_requests_only_create_one_fresh_session() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+        let app = AppWindow::new().unwrap();
+        bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+
+        let ssh_id = create_root_ssh(&app, "DB Admin", "10.0.0.24");
+        app.invoke_asset_activated(ssh_id.clone().into());
+        settle_terminal_projection();
+        let existing_session_id = app.get_active_workspace_session_id().to_string();
+
+        app.invoke_workspace_new_tab_requested();
+        app.invoke_welcome_open_saved_ssh_requested();
+        assert!(app.get_open_saved_ssh_modal_open());
+
+        app.invoke_open_saved_ssh_modal_asset_selected(ssh_id.clone().into());
+        app.invoke_open_saved_ssh_modal_asset_activated(ssh_id.into());
+        app.invoke_open_saved_ssh_modal_activate_selection_requested();
+        settle_terminal_projection();
+
+        assert!(!app.get_open_saved_ssh_modal_open());
+        let active_session_id = app.get_active_workspace_session_id().to_string();
+        let tabs = workspace_tab_snapshot(&app);
+        assert_eq!(
+            tabs.len(),
+            2,
+            "a duplicated picker gesture should yield exactly one extra session tab"
+        );
+        assert_ne!(
+            active_session_id.as_str(),
+            existing_session_id.as_str(),
+            "the duplicated picker gesture should still end on one fresh session"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &existing_session_id && title.as_str() == "DB Admin"
+            }),
+            "the original session must stay present after the duplicated picker gesture"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &active_session_id
+                    && workspace_tab_title_matches_connection(title.as_str(), "DB Admin")
+            }),
+            "the duplicated picker gesture should create one replacement session tab"
+        );
+    });
+}
+
+#[test]
+fn launcher_recent_duplicate_activation_requests_only_create_one_fresh_session() {
+    run_with_large_test_stack(|| {
+        let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+        let app = AppWindow::new().unwrap();
+        bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+
+        let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+        app.invoke_asset_activated(ssh_id.clone().into());
+        settle_terminal_projection();
+        let existing_session_id = app.get_active_workspace_session_id().to_string();
+
+        app.invoke_workspace_new_tab_requested();
+        app.invoke_welcome_quick_launch_connect_requested(ssh_id.clone().into());
+        app.invoke_welcome_quick_launch_connect_requested(ssh_id.into());
+        settle_terminal_projection();
+
+        let active_session_id = app.get_active_workspace_session_id().to_string();
+        let tabs = workspace_tab_snapshot(&app);
+        assert_eq!(
+            tabs.len(),
+            2,
+            "a duplicated launcher recent gesture should yield exactly one extra session tab"
+        );
+        assert_ne!(
+            active_session_id.as_str(),
+            existing_session_id.as_str(),
+            "the duplicated launcher recent gesture should still end on one fresh session"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &existing_session_id && title.as_str() == "Prod Bastion"
+            }),
+            "the original Prod Bastion session must stay present after the duplicated recent gesture"
+        );
+        assert!(
+            tabs.iter().any(|(tab_id, title)| {
+                tab_id == &active_session_id
+                    && workspace_tab_title_matches_connection(title.as_str(), "Prod Bastion")
+            }),
+            "the duplicated launcher recent gesture should create one replacement session tab"
+        );
     });
 }
 
@@ -11293,6 +11578,61 @@ fn workspace_terminal_selection_rows_stay_bound_to_buffer_when_scrolling() {
 }
 
 #[test]
+fn workspace_terminal_selection_restores_from_rust_truth_after_native_host_props_are_clobbered() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+    select_terminal_welcome_span(&app);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "precondition: native workspace selection should be active before the host mirror is clobbered"
+    );
+    let expected_start_row = app.get_workspace_session_selection_start_row();
+    let expected_start_col = app.get_workspace_session_selection_start_col();
+    let expected_end_row = app.get_workspace_session_selection_end_row();
+    let expected_end_col = app.get_workspace_session_selection_end_col();
+
+    app.set_workspace_session_selection_active(false);
+    app.set_workspace_session_selection_start_row(-1);
+    app.set_workspace_session_selection_start_col(-1);
+    app.set_workspace_session_selection_end_row(-1);
+    app.set_workspace_session_selection_end_col(-1);
+
+    app.invoke_workspace_session_search_query_changed("welcome".into());
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "workspace terminal selection should restore from the Rust-owned truth during the next projection sync instead of disappearing when the host-side mirror properties get reset"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_row(),
+        expected_start_row
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_col(),
+        expected_start_col
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_end_row(),
+        expected_end_row
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_end_col(),
+        expected_end_col
+    );
+}
+
+#[test]
 fn workspace_terminal_copy_selection_reads_full_scrollback_buffer_text() {
     run_on_large_stack(
         "workspace_terminal_copy_selection_reads_full_scrollback_buffer_text",
@@ -12342,6 +12682,525 @@ fn workspace_terminal_alt_screen_ctrl_click_does_not_open_link_and_still_forward
             .len(),
         2,
         "alternate-screen sessions should keep mouse ownership so Ctrl+click still forwards to the remote terminal"
+    );
+}
+
+#[test]
+fn workspace_terminal_double_click_selects_entire_file_like_token() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TerminalGestureLauncher {
+            line: "hello-world/path.txt",
+            mouse_grabbed: false,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    double_click_terminal_cell(&app, 0, 8.0);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "double-clicking a file-like shell token should create a visible selection instead of leaving the terminal unselected"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_col(),
+        0,
+        "double-clicking inside hello-world/path.txt should snap the selection start back to the beginning of the token"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_end_col(),
+        "hello-world/path.txt".chars().count() as i32,
+        "double-clicking inside hello-world/path.txt should select the entire token width instead of collapsing to a caret-sized range"
+    );
+}
+
+#[test]
+fn workspace_terminal_double_click_selects_entire_url_token() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TerminalGestureLauncher {
+            line: "https://example.com/a/b?x=1",
+            mouse_grabbed: false,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    double_click_terminal_cell(&app, 0, 9.0);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "double-clicking inside a URL should create a visible selection instead of leaving the token fragmented under the caret"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_col(),
+        0,
+        "double-clicking inside https://example.com/a/b?x=1 should preserve the full URL start instead of splitting at :// or / boundaries"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_end_col(),
+        "https://example.com/a/b?x=1".chars().count() as i32,
+        "double-clicking inside https://example.com/a/b?x=1 should keep the entire openable token selected"
+    );
+}
+
+#[test]
+fn workspace_terminal_double_click_selects_contiguous_cjk_text() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TerminalGestureLauncher {
+            line: "连续中文片段",
+            mouse_grabbed: false,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    double_click_terminal_cell(&app, 0, 2.0);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "double-clicking inside contiguous CJK output should create a visible selection instead of behaving like a plain caret click"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_col(),
+        0,
+        "double-clicking inside contiguous CJK output should expand back to the start of the non-whitespace run"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_end_col(),
+        "连续中文片段".chars().count() as i32,
+        "double-clicking inside contiguous CJK output should select the full run without forcing Western-style delimiter splits"
+    );
+}
+
+#[test]
+fn workspace_terminal_double_click_on_wide_char_trailing_cell_normalizes_to_cluster_start() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TerminalGestureLauncher {
+            line: "条 abc",
+            mouse_grabbed: false,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    double_click_terminal_cell(&app, 0, 1.0);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "double-clicking the trailing half of a wide glyph should still create a local selection instead of collapsing into an empty hit"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_col(),
+        0,
+        "double-clicking the trailing half of a wide glyph should normalize the anchor back to the leading cell"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_end_col(),
+        2,
+        "double-clicking the trailing half of a wide glyph should keep the selection bounded to that wide cluster instead of starting from the trailing cell"
+    );
+}
+
+#[test]
+fn workspace_terminal_triple_click_selects_the_current_visual_row() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TerminalGestureLauncher {
+            line: "triple click row",
+            mouse_grabbed: false,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    triple_click_terminal_cell(&app, 0, 4.0);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "triple-clicking a terminal row should promote the gesture into a visible row selection"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_row(),
+        0,
+        "triple-click row selection should anchor on the clicked visual row"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_end_row(),
+        0,
+        "triple-click row selection should stay bound to the clicked visual row in v1 instead of expanding to wrapped logical lines"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_col(),
+        0,
+        "triple-click row selection should cover the row from column 0"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_end_col(),
+        app.get_workspace_session_cols(),
+        "triple-click row selection should span through the row's visual width so copy can read the whole row"
+    );
+}
+
+#[test]
+fn workspace_terminal_ctrl_shift_c_copies_double_click_token_selection_text() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text("", slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("clear clipboard");
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TerminalGestureLauncher {
+            line: "hello-world/path.txt",
+            mouse_grabbed: false,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    double_click_terminal_cell(&app, 0, 8.0);
+    settle_terminal_projection();
+    dispatch_text_key_chord(&app, "C", true, true, false);
+
+    let copied = i_slint_backend_selector::with_platform(|platform| {
+        Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
+    })
+    .expect("read clipboard");
+
+    assert_eq!(
+        copied.as_deref(),
+        Some("hello-world/path.txt"),
+        "Ctrl+Shift+C should copy the Rust-owned token selection text exactly instead of collapsing back to a caret-sized or delimiter-split copy"
+    );
+}
+
+#[test]
+fn workspace_terminal_context_menu_copy_uses_triple_click_visual_row_text() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text("", slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("clear clipboard");
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TerminalGestureLauncher {
+            line: "triple click row",
+            mouse_grabbed: false,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    triple_click_terminal_cell(&app, 0, 4.0);
+    settle_terminal_projection();
+
+    let menu_origin = terminal_cell_center_position(&app, 0, 4.0);
+    open_terminal_context_menu(&app, menu_origin);
+    choose_terminal_context_menu_copy(&app, menu_origin);
+
+    let copied = i_slint_backend_selector::with_platform(|platform| {
+        Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
+    })
+    .expect("read clipboard");
+
+    assert_eq!(
+        copied.as_deref(),
+        Some("triple click row"),
+        "right-click Copy should reuse the visual-row selection range and trim trailing terminal padding instead of copying a full-width padded line"
+    );
+}
+
+#[test]
+fn workspace_terminal_context_menu_copy_keeps_wide_char_selection_single_copy() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text("", slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("clear clipboard");
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TerminalGestureLauncher {
+            line: "条 abc",
+            mouse_grabbed: false,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    double_click_terminal_cell(&app, 0, 1.0);
+    settle_terminal_projection();
+
+    let menu_origin = terminal_cell_center_position(&app, 0, 1.0);
+    open_terminal_context_menu(&app, menu_origin);
+    choose_terminal_context_menu_copy(&app, menu_origin);
+
+    let copied = i_slint_backend_selector::with_platform(|platform| {
+        Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
+    })
+    .expect("read clipboard");
+
+    assert_eq!(
+        copied.as_deref(),
+        Some("条"),
+        "Copy should treat a wide-character token as a single glyph when the selection was created from its trailing cell instead of duplicating or fragmenting the cluster"
+    );
+}
+
+#[test]
+fn workspace_terminal_context_menu_copy_restores_rust_truth_after_host_props_are_clobbered() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text("", slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("clear clipboard");
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+    select_terminal_welcome_span(&app);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "precondition: selection should exist before the host mirror is clobbered"
+    );
+
+    app.set_workspace_session_selection_active(false);
+    app.set_workspace_session_selection_start_row(-1);
+    app.set_workspace_session_selection_start_col(-1);
+    app.set_workspace_session_selection_end_row(-1);
+    app.set_workspace_session_selection_end_col(-1);
+
+    let menu_origin = terminal_interaction_position(&app);
+    open_terminal_context_menu(&app, menu_origin);
+    choose_terminal_context_menu_copy(&app, menu_origin);
+
+    let copied = i_slint_backend_selector::with_platform(|platform| {
+        Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
+    })
+    .expect("read clipboard");
+
+    assert!(
+        copied
+            .as_deref()
+            .is_some_and(|text| text.contains("welcome")),
+        "right-click Copy should rehydrate the host mirror from the Rust-owned selection truth before dispatch so stale mirror resets do not silently disable copy"
+    );
+}
+
+#[test]
+fn workspace_terminal_plain_double_click_stays_remote_when_mouse_is_grabbed() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let launcher_state = LinkInteractionLauncherState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(LinkInteractionLauncher {
+            state: launcher_state.clone(),
+            line: "remote mouse owner",
+            alternate_screen_active: false,
+            mouse_grabbed: true,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+    launcher_state.take_forwarded_mouse_inputs();
+
+    double_click_terminal_cell(&app, 0, 4.0);
+    settle_terminal_projection();
+
+    assert!(
+        !app.get_workspace_session_selection_active(),
+        "plain double-click should stay on the remote mouse path when mouse reporting owns the session"
+    );
+    let forwarded = launcher_state.take_forwarded_mouse_inputs();
+    assert!(
+        forwarded
+            .iter()
+            .any(|event| event.kind == TerminalMouseEventKind::Down)
+            && forwarded
+                .iter()
+                .any(|event| event.kind == TerminalMouseEventKind::Up),
+        "plain double-click under mouse_grabbed=true should keep forwarding remote mouse press/release events"
+    );
+}
+
+#[test]
+fn workspace_terminal_shift_double_click_selects_locally_even_when_mouse_is_grabbed() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let launcher_state = LinkInteractionLauncherState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(LinkInteractionLauncher {
+            state: launcher_state.clone(),
+            line: "shift/override/token",
+            alternate_screen_active: false,
+            mouse_grabbed: true,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+    launcher_state.take_forwarded_mouse_inputs();
+
+    dispatch_modifier_pressed(&app, Key::Shift);
+    double_click_terminal_cell(&app, 0, 8.0);
+    dispatch_modifier_released(&app, Key::Shift);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "Shift+double-click should force the host terminal into local selection mode even while the remote session has mouse reporting grabbed"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_col(),
+        0,
+        "Shift+double-click should select the full local token instead of keeping the mouse-grabbed path on a point hit"
+    );
+    assert_eq!(
+        launcher_state.take_forwarded_mouse_inputs().len(),
+        0,
+        "Shift+double-click should stay on the local selection path and must not leak pointer press/release events into the remote PTY"
+    );
+}
+
+#[test]
+fn workspace_terminal_native_double_click_selection_keeps_frame_contract_active() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TerminalGestureLauncher {
+            line: "native-double-click/path",
+            mouse_grabbed: false,
+        }),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    let before_frame = app.get_workspace_session_native_frame_token();
+    let before_surface_seqno = app.get_workspace_session_surface_seqno();
+
+    double_click_terminal_cell(&app, 0, 9.0);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "native double-click selection should still publish an active host selection instead of collapsing to a caret-sized no-op"
+    );
+    assert_eq!(
+        app.get_workspace_session_render_mode().as_str(),
+        "native",
+        "the mainline workspace test path should stay on the retained native presenter while validating double-click selection visibility"
+    );
+    assert!(
+        before_frame > 0 && app.get_workspace_session_native_frame_token() > 0,
+        "double-click selection should keep the retained native frame contract alive before and after the selection change"
+    );
+    assert!(
+        before_surface_seqno > 0 && app.get_workspace_session_surface_seqno() > 0,
+        "double-click selection should keep a staged terminal surface frame available while native composition handles the visible selection repaint"
     );
 }
 
@@ -15152,19 +16011,16 @@ fn selected_workspace_sftp_item_names(app: &AppWindow) -> Vec<String> {
 }
 
 fn workspace_sftp_selection_status_text(app: &AppWindow) -> String {
-    ElementHandle::find_by_element_id(
-        app,
-        "SftpWorkspaceHost::workspace-statusbar-selection-text",
-    )
-    .chain(ElementHandle::find_by_element_id(
-        app,
-        "workspace-statusbar-selection-text",
-    ))
-    .next()
-    .expect("workspace selection status text")
-    .accessible_value()
-    .expect("workspace selection status accessible value")
-    .to_string()
+    ElementHandle::find_by_element_id(app, "SftpWorkspaceHost::workspace-statusbar-selection-text")
+        .chain(ElementHandle::find_by_element_id(
+            app,
+            "workspace-statusbar-selection-text",
+        ))
+        .next()
+        .expect("workspace selection status text")
+        .accessible_value()
+        .expect("workspace selection status accessible value")
+        .to_string()
 }
 
 #[test]
@@ -15262,7 +16118,11 @@ fn workspace_sftp_background_reads_sync_full_rows_for_each_remote_path() {
                 && app.get_workspace_sftp_items().row_count() == root_names.len()
         });
         let names = workspace_sftp_item_names(&app);
-        assert_eq!(names.len(), root_names.len(), "root rows should be complete");
+        assert_eq!(
+            names.len(),
+            root_names.len(),
+            "root rows should be complete"
+        );
         assert_eq!(names.first().map(String::as_str), Some("admin"));
         assert_eq!(names.last().map(String::as_str), Some("vmlinuz.old"));
         assert!(
@@ -15279,7 +16139,9 @@ fn workspace_sftp_background_reads_sync_full_rows_for_each_remote_path() {
         let names = workspace_sftp_item_names(&app);
         assert_eq!(names.first().map(String::as_str), Some(".."));
         assert!(
-            home_names.iter().all(|expected| names.iter().any(|name| name == expected)),
+            home_names
+                .iter()
+                .all(|expected| names.iter().any(|name| name == expected)),
             "/home rows should sync the full backend result plus parent entry"
         );
 

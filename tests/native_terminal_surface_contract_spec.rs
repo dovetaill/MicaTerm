@@ -184,6 +184,27 @@ fn bitmap_host_selection_source_exposes_local_overlay_contract() {
 }
 
 #[test]
+fn workspace_terminal_selection_callback_routes_bitmap_host_changes_through_rust_truth() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let selection_changed_block = block_between(
+        &bootstrap_source,
+        "window.on_workspace_session_selection_changed(move || {",
+        "window.on_workspace_session_normalize_hit_col(move |row, col| {",
+    );
+    let sync_from_window = selection_changed_block
+        .find("workspace_terminal::sync_active_workspace_terminal_selection_from_window(")
+        .expect("selection callback should sync bitmap/native host props into Rust state");
+    let host_overlay_guard = selection_changed_block
+        .find("if workspace_session_uses_host_selection_overlay(&window) {")
+        .expect("bitmap host overlay guard");
+
+    assert!(
+        sync_from_window < host_overlay_guard,
+        "bitmap host selection changes should still be synchronized back into the Rust-owned workspace terminal selection truth before any render-mode-specific early return can skip presenter refresh work"
+    );
+}
+
+#[test]
 fn terminal_session_host_source_exposes_terminal_link_affordance_contract() {
     let host_source =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
