@@ -146,6 +146,8 @@ Notes:
 - Windows builds use daily log rotation, so the file name includes the current date.
 - Terminal memory entries are written under the `app.memory` target with events like
   `close-shrink`, `idle-shrink`, `trim-request`, and `trim-executed`.
+- The packaged memory baseline matrix, counter checklist, and renderer/path capture rules live in
+  `docs/plans/2026-06-09-memory-footprint-reduction/verification.md`.
 - After reproducing, you can filter just the memory diagnostics with
   `Select-String -Path .\logs\system-error.log* -Pattern "app.memory","shrink","trim-"`.
 

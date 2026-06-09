@@ -53,6 +53,9 @@ fn apply_renderer_selector(profile: AppRuntimeProfile) -> anyhow::Result<()> {
             Ok(()) => {
                 tracing::info!(
                     target: "app.renderer",
+                    requested_build_flavor = profile.build_flavor_label(),
+                    requested_terminal_render_mode = profile.terminal_render_mode_label(),
+                    requested_native_present_path = profile.native_present_path_label(),
                     selected_backend = backend_name,
                     selected_renderer = attempt.renderer_mode.renderer_name(),
                     selected_graphics_api = ?attempt.graphics_api.map(GraphicsApiRequirement::as_str),
@@ -65,6 +68,9 @@ fn apply_renderer_selector(profile: AppRuntimeProfile) -> anyhow::Result<()> {
             Err(err) => {
                 tracing::warn!(
                     target: "app.renderer",
+                    requested_build_flavor = profile.build_flavor_label(),
+                    requested_terminal_render_mode = profile.terminal_render_mode_label(),
+                    requested_native_present_path = profile.native_present_path_label(),
                     attempted_backend = backend_name,
                     attempted_renderer = attempt.renderer_mode.renderer_name(),
                     attempted_graphics_api = ?attempt.graphics_api.map(GraphicsApiRequirement::as_str),

@@ -7,6 +7,16 @@ pub enum AppBuildFlavor {
     WindowsSoftwareCompat,
 }
 
+impl AppBuildFlavor {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Development => "development",
+            Self::WindowsMainline => "windows-mainline",
+            Self::WindowsSoftwareCompat => "windows-software-compat",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RendererMode {
     Software,
@@ -178,6 +188,10 @@ impl AppRuntimeProfile {
 
     pub fn selector_label(self) -> &'static str {
         self.renderer_mode.selector_label()
+    }
+
+    pub fn build_flavor_label(self) -> &'static str {
+        self.build_flavor.as_str()
     }
 
     pub fn preferred_graphics_api(self) -> Option<GraphicsApiRequirement> {
