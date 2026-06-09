@@ -259,6 +259,28 @@ fn memory_diagnostics_helpers_emit_structured_runtime_memory_events_when_enabled
             AppRuntimeProfile::software_compat(),
             config,
             MemoryDiagnosticsEvent {
+                event_name: "startup-checkpoint",
+                startup_stage: Some("after-ui-font-fallbacks"),
+                before_memory: Some(sample_process_memory_snapshot(
+                    90_000_000,
+                    120_000_000,
+                    120_000_000,
+                )),
+                after_memory: Some(sample_process_memory_snapshot(
+                    95_000_000,
+                    125_000_000,
+                    125_000_000,
+                )),
+                ui_shared_collection_configure_calls: Some(1),
+                ui_shared_collection_diagnostics_calls: Some(0),
+                system_font_database_load_calls: Some(0),
+                ..MemoryDiagnosticsEvent::default()
+            },
+        );
+        emit_memory_diagnostics_event_with_config(
+            AppRuntimeProfile::software_compat(),
+            config,
+            MemoryDiagnosticsEvent {
                 event_name: "trim-request",
                 trigger_reason: Some("large-output-idle"),
                 active_renderer_mode: Some("native"),
@@ -380,6 +402,7 @@ fn memory_diagnostics_helpers_emit_structured_runtime_memory_events_when_enabled
     let content = fs::read_to_string(paths.logs_dir.join("system-error.log")).unwrap();
     assert!(content.contains("app.memory"));
     assert!(content.contains("startup-snapshot"));
+    assert!(content.contains("startup-checkpoint"));
     assert!(content.contains("session-close"));
     assert!(content.contains("close-shrink"));
     assert!(content.contains("idle-shrink"));
@@ -391,6 +414,11 @@ fn memory_diagnostics_helpers_emit_structured_runtime_memory_events_when_enabled
     assert!(content.contains("working_set_bytes"));
     assert!(content.contains("private_usage_bytes"));
     assert!(content.contains("pagefile_usage_bytes"));
+    assert!(content.contains("startup_stage"));
+    assert!(content.contains("after-ui-font-fallbacks"));
+    assert!(content.contains("ui_shared_collection_configure_calls"));
+    assert!(content.contains("ui_shared_collection_diagnostics_calls"));
+    assert!(content.contains("system_font_database_load_calls"));
     assert!(content.contains("before_private_usage_bytes"));
     assert!(content.contains("after_private_usage_bytes"));
     assert!(content.contains("before_session_count"));

@@ -34,15 +34,27 @@ fn readme_documents_windows_memory_diagnostics_repro_flow() {
     );
     assert!(
         content.contains("startup-snapshot")
+            && content.contains("startup-checkpoint")
             && content.contains("close-shrink")
             && content.contains("idle-shrink")
             && content.contains("trim-request")
             && content.contains("trim-executed"),
-        "README should document startup-snapshot, close-shrink, idle-shrink, trim-request, and trim-executed so packaged diagnostics can map each runtime memory transition"
+        "README should document startup-snapshot, startup-checkpoint, close-shrink, idle-shrink, trim-request, and trim-executed so packaged diagnostics can map each runtime memory transition"
     );
     assert!(
         content.contains("private_usage_bytes") && content.contains("pagefile_usage_bytes"),
         "README should explain that runtime memory diagnostics must surface private_usage_bytes and pagefile_usage_bytes so field runs can distinguish real release from a working-set-only trim"
+    );
+    assert!(
+        content.contains("startup_stage")
+            && content.contains("after-ui-font-fallbacks")
+            && content.contains("after-window-new")
+            && content.contains("after-ui-font-diagnostics")
+            && content.contains("after-bootstrap-bind")
+            && content.contains("ui_shared_collection_configure_calls")
+            && content.contains("ui_shared_collection_diagnostics_calls")
+            && content.contains("system_font_database_load_calls"),
+        "README should document startup-checkpoint stage names plus font/system catalog counters so packaged runs can separate UI font fallback, AppWindow creation, and bootstrap service costs"
     );
     assert!(
         content.contains("before_session_count")
@@ -67,6 +79,14 @@ fn runtime_memory_diagnostics_source_wires_all_required_event_families() {
         "logging runtime should define a startup-snapshot memory event so packaged baseline runs capture startup private/commit counters before later optimizations"
     );
     assert!(
+        bootstrap.contains("\"startup-checkpoint\"")
+            && bootstrap.contains("\"after-ui-font-fallbacks\"")
+            && bootstrap.contains("\"after-window-new\"")
+            && bootstrap.contains("\"after-ui-font-diagnostics\"")
+            && bootstrap.contains("\"after-bootstrap-bind\""),
+        "bootstrap should emit staged startup-checkpoint events around UI font fallback, AppWindow creation, UI font diagnostics, and bootstrap service binding so startup private/commit spikes can be attributed instead of guessed"
+    );
+    assert!(
         bootstrap.contains("\"session-close\"")
             && bootstrap.contains("\"close-shrink\"")
             && bootstrap.contains("\"idle-shrink\""),
@@ -82,6 +102,13 @@ fn runtime_memory_diagnostics_source_wires_all_required_event_families() {
             && logging_runtime.contains("terminal_memory_release_succeeded")
             && logging_runtime.contains("runtime_disconnect_succeeded"),
         "logging runtime should surface session-registry counters and runtime release outcomes so close-path logs can prove whether session close actually released memory-bearing state"
+    );
+    assert!(
+        logging_runtime.contains("startup_stage")
+            && logging_runtime.contains("ui_shared_collection_configure_calls")
+            && logging_runtime.contains("ui_shared_collection_diagnostics_calls")
+            && logging_runtime.contains("system_font_database_load_calls"),
+        "logging runtime should surface startup_stage plus font/system-catalog counters so packaged startup runs can separate UI font fallback work from AppWindow and bootstrap service costs"
     );
     assert!(
         session_manager.contains("pub struct SessionRegistryDiagnosticsSnapshot")

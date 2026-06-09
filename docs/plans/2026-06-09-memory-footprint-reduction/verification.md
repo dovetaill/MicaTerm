@@ -114,7 +114,8 @@ typeperf "\Process(mica-term)\Private Bytes" "\Process(mica-term)\Page File Byte
 
 - runtime profile 仍区分 mainline / software compatibility。
 - `app.renderer` 启动日志现在会暴露 `requested_build_flavor`、`requested_terminal_render_mode`、`requested_native_present_path` 与 `fallback_level`。
-- `MICA_TERM_MEMORY_DIAGNOSTICS=1` 现在会额外输出 `startup-snapshot`、`session-close`、`close-shrink`、`idle-shrink`、`trim-request`、`trim-executed`，并带上 `private_usage_bytes` / `pagefile_usage_bytes` 相关字段。
+- `MICA_TERM_MEMORY_DIAGNOSTICS=1` 现在会额外输出 `startup-snapshot`、`startup-checkpoint`、`session-close`、`close-shrink`、`idle-shrink`、`trim-request`、`trim-executed`，并带上 `private_usage_bytes` / `pagefile_usage_bytes` 相关字段。
+- `startup-checkpoint` 会按 `after-ui-font-fallbacks`、`after-window-new`、`after-ui-font-diagnostics`、`after-bootstrap-bind` 分段记录启动期 before/after 内存快照，并额外暴露 `ui_shared_collection_configure_calls`、`ui_shared_collection_diagnostics_calls`、`system_font_database_load_calls`，用于区分 UI font fallback、Slint/AppWindow 与 bootstrap services 哪一段把 `private/commit` 推高。
 - `session-close` 现在会额外暴露 `before_session_count` / `after_session_count`、`before_runtime_control_count` / `after_runtime_control_count`、`terminal_memory_release_succeeded`、`runtime_disconnect_succeeded`，用于区分 session runtime 真实释放与后续 surface clear / idle shrink 的视觉清理。
 - `close-shrink` / `idle-shrink` 现在会额外暴露 `cache_*_bitmap_sprite_cache_entries`、`cache_*_bitmap_row_hash_entries`、`cache_*_bitmap_surface_bytes`，用于区分 bitmap atlas fallback 路径是否真的释放了 sprite cache 与 backing pixel buffer。
 - `readme.md` 指向本手册，避免 packaged baseline 复现流程孤立。

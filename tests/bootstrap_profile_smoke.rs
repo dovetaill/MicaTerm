@@ -49,6 +49,14 @@ fn run_with_profile_accepts_external_async_handle_for_ssh_services() {
         !content.contains("    _async_runtime_handle: tokio::runtime::Handle,"),
         "the runtime handle should be consumed for ssh services instead of being ignored"
     );
+    assert!(
+        content.contains("reset_startup_font_diagnostics_counters();")
+            && content.contains("\"after-ui-font-fallbacks\"")
+            && content.contains("\"after-window-new\"")
+            && content.contains("\"after-ui-font-diagnostics\"")
+            && content.contains("\"after-bootstrap-bind\""),
+        "run_with_profile should reset startup font counters and emit staged startup checkpoints so packaged startup runs can separate UI font fallback, AppWindow creation, and bootstrap service costs"
+    );
 }
 
 #[test]

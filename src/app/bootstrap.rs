@@ -46,7 +46,10 @@ use crate::app::assets_catalog::{
     catalog_to_asset_trees,
 };
 use crate::app::async_runtime::AppAsyncRuntime;
-use crate::app::font_diagnostics::{configure_ui_font_fallbacks, log_ui_shell_font_diagnostics};
+use crate::app::font_diagnostics::{
+    configure_ui_font_fallbacks, log_ui_shell_font_diagnostics,
+    reset_startup_font_diagnostics_counters, startup_font_diagnostics_counters,
+};
 use crate::app::keychain::{
     KeychainCatalog, KeychainCatalogRepository, KeychainNodePayload, RedbKeychainCatalogStore,
     derive_public_key_material_from_private_key, derive_public_key_material_from_public_key,
@@ -9240,17 +9243,78 @@ fn configure_window_creation_env_for_profile(profile: AppRuntimeProfile) {
 #[cfg(not(target_os = "windows"))]
 fn configure_window_creation_env_for_profile(_profile: AppRuntimeProfile) {}
 
+fn emit_startup_checkpoint(
+    profile: AppRuntimeProfile,
+    startup_stage: &'static str,
+    before_memory: Option<crate::app::memory::ProcessMemorySnapshot>,
+    after_memory: Option<crate::app::memory::ProcessMemorySnapshot>,
+) {
+    let counters = startup_font_diagnostics_counters();
+    crate::app::logging::runtime::emit_memory_diagnostics_event(
+        profile,
+        crate::app::logging::runtime::MemoryDiagnosticsEvent {
+            event_name: "startup-checkpoint",
+            startup_stage: Some(startup_stage),
+            before_memory,
+            after_memory,
+            ui_shared_collection_configure_calls: Some(
+                counters.ui_shared_collection_configure_calls,
+            ),
+            ui_shared_collection_diagnostics_calls: Some(
+                counters.ui_shared_collection_diagnostics_calls,
+            ),
+            system_font_database_load_calls: Some(counters.system_font_database_load_calls),
+            ..crate::app::logging::runtime::MemoryDiagnosticsEvent::default()
+        },
+    );
+}
+
 pub fn run_with_profile(
     profile: AppRuntimeProfile,
     async_runtime_handle: tokio::runtime::Handle,
 ) -> Result<()> {
     configure_window_creation_env_for_profile(profile);
+    reset_startup_font_diagnostics_counters();
+    let before_font_fallbacks = crate::app::memory::current_process_memory_snapshot();
     configure_ui_font_fallbacks();
+    let after_font_fallbacks = crate::app::memory::current_process_memory_snapshot();
+    emit_startup_checkpoint(
+        profile,
+        "after-ui-font-fallbacks",
+        before_font_fallbacks,
+        after_font_fallbacks,
+    );
+
+    let before_window_new = crate::app::memory::current_process_memory_snapshot();
     let window = AppWindow::new()?;
+    let after_window_new = crate::app::memory::current_process_memory_snapshot();
+    emit_startup_checkpoint(
+        profile,
+        "after-window-new",
+        before_window_new,
+        after_window_new,
+    );
+
     windows_icon::log_window_icon_state(&window, "after_window_new");
+    let before_ui_font_diagnostics = crate::app::memory::current_process_memory_snapshot();
     log_ui_shell_font_diagnostics();
+    let after_ui_font_diagnostics = crate::app::memory::current_process_memory_snapshot();
+    emit_startup_checkpoint(
+        profile,
+        "after-ui-font-diagnostics",
+        before_ui_font_diagnostics,
+        after_ui_font_diagnostics,
+    );
     window.set_window_title(runtime_window_title(profile).into());
+    let before_bootstrap_bind = crate::app::memory::current_process_memory_snapshot();
     bind_top_status_bar_with_profile_and_async_handle(&window, profile, Some(async_runtime_handle));
+    let after_bootstrap_bind = crate::app::memory::current_process_memory_snapshot();
+    emit_startup_checkpoint(
+        profile,
+        "after-bootstrap-bind",
+        before_bootstrap_bind,
+        after_bootstrap_bind,
+    );
     windows_icon::log_window_icon_state(&window, "before_window_run");
     window.run()?;
     Ok(())

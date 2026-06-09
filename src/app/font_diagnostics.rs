@@ -1,6 +1,7 @@
 //! Shared UI/terminal font diagnostics and fallback policy helpers.
 
 use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use fontdb::{Database, Query, Stretch, Style, Weight};
 use slint::fontique_07::{fontique, shared_collection};
@@ -10,7 +11,10 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_PIXEL_GEOMETRY_FLAT, DWRITE_PIXEL_GEOMETRY_RGB, DWriteCreateFactory, IDWriteFactory,
 };
 
-use crate::app::system_font_database::load_system_font_database;
+use crate::app::system_font_database::{
+    load_system_font_database, reset_system_font_database_load_call_count,
+    system_font_database_load_call_count,
+};
 use crate::app::terminal_font::{DEFAULT_TERMINAL_FONT_WEIGHT, DEFAULT_TERMINAL_LETTER_SPACING_PX};
 
 pub const UI_FONT_FAMILY: &str = "JetBrains Maple Mono";
@@ -66,6 +70,9 @@ pub const TERMINAL_ICON_FALLBACK_FAMILIES: &[&str] =
 const BUNDLED_SARASA_TERM_SC_FONT_BYTES: &[u8] =
     include_bytes!("../../assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-SemiBold.ttf");
 
+static UI_SHARED_COLLECTION_CONFIGURE_CALLS: AtomicUsize = AtomicUsize::new(0);
+static UI_SHARED_COLLECTION_DIAGNOSTICS_CALLS: AtomicUsize = AtomicUsize::new(0);
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct FontFaceMatchDiagnostic {
     pub requested_family: String,
@@ -98,7 +105,31 @@ struct ParsedFaceMetadata {
     style: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct StartupFontDiagnosticsCounters {
+    pub ui_shared_collection_configure_calls: usize,
+    pub ui_shared_collection_diagnostics_calls: usize,
+    pub system_font_database_load_calls: usize,
+}
+
+pub(crate) fn reset_startup_font_diagnostics_counters() {
+    UI_SHARED_COLLECTION_CONFIGURE_CALLS.store(0, Ordering::Relaxed);
+    UI_SHARED_COLLECTION_DIAGNOSTICS_CALLS.store(0, Ordering::Relaxed);
+    reset_system_font_database_load_call_count();
+}
+
+pub(crate) fn startup_font_diagnostics_counters() -> StartupFontDiagnosticsCounters {
+    StartupFontDiagnosticsCounters {
+        ui_shared_collection_configure_calls: UI_SHARED_COLLECTION_CONFIGURE_CALLS
+            .load(Ordering::Relaxed),
+        ui_shared_collection_diagnostics_calls: UI_SHARED_COLLECTION_DIAGNOSTICS_CALLS
+            .load(Ordering::Relaxed),
+        system_font_database_load_calls: system_font_database_load_call_count(),
+    }
+}
+
 pub(crate) fn configure_ui_font_fallbacks() {
+    UI_SHARED_COLLECTION_CONFIGURE_CALLS.fetch_add(1, Ordering::Relaxed);
     let mut collection = shared_collection();
     let fallback_ids = UI_FALLBACK_FAMILIES
         .iter()
@@ -125,6 +156,7 @@ pub(crate) fn configure_ui_font_fallbacks() {
 }
 
 pub(crate) fn log_ui_shell_font_diagnostics() {
+    UI_SHARED_COLLECTION_DIAGNOSTICS_CALLS.fetch_add(1, Ordering::Relaxed);
     let mut collection = shared_collection();
     let requested_weight = UI_FONT_DEFAULT_WEIGHT;
     let requested_style = fontique::FontStyle::Normal;

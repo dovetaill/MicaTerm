@@ -145,10 +145,19 @@ Notes:
 - Without `MICA_TERM_LOG=debug`, only error-level events are persisted.
 - Windows builds use daily log rotation, so the file name includes the current date.
 - Terminal memory entries are written under the `app.memory` target with events like
-  `startup-snapshot`, `session-close`, `close-shrink`, `idle-shrink`, `trim-request`, and `trim-executed`.
+  `startup-snapshot`, `startup-checkpoint`, `session-close`, `close-shrink`, `idle-shrink`,
+  `trim-request`, and `trim-executed`.
 - `startup-snapshot` captures the current `working_set_bytes`, `private_usage_bytes`, and
   `pagefile_usage_bytes` near startup so later field runs can compare private/commit behavior
   instead of relying on working-set motion alone.
+- `startup-checkpoint` splits startup into `startup_stage` checkpoints such as
+  `after-ui-font-fallbacks`, `after-window-new`, `after-ui-font-diagnostics`, and
+  `after-bootstrap-bind`, then records before/after `working_set_bytes`,
+  `private_usage_bytes`, and `pagefile_usage_bytes` for each stage.
+- The startup checkpoints also surface `ui_shared_collection_configure_calls`,
+  `ui_shared_collection_diagnostics_calls`, and `system_font_database_load_calls` so packaged
+  runs can separate our explicit UI font fallback/setup work from the `AppWindow::new()` jump and
+  the later bootstrap service bind cost.
 - `session-close` captures `before_session_count`, `after_session_count`,
   `before_runtime_control_count`, `after_runtime_control_count`,
   `terminal_memory_release_succeeded`, and `runtime_disconnect_succeeded` so field runs can tell
@@ -164,7 +173,7 @@ Notes:
 - The packaged memory baseline matrix, counter checklist, and renderer/path capture rules live in
   `docs/plans/2026-06-09-memory-footprint-reduction/verification.md`.
 - After reproducing, you can filter just the memory diagnostics with
-  `Select-String -Path .\logs\system-error.log* -Pattern "app.memory","startup-snapshot","session-close","close-shrink","idle-shrink","trim-request","trim-executed"`.
+  `Select-String -Path .\logs\system-error.log* -Pattern "app.memory","startup-snapshot","startup-checkpoint","session-close","close-shrink","idle-shrink","trim-request","trim-executed"`.
 
 ## Asset Persistence
 

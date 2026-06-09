@@ -30,6 +30,7 @@ pub fn memory_diagnostics_enabled() -> bool {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct MemoryDiagnosticsEvent {
     pub event_name: &'static str,
+    pub startup_stage: Option<&'static str>,
     pub trigger_reason: Option<&'static str>,
     pub active_renderer_mode: Option<&'static str>,
     pub has_active_surface: Option<bool>,
@@ -47,6 +48,9 @@ pub struct MemoryDiagnosticsEvent {
     pub runtime_control_present_before: Option<bool>,
     pub terminal_surface_present_before: Option<bool>,
     pub sftp_binding_present_before: Option<bool>,
+    pub ui_shared_collection_configure_calls: Option<usize>,
+    pub ui_shared_collection_diagnostics_calls: Option<usize>,
+    pub system_font_database_load_calls: Option<usize>,
     pub terminal_memory_release_attempted: Option<bool>,
     pub terminal_memory_release_succeeded: Option<bool>,
     pub runtime_disconnect_attempted: Option<bool>,
@@ -118,6 +122,7 @@ pub fn emit_memory_diagnostics_event_with_config(
         active_renderer_mode = event
             .active_renderer_mode
             .unwrap_or(profile.terminal_render_mode_label()),
+        startup_stage = ?event.startup_stage,
         trigger_reason = event.trigger_reason.unwrap_or("unspecified"),
         has_active_surface = ?event.has_active_surface,
         pending_output_bytes = ?event.pending_output_bytes,
@@ -164,6 +169,9 @@ pub fn emit_memory_diagnostics_event_with_config(
         runtime_control_present_before = ?event.runtime_control_present_before,
         terminal_surface_present_before = ?event.terminal_surface_present_before,
         sftp_binding_present_before = ?event.sftp_binding_present_before,
+        ui_shared_collection_configure_calls = ?event.ui_shared_collection_configure_calls,
+        ui_shared_collection_diagnostics_calls = ?event.ui_shared_collection_diagnostics_calls,
+        system_font_database_load_calls = ?event.system_font_database_load_calls,
         terminal_memory_release_attempted = ?event.terminal_memory_release_attempted,
         terminal_memory_release_succeeded = ?event.terminal_memory_release_succeeded,
         runtime_disconnect_attempted = ?event.runtime_disconnect_attempted,
