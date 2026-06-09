@@ -2166,9 +2166,46 @@ fn close_session_by_id(
     if let Some(bridge) = bridge
         && let Ok(session_uuid) = Uuid::parse_str(session_id)
     {
-        let _ = bridge.manager.close_session(session_uuid);
+        let _ = close_bridge_session_with_diagnostics(bridge, session_uuid);
     }
     state.close_workspace_session_with_fallback(session_id)
+}
+
+fn close_bridge_session_with_diagnostics(bridge: &ShellSessionBridge, session_uuid: Uuid) -> bool {
+    let before_memory = crate::app::memory::current_process_memory_snapshot();
+    let diagnostics = bridge.manager.close_session_with_diagnostics(session_uuid);
+    let after_memory = crate::app::memory::current_process_memory_snapshot();
+
+    if let Some(diagnostics) = diagnostics {
+        let release_outcome = diagnostics.release_outcome;
+        crate::app::logging::runtime::emit_memory_diagnostics_event(
+            workspace_runtime_profile(),
+            crate::app::logging::runtime::MemoryDiagnosticsEvent {
+                event_name: "session-close",
+                trigger_reason: Some("session-close"),
+                active_renderer_mode: workspace_terminal_renderer_mode_label(),
+                before_memory,
+                after_memory,
+                session_registry_before: Some(diagnostics.before_registry),
+                session_registry_after: Some(diagnostics.after_registry),
+                runtime_control_present_before: Some(diagnostics.runtime_control_present_before),
+                terminal_surface_present_before: Some(diagnostics.terminal_surface_present_before),
+                sftp_binding_present_before: Some(diagnostics.sftp_binding_present_before),
+                terminal_memory_release_attempted: release_outcome
+                    .map(|outcome| outcome.terminal_memory_release_attempted),
+                terminal_memory_release_succeeded: release_outcome
+                    .map(|outcome| outcome.terminal_memory_release_succeeded),
+                runtime_disconnect_attempted: release_outcome
+                    .map(|outcome| outcome.runtime_disconnect_attempted),
+                runtime_disconnect_succeeded: release_outcome
+                    .map(|outcome| outcome.runtime_disconnect_succeeded),
+                ..crate::app::logging::runtime::MemoryDiagnosticsEvent::default()
+            },
+        );
+        return true;
+    }
+
+    false
 }
 
 fn close_workspace_tab_by_id(
@@ -2222,7 +2259,7 @@ fn close_workspace_tab_by_id(
         if let Some(bridge) = bridge
             && let Ok(session_uuid) = Uuid::parse_str(session_id.as_str())
         {
-            let _ = bridge.manager.close_session(session_uuid);
+            let _ = close_bridge_session_with_diagnostics(bridge, session_uuid);
         }
         state.unhide_workspace_terminal_session(session_id.as_str());
     }

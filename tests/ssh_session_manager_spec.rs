@@ -67,6 +67,12 @@ struct TrackingLauncher {
     terminal_releases: Arc<AtomicUsize>,
 }
 
+#[derive(Clone)]
+struct SurfaceTrackingLauncher {
+    disconnects: Arc<AtomicUsize>,
+    terminal_releases: Arc<AtomicUsize>,
+}
+
 struct NoopFileHandle {
     cursor: Cursor<Vec<u8>>,
 }
@@ -296,6 +302,15 @@ impl TrackingLauncher {
     }
 }
 
+impl SurfaceTrackingLauncher {
+    fn new(disconnects: Arc<AtomicUsize>, terminal_releases: Arc<AtomicUsize>) -> Self {
+        Self {
+            disconnects,
+            terminal_releases,
+        }
+    }
+}
+
 impl InteractiveTrackingLauncher {
     fn new(state: InteractiveTrackingState) -> Self {
         Self { state }
@@ -449,6 +464,37 @@ impl SessionRuntimeLauncher for TrackingLauncher {
         let disconnects = Arc::clone(&self.disconnects);
         let terminal_releases = Arc::clone(&self.terminal_releases);
         Box::pin(async move {
+            Ok(Box::new(TrackingRuntimeControl {
+                disconnects,
+                terminal_releases,
+            }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SessionRuntimeLauncher for SurfaceTrackingLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: Uuid,
+        _attempt_id: Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let disconnects = Arc::clone(&self.disconnects);
+        let terminal_releases = Arc::clone(&self.terminal_releases);
+        Box::pin(async move {
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface_with_viewport(
+                session_id, 1, 0, 24,
+            )));
             Ok(Box::new(TrackingRuntimeControl {
                 disconnects,
                 terminal_releases,
@@ -3781,6 +3827,108 @@ fn close_session_before_runtime_ready_disconnects_when_control_arrives() {
     manager
         .close_session(handle.session_id)
         .expect("close session before runtime ready");
+
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(60)).await;
+    });
+
+    assert_eq!(disconnects.load(Ordering::SeqCst), 1);
+    assert_eq!(terminal_releases.load(Ordering::SeqCst), 1);
+    assert!(manager.session(handle.session_id).is_none());
+}
+
+#[test]
+fn close_session_diagnostics_report_session_runtime_and_surface_release() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let disconnects = Arc::new(AtomicUsize::new(0));
+    let terminal_releases = Arc::new(AtomicUsize::new(0));
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(SurfaceTrackingLauncher::new(
+            Arc::clone(&disconnects),
+            Arc::clone(&terminal_releases),
+        )),
+    );
+
+    let handle = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open session");
+
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    });
+
+    assert!(
+        manager.terminal_surface(handle.session_id).is_some(),
+        "sanity check: close-path diagnostics should start from a registry that still retains a projected terminal surface"
+    );
+
+    let diagnostics = manager
+        .close_session_with_diagnostics(handle.session_id)
+        .expect("close session with diagnostics");
+
+    assert_eq!(diagnostics.before_registry.session_count, 1);
+    assert_eq!(diagnostics.after_registry.session_count, 0);
+    assert_eq!(diagnostics.before_registry.terminal_surface_count, 1);
+    assert_eq!(diagnostics.after_registry.terminal_surface_count, 0);
+    assert_eq!(diagnostics.before_registry.runtime_control_count, 1);
+    assert_eq!(diagnostics.after_registry.runtime_control_count, 0);
+    assert!(diagnostics.runtime_control_present_before);
+    assert!(diagnostics.terminal_surface_present_before);
+    assert!(
+        diagnostics
+            .release_outcome
+            .expect("runtime release outcome")
+            .terminal_memory_release_succeeded
+    );
+    assert!(
+        diagnostics
+            .release_outcome
+            .expect("runtime release outcome")
+            .runtime_disconnect_succeeded
+    );
+    assert_eq!(disconnects.load(Ordering::SeqCst), 1);
+    assert_eq!(terminal_releases.load(Ordering::SeqCst), 1);
+    assert!(manager.session(handle.session_id).is_none());
+}
+
+#[test]
+fn close_session_diagnostics_do_not_claim_runtime_release_before_control_exists() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let disconnects = Arc::new(AtomicUsize::new(0));
+    let terminal_releases = Arc::new(AtomicUsize::new(0));
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(DelayedTrackingLauncher::new(
+            Arc::clone(&disconnects),
+            Arc::clone(&terminal_releases),
+            Duration::from_millis(25),
+        )),
+    );
+
+    let handle = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open session");
+
+    let diagnostics = manager
+        .close_session_with_diagnostics(handle.session_id)
+        .expect("close session before runtime ready");
+
+    assert_eq!(diagnostics.before_registry.session_count, 1);
+    assert_eq!(diagnostics.before_registry.runtime_control_count, 0);
+    assert_eq!(diagnostics.after_registry.session_count, 0);
+    assert_eq!(diagnostics.after_registry.runtime_control_count, 0);
+    assert!(!diagnostics.runtime_control_present_before);
+    assert!(
+        diagnostics.release_outcome.is_none(),
+        "when the runtime control has not arrived yet, close-path diagnostics should not falsely claim that terminal memory was already released"
+    );
 
     runtime.block_on(async {
         tokio::time::sleep(Duration::from_millis(60)).await;

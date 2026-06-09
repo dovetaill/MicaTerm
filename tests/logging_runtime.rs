@@ -11,6 +11,7 @@ use mica_term::app::logging::runtime::{
 };
 use mica_term::app::memory::ProcessMemorySnapshot;
 use mica_term::app::runtime_profile::AppRuntimeProfile;
+use mica_term::app::ssh::session_manager::SessionRegistryDiagnosticsSnapshot;
 use mica_term::app::terminal_presenter::TerminalPresenterCacheStats;
 
 #[test]
@@ -169,6 +170,21 @@ fn sample_cache_stats(entries: usize) -> TerminalPresenterCacheStats {
     }
 }
 
+fn sample_session_registry_snapshot(entries: usize) -> SessionRegistryDiagnosticsSnapshot {
+    SessionRegistryDiagnosticsSnapshot {
+        session_count: entries,
+        open_order_count: entries,
+        asset_session_count: entries,
+        terminal_surface_count: entries,
+        runtime_control_count: entries,
+        pending_disconnect_count: entries.saturating_sub(1),
+        pending_resize_count: entries / 2,
+        current_working_directory_count: entries,
+        disabled_enhancement_count: entries / 3,
+        sftp_binding_count: entries / 2,
+    }
+}
+
 #[test]
 fn memory_diagnostics_helpers_stay_silent_when_toggle_is_disabled() {
     let temp_root = std::env::temp_dir()
@@ -280,6 +296,34 @@ fn memory_diagnostics_helpers_emit_structured_runtime_memory_events_when_enabled
             AppRuntimeProfile::software_compat(),
             config,
             MemoryDiagnosticsEvent {
+                event_name: "session-close",
+                trigger_reason: Some("session-close"),
+                before_memory: Some(sample_process_memory_snapshot(
+                    210_000_000,
+                    212_000_000,
+                    212_000_000,
+                )),
+                after_memory: Some(sample_process_memory_snapshot(
+                    181_000_000,
+                    212_000_000,
+                    212_000_000,
+                )),
+                session_registry_before: Some(sample_session_registry_snapshot(3)),
+                session_registry_after: Some(sample_session_registry_snapshot(2)),
+                runtime_control_present_before: Some(true),
+                terminal_surface_present_before: Some(true),
+                sftp_binding_present_before: Some(true),
+                terminal_memory_release_attempted: Some(true),
+                terminal_memory_release_succeeded: Some(true),
+                runtime_disconnect_attempted: Some(true),
+                runtime_disconnect_succeeded: Some(true),
+                ..MemoryDiagnosticsEvent::default()
+            },
+        );
+        emit_memory_diagnostics_event_with_config(
+            AppRuntimeProfile::software_compat(),
+            config,
+            MemoryDiagnosticsEvent {
                 event_name: "close-shrink",
                 trigger_reason: Some("surface-disappeared"),
                 active_renderer_mode: Some("native"),
@@ -333,6 +377,7 @@ fn memory_diagnostics_helpers_emit_structured_runtime_memory_events_when_enabled
     let content = fs::read_to_string(paths.logs_dir.join("system-error.log")).unwrap();
     assert!(content.contains("app.memory"));
     assert!(content.contains("startup-snapshot"));
+    assert!(content.contains("session-close"));
     assert!(content.contains("close-shrink"));
     assert!(content.contains("idle-shrink"));
     assert!(content.contains("trim-request"));
@@ -345,4 +390,10 @@ fn memory_diagnostics_helpers_emit_structured_runtime_memory_events_when_enabled
     assert!(content.contains("pagefile_usage_bytes"));
     assert!(content.contains("before_private_usage_bytes"));
     assert!(content.contains("after_private_usage_bytes"));
+    assert!(content.contains("before_session_count"));
+    assert!(content.contains("after_session_count"));
+    assert!(content.contains("before_runtime_control_count"));
+    assert!(content.contains("after_runtime_control_count"));
+    assert!(content.contains("terminal_memory_release_succeeded"));
+    assert!(content.contains("runtime_disconnect_succeeded"));
 }

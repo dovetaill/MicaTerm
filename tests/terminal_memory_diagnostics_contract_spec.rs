@@ -29,6 +29,10 @@ fn readme_documents_windows_memory_diagnostics_repro_flow() {
         "README should mention the dedicated memory diagnostics toggle by name"
     );
     assert!(
+        content.contains("session-close"),
+        "README should document the dedicated session-close event so packaged diagnostics can separate runtime/session release from later surface-clear and no-surface shrink phases"
+    );
+    assert!(
         content.contains("startup-snapshot")
             && content.contains("close-shrink")
             && content.contains("idle-shrink")
@@ -40,6 +44,13 @@ fn readme_documents_windows_memory_diagnostics_repro_flow() {
         content.contains("private_usage_bytes") && content.contains("pagefile_usage_bytes"),
         "README should explain that runtime memory diagnostics must surface private_usage_bytes and pagefile_usage_bytes so field runs can distinguish real release from a working-set-only trim"
     );
+    assert!(
+        content.contains("before_session_count")
+            && content.contains("after_session_count")
+            && content.contains("terminal_memory_release_succeeded")
+            && content.contains("runtime_disconnect_succeeded"),
+        "README should explain that close-path diagnostics must surface before/after session counts plus terminal-memory/disconnect outcomes so field runs can tell whether session close really released runtime state"
+    );
 }
 
 #[test]
@@ -48,18 +59,35 @@ fn runtime_memory_diagnostics_source_wires_all_required_event_families() {
         fs::read_to_string("src/app/logging/runtime.rs").expect("read logging runtime");
     let bootstrap = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
     let ssh_pump = fs::read_to_string("src/app/ssh/runtime/pump.rs").expect("read ssh pump");
+    let session_manager =
+        fs::read_to_string("src/app/ssh/session_manager.rs").expect("read session manager");
 
     assert!(
         logging_runtime.contains("startup-snapshot"),
         "logging runtime should define a startup-snapshot memory event so packaged baseline runs capture startup private/commit counters before later optimizations"
     );
     assert!(
-        bootstrap.contains("\"close-shrink\"") && bootstrap.contains("\"idle-shrink\""),
-        "bootstrap should emit both close-shrink and idle-shrink events so field diagnostics can distinguish immediate surface cleanup from delayed no-surface release"
+        bootstrap.contains("\"session-close\"")
+            && bootstrap.contains("\"close-shrink\"")
+            && bootstrap.contains("\"idle-shrink\""),
+        "bootstrap should emit session-close, close-shrink, and idle-shrink events so field diagnostics can distinguish session/runtime release, immediate surface cleanup, and delayed no-surface release"
     );
     assert!(
         ssh_pump.contains("\"trim-request\"") && ssh_pump.contains("\"trim-executed\""),
         "the SSH output pump should emit trim-request and trim-executed events so large-output trims record both the request cause and the post-trim counters"
+    );
+    assert!(
+        logging_runtime.contains("before_session_count")
+            && logging_runtime.contains("after_session_count")
+            && logging_runtime.contains("terminal_memory_release_succeeded")
+            && logging_runtime.contains("runtime_disconnect_succeeded"),
+        "logging runtime should surface session-registry counters and runtime release outcomes so close-path logs can prove whether session close actually released memory-bearing state"
+    );
+    assert!(
+        session_manager.contains("pub struct SessionRegistryDiagnosticsSnapshot")
+            && session_manager.contains("pub struct ClosedSessionDiagnostics")
+            && session_manager.contains("pub fn close_session_with_diagnostics"),
+        "session manager should expose a diagnostics snapshot and close_session_with_diagnostics helper so close-path tests and bootstrap logging can prove which registry/runtime state was released"
     );
 }
 

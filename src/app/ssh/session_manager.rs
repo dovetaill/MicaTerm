@@ -100,6 +100,39 @@ pub struct SessionHandle {
     pub enhanced_session_state: EnhancedSessionState,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SessionRegistryDiagnosticsSnapshot {
+    pub session_count: usize,
+    pub open_order_count: usize,
+    pub asset_session_count: usize,
+    pub terminal_surface_count: usize,
+    pub runtime_control_count: usize,
+    pub pending_disconnect_count: usize,
+    pub pending_resize_count: usize,
+    pub current_working_directory_count: usize,
+    pub disabled_enhancement_count: usize,
+    pub sftp_binding_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RuntimeControlReleaseOutcome {
+    pub terminal_memory_release_attempted: bool,
+    pub terminal_memory_release_succeeded: bool,
+    pub runtime_disconnect_attempted: bool,
+    pub runtime_disconnect_succeeded: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClosedSessionDiagnostics {
+    pub removed: SessionHandle,
+    pub before_registry: SessionRegistryDiagnosticsSnapshot,
+    pub after_registry: SessionRegistryDiagnosticsSnapshot,
+    pub runtime_control_present_before: bool,
+    pub terminal_surface_present_before: bool,
+    pub sftp_binding_present_before: bool,
+    pub release_outcome: Option<RuntimeControlReleaseOutcome>,
+}
+
 pub trait SessionRuntimeControl: Send {
     fn disconnect(&self) -> Result<()>;
     fn release_terminal_memory(&self) -> Result<()> {
@@ -146,9 +179,22 @@ type LaunchFuture =
     Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>;
 
 fn release_and_disconnect_runtime_control(runtime_control: Box<dyn SessionRuntimeControl>) {
+    let _ = release_and_disconnect_runtime_control_with_outcome(runtime_control);
+}
+
+fn release_and_disconnect_runtime_control_with_outcome(
+    runtime_control: Box<dyn SessionRuntimeControl>,
+) -> RuntimeControlReleaseOutcome {
     // Drop scrollback/terminal state before the network-side graceful disconnect finishes.
-    let _ = runtime_control.release_terminal_memory();
-    let _ = runtime_control.disconnect();
+    let terminal_memory_release_succeeded = runtime_control.release_terminal_memory().is_ok();
+    let runtime_disconnect_succeeded = runtime_control.disconnect().is_ok();
+
+    RuntimeControlReleaseOutcome {
+        terminal_memory_release_attempted: true,
+        terminal_memory_release_succeeded,
+        runtime_disconnect_attempted: true,
+        runtime_disconnect_succeeded,
+    }
 }
 type ProbeFuture = Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>>;
 
@@ -278,6 +324,11 @@ impl SessionManager {
             .iter()
             .filter_map(|session_id| registry.sessions.get(session_id).cloned())
             .collect()
+    }
+
+    pub fn diagnostics_snapshot(&self) -> SessionRegistryDiagnosticsSnapshot {
+        let registry = self.registry.lock().expect("lock session registry");
+        SessionRegistryDiagnosticsSnapshot::capture(&registry)
     }
 
     pub fn terminal_surface(&self, session_id: Uuid) -> Option<TerminalSurfaceState> {
@@ -867,22 +918,41 @@ impl SessionManager {
     }
 
     pub fn close_session(&self, session_id: Uuid) -> Option<SessionHandle> {
-        let (removed, runtime_control) = {
+        self.close_session_with_diagnostics(session_id)
+            .map(|diagnostics| diagnostics.removed)
+    }
+
+    pub fn close_session_with_diagnostics(
+        &self,
+        session_id: Uuid,
+    ) -> Option<ClosedSessionDiagnostics> {
+        let (
+            removed,
+            before_registry,
+            after_registry,
+            runtime_control_present_before,
+            terminal_surface_present_before,
+            sftp_binding_present_before,
+            runtime_control,
+        ) = {
             let mut registry = self.registry.lock().expect("lock session registry");
+            let before_registry = SessionRegistryDiagnosticsSnapshot::capture(&registry);
             let removed = registry.sessions.remove(&session_id)?;
             registry
                 .open_order
                 .retain(|existing_id| *existing_id != session_id);
             registry.connection_attempts.remove(&session_id);
             registry.session_profiles.remove(&session_id);
-            registry.terminal_surfaces.remove(&session_id);
+            let terminal_surface_present_before =
+                registry.terminal_surfaces.remove(&session_id).is_some();
             registry.current_working_directories.remove(&session_id);
             registry.terminal_surface_revisions.remove(&session_id);
             registry.pending_disconnects.remove(&session_id);
             registry.pending_resizes.remove(&session_id);
             registry.disabled_enhancement_sessions.remove(&session_id);
-            registry.sftp_bindings.remove(&session_id);
+            let sftp_binding_present_before = registry.sftp_bindings.remove(&session_id).is_some();
             let runtime_control = registry.runtime_controls.remove(&session_id);
+            let runtime_control_present_before = runtime_control.is_some();
             if registry.asset_sessions.get(&removed.asset_id) == Some(&session_id) {
                 let replacement = registry
                     .open_order
@@ -905,14 +975,30 @@ impl SessionManager {
                     registry.asset_sessions.remove(&removed.asset_id);
                 }
             }
-            (removed, runtime_control)
+            let after_registry = SessionRegistryDiagnosticsSnapshot::capture(&registry);
+            (
+                removed,
+                before_registry,
+                after_registry,
+                runtime_control_present_before,
+                terminal_surface_present_before,
+                sftp_binding_present_before,
+                runtime_control,
+            )
         };
 
-        if let Some(runtime_control) = runtime_control {
-            release_and_disconnect_runtime_control(runtime_control);
-        }
+        let release_outcome =
+            runtime_control.map(release_and_disconnect_runtime_control_with_outcome);
 
-        Some(removed)
+        Some(ClosedSessionDiagnostics {
+            removed,
+            before_registry,
+            after_registry,
+            runtime_control_present_before,
+            terminal_surface_present_before,
+            sftp_binding_present_before,
+            release_outcome,
+        })
     }
 
     fn spawn_session_attempt(
@@ -1104,6 +1190,23 @@ impl Default for SessionRegistry {
             pending_resizes: HashMap::new(),
             theme_mode: ThemeMode::Dark,
             theme_variant: ThemeVariant::PremiumDefault,
+        }
+    }
+}
+
+impl SessionRegistryDiagnosticsSnapshot {
+    fn capture(registry: &SessionRegistry) -> Self {
+        Self {
+            session_count: registry.sessions.len(),
+            open_order_count: registry.open_order.len(),
+            asset_session_count: registry.asset_sessions.len(),
+            terminal_surface_count: registry.terminal_surfaces.len(),
+            runtime_control_count: registry.runtime_controls.len(),
+            pending_disconnect_count: registry.pending_disconnects.len(),
+            pending_resize_count: registry.pending_resizes.len(),
+            current_working_directory_count: registry.current_working_directories.len(),
+            disabled_enhancement_count: registry.disabled_enhancement_sessions.len(),
+            sftp_binding_count: registry.sftp_bindings.len(),
         }
     }
 }

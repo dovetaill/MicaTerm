@@ -6,6 +6,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::app::memory::{ProcessMemorySnapshot, current_process_memory_snapshot};
 use crate::app::runtime_profile::AppRuntimeProfile;
+use crate::app::ssh::session_manager::SessionRegistryDiagnosticsSnapshot;
 use crate::app::terminal_presenter::TerminalPresenterCacheStats;
 
 use super::cleanup::{CleanupPolicy, cleanup_logging_dirs};
@@ -41,6 +42,15 @@ pub struct MemoryDiagnosticsEvent {
     pub retained_renderer_resources_after: Option<bool>,
     pub before_memory: Option<ProcessMemorySnapshot>,
     pub after_memory: Option<ProcessMemorySnapshot>,
+    pub session_registry_before: Option<SessionRegistryDiagnosticsSnapshot>,
+    pub session_registry_after: Option<SessionRegistryDiagnosticsSnapshot>,
+    pub runtime_control_present_before: Option<bool>,
+    pub terminal_surface_present_before: Option<bool>,
+    pub sftp_binding_present_before: Option<bool>,
+    pub terminal_memory_release_attempted: Option<bool>,
+    pub terminal_memory_release_succeeded: Option<bool>,
+    pub runtime_disconnect_attempted: Option<bool>,
+    pub runtime_disconnect_succeeded: Option<bool>,
     pub cache_stats_before: Option<TerminalPresenterCacheStats>,
     pub cache_stats_after: Option<TerminalPresenterCacheStats>,
 }
@@ -94,6 +104,8 @@ pub fn emit_memory_diagnostics_event_with_config(
     let after_memory_snapshot_available = event.after_memory.is_some();
     let before_memory = event.before_memory.unwrap_or_default();
     let after_memory = event.after_memory.unwrap_or_default();
+    let session_registry_before = event.session_registry_before.unwrap_or_default();
+    let session_registry_after = event.session_registry_after.unwrap_or_default();
     let cache_stats_before = event.cache_stats_before.unwrap_or_default();
     let cache_stats_after = event.cache_stats_after.unwrap_or_default();
 
@@ -125,6 +137,37 @@ pub fn emit_memory_diagnostics_event_with_config(
         after_peak_working_set_bytes = after_memory.peak_working_set_bytes,
         after_pagefile_usage_bytes = after_memory.pagefile_usage_bytes,
         after_private_usage_bytes = after_memory.private_usage_bytes,
+        before_session_count = session_registry_before.session_count,
+        before_open_order_count = session_registry_before.open_order_count,
+        before_asset_session_count = session_registry_before.asset_session_count,
+        before_terminal_surface_count = session_registry_before.terminal_surface_count,
+        before_runtime_control_count = session_registry_before.runtime_control_count,
+        before_pending_disconnect_count = session_registry_before.pending_disconnect_count,
+        before_pending_resize_count = session_registry_before.pending_resize_count,
+        before_current_working_directory_count =
+            session_registry_before.current_working_directory_count,
+        before_disabled_enhancement_count =
+            session_registry_before.disabled_enhancement_count,
+        before_sftp_binding_count = session_registry_before.sftp_binding_count,
+        after_session_count = session_registry_after.session_count,
+        after_open_order_count = session_registry_after.open_order_count,
+        after_asset_session_count = session_registry_after.asset_session_count,
+        after_terminal_surface_count = session_registry_after.terminal_surface_count,
+        after_runtime_control_count = session_registry_after.runtime_control_count,
+        after_pending_disconnect_count = session_registry_after.pending_disconnect_count,
+        after_pending_resize_count = session_registry_after.pending_resize_count,
+        after_current_working_directory_count =
+            session_registry_after.current_working_directory_count,
+        after_disabled_enhancement_count =
+            session_registry_after.disabled_enhancement_count,
+        after_sftp_binding_count = session_registry_after.sftp_binding_count,
+        runtime_control_present_before = ?event.runtime_control_present_before,
+        terminal_surface_present_before = ?event.terminal_surface_present_before,
+        sftp_binding_present_before = ?event.sftp_binding_present_before,
+        terminal_memory_release_attempted = ?event.terminal_memory_release_attempted,
+        terminal_memory_release_succeeded = ?event.terminal_memory_release_succeeded,
+        runtime_disconnect_attempted = ?event.runtime_disconnect_attempted,
+        runtime_disconnect_succeeded = ?event.runtime_disconnect_succeeded,
         cache_before_previous_frame_rows = cache_stats_before.previous_frame_rows,
         cache_before_previous_shaped_rows = cache_stats_before.previous_shaped_rows,
         cache_before_shaped_row_cache_entries = cache_stats_before.shaped_row_cache_entries,

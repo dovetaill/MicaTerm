@@ -141,21 +141,26 @@ Expected output location:
 Notes:
 
 - `MICA_TERM_LOG=debug` enables `ui.theme` and `app.window` diagnostics.
-- `MICA_TERM_MEMORY_DIAGNOSTICS=1` enables opt-in terminal memory diagnostics for cache shrink and large-output trim investigations.
+- `MICA_TERM_MEMORY_DIAGNOSTICS=1` enables opt-in terminal memory diagnostics for session close, cache shrink, and large-output trim investigations.
 - Without `MICA_TERM_LOG=debug`, only error-level events are persisted.
 - Windows builds use daily log rotation, so the file name includes the current date.
 - Terminal memory entries are written under the `app.memory` target with events like
-  `startup-snapshot`, `close-shrink`, `idle-shrink`, `trim-request`, and `trim-executed`.
+  `startup-snapshot`, `session-close`, `close-shrink`, `idle-shrink`, `trim-request`, and `trim-executed`.
 - `startup-snapshot` captures the current `working_set_bytes`, `private_usage_bytes`, and
   `pagefile_usage_bytes` near startup so later field runs can compare private/commit behavior
   instead of relying on working-set motion alone.
+- `session-close` captures `before_session_count`, `after_session_count`,
+  `before_runtime_control_count`, `after_runtime_control_count`,
+  `terminal_memory_release_succeeded`, and `runtime_disconnect_succeeded` so field runs can tell
+  whether session close really released session/runtime state before later surface-clear or
+  no-surface idle shrink events run.
 - `trim-request` / `trim-executed` and the shrink events should be interpreted together: if only
   `working_set_bytes` falls while `private_usage_bytes` and `pagefile_usage_bytes` stay flat, the
   process mainly shed resident pages rather than truly releasing committed private memory.
 - The packaged memory baseline matrix, counter checklist, and renderer/path capture rules live in
   `docs/plans/2026-06-09-memory-footprint-reduction/verification.md`.
 - After reproducing, you can filter just the memory diagnostics with
-  `Select-String -Path .\logs\system-error.log* -Pattern "app.memory","startup-snapshot","close-shrink","idle-shrink","trim-request","trim-executed"`.
+  `Select-String -Path .\logs\system-error.log* -Pattern "app.memory","startup-snapshot","session-close","close-shrink","idle-shrink","trim-request","trim-executed"`.
 
 ## Asset Persistence
 
