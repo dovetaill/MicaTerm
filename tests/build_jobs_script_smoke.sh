@@ -71,6 +71,8 @@ if [[ "${1:-}" == "xwin" && "${2:-}" == "build" ]]; then
     echo 'missing --target for fake cargo xwin build' >&2
     exit 1
   }
+  echo 'Compiling dependency-crate v0.1.0'
+  echo 'Building [=====================> ] 1131/1133: mica-term'
   mkdir -p "$FAKE_PROJECT_DIR/target/$target/$profile"
   printf 'stub exe\n' > "$FAKE_PROJECT_DIR/target/$target/$profile/mica-term.exe"
   exit 0
@@ -99,6 +101,8 @@ if [[ "${1:-}" == "build" ]]; then
     echo 'missing --target for fake cargo build' >&2
     exit 1
   }
+  echo 'Compiling dependency-crate v0.1.0'
+  echo 'Compiling mica-term v0.1.0'
   mkdir -p "$FAKE_PROJECT_DIR/target/$target/$profile"
   if [[ "$target" == *windows* ]]; then
     printf 'stub exe\n' > "$FAKE_PROJECT_DIR/target/$target/$profile/mica-term.exe"
@@ -191,6 +195,12 @@ fi
 /usr/bin/uname "$@"
 EOF_UNAME
 
+cat <<'EOF_NPROC' > "$FAKE_BIN/nproc"
+#!/usr/bin/env bash
+set -euo pipefail
+echo "${FAKE_NPROC:-12}"
+EOF_NPROC
+
 cat <<'EOF_CLANG' > "$FAKE_BIN/clang"
 #!/usr/bin/env bash
 set -euo pipefail
@@ -238,6 +248,7 @@ grep -F "BUILD_JOBS" <<<"$HELP_OUTPUT" >/dev/null
 WINDOWS_HELP_OUTPUT="$("$ROOT_DIR/build-win-x64.sh" --help)"
 grep -F "BUILD_JOBS" <<<"$WINDOWS_HELP_OUTPUT" >/dev/null
 grep -F "x86_64-pc-windows-msvc" <<<"$WINDOWS_HELP_OUTPUT" >/dev/null
+grep -F "auto-detects parallel jobs" <<<"$WINDOWS_HELP_OUTPUT" >/dev/null
 
 linux_log="$TMP_ROOT/linux.log"
 linux_out="$TMP_ROOT/linux.out"
@@ -252,6 +263,9 @@ env "${COMMON_ENV[@]}" \
 
 grep -F 'build jobs: BUILD_JOBS=32 -> --jobs 32' "$linux_out" >/dev/null
 grep -F 'build driver: cargo build' "$linux_out" >/dev/null
+grep -F 'phase 1/3: parallel dependency compilation' "$linux_out" >/dev/null
+grep -F 'phase 2/3: final crate compile + link' "$linux_out" >/dev/null
+grep -F 'phase 3/3: package staging and archive' "$linux_out" >/dev/null
 grep -F -- 'build --target x86_64-unknown-linux-gnu --locked --jobs 32' "$linux_log" >/dev/null
 
 linux_default_log="$TMP_ROOT/linux-default.log"
@@ -285,6 +299,9 @@ env "${COMMON_ENV[@]}" \
 
 grep -F 'build driver: cargo xwin build' "$windows_out" >/dev/null
 grep -F 'build jobs: BUILD_JOBS=32 -> --jobs 32' "$windows_out" >/dev/null
+grep -F 'phase 1/3: parallel dependency compilation' "$windows_out" >/dev/null
+grep -F 'phase 2/3: final crate compile + link' "$windows_out" >/dev/null
+grep -F 'phase 3/3: package staging and archive' "$windows_out" >/dev/null
 grep -F -- 'xwin build --target x86_64-pc-windows-msvc --locked --jobs 32' "$windows_log" >/dev/null
 
 for invalid_jobs in 0 -1 abc; do
@@ -319,6 +336,9 @@ env "${COMMON_ENV[@]}" \
   bash "$PROJECT_DIR/build-win-x64.sh" >"$wrapper_target_out"
 
 grep -F -- 'xwin build --release --target x86_64-pc-windows-msvc --locked --no-default-features --features slint-renderer-skia,terminal-native-renderer --jobs 32' "$wrapper_target_log" >/dev/null
+grep -F 'phase 1/3: parallel dependency compilation' "$wrapper_target_out" >/dev/null
+grep -F 'phase 2/3: final crate compile + link' "$wrapper_target_out" >/dev/null
+grep -F 'phase 3/3: package staging and archive' "$wrapper_target_out" >/dev/null
 [[ -f "$PROJECT_DIR/out-wrapper/mica-term-x86_64-pc-windows-msvc-release-skia.zip" ]]
 [[ -f "$publish_archive" ]]
 [[ ! -L "$publish_archive" ]]
@@ -327,3 +347,19 @@ cmp -s \
   "$publish_archive"
 grep -F 'Published archive:' "$wrapper_target_out" >/dev/null
 grep -F "$publish_archive" "$wrapper_target_out" >/dev/null
+
+wrapper_auto_log="$TMP_ROOT/wrapper-auto.log"
+wrapper_auto_out="$TMP_ROOT/wrapper-auto.out"
+wrapper_auto_publish_dir="$TMP_ROOT/publish-auto"
+: > "$wrapper_auto_log"
+mkdir -p "$wrapper_auto_publish_dir"
+env "${COMMON_ENV[@]}" \
+  FAKE_CARGO_LOG="$wrapper_auto_log" \
+  FAKE_UNAME=Linux \
+  FAKE_NPROC=12 \
+  DIST_DIR="$PROJECT_DIR/out-wrapper-auto" \
+  PUBLISH_DIR="$wrapper_auto_publish_dir" \
+  bash "$PROJECT_DIR/build-win-x64.sh" >"$wrapper_auto_out"
+
+grep -F 'build jobs: auto-detected 12 via nproc -> --jobs 12' "$wrapper_auto_out" >/dev/null
+grep -F -- 'xwin build --release --target x86_64-pc-windows-msvc --locked --no-default-features --features slint-renderer-skia,terminal-native-renderer --jobs 12' "$wrapper_auto_log" >/dev/null

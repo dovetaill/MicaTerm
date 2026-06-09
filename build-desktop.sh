@@ -85,6 +85,8 @@ BUILD_JOBS_ARGS=()
 
 resolve_build_jobs() {
   local raw_jobs="${BUILD_JOBS:-}"
+  local jobs_auto="${MICA_TERM_BUILD_JOBS_AUTO:-0}"
+  local jobs_source="${MICA_TERM_BUILD_JOBS_SOURCE:-}"
 
   if [[ -z "$raw_jobs" ]]; then
     BUILD_JOBS_LOG="default"
@@ -95,8 +97,53 @@ resolve_build_jobs() {
   [[ "$raw_jobs" =~ ^[1-9][0-9]*$ ]] || \
     fail "BUILD_JOBS must be a positive integer, got '$raw_jobs'"
 
-  BUILD_JOBS_LOG="BUILD_JOBS=$raw_jobs -> --jobs $raw_jobs"
+  if [[ "$jobs_auto" == "1" && -n "$jobs_source" ]]; then
+    BUILD_JOBS_LOG="auto-detected $raw_jobs via $jobs_source -> --jobs $raw_jobs"
+  else
+    BUILD_JOBS_LOG="BUILD_JOBS=$raw_jobs -> --jobs $raw_jobs"
+  fi
   BUILD_JOBS_ARGS=(--jobs "$raw_jobs")
+}
+
+BUILD_PHASE_FINAL_MARKER=""
+
+maybe_log_final_build_phase() {
+  local line="$1"
+
+  [[ -n "$BUILD_PHASE_FINAL_MARKER" ]] || return 0
+  [[ ! -s "$BUILD_PHASE_FINAL_MARKER" ]] || return 0
+
+  case "$line" in
+    *"Compiling $APP_NAME v"*|*"Compiling $BIN_NAME v"*|*": $APP_NAME"*|*": $BIN_NAME"*)
+      echo "==> phase 2/3: final crate compile + link (visible parallelism may drop here)"
+      printf 'seen\n' > "$BUILD_PHASE_FINAL_MARKER"
+      ;;
+  esac
+}
+
+run_cargo_build_with_phase_logs() {
+  local cargo_status=0
+  local line normalized_line
+
+  BUILD_PHASE_FINAL_MARKER="$(mktemp)"
+  echo "==> phase 1/3: parallel dependency compilation"
+
+  set +e
+  "${CARGO_BUILD_CMD[@]}" "${CARGO_BUILD_ARGS[@]}" 2>&1 | while IFS= read -r line || [[ -n "$line" ]]; do
+    normalized_line="${line//$'\r'/}"
+    maybe_log_final_build_phase "$normalized_line"
+    printf '%s\n' "$normalized_line"
+  done
+  cargo_status=${PIPESTATUS[0]}
+  set -e
+
+  if [[ ! -s "$BUILD_PHASE_FINAL_MARKER" ]]; then
+    echo "==> phase 2/3: final crate compile + link (visible parallelism may drop here)"
+  fi
+
+  rm -f "$BUILD_PHASE_FINAL_MARKER"
+  BUILD_PHASE_FINAL_MARKER=""
+  return "$cargo_status"
 }
 
 stage_bundled_font_licenses() {
@@ -488,10 +535,11 @@ echo "==> build profile: $PROFILE"
 echo "==> build features: $BUILD_FEATURES_LOG"
 echo "==> build jobs: $BUILD_JOBS_LOG"
 
-"${CARGO_BUILD_CMD[@]}" "${CARGO_BUILD_ARGS[@]}"
+run_cargo_build_with_phase_logs
 
 [[ -f "$BIN_PATH" ]] || fail "expected binary not found: $BIN_PATH"
 
+echo "==> phase 3/3: package staging and archive"
 echo "==> Staging package in $STAGE_DIR"
 # Stage a minimal distributable layout first, then archive that directory so downstream release
 # tooling can inspect the unpacked tree or the final artifact interchangeably.

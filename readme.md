@@ -34,6 +34,7 @@ Project planning is in `docs/plans/`.
   - Windows Skia mainline wrapper
   - Default target: `x86_64-pc-windows-msvc`
   - Host requirement: Windows MSVC shell / Git Bash, or Linux + `cargo-xwin` + `clang`
+  - Default parallelism: auto-detects jobs when `BUILD_JOBS` is unset
   - Explicit parallel override examples:
     - `BUILD_JOBS=32 ./build-win-x64.sh`
     - `BUILD_JOBS=$(nproc) ./build-win-x64.sh`
@@ -51,8 +52,10 @@ Notes:
 
 - Cargo already builds in parallel by default.
 - `BUILD_JOBS` is the repo wrapper's explicit override knob and maps directly to `cargo --jobs <N>`.
-- If `BUILD_JOBS` is unset, `./build-desktop.sh`, `./build-win-x64.sh`, and `./build-win-x64-software.sh` keep the previous behavior and do not append `--jobs`.
+- `./build-win-x64.sh` now auto-detects a default job count when `BUILD_JOBS` is unset, probing `nproc`, then `getconf _NPROCESSORS_ONLN`, then `NUMBER_OF_PROCESSORS`.
+- If `BUILD_JOBS` is unset, `./build-desktop.sh` and `./build-win-x64-software.sh` keep the previous behavior and do not append `--jobs`.
 - If you already set `CARGO_BUILD_JOBS`, the repo entrypoints still recommend using `BUILD_JOBS` as the wrapper-level override.
+- Shared build logs now announce `phase 1/3`, `phase 2/3`, and `phase 3/3` so the final root-crate compile/link stretch is easier to distinguish from the earlier parallel dependency fan-out.
 - `./build-win-x64.sh` defaults to the Windows MSVC Skia mainline package on `x86_64-pc-windows-msvc`; it is not the GNU entrypoint.
 - `./build-win-x64.sh` packages the Windows Skia route as `winit-skia` on `x86_64-pc-windows-msvc`.
 - `./build-win-x64-software.sh` packages the Windows compatibility route as `winit-software`.

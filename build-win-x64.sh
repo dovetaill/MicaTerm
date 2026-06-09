@@ -12,6 +12,36 @@ PROFILE="${PROFILE:-release}"
 DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
 PUBLISH_DIR="${PUBLISH_DIR:-/var/www/html}"
 
+detect_default_build_jobs() {
+  local detected_jobs="" detected_source=""
+
+  if [[ -n "${BUILD_JOBS:-}" ]]; then
+    unset MICA_TERM_BUILD_JOBS_AUTO || true
+    unset MICA_TERM_BUILD_JOBS_SOURCE || true
+    return 0
+  fi
+
+  unset MICA_TERM_BUILD_JOBS_AUTO || true
+  unset MICA_TERM_BUILD_JOBS_SOURCE || true
+
+  if command -v nproc >/dev/null 2>&1; then
+    detected_jobs="$(nproc 2>/dev/null || true)"
+    detected_source="nproc"
+  elif command -v getconf >/dev/null 2>&1; then
+    detected_jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
+    detected_source="getconf"
+  elif [[ -n "${NUMBER_OF_PROCESSORS:-}" ]]; then
+    detected_jobs="${NUMBER_OF_PROCESSORS:-}"
+    detected_source="NUMBER_OF_PROCESSORS"
+  fi
+
+  if [[ "$detected_jobs" =~ ^[1-9][0-9]*$ ]]; then
+    export BUILD_JOBS="$detected_jobs"
+    export MICA_TERM_BUILD_JOBS_AUTO=1
+    export MICA_TERM_BUILD_JOBS_SOURCE="$detected_source"
+  fi
+}
+
 usage() {
   cat <<'EOF'
 Usage: ./build-win-x64.sh [--help]
@@ -37,6 +67,10 @@ Linux-host Windows GNU package:
 Outputs:
   dist/mica-term-x86_64-pc-windows-msvc-release-skia.zip
   /var/www/html/mica-term-x86_64-pc-windows-msvc-release-skia.zip
+
+Default parallelism:
+  auto-detects parallel jobs for this wrapper when BUILD_JOBS is unset
+  probe order: nproc -> getconf _NPROCESSORS_ONLN -> NUMBER_OF_PROCESSORS
 
 Parallel override:
   BUILD_JOBS=<positive integer> ./build-win-x64.sh
@@ -78,6 +112,8 @@ ARCHIVE_PATH="$DIST_DIR/${ARCHIVE_STEM}.zip"
 
 echo "==> Text renderer path: ${MICA_TERM_EXPECTED_TEXT_RENDERER_PATH} -> ${MICA_TERM_TEXT_RENDERER_FALLBACK_PATH}"
 echo "==> Verification matrix: DPI ${MICA_TERM_VERIFICATION_DPI_SCALE_MATRIX}; font px ${MICA_TERM_VERIFICATION_FONT_PX_MATRIX}"
+
+detect_default_build_jobs
 
 publish_archive() {
   local source_archive="$1"
