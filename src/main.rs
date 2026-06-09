@@ -129,6 +129,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     apply_renderer_selector(profile)?;
+    mica_term::app::logging::runtime::emit_startup_memory_snapshot(profile);
 
     if let Err(err) = mica_term::app::bootstrap::run_with_profile(profile, async_runtime.handle()) {
         // Mirror fatal startup errors to stderr and the crash directory so failures remain visible

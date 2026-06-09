@@ -114,6 +114,7 @@ typeperf "\Process(mica-term)\Private Bytes" "\Process(mica-term)\Page File Byte
 
 - runtime profile 仍区分 mainline / software compatibility。
 - `app.renderer` 启动日志现在会暴露 `requested_build_flavor`、`requested_terminal_render_mode`、`requested_native_present_path` 与 `fallback_level`。
+- `MICA_TERM_MEMORY_DIAGNOSTICS=1` 现在会额外输出 `startup-snapshot`、`close-shrink`、`idle-shrink`、`trim-request`、`trim-executed`，并带上 `private_usage_bytes` / `pagefile_usage_bytes` 相关字段。
 - `readme.md` 指向本手册，避免 packaged baseline 复现流程孤立。
 - Windows 打包 wrapper smoke 继续锁住 `./build-win-x64.sh` 与 `./build-win-x64-software.sh` 的 packaged 合同。
 
@@ -121,4 +122,4 @@ typeperf "\Process(mica-term)\Private Bytes" "\Process(mica-term)\Page File Byte
 
 - 本 worktree 不能在当前 Linux 环境直接完成真正的 Windows packaged 运行测量。
 - 本步尚未证明任何 `private/commit` 已下降；这里只是把 baseline、记录字段、脚本口径与测量矩阵固定下来。
-- 后续 step 2 以后，仍需补齐 `startup-snapshot`、`close-shrink`、`idle-shrink`、`trim-request`、`trim-executed` 等运行时内存事件。
+- 本 worktree 仍不能替代真实 Windows packaged 运行；即便这些事件已经接线，本地也只能验证日志 contract，不能直接证明现场数值改善。

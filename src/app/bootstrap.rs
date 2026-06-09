@@ -3195,6 +3195,28 @@ fn workspace_terminal_renderer_resources_retained() -> bool {
     host_retained || native_surface_retained
 }
 
+fn workspace_runtime_profile() -> AppRuntimeProfile {
+    WORKSPACE_RUNTIME_PROFILE
+        .with(|profile| (*profile.borrow()).unwrap_or_else(AppRuntimeProfile::packaged))
+}
+
+fn workspace_terminal_renderer_mode_label() -> Option<&'static str> {
+    WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+        host.borrow()
+            .as_ref()
+            .map(TerminalRendererHost::render_mode_label)
+    })
+}
+
+fn workspace_terminal_cache_stats()
+-> Option<crate::app::terminal_presenter::TerminalPresenterCacheStats> {
+    WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+        host.borrow()
+            .as_ref()
+            .map(TerminalRendererHost::cache_stats)
+    })
+}
+
 #[cfg(test)]
 fn trim_workspace_process_memory() -> bool {
     WORKSPACE_TEST_PROCESS_MEMORY_TRIMMER_HOOK.with(|hook| {
@@ -3423,7 +3445,35 @@ fn update_workspace_terminal_idle_cache_shrink(
 
     let retained_renderer_resources = workspace_terminal_renderer_resources_retained();
     if surface_disappeared || (no_surface_since.is_none() && retained_renderer_resources) {
+        let profile = workspace_runtime_profile();
+        let active_renderer_mode = workspace_terminal_renderer_mode_label();
+        let before_memory = crate::app::memory::current_process_memory_snapshot();
+        let cache_stats_before = workspace_terminal_cache_stats();
         clear_workspace_terminal_transient_caches();
+        let after_memory = crate::app::memory::current_process_memory_snapshot();
+        let cache_stats_after = workspace_terminal_cache_stats();
+        crate::app::logging::runtime::emit_memory_diagnostics_event(
+            profile,
+            crate::app::logging::runtime::MemoryDiagnosticsEvent {
+                event_name: "close-shrink",
+                trigger_reason: Some(if surface_disappeared {
+                    "surface-disappeared"
+                } else {
+                    "retained-renderer-resources"
+                }),
+                active_renderer_mode,
+                has_active_surface: Some(false),
+                retained_renderer_resources_before: Some(retained_renderer_resources),
+                retained_renderer_resources_after: Some(
+                    workspace_terminal_renderer_resources_retained(),
+                ),
+                before_memory,
+                after_memory,
+                cache_stats_before,
+                cache_stats_after,
+                ..crate::app::logging::runtime::MemoryDiagnosticsEvent::default()
+            },
+        );
         rearm_workspace_terminal_no_surface_idle_shrink(now, no_surface_since, idle_cache_shrunk);
         return;
     }
@@ -3438,10 +3488,37 @@ fn update_workspace_terminal_idle_cache_shrink(
         return;
     }
 
+    let profile = workspace_runtime_profile();
+    let active_renderer_mode = workspace_terminal_renderer_mode_label();
+    let retained_renderer_resources_before = workspace_terminal_renderer_resources_retained();
+    let before_memory = crate::app::memory::current_process_memory_snapshot();
+    let cache_stats_before = workspace_terminal_cache_stats();
     clear_workspace_terminal_transient_caches();
     release_workspace_terminal_renderer_resources();
-    let _ = purge_workspace_backend_memory(window);
-    let _ = trim_workspace_process_memory();
+    let backend_purge_succeeded = purge_workspace_backend_memory(window);
+    let trim_succeeded = trim_workspace_process_memory();
+    let retained_renderer_resources_after = workspace_terminal_renderer_resources_retained();
+    let after_memory = crate::app::memory::current_process_memory_snapshot();
+    let cache_stats_after = workspace_terminal_cache_stats();
+    crate::app::logging::runtime::emit_memory_diagnostics_event(
+        profile,
+        crate::app::logging::runtime::MemoryDiagnosticsEvent {
+            event_name: "idle-shrink",
+            trigger_reason: Some("no-active-surface-idle"),
+            active_renderer_mode,
+            has_active_surface: Some(false),
+            no_surface_idle_ms: Some(now.duration_since(no_surface_since_at).as_millis() as u64),
+            trim_succeeded: Some(trim_succeeded),
+            backend_purge_succeeded: Some(backend_purge_succeeded),
+            retained_renderer_resources_before: Some(retained_renderer_resources_before),
+            retained_renderer_resources_after: Some(retained_renderer_resources_after),
+            before_memory,
+            after_memory,
+            cache_stats_before,
+            cache_stats_after,
+            ..crate::app::logging::runtime::MemoryDiagnosticsEvent::default()
+        },
+    );
     *idle_cache_shrunk = true;
 }
 

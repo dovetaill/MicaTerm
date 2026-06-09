@@ -285,8 +285,38 @@ pub(super) async fn run_channel_pump(
             }
             () = async { if let Some(timer) = working_set_trim_timer.as_mut() { timer.await } }, if working_set_trim_timer.is_some() => {
                 working_set_trim_timer = None;
-                if working_set_trim_scheduler.trim_due() {
-                    let _ = crate::app::memory::trim_process_working_set();
+                if let Some(pending_output_bytes) = working_set_trim_scheduler.take_trim_request_bytes() {
+                    let profile = crate::app::runtime_profile::AppRuntimeProfile::packaged();
+                    let idle_interval_ms = WORKING_SET_TRIM_IDLE_INTERVAL.as_millis() as u64;
+                    let before_memory = crate::app::memory::current_process_memory_snapshot();
+                    crate::app::logging::runtime::emit_memory_diagnostics_event(
+                        profile,
+                        crate::app::logging::runtime::MemoryDiagnosticsEvent {
+                            event_name: "trim-request",
+                            trigger_reason: Some("large-output-idle"),
+                            active_renderer_mode: Some(profile.terminal_render_mode_label()),
+                            pending_output_bytes: Some(pending_output_bytes),
+                            idle_interval_ms: Some(idle_interval_ms),
+                            before_memory,
+                            ..crate::app::logging::runtime::MemoryDiagnosticsEvent::default()
+                        },
+                    );
+                    let trim_succeeded = crate::app::memory::trim_process_working_set();
+                    let after_memory = crate::app::memory::current_process_memory_snapshot();
+                    crate::app::logging::runtime::emit_memory_diagnostics_event(
+                        profile,
+                        crate::app::logging::runtime::MemoryDiagnosticsEvent {
+                            event_name: "trim-executed",
+                            trigger_reason: Some("large-output-idle"),
+                            active_renderer_mode: Some(profile.terminal_render_mode_label()),
+                            pending_output_bytes: Some(pending_output_bytes),
+                            idle_interval_ms: Some(idle_interval_ms),
+                            trim_succeeded: Some(trim_succeeded),
+                            before_memory,
+                            after_memory,
+                            ..crate::app::logging::runtime::MemoryDiagnosticsEvent::default()
+                        },
+                    );
                 }
             }
         }
@@ -615,10 +645,10 @@ impl WorkingSetTrimScheduler {
         self.pending_output_bytes = self.pending_output_bytes.saturating_add(bytes);
     }
 
-    fn trim_due(&mut self) -> bool {
-        let should_trim = self.pending_output_bytes >= WORKING_SET_TRIM_MIN_OUTPUT_BYTES;
+    fn take_trim_request_bytes(&mut self) -> Option<usize> {
+        let pending_output_bytes = self.pending_output_bytes;
         self.pending_output_bytes = 0;
-        should_trim
+        (pending_output_bytes >= WORKING_SET_TRIM_MIN_OUTPUT_BYTES).then_some(pending_output_bytes)
     }
 }
 
@@ -695,8 +725,8 @@ mod tests {
 
         scheduler.record_output(WORKING_SET_TRIM_MIN_OUTPUT_BYTES / 4);
 
-        assert!(!scheduler.trim_due());
-        assert!(!scheduler.trim_due());
+        assert_eq!(scheduler.take_trim_request_bytes(), None);
+        assert_eq!(scheduler.take_trim_request_bytes(), None);
     }
 
     #[test]
@@ -707,8 +737,26 @@ mod tests {
         scheduler.record_output(WORKING_SET_TRIM_MIN_OUTPUT_BYTES / 2);
         scheduler.record_output(1);
 
-        assert!(scheduler.trim_due());
-        assert!(!scheduler.trim_due());
+        assert_eq!(
+            scheduler.take_trim_request_bytes(),
+            Some(WORKING_SET_TRIM_MIN_OUTPUT_BYTES + 1)
+        );
+        assert_eq!(scheduler.take_trim_request_bytes(), None);
+    }
+
+    #[test]
+    fn working_set_trim_scheduler_reports_pending_bytes_for_trim_diagnostics() {
+        let mut scheduler = WorkingSetTrimScheduler::default();
+
+        scheduler.record_output(WORKING_SET_TRIM_MIN_OUTPUT_BYTES / 2);
+        scheduler.record_output(WORKING_SET_TRIM_MIN_OUTPUT_BYTES / 2);
+        scheduler.record_output(1);
+
+        assert_eq!(
+            scheduler.take_trim_request_bytes(),
+            Some(WORKING_SET_TRIM_MIN_OUTPUT_BYTES + 1)
+        );
+        assert_eq!(scheduler.take_trim_request_bytes(), None);
     }
 
     #[test]

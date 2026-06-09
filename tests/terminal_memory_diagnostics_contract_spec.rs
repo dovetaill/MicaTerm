@@ -29,8 +29,37 @@ fn readme_documents_windows_memory_diagnostics_repro_flow() {
         "README should mention the dedicated memory diagnostics toggle by name"
     );
     assert!(
-        content.contains("close-shrink") && content.contains("idle-shrink"),
-        "README should document the close-shrink and idle-shrink memory events so field diagnostics can distinguish immediate surface-clear cleanup from delayed no-surface cleanup"
+        content.contains("startup-snapshot")
+            && content.contains("close-shrink")
+            && content.contains("idle-shrink")
+            && content.contains("trim-request")
+            && content.contains("trim-executed"),
+        "README should document startup-snapshot, close-shrink, idle-shrink, trim-request, and trim-executed so packaged diagnostics can map each runtime memory transition"
+    );
+    assert!(
+        content.contains("private_usage_bytes") && content.contains("pagefile_usage_bytes"),
+        "README should explain that runtime memory diagnostics must surface private_usage_bytes and pagefile_usage_bytes so field runs can distinguish real release from a working-set-only trim"
+    );
+}
+
+#[test]
+fn runtime_memory_diagnostics_source_wires_all_required_event_families() {
+    let logging_runtime =
+        fs::read_to_string("src/app/logging/runtime.rs").expect("read logging runtime");
+    let bootstrap = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let ssh_pump = fs::read_to_string("src/app/ssh/runtime/pump.rs").expect("read ssh pump");
+
+    assert!(
+        logging_runtime.contains("startup-snapshot"),
+        "logging runtime should define a startup-snapshot memory event so packaged baseline runs capture startup private/commit counters before later optimizations"
+    );
+    assert!(
+        bootstrap.contains("\"close-shrink\"") && bootstrap.contains("\"idle-shrink\""),
+        "bootstrap should emit both close-shrink and idle-shrink events so field diagnostics can distinguish immediate surface cleanup from delayed no-surface release"
+    );
+    assert!(
+        ssh_pump.contains("\"trim-request\"") && ssh_pump.contains("\"trim-executed\""),
+        "the SSH output pump should emit trim-request and trim-executed events so large-output trims record both the request cause and the post-trim counters"
     );
 }
 
