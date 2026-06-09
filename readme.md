@@ -154,6 +154,10 @@ Notes:
   `terminal_memory_release_succeeded`, and `runtime_disconnect_succeeded` so field runs can tell
   whether session close really released session/runtime state before later surface-clear or
   no-surface idle shrink events run.
+- The shrink events now also surface bitmap-atlas retained-state counters such as
+  `cache_before_bitmap_sprite_cache_entries`, `cache_before_bitmap_row_hash_entries`, and
+  `cache_before_bitmap_surface_bytes` so software/fallback runs can tell whether the atlas path
+  actually dropped sprite and backing-pixel state instead of only clearing native glyph caches.
 - `trim-request` / `trim-executed` and the shrink events should be interpreted together: if only
   `working_set_bytes` falls while `private_usage_bytes` and `pagefile_usage_bytes` stay flat, the
   process mainly shed resident pages rather than truly releasing committed private memory.

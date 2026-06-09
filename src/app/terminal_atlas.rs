@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::mem::size_of;
 
 use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
 use anyhow::{Result, anyhow};
@@ -118,6 +119,13 @@ pub struct TerminalSurfaceFrame {
     pub cache_entries: usize,
     pub rerendered_rows: Vec<u32>,
     pub rendered_clusters: Vec<RenderedCluster>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TerminalAtlasCacheStats {
+    pub sprite_cache_entries: usize,
+    pub row_hash_entries: usize,
+    pub surface_pixel_bytes: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -264,6 +272,23 @@ impl TerminalAtlasRenderer {
         self.raster_metrics
     }
 
+    pub fn cache_stats(&self) -> TerminalAtlasCacheStats {
+        TerminalAtlasCacheStats {
+            sprite_cache_entries: self.sprite_cache.len(),
+            row_hash_entries: self.row_hashes.len(),
+            surface_pixel_bytes: self.pixels.len().saturating_mul(size_of::<Rgba8Pixel>()),
+        }
+    }
+
+    pub fn clear_transient_caches(&mut self) {
+        self.sprite_cache.clear();
+        self.row_hashes.clear();
+        self.pixels.clear();
+        self.surface_width_px = 0;
+        self.surface_height_px = 0;
+        self.viewport_background_signature = None;
+    }
+
     pub fn set_raster_scale(&mut self, scale: f32) {
         let next_scale = sanitize_raster_scale(scale);
         if (next_scale - self.raster_scale).abs() < 0.01 {
@@ -272,11 +297,7 @@ impl TerminalAtlasRenderer {
 
         self.raster_scale = next_scale;
         self.raster_metrics = scale_terminal_metrics(self.logical_metrics, next_scale);
-        self.sprite_cache.clear();
-        self.row_hashes.clear();
-        self.pixels.clear();
-        self.surface_width_px = 0;
-        self.surface_height_px = 0;
+        self.clear_transient_caches();
     }
 
     pub fn render(&mut self, surface: &TerminalSurfaceState) -> Result<TerminalSurfaceFrame> {

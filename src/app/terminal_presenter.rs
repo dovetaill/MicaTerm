@@ -12,7 +12,9 @@ use crate::app::font_diagnostics::{
     bitmap_terminal_font_resolution_snapshot, log_terminal_font_diagnostics,
 };
 use crate::app::ssh::runtime::{SurfaceState, TerminalCursorShape};
-use crate::app::terminal_atlas::{TerminalAtlasRenderer, TerminalAtlasSelection};
+use crate::app::terminal_atlas::{
+    TerminalAtlasCacheStats, TerminalAtlasRenderer, TerminalAtlasSelection,
+};
 use crate::app::terminal_core::TerminalFrameSnapshot;
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_emoji::TerminalEmojiRenderer;
@@ -249,6 +251,9 @@ pub struct TerminalPresenterCacheStats {
     pub color_glyph_cache_entries: usize,
     pub glyph_raster_cache_entries: usize,
     pub prepared_row_cache_entries: usize,
+    pub bitmap_sprite_cache_entries: usize,
+    pub bitmap_row_hash_entries: usize,
+    pub bitmap_surface_bytes: usize,
 }
 
 #[cfg(feature = "terminal-native-renderer")]
@@ -494,12 +499,16 @@ impl TerminalPresenter for BitmapAtlasPresenter {
     }
 
     fn cache_stats(&self) -> TerminalPresenterCacheStats {
+        let renderer_stats: TerminalAtlasCacheStats = self.renderer.cache_stats();
         TerminalPresenterCacheStats {
             previous_frame_rows: self
                 .previous_styled_frame
                 .as_ref()
                 .map(|frame| frame.rows.len())
                 .unwrap_or_default(),
+            bitmap_sprite_cache_entries: renderer_stats.sprite_cache_entries,
+            bitmap_row_hash_entries: renderer_stats.row_hash_entries,
+            bitmap_surface_bytes: renderer_stats.surface_pixel_bytes,
             ..TerminalPresenterCacheStats::default()
         }
     }
@@ -507,6 +516,7 @@ impl TerminalPresenter for BitmapAtlasPresenter {
     fn clear_transient_caches(&mut self) {
         self.previous_source_frame = None;
         self.previous_styled_frame = None;
+        self.renderer.clear_transient_caches();
     }
 }
 
@@ -641,6 +651,7 @@ impl TerminalPresenter for WindowsNativePresenter {
             color_glyph_cache_entries: renderer_stats.color_glyph_cache_entries,
             glyph_raster_cache_entries: renderer_stats.glyph_raster_cache_entries,
             prepared_row_cache_entries: renderer_stats.prepared_row_cache_entries,
+            ..TerminalPresenterCacheStats::default()
         }
     }
 

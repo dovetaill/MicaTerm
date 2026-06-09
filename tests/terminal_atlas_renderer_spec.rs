@@ -339,6 +339,62 @@ fn atlas_renderer_reuses_cached_sprites_for_identical_frames() -> Result<()> {
 }
 
 #[test]
+fn atlas_renderer_clear_transient_caches_drops_retained_sprite_and_pixel_state() -> Result<()> {
+    let surface = render_surface(4, 20, "[root@host ~]# echo atlas\r\n");
+    let mut renderer = TerminalAtlasRenderer::new()?;
+
+    let warmed = renderer.render(&surface)?;
+    let warmed_stats = renderer.cache_stats();
+    let cached = renderer.render(&surface)?;
+
+    assert!(
+        warmed_stats.sprite_cache_entries > 0,
+        "bitmap atlas warm renders should populate the sprite cache so repeated frames can reuse rasterized cluster payloads"
+    );
+    assert!(
+        warmed_stats.row_hash_entries > 0,
+        "bitmap atlas warm renders should retain per-row hashes so identical follow-up frames stay off the reraster path"
+    );
+    assert!(
+        warmed_stats.surface_pixel_bytes > 0,
+        "bitmap atlas warm renders should retain a backing pixel buffer while the terminal surface stays visible"
+    );
+    assert!(
+        cached.rerendered_rows.is_empty(),
+        "identical warm frames should reuse retained row hashes before the clear hook runs"
+    );
+
+    renderer.clear_transient_caches();
+    let cleared_stats = renderer.cache_stats();
+    let rerendered_after_clear = renderer.render(&surface)?;
+
+    assert_eq!(
+        cleared_stats.sprite_cache_entries, 0,
+        "clear_transient_caches should drop bitmap sprite-cache entries after the workspace loses its active terminal surface"
+    );
+    assert_eq!(
+        cleared_stats.row_hash_entries, 0,
+        "clear_transient_caches should drop retained bitmap row hashes so the next visible frame rebuilds from a cold surface baseline"
+    );
+    assert_eq!(
+        cleared_stats.surface_pixel_bytes, 0,
+        "clear_transient_caches should release the retained bitmap pixel buffer instead of carrying the last surface image across idle or close transitions"
+    );
+    assert_eq!(
+        rerendered_after_clear.rerendered_rows,
+        (0..surface.rows).collect::<Vec<_>>(),
+        "after transient caches are cleared the next visible frame should repaint every row from scratch instead of silently reusing stale atlas row state"
+    );
+    assert_eq!(
+        rerendered_after_clear.image.size(),
+        warmed.image.size(),
+        "clearing transient bitmap caches should not change the surface dimensions that the next frame rebuilds"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn atlas_renderer_only_redraws_rows_that_changed() -> Result<()> {
     let first_surface = render_surface(4, 24, "one\r\ntwo\r\n");
     let second_surface = render_surface(4, 24, "one\r\nTWO\r\n");

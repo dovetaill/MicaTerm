@@ -176,6 +176,10 @@ pub fn emit_memory_diagnostics_event_with_config(
         cache_before_color_glyph_cache_entries = cache_stats_before.color_glyph_cache_entries,
         cache_before_glyph_raster_cache_entries = cache_stats_before.glyph_raster_cache_entries,
         cache_before_prepared_row_cache_entries = cache_stats_before.prepared_row_cache_entries,
+        cache_before_bitmap_sprite_cache_entries =
+            cache_stats_before.bitmap_sprite_cache_entries,
+        cache_before_bitmap_row_hash_entries = cache_stats_before.bitmap_row_hash_entries,
+        cache_before_bitmap_surface_bytes = cache_stats_before.bitmap_surface_bytes,
         cache_after_previous_frame_rows = cache_stats_after.previous_frame_rows,
         cache_after_previous_shaped_rows = cache_stats_after.previous_shaped_rows,
         cache_after_shaped_row_cache_entries = cache_stats_after.shaped_row_cache_entries,
@@ -184,6 +188,9 @@ pub fn emit_memory_diagnostics_event_with_config(
         cache_after_color_glyph_cache_entries = cache_stats_after.color_glyph_cache_entries,
         cache_after_glyph_raster_cache_entries = cache_stats_after.glyph_raster_cache_entries,
         cache_after_prepared_row_cache_entries = cache_stats_after.prepared_row_cache_entries,
+        cache_after_bitmap_sprite_cache_entries = cache_stats_after.bitmap_sprite_cache_entries,
+        cache_after_bitmap_row_hash_entries = cache_stats_after.bitmap_row_hash_entries,
+        cache_after_bitmap_surface_bytes = cache_stats_after.bitmap_surface_bytes,
         "terminal memory diagnostic event"
     );
 }

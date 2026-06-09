@@ -167,6 +167,9 @@ fn sample_cache_stats(entries: usize) -> TerminalPresenterCacheStats {
         color_glyph_cache_entries: entries / 4,
         glyph_raster_cache_entries: entries / 2,
         prepared_row_cache_entries: entries / 3,
+        bitmap_sprite_cache_entries: entries / 5,
+        bitmap_row_hash_entries: entries / 6,
+        bitmap_surface_bytes: entries.saturating_mul(1024),
     }
 }
 
@@ -396,4 +399,7 @@ fn memory_diagnostics_helpers_emit_structured_runtime_memory_events_when_enabled
     assert!(content.contains("after_runtime_control_count"));
     assert!(content.contains("terminal_memory_release_succeeded"));
     assert!(content.contains("runtime_disconnect_succeeded"));
+    assert!(content.contains("cache_before_bitmap_sprite_cache_entries"));
+    assert!(content.contains("cache_after_bitmap_row_hash_entries"));
+    assert!(content.contains("cache_after_bitmap_surface_bytes"));
 }
