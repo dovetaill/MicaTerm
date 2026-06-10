@@ -1493,6 +1493,7 @@ fn sync_modal_repository_field_right_click_keeps_selection_and_typing_owner() {
     let base_url_position = element_center(&base_url_input);
 
     dispatch_pointer_click(&app, base_url_position, PointerEventButton::Left);
+    dispatch_text_key_chord(&app, "a", true, false, false);
     dispatch_text_sequence(&app, "https://vault.example.com");
 
     dispatch_text_key_chord(&app, "a", true, false, false);
@@ -1512,5 +1513,146 @@ fn sync_modal_repository_field_right_click_keeps_selection_and_typing_owner() {
         app.get_sync_modal_git_base_url().as_str(),
         "Z",
         "after right-clicking a selected sync modal field, the next typed character should still replace the same field selection"
+    );
+}
+
+#[test]
+fn sync_modal_base_url_context_menu_copy_and_paste_actions_work() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let app_weak = app.as_weak();
+    app.on_sync_modal_draft_changed(move |field, value| {
+        let app = app_weak.upgrade().expect("upgrade app");
+        if field.as_str() == "git-base-url" {
+            app.set_sync_modal_git_base_url(value);
+        }
+    });
+
+    app.show().expect("show app window");
+    app.window()
+        .dispatch_event(WindowEvent::WindowActiveChanged(true));
+    app.set_sync_modal_open(true);
+    app.set_sync_modal_mode("configured".into());
+    app.set_sync_modal_git_auth_mode("https".into());
+    settle_modal_ui();
+
+    let base_url_field = ElementHandle::find_by_element_id(&app, "SyncVaultModal::git-base-url-field")
+        .next()
+        .expect("find sync base url field");
+    let base_url_input = descendant_by_id(&base_url_field, "DialogTextField::field-input");
+    let base_url_position = element_center(&base_url_input);
+
+    dispatch_pointer_click(&app, base_url_position, PointerEventButton::Left);
+    dispatch_text_key_chord(&app, "a", true, false, false);
+    dispatch_text_sequence(&app, "https://vault.example.com");
+    dispatch_text_key_chord(&app, "a", true, false, false);
+
+    set_clipboard_text("sentinel-before-base-url-copy");
+    dispatch_pointer_click(&app, base_url_position, PointerEventButton::Right);
+
+    assert!(
+        app.get_text_context_menu_copy_enabled(),
+        "public sync repository fields should expose Copy through the shared text context menu"
+    );
+
+    let text_menu_overlay =
+        ElementHandle::find_by_element_id(&app, "AppWindow::text-context-menu-overlay")
+            .next()
+            .expect("find text context menu overlay");
+    let copy_row = descendant_by_id(&text_menu_overlay, "TextContextMenuOverlay::copy-row");
+    dispatch_pointer_click(&app, element_center(&copy_row), PointerEventButton::Left);
+
+    assert_eq!(
+        clipboard_text(),
+        "https://vault.example.com",
+        "the shared text context menu Copy row should keep working for public sync repository fields"
+    );
+
+    dispatch_pointer_click(&app, base_url_position, PointerEventButton::Left);
+    dispatch_text_key_chord(&app, "a", true, false, false);
+    set_clipboard_text("https://mirror.example.com");
+    dispatch_pointer_click(&app, base_url_position, PointerEventButton::Right);
+
+    let text_menu_overlay =
+        ElementHandle::find_by_element_id(&app, "AppWindow::text-context-menu-overlay")
+            .next()
+            .expect("find text context menu overlay");
+    let paste_row = descendant_by_id(&text_menu_overlay, "TextContextMenuOverlay::paste-row");
+    dispatch_pointer_click(&app, element_center(&paste_row), PointerEventButton::Left);
+
+    assert_eq!(
+        app.get_sync_modal_git_base_url().as_str(),
+        "https://mirror.example.com",
+        "the shared text context menu Paste row should keep working for public sync repository fields"
+    );
+}
+
+#[test]
+fn sync_modal_master_password_pastes_without_exposing_copy_even_when_revealed() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let app_weak = app.as_weak();
+    app.on_sync_modal_draft_changed(move |field, value| {
+        let app = app_weak.upgrade().expect("upgrade app");
+        if field.as_str() == "master-password" {
+            app.set_sync_modal_master_password(value);
+        }
+    });
+
+    app.show().expect("show app window");
+    app.window()
+        .dispatch_event(WindowEvent::WindowActiveChanged(true));
+    app.set_sync_modal_open(true);
+    app.set_sync_modal_mode("not-configured".into());
+    settle_modal_ui();
+
+    let password_input =
+        ElementHandle::find_by_element_id(&app, "SyncVaultModal::master-password-field")
+        .next()
+        .map(|password_field| descendant_by_id(&password_field, "DialogTextField::field-input"))
+        .expect("find sync master password input");
+    let password_position = element_center(&password_input);
+
+    dispatch_pointer_click(&app, password_position, PointerEventButton::Left);
+    dispatch_text_sequence(&app, "vault-master-secret");
+    dispatch_text_key_chord(&app, "a", true, false, false);
+
+    set_clipboard_text("sentinel-before-master-password-menu");
+    dispatch_pointer_click(&app, password_position, PointerEventButton::Right);
+
+    assert!(
+        !app.get_text_context_menu_copy_enabled(),
+        "secret sync credentials should not expose Copy through the shared text context menu"
+    );
+    assert!(
+        app.get_text_context_menu_paste_enabled(),
+        "secret sync credentials should still expose Paste through the shared text context menu"
+    );
+
+    set_clipboard_text("vault-master-replaced");
+    let text_menu_overlay =
+        ElementHandle::find_by_element_id(&app, "AppWindow::text-context-menu-overlay")
+            .next()
+            .expect("find text context menu overlay");
+    let paste_row = descendant_by_id(&text_menu_overlay, "TextContextMenuOverlay::paste-row");
+    dispatch_pointer_click(&app, element_center(&paste_row), PointerEventButton::Left);
+
+    assert_eq!(
+        app.get_sync_modal_master_password().as_str(),
+        "vault-master-replaced",
+        "the shared text context menu Paste row should still work for secret sync credential fields"
+    );
+
+    app.set_sync_modal_master_password_visible(true);
+    settle_modal_ui();
+    dispatch_pointer_click(&app, password_position, PointerEventButton::Left);
+    dispatch_text_key_chord(&app, "a", true, false, false);
+    dispatch_pointer_click(&app, password_position, PointerEventButton::Right);
+
+    assert!(
+        !app.get_text_context_menu_copy_enabled(),
+        "revealing a secret sync credential should not automatically grant Copy in the shared text context menu"
     );
 }

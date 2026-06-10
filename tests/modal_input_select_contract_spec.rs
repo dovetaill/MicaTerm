@@ -150,6 +150,87 @@ fn ssh_modal_contract_wires_public_fields_into_text_context_menu_bridge() {
 }
 
 #[test]
+fn keychain_identity_modal_contract_wires_public_and_secret_fields_into_text_context_menu_bridge()
+{
+    let source = fs::read_to_string("ui/components/assets-keychain-identity-modal.slint")
+        .expect("read keychain identity modal source");
+
+    for marker in [
+        "callback text-context-menu-requested(",
+        "in property <string> text-context-menu-action-id: \"\";",
+        "in property <string> text-context-menu-action-field-id: \"\";",
+        "in property <int> text-context-menu-action-sequence: 0;",
+        "field-id: \"keychain-identity.name\";",
+        "field-id: \"keychain-identity.username\";",
+        "field-id: \"keychain-identity.password\";",
+        "context-menu-secret: true;",
+        "field-id: \"keychain-identity.remark\";",
+        "field-kind: \"comment\";",
+    ] {
+        assert!(
+            source.contains(marker),
+            "keychain identity modal should wire text fields into the shared text context-menu bridge marker `{marker}`"
+        );
+    }
+}
+
+#[test]
+fn keychain_ssh_key_modal_contract_wires_secret_and_public_material_into_text_context_menu_bridge()
+{
+    let source = fs::read_to_string("ui/components/assets-keychain-ssh-key-modal.slint")
+        .expect("read keychain ssh key modal source");
+
+    for marker in [
+        "callback text-context-menu-requested(",
+        "in property <string> text-context-menu-action-id: \"\";",
+        "in property <string> text-context-menu-action-field-id: \"\";",
+        "in property <int> text-context-menu-action-sequence: 0;",
+        "field-id: \"keychain-ssh-key.name\";",
+        "field-id: \"keychain-ssh-key.private-key\";",
+        "field-kind: \"private-key\";",
+        "context-menu-secret: true;",
+        "field-id: \"keychain-ssh-key.public-key\";",
+        "field-kind: \"public-key\";",
+        "field-id: \"keychain-ssh-key.fingerprint\";",
+        "field-kind: \"fingerprint\";",
+    ] {
+        assert!(
+            source.contains(marker),
+            "keychain SSH key modal should wire secret/public material into the shared text context-menu bridge marker `{marker}`"
+        );
+    }
+}
+
+#[test]
+fn sync_vault_modal_contract_wires_public_and_secret_fields_into_text_context_menu_bridge() {
+    let source = fs::read_to_string("ui/components/sync-vault-modal.slint")
+        .expect("read sync vault modal source");
+
+    for marker in [
+        "callback text-context-menu-requested(",
+        "in property <string> text-context-menu-action-id: \"\";",
+        "in property <string> text-context-menu-action-field-id: \"\";",
+        "in property <int> text-context-menu-action-sequence: 0;",
+        "field-id: \"sync.master-password\";",
+        "field-id: \"sync.git-base-url\";",
+        "field-id: \"sync.git-namespace\";",
+        "field-id: \"sync.git-repository\";",
+        "field-id: \"sync.git-branch\";",
+        "field-id: \"sync.git-root-path\";",
+        "field-id: \"sync.git-https-username\";",
+        "field-id: \"sync.git-pat\";",
+        "field-id: \"sync.git-ssh-private-key\";",
+        "field-id: \"sync.git-ssh-passphrase\";",
+        "context-menu-secret: true;",
+    ] {
+        assert!(
+            source.contains(marker),
+            "sync vault modal should wire text fields into the shared text context-menu bridge marker `{marker}`"
+        );
+    }
+}
+
+#[test]
 fn dialog_select_contract_exposes_modal_local_popup_primitives() {
     let source =
         fs::read_to_string("ui/components/modal-chrome.slint").expect("read modal chrome source");

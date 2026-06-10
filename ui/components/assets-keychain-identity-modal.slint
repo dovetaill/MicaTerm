@@ -23,10 +23,14 @@ export component AssetsKeychainIdentityModal inherits Rectangle {
     in property <string> validation-message: "";
     in property <bool> can-confirm: false;
     in property <int> focus-sequence: 0;
+    in property <string> text-context-menu-action-id: "";
+    in property <string> text-context-menu-action-field-id: "";
+    in property <int> text-context-menu-action-sequence: 0;
     callback close-requested();
     callback confirm-requested();
     callback draft-changed(string, string);
     callback action-requested(string);
+    callback text-context-menu-requested(string, string, bool, bool, bool, bool, length, length);
     callback drag-requested(length, length);
     callback drag-moved(length, length);
     callback drag-ended();
@@ -117,6 +121,11 @@ export component AssetsKeychainIdentityModal inherits Rectangle {
                         name-field := DialogTextField {
                             width: parent.width;
                             label: "Name";
+                            field-id: "keychain-identity.name";
+                            field-kind: "label";
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             required: true;
                             value: root.name;
                             invalid: root.validation-message != "";
@@ -125,16 +134,65 @@ export component AssetsKeychainIdentityModal inherits Rectangle {
                             value-changed(value) => {
                                 root.draft-changed("name", value);
                             }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                );
+                            }
                         }
 
-                        DialogTextField {
+                        username-field := DialogTextField {
                             width: parent.width;
                             label: "Username";
+                            field-id: "keychain-identity.username";
+                            field-kind: "text";
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             required: true;
                             value: root.username;
 
                             value-changed(value) => {
                                 root.draft-changed("username", value);
+                            }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                );
                             }
                         }
                     }
@@ -175,9 +233,15 @@ export component AssetsKeychainIdentityModal inherits Rectangle {
                             }
                         }
 
-                        if root.auth-kind == "password" : DialogTextField {
+                        if root.auth-kind == "password" : password-field := DialogTextField {
                             width: parent.width;
                             label: "Password";
+                            field-id: "keychain-identity.password";
+                            field-kind: "secret";
+                            context-menu-secret: true;
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             required: true;
                             value: root.password;
                             password-mode: !root.password-visible;
@@ -194,6 +258,28 @@ export component AssetsKeychainIdentityModal inherits Rectangle {
                                 root.draft-changed(
                                     "password_visibility",
                                     root.password-visible ? "hidden" : "visible"
+                                );
+                            }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
                                 );
                             }
                         }
@@ -242,15 +328,42 @@ export component AssetsKeychainIdentityModal inherits Rectangle {
                         title: "Notes";
                         description: "Use this for environment or owner hints when the same username appears across systems.";
 
-                        DialogTextField {
+                        remark-field := DialogTextField {
                             width: parent.width;
                             label: "Remark";
+                            field-id: "keychain-identity.remark";
+                            field-kind: "comment";
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             value: root.remark;
                             multiline: true;
                             helper-text: "Helpful for environment, scope, or owner notes when the same username exists across multiple systems.";
 
                             value-changed(value) => {
                                 root.draft-changed("remark", value);
+                            }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                );
                             }
                         }
                     }

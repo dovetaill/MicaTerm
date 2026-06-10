@@ -82,12 +82,16 @@ export component SyncVaultModal inherits Rectangle {
     in property <string> primary-revision-text: "Unknown";
     in property <string> remote-status-text: "";
     in property <bool> remote-status-loading: false;
+    in property <string> text-context-menu-action-id: "";
+    in property <string> text-context-menu-action-field-id: "";
+    in property <int> text-context-menu-action-sequence: 0;
     callback close-requested();
     callback primary-action-requested();
     callback secondary-action-requested();
     callback validate-requested();
     callback draft-changed(string, string);
     callback toggle-changed(string, bool);
+    callback text-context-menu-requested(string, string, bool, bool, bool, bool, length, length);
     callback drag-requested(length, length);
     callback drag-moved(length, length);
     callback drag-ended();
@@ -272,9 +276,15 @@ export component SyncVaultModal inherits Rectangle {
                         title: "Vault bootstrap";
                         description: root.compact-layout ? "" : "Provide the master password only during first-time setup or unlock-style flows.";
 
-                        DialogTextField {
+                        master-password-field := DialogTextField {
                             width: parent.width;
                             label: "Master password";
+                            field-id: "sync.master-password";
+                            field-kind: "secret";
+                            context-menu-secret: true;
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             value: root.master-password;
                             password-mode: !root.master-password-visible;
                             trailing-icon-visible: true;
@@ -290,6 +300,28 @@ export component SyncVaultModal inherits Rectangle {
                                 root.draft-changed(
                                     "master-password-visibility",
                                     root.master-password-visible ? "hidden" : "visible"
+                                );
+                            }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
                                 );
                             }
                         }
@@ -342,55 +374,190 @@ export component SyncVaultModal inherits Rectangle {
                         title: "Repository";
                         description: root.compact-layout ? "" : "Use structured repository coordinates so visibility validation can fail closed before sync is enabled.";
 
-                        DialogTextField {
+                        git-base-url-field := DialogTextField {
                             width: parent.width;
                             label: "Base URL";
+                            field-id: "sync.git-base-url";
+                            field-kind: "public-metadata";
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             value: root.git-base-url;
                             helper-text: root.git-provider-kind == "gitlab" ? "Override this for self-managed GitLab instances." : "Defaults to the formal host for the selected provider.";
 
                             value-changed(value) => {
                                 root.draft-changed("git-base-url", value);
                             }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                );
+                            }
                         }
 
-                        DialogTextField {
+                        git-namespace-field := DialogTextField {
                             width: parent.width;
                             label: root.git-provider-kind == "gitlab" ? "Namespace" : "Owner or namespace";
+                            field-id: "sync.git-namespace";
+                            field-kind: "public-metadata";
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             value: root.git-namespace;
 
                             value-changed(value) => {
                                 root.draft-changed("git-namespace", value);
                             }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                );
+                            }
                         }
 
-                        DialogTextField {
+                        git-repository-field := DialogTextField {
                             width: parent.width;
                             label: "Repository";
+                            field-id: "sync.git-repository";
+                            field-kind: "public-metadata";
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             value: root.git-repository;
 
                             value-changed(value) => {
                                 root.draft-changed("git-repository", value);
                             }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                );
+                            }
                         }
 
-                        DialogTextField {
+                        git-branch-field := DialogTextField {
                             width: parent.width;
                             label: "Branch";
+                            field-id: "sync.git-branch";
+                            field-kind: "public-metadata";
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             value: root.git-branch;
 
                             value-changed(value) => {
                                 root.draft-changed("git-branch", value);
                             }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                );
+                            }
                         }
 
-                        DialogTextField {
+                        git-root-path-field := DialogTextField {
                             width: parent.width;
                             label: "Remote path";
+                            field-id: "sync.git-root-path";
+                            field-kind: "path";
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             value: root.git-root-path;
                             helper-text: "The encrypted sync payload is stored under this directory inside the repository.";
 
                             value-changed(value) => {
                                 root.draft-changed("git-root-path", value);
+                            }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                );
                             }
                         }
                     }
@@ -426,20 +593,53 @@ export component SyncVaultModal inherits Rectangle {
                             }
                         }
 
-                        if root.git-auth-mode == "https" : DialogTextField {
+                        if root.git-auth-mode == "https" : git-https-username-field := DialogTextField {
                             width: parent.width;
                             label: "HTTPS username";
+                            field-id: "sync.git-https-username";
+                            field-kind: "text";
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             value: root.git-https-username;
                             helper-text: "Used for HTTPS Git transport together with the Personal Access Token.";
 
                             value-changed(value) => {
                                 root.draft-changed("git-https-username", value);
                             }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                );
+                            }
                         }
 
-                        if root.git-auth-mode == "https" : DialogTextField {
+                        if root.git-auth-mode == "https" : git-pat-field := DialogTextField {
                             width: parent.width;
                             label: "Personal Access Token";
+                            field-id: "sync.git-pat";
+                            field-kind: "secret";
+                            context-menu-secret: true;
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             value: root.git-pat;
                             password-mode: !root.git-https-secret-visible;
                             trailing-icon-visible: true;
@@ -456,11 +656,39 @@ export component SyncVaultModal inherits Rectangle {
                                     root.git-https-secret-visible ? "hidden" : "visible"
                                 );
                             }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                );
+                            }
                         }
 
-                        if root.git-auth-mode == "ssh" : DialogTextField {
+                        if root.git-auth-mode == "ssh" : git-ssh-private-key-field := DialogTextField {
                             width: parent.width;
                             label: "SSH private key";
+                            field-id: "sync.git-ssh-private-key";
+                            field-kind: "private-key";
+                            context-menu-secret: true;
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             value: root.git-ssh-private-key;
                             password-mode: true;
                             multiline: true;
@@ -468,11 +696,39 @@ export component SyncVaultModal inherits Rectangle {
                             value-changed(value) => {
                                 root.draft-changed("git-ssh-private-key", value);
                             }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                );
+                            }
                         }
 
-                        if root.git-auth-mode == "ssh" : DialogTextField {
+                        if root.git-auth-mode == "ssh" : git-ssh-passphrase-field := DialogTextField {
                             width: parent.width;
                             label: "SSH passphrase";
+                            field-id: "sync.git-ssh-passphrase";
+                            field-kind: "secret";
+                            context-menu-secret: true;
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             value: root.git-ssh-passphrase;
                             password-mode: !root.git-ssh-passphrase-visible;
                             trailing-icon-visible: true;
@@ -487,6 +743,28 @@ export component SyncVaultModal inherits Rectangle {
                                 root.draft-changed(
                                     "git-ssh-passphrase-visibility",
                                     root.git-ssh-passphrase-visible ? "hidden" : "visible"
+                                );
+                            }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
                                 );
                             }
                         }

@@ -2280,6 +2280,9 @@ export component AppWindow inherits Window {
             primary-revision-text: root.sync-modal-primary-revision-text;
             remote-status-text: root.sync-modal-remote-status-text;
             remote-status-loading: root.sync-modal-remote-status-loading;
+            text-context-menu-action-id: root.text-context-menu-action-id;
+            text-context-menu-action-field-id: root.text-context-menu-action-field-id;
+            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
 
             close-requested => {
                 root.sync-modal-close-requested();
@@ -2303,6 +2306,28 @@ export component AppWindow inherits Window {
 
             toggle-changed(field, value) => {
                 root.sync-modal-toggle-changed(field, value);
+            }
+
+            text-context-menu-requested(
+                field-id,
+                field-kind,
+                read-only,
+                is-secret,
+                has-selection,
+                supports-multiline,
+                anchor-x,
+                anchor-y,
+            ) => {
+                root.text-context-menu-requested(
+                    field-id,
+                    field-kind,
+                    read-only,
+                    is-secret,
+                    has-selection,
+                    supports-multiline,
+                    anchor-x,
+                    anchor-y,
+                );
             }
 
             drag-requested(pointer-x, pointer-y) => {
@@ -2786,6 +2811,9 @@ export component AppWindow inherits Window {
             validation-message: root.asset-modal-validation-message;
             can-confirm: root.asset-modal-can-confirm;
             focus-sequence: root.asset-modal-focus-sequence;
+            text-context-menu-action-id: root.text-context-menu-action-id;
+            text-context-menu-action-field-id: root.text-context-menu-action-field-id;
+            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
 
             close-requested => {
                 root.close-asset-modal-requested();
@@ -2801,6 +2829,28 @@ export component AppWindow inherits Window {
 
             action-requested(action-id) => {
                 root.keychain-identity-modal-action-requested(action-id);
+            }
+
+            text-context-menu-requested(
+                field-id,
+                field-kind,
+                read-only,
+                is-secret,
+                has-selection,
+                supports-multiline,
+                anchor-x,
+                anchor-y,
+            ) => {
+                root.text-context-menu-requested(
+                    field-id,
+                    field-kind,
+                    read-only,
+                    is-secret,
+                    has-selection,
+                    supports-multiline,
+                    anchor-x,
+                    anchor-y,
+                );
             }
 
             drag-requested(pointer-x, pointer-y) => {
@@ -2854,6 +2904,9 @@ export component AppWindow inherits Window {
             validation-message: root.asset-modal-validation-message;
             can-confirm: root.asset-modal-can-confirm;
             focus-sequence: root.asset-modal-focus-sequence;
+            text-context-menu-action-id: root.text-context-menu-action-id;
+            text-context-menu-action-field-id: root.text-context-menu-action-field-id;
+            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
 
             close-requested => {
                 root.close-asset-modal-requested();
@@ -2869,6 +2922,28 @@ export component AppWindow inherits Window {
 
             action-requested(action-id) => {
                 root.keychain-ssh-key-modal-action-requested(action-id);
+            }
+
+            text-context-menu-requested(
+                field-id,
+                field-kind,
+                read-only,
+                is-secret,
+                has-selection,
+                supports-multiline,
+                anchor-x,
+                anchor-y,
+            ) => {
+                root.text-context-menu-requested(
+                    field-id,
+                    field-kind,
+                    read-only,
+                    is-secret,
+                    has-selection,
+                    supports-multiline,
+                    anchor-x,
+                    anchor-y,
+                );
             }
 
             drag-requested(pointer-x, pointer-y) => {

@@ -19,10 +19,14 @@ export component AssetsKeychainSshKeyModal inherits Rectangle {
     in property <string> validation-message: "";
     in property <bool> can-confirm: false;
     in property <int> focus-sequence: 0;
+    in property <string> text-context-menu-action-id: "";
+    in property <string> text-context-menu-action-field-id: "";
+    in property <int> text-context-menu-action-sequence: 0;
     callback close-requested();
     callback confirm-requested();
     callback draft-changed(string, string);
     callback action-requested(string);
+    callback text-context-menu-requested(string, string, bool, bool, bool, bool, length, length);
     callback drag-requested(length, length);
     callback drag-moved(length, length);
     callback drag-ended();
@@ -111,6 +115,11 @@ export component AssetsKeychainSshKeyModal inherits Rectangle {
                         name-field := DialogTextField {
                             width: parent.width;
                             label: "Name";
+                            field-id: "keychain-ssh-key.name";
+                            field-kind: "label";
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             value: root.name;
                             invalid: root.validation-message != "";
                             helper-text: root.validation-message != ""
@@ -119,6 +128,28 @@ export component AssetsKeychainSshKeyModal inherits Rectangle {
 
                             value-changed(value) => {
                                 root.draft-changed("name", value);
+                            }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                );
                             }
                         }
                     }
@@ -152,15 +183,43 @@ export component AssetsKeychainSshKeyModal inherits Rectangle {
                             }
                         }
 
-                        DialogTextField {
+                        private-key-field := DialogTextField {
                             width: parent.width;
                             label: "Private key";
+                            field-id: "keychain-ssh-key.private-key";
+                            field-kind: "private-key";
+                            context-menu-secret: true;
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             value: root.private-key;
                             multiline: true;
                             helper-text: "Keep the private key material here; the matching public key and fingerprint are shown below for confirmation.";
 
                             value-changed(value) => {
                                 root.draft-changed("private_key", value);
+                            }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                );
                             }
                         }
                     }
@@ -223,25 +282,81 @@ export component AssetsKeychainSshKeyModal inherits Rectangle {
                             }
                         }
 
-                        DialogTextField {
+                        public-key-field := DialogTextField {
                             width: parent.width;
                             label: "Public key";
+                            field-id: "keychain-ssh-key.public-key";
+                            field-kind: "public-key";
+                            context-menu-secret: true;
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             value: root.public-key;
                             multiline: true;
 
                             value-changed(value) => {
                                 root.draft-changed("public_key", value);
                             }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                );
+                            }
                         }
 
-                        DialogTextField {
+                        fingerprint-field := DialogTextField {
                             width: parent.width;
                             label: "Fingerprint";
+                            field-id: "keychain-ssh-key.fingerprint";
+                            field-kind: "fingerprint";
+                            context-menu-secret: true;
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             value: root.fingerprint;
                             helper-text: "This fingerprint is shown in identity pickers and conflict confirmation surfaces.";
 
                             value-changed(value) => {
                                 root.draft-changed("fingerprint", value);
+                            }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                );
                             }
                         }
                     }
