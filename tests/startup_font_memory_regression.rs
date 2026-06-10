@@ -78,3 +78,31 @@ fn atlas_renderer_dependency_contract_uses_ab_glyph_instead_of_fontdue() {
         "terminal atlas source should no longer build on fontdue"
     );
 }
+
+#[test]
+fn ui_shell_font_diagnostics_gate_system_catalog_snapshot_behind_memory_diagnostics() {
+    let source = fs::read_to_string("src/app/font_diagnostics.rs").expect("read font diagnostics");
+    let function_start = source
+        .find("pub(crate) fn log_ui_shell_font_diagnostics() {")
+        .expect("find ui shell diagnostics function");
+    let function_end = source[function_start..]
+        .find("#[cfg(target_os = \"windows\")]")
+        .map(|offset| function_start + offset)
+        .expect("find ui diagnostics function end");
+    let function_body = &source[function_start..function_end];
+    let gate_offset = function_body.find("memory_diagnostics_enabled()");
+    let system_probe_offset = function_body.find("resolve_system_face_diagnostic(");
+
+    assert!(
+        gate_offset.is_some(),
+        "ui shell startup diagnostics should only opt into full system-font snapshot work when memory diagnostics are explicitly enabled"
+    );
+    assert!(
+        system_probe_offset.is_some(),
+        "ui shell diagnostics should still keep the explicit system-font snapshot path available for opt-in debugging"
+    );
+    assert!(
+        gate_offset.unwrap() < system_probe_offset.unwrap(),
+        "ui shell startup diagnostics should gate the expensive system-font snapshot before resolve_system_face_diagnostic can run on the default startup path"
+    );
+}

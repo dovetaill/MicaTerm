@@ -175,53 +175,7 @@ pub(crate) fn log_ui_shell_font_diagnostics() {
         requested_style,
         "界",
     );
-    let icon = resolve_ui_probe(
-        &mut collection,
-        UI_FONT_FAMILY,
-        requested_weight,
-        requested_style,
-        "⚙",
-    )
-    .or_else(|| {
-        resolve_system_face_diagnostic(
-            UI_FONT_FAMILY,
-            "Segoe UI Symbol",
-            UI_SYMBOL_FALLBACK_FAMILIES,
-        )
-    });
-    let emoji = resolve_ui_probe(
-        &mut collection,
-        UI_FONT_FAMILY,
-        requested_weight,
-        requested_style,
-        "🙂",
-    )
-    .or_else(|| {
-        resolve_system_face_diagnostic(
-            UI_FONT_FAMILY,
-            TERMINAL_EMOJI_FALLBACK_FAMILY,
-            UI_EMOJI_FALLBACK_FAMILIES,
-        )
-    });
     let requested_match = latin.clone().unwrap_or_default();
-    let chrome_latin = resolve_ui_probe(
-        &mut collection,
-        UI_FONT_FAMILY,
-        UI_CHROME_FONT_WEIGHT,
-        requested_style,
-        "A",
-    );
-    let chrome_cjk = resolve_ui_probe(
-        &mut collection,
-        UI_FONT_FAMILY,
-        UI_CHROME_FONT_WEIGHT,
-        requested_style,
-        "界",
-    );
-    let chrome_requested_match = chrome_latin
-        .clone()
-        .or_else(|| chrome_cjk.clone())
-        .unwrap_or_default();
     let shell_probe_matches = [latin.as_ref(), cjk.as_ref()];
     let fallback_family = shell_probe_matches
         .iter()
@@ -237,9 +191,58 @@ pub(crate) fn log_ui_shell_font_diagnostics() {
         .collect::<BTreeSet<_>>();
     let mixed_ui_families = resolved_families.len() > 1;
 
-    // Keep the full shell-font snapshot wiring available in-source for contract checks
-    // without reintroducing a startup info log on packaged runs.
-    let _ui_shell_font_snapshot = || {
+    // Only the opt-in memory-diagnostics path should pay to enumerate extra system-font
+    // snapshot data. The default startup warning path stays limited to the latin/cjk probes.
+    if crate::app::logging::runtime::memory_diagnostics_enabled()
+        && tracing::enabled!(target: "app.fonts", tracing::Level::DEBUG)
+    {
+        let icon = resolve_ui_probe(
+            &mut collection,
+            UI_FONT_FAMILY,
+            requested_weight,
+            requested_style,
+            "⚙",
+        )
+        .or_else(|| {
+            resolve_system_face_diagnostic(
+                UI_FONT_FAMILY,
+                "Segoe UI Symbol",
+                UI_SYMBOL_FALLBACK_FAMILIES,
+            )
+        });
+        let emoji = resolve_ui_probe(
+            &mut collection,
+            UI_FONT_FAMILY,
+            requested_weight,
+            requested_style,
+            "🙂",
+        )
+        .or_else(|| {
+            resolve_system_face_diagnostic(
+                UI_FONT_FAMILY,
+                TERMINAL_EMOJI_FALLBACK_FAMILY,
+                UI_EMOJI_FALLBACK_FAMILIES,
+            )
+        });
+        let chrome_latin = resolve_ui_probe(
+            &mut collection,
+            UI_FONT_FAMILY,
+            UI_CHROME_FONT_WEIGHT,
+            requested_style,
+            "A",
+        );
+        let chrome_cjk = resolve_ui_probe(
+            &mut collection,
+            UI_FONT_FAMILY,
+            UI_CHROME_FONT_WEIGHT,
+            requested_style,
+            "界",
+        );
+        let chrome_requested_match = chrome_latin
+            .clone()
+            .or_else(|| chrome_cjk.clone())
+            .unwrap_or_default();
+
         tracing::debug!(
             target: "app.fonts",
             requested_family = UI_FONT_FAMILY,
@@ -286,7 +289,7 @@ pub(crate) fn log_ui_shell_font_diagnostics() {
             mixed_ui_families,
             "ui shell font resolution snapshot"
         );
-    };
+    }
 
     if requested_match.resolved_family != UI_FONT_FAMILY || mixed_ui_families {
         tracing::warn!(
