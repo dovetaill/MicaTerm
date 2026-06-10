@@ -19,6 +19,34 @@ fn native_terminal_shortcut_routes_paste_through_workspace_callback() {
 }
 
 #[test]
+fn native_terminal_paste_shortcut_scopes_view_model_borrows_to_copy_only() {
+    let source = fs::read_to_string("src/app/bootstrap/windowing.rs")
+        .expect("read workspace windowing binder");
+
+    let shortcut_block = slice_after(&source, "if let Some(shortcut) = clipboard_shortcut {");
+    let match_block = slice_after(shortcut_block, "match shortcut {");
+    let copy_arm = slice_after(match_block, "NativeTerminalClipboardShortcut::Copy");
+    let copy_arm = copy_arm
+        .split_once("NativeTerminalClipboardShortcut::Paste => {")
+        .map(|(arm, _)| arm)
+        .expect("copy arm should precede the paste arm");
+    let paste_arm = slice_after(match_block, "NativeTerminalClipboardShortcut::Paste => {");
+    let paste_arm = paste_arm
+        .split_once("if sftp_path_edit_shortcut {")
+        .map(|(arm, _)| arm)
+        .expect("paste arm should be followed by the SFTP shortcut branch");
+
+    assert!(
+        copy_arm.contains("let state = state.borrow();"),
+        "the native copy path should borrow the workspace view model only inside the copy arm so paste does not inherit that borrow scope"
+    );
+    assert!(
+        !paste_arm.contains("let state = state.borrow();"),
+        "the native paste path must not hold an immutable workspace view-model borrow before invoking the shared paste callback, or Ctrl+Shift+V can panic with a RefCell borrow_mut error"
+    );
+}
+
+#[test]
 fn workspace_paste_requests_are_ignored_while_the_review_modal_is_open() {
     let source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap paste handler");
 

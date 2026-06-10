@@ -102,23 +102,24 @@ pub(super) fn bind_windows_window_state_tracking(
                     if window.get_workspace_session_host_mode() == "terminal"
                         && !window.get_active_workspace_session_id().is_empty()
                     {
-                        let state = state.borrow();
                         match shortcut {
-                            NativeTerminalClipboardShortcut::Copy
+                            NativeTerminalClipboardShortcut::Copy => {
+                                let state = state.borrow();
                                 if super::workspace_terminal::active_workspace_terminal_selection_buffer_range(
                                     &state,
                                 )
-                                .is_some() =>
-                            {
-                                workspace_terminal::forward_active_workspace_copy_selection(
-                                    &state,
-                                    session_bridge.as_deref(),
-                                    -1,
-                                    -1,
-                                    -1,
-                                    -1,
-                                );
-                                return EventResult::PreventDefault;
+                                .is_some()
+                                {
+                                    workspace_terminal::forward_active_workspace_copy_selection(
+                                        &state,
+                                        session_bridge.as_deref(),
+                                        -1,
+                                        -1,
+                                        -1,
+                                        -1,
+                                    );
+                                    return EventResult::PreventDefault;
+                                }
                             }
                             NativeTerminalClipboardShortcut::Paste => {
                                 if window.get_workspace_paste_warning_modal_open() {
@@ -127,7 +128,6 @@ pub(super) fn bind_windows_window_state_tracking(
                                 window.invoke_workspace_session_paste_requested();
                                 return EventResult::PreventDefault;
                             }
-                            _ => {}
                         }
                     }
                 }
