@@ -3235,6 +3235,9 @@ export component AppWindow inherits Window {
             paste-text <=> root.workspace-paste-warning-text;
             editor-focused <=> root.workspace-paste-warning-editor-focused;
             focus-sequence: root.workspace-paste-warning-focus-sequence;
+            text-context-menu-action-id: root.text-context-menu-action-id;
+            text-context-menu-action-field-id: root.text-context-menu-action-field-id;
+            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
 
             confirm-requested => {
                 root.workspace-paste-warning-confirm-requested();
@@ -3242,6 +3245,28 @@ export component AppWindow inherits Window {
 
             cancel-requested => {
                 root.workspace-paste-warning-cancel-requested();
+            }
+
+            text-context-menu-requested(
+                field-id,
+                field-kind,
+                read-only,
+                is-secret,
+                has-selection,
+                supports-multiline,
+                anchor-x,
+                anchor-y,
+            ) => {
+                root.text-context-menu-requested(
+                    field-id,
+                    field-kind,
+                    read-only,
+                    is-secret,
+                    has-selection,
+                    supports-multiline,
+                    anchor-x,
+                    anchor-y,
+                );
             }
 
             drag-requested(pointer-x, pointer-y) => {

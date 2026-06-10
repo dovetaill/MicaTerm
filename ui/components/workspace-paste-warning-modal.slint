@@ -86,8 +86,12 @@ export component WorkspacePasteWarningModal inherits Rectangle {
     in-out property <string> paste-text: "";
     in property <int> focus-sequence: 0;
     in-out property <bool> editor-focused: false;
+    in property <string> text-context-menu-action-id: "";
+    in property <string> text-context-menu-action-field-id: "";
+    in property <int> text-context-menu-action-sequence: 0;
     callback confirm-requested();
     callback cancel-requested();
+    callback text-context-menu-requested(string, string, bool, bool, bool, bool, length, length);
     callback drag-requested(length, length);
     callback drag-moved(length, length);
     callback drag-ended();
@@ -316,6 +320,9 @@ export component WorkspacePasteWarningModal inherits Rectangle {
                 y: 76px;
                 width: parent.width - (root.body-padding-horizontal * 2);
                 height: max(180px, parent.height - 92px);
+                private property <int> context-menu-anchor-offset: -1;
+                private property <int> context-menu-cursor-offset: -1;
+                private property <int> action-sequence: root.text-context-menu-action-sequence;
                 border-radius: 14px;
                 border-width: 1px;
                 border-color: paste-input.has-focus
@@ -350,6 +357,33 @@ export component WorkspacePasteWarningModal inherits Rectangle {
                             paste-input.y + paste-input.height + root.editor-padding-vertical
                         );
                         background: transparent;
+
+                        paste-input-right-click-hit-area := TouchArea {
+                            x: root.editor-padding-horizontal;
+                            y: root.editor-padding-vertical;
+                            width: max(0px, editor-viewport.width - (root.editor-padding-horizontal * 2));
+                            height: paste-input.height;
+                            mouse-cursor: MouseCursor.text;
+
+                            pointer-event(event) => {
+                                if event.kind == PointerEventKind.down
+                                    && event.button == PointerEventButton.right
+                                {
+                                    editor-frame.context-menu-anchor-offset = paste-input.anchor-position-byte-offset;
+                                    editor-frame.context-menu-cursor-offset = paste-input.cursor-position_byte-offset;
+                                    root.text-context-menu-requested(
+                                        "workspace-paste-warning-editor",
+                                        "multiline",
+                                        false,
+                                        false,
+                                        paste-input.cursor-position_byte-offset != paste-input.anchor-position-byte-offset,
+                                        true,
+                                        self.absolute-position.x + self.mouse-x,
+                                        self.absolute-position.y + self.mouse-y,
+                                    );
+                                }
+                            }
+                        }
 
                         paste-input := TextInput {
                             x: root.editor-padding-horizontal;
@@ -387,6 +421,27 @@ export component WorkspacePasteWarningModal inherits Rectangle {
                                     reject
                                 }
                             }
+                        }
+                    }
+                }
+
+                changed action-sequence => {
+                    if root.text-context-menu-action-field-id == "workspace-paste-warning-editor" {
+                        if editor-frame.context-menu-anchor-offset >= 0 && editor-frame.context-menu-cursor-offset >= 0 {
+                            paste-input.focus();
+                            paste-input.set-selection-offsets(
+                                editor-frame.context-menu-anchor-offset,
+                                editor-frame.context-menu-cursor-offset,
+                            );
+                        }
+                        if root.text-context-menu-action-id == "copy" {
+                            paste-input.copy();
+                            paste-input.focus();
+                        } else if root.text-context-menu-action-id == "paste" {
+                            paste-input.paste();
+                            paste-input.focus();
+                        } else if root.text-context-menu-action-id == "select-all" {
+                            paste-input.select-all();
                         }
                     }
                 }
