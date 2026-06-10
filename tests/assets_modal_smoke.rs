@@ -603,6 +603,153 @@ fn ssh_modal_host_field_context_menu_copy_and_paste_actions_work() {
 }
 
 #[test]
+fn snippet_modal_script_field_context_menu_preserves_multiline_paste_without_terminal_pipeline() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let app_weak = app.as_weak();
+    app.on_asset_snippet_modal_draft_changed(move |field, value| {
+        let app = app_weak.upgrade().expect("upgrade app");
+        match field.as_str() {
+            "name" => app.set_asset_snippet_modal_name(value),
+            "script" => app.set_asset_snippet_modal_script(value),
+            "package" => app.set_asset_snippet_modal_package(value),
+            _ => {}
+        }
+    });
+
+    app.show().expect("show app window");
+    app.window()
+        .dispatch_event(WindowEvent::WindowActiveChanged(true));
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-snippet".into());
+    settle_modal_ui();
+
+    let script_field =
+        ElementHandle::find_by_element_id(&app, "AssetsSnippetModal::script-field")
+            .next()
+            .expect("find snippet script field");
+    let script_input = descendant_by_id(&script_field, "DialogTextField::field-input");
+    let script_position = element_center(&script_input);
+    let multiline_script = "echo alpha\n\tprintf 'beta'\n  gamma";
+
+    dispatch_pointer_click(&app, script_position, PointerEventButton::Left);
+    set_clipboard_text(multiline_script);
+    dispatch_pointer_click(&app, script_position, PointerEventButton::Right);
+
+    assert!(
+        app.get_text_context_menu_open(),
+        "right-clicking the snippet script editor should open the shared text context menu"
+    );
+    assert!(
+        app.get_text_context_menu_paste_enabled(),
+        "snippet script editors should expose Paste through the shared text context menu"
+    );
+
+    let text_menu_overlay =
+        ElementHandle::find_by_element_id(&app, "AppWindow::text-context-menu-overlay")
+            .next()
+            .expect("find text context menu overlay");
+    let paste_row = descendant_by_id(&text_menu_overlay, "TextContextMenuOverlay::paste-row");
+    dispatch_pointer_click(&app, element_center(&paste_row), PointerEventButton::Left);
+
+    assert_eq!(
+        app.get_asset_snippet_modal_script().as_str(),
+        multiline_script,
+        "snippet script editors should preserve newlines, tabs, and indentation when the shared text context menu pastes multiline text"
+    );
+    assert!(
+        !app.get_workspace_paste_warning_modal_open(),
+        "snippet script right-click paste should stay inside the text field domain instead of opening the terminal paste warning flow"
+    );
+
+    dispatch_pointer_click(&app, script_position, PointerEventButton::Left);
+    dispatch_text_key_chord(&app, "a", true, false, false);
+    set_clipboard_text("sentinel-before-snippet-copy");
+    dispatch_pointer_click(&app, script_position, PointerEventButton::Right);
+
+    let text_menu_overlay =
+        ElementHandle::find_by_element_id(&app, "AppWindow::text-context-menu-overlay")
+            .next()
+            .expect("find text context menu overlay");
+    let copy_row = descendant_by_id(&text_menu_overlay, "TextContextMenuOverlay::copy-row");
+    dispatch_pointer_click(&app, element_center(&copy_row), PointerEventButton::Left);
+
+    assert_eq!(
+        clipboard_text(),
+        multiline_script,
+        "snippet script editors should copy the original multiline payload without terminal paste normalization"
+    );
+}
+
+#[test]
+fn snippet_package_name_field_context_menu_copy_and_paste_actions_work() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let app_weak = app.as_weak();
+    app.on_asset_snippet_package_modal_name_changed(move |value| {
+        let app = app_weak.upgrade().expect("upgrade app");
+        app.set_asset_snippet_package_modal_name(value);
+    });
+
+    app.show().expect("show app window");
+    app.window()
+        .dispatch_event(WindowEvent::WindowActiveChanged(true));
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-snippet-package".into());
+    settle_modal_ui();
+
+    let package_name_input =
+        ElementHandle::find_by_element_id(&app, "AssetsSnippetPackageModal::name-input")
+            .next()
+            .expect("find snippet package name input");
+    let package_name_position = element_center(&package_name_input);
+
+    dispatch_pointer_click(&app, package_name_position, PointerEventButton::Left);
+    dispatch_text_sequence(&app, "Ops");
+    dispatch_text_key_chord(&app, "a", true, false, false);
+    set_clipboard_text("sentinel-before-snippet-package-copy");
+    dispatch_pointer_click(&app, package_name_position, PointerEventButton::Right);
+
+    assert!(
+        app.get_text_context_menu_open(),
+        "right-clicking the bare snippet package input should open the shared text context menu"
+    );
+
+    let text_menu_overlay =
+        ElementHandle::find_by_element_id(&app, "AppWindow::text-context-menu-overlay")
+            .next()
+            .expect("find text context menu overlay");
+    let copy_row = descendant_by_id(&text_menu_overlay, "TextContextMenuOverlay::copy-row");
+    dispatch_pointer_click(&app, element_center(&copy_row), PointerEventButton::Left);
+
+    assert_eq!(
+        clipboard_text(),
+        "Ops",
+        "the shared text context menu Copy row should forward to the bare snippet package input selection"
+    );
+
+    dispatch_pointer_click(&app, package_name_position, PointerEventButton::Left);
+    dispatch_text_key_chord(&app, "a", true, false, false);
+    set_clipboard_text("Team Tools");
+    dispatch_pointer_click(&app, package_name_position, PointerEventButton::Right);
+
+    let text_menu_overlay =
+        ElementHandle::find_by_element_id(&app, "AppWindow::text-context-menu-overlay")
+            .next()
+            .expect("find text context menu overlay");
+    let paste_row = descendant_by_id(&text_menu_overlay, "TextContextMenuOverlay::paste-row");
+    dispatch_pointer_click(&app, element_center(&paste_row), PointerEventButton::Left);
+
+    assert_eq!(
+        app.get_asset_snippet_package_modal_name().as_str(),
+        "Team Tools",
+        "the shared text context menu Paste row should update the bare snippet package input without introducing a DialogTextField wrapper"
+    );
+}
+
+#[test]
 fn snippet_package_select_fully_fits_inside_its_layout_group() {
     i_slint_backend_testing::init_no_event_loop();
 

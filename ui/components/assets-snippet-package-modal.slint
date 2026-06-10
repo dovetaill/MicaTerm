@@ -43,6 +43,9 @@ export component AssetsSnippetPackageModal inherits Rectangle {
     in property <string> validation-message: "";
     in property <bool> can-confirm: false;
     in property <int> focus-sequence: 0;
+    in property <string> text-context-menu-action-id: "";
+    in property <string> text-context-menu-action-field-id: "";
+    in property <int> text-context-menu-action-sequence: 0;
     callback close-requested();
     callback confirm-requested();
     callback name-changed(string);
@@ -52,6 +55,8 @@ export component AssetsSnippetPackageModal inherits Rectangle {
     callback drag-ended();
     callback focus-restore-requested();
     private property <length> footer-height: 78px;
+    private property <int> context-menu-anchor-offset: -1;
+    private property <int> context-menu-cursor-offset: -1;
 
     background: transparent;
 
@@ -59,8 +64,41 @@ export component AssetsSnippetPackageModal inherits Rectangle {
         name-input.focus();
     }
 
+    public function select-all() {
+        name-input.select-all();
+    }
+
+    public function copy-selection() {
+        name-input.copy();
+        name-input.focus();
+    }
+
+    public function paste-clipboard() {
+        name-input.paste();
+        name-input.focus();
+    }
+
     function name-field-has-selection() -> bool {
         return name-input.cursor-position_byte-offset != name-input.anchor-position-byte-offset;
+    }
+
+    function apply-text-context-menu-action() {
+        if root.text-context-menu-action-field-id == "snippet-package-name" {
+            if root.context-menu-anchor-offset >= 0 && root.context-menu-cursor-offset >= 0 {
+                name-input.focus();
+                name-input.set-selection-offsets(
+                    root.context-menu-anchor-offset,
+                    root.context-menu-cursor-offset,
+                );
+            }
+            if root.text-context-menu-action-id == "copy" {
+                root.copy-selection();
+            } else if root.text-context-menu-action-id == "paste" {
+                root.paste-clipboard();
+            } else if root.text-context-menu-action-id == "select-all" {
+                root.select-all();
+            }
+        }
     }
 
     modal-focus := FocusScope {
@@ -199,6 +237,8 @@ export component AssetsSnippetPackageModal inherits Rectangle {
                         if event.kind == PointerEventKind.down
                             && event.button == PointerEventButton.right
                         {
+                            root.context-menu-anchor-offset = name-input.anchor-position-byte-offset;
+                            root.context-menu-cursor-offset = name-input.cursor-position_byte-offset;
                             root.text-context-menu-requested(
                                 "snippet-package-name",
                                 "snippet-package-name",
@@ -297,5 +337,9 @@ export component AssetsSnippetPackageModal inherits Rectangle {
                 }
             }
         }
+    }
+
+    changed text-context-menu-action-sequence => {
+        root.apply-text-context-menu-action();
     }
 }

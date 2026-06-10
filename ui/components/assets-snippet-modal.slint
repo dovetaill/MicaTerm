@@ -20,9 +20,13 @@ export component AssetsSnippetModal inherits Rectangle {
     in property <string> validation-message: "";
     in property <bool> can-confirm: false;
     in property <int> focus-sequence: 0;
+    in property <string> text-context-menu-action-id: "";
+    in property <string> text-context-menu-action-field-id: "";
+    in property <int> text-context-menu-action-sequence: 0;
     callback close-requested();
     callback confirm-requested();
     callback draft-changed(string, string);
+    callback text-context-menu-requested(string, string, bool, bool, bool, bool, length, length);
     callback drag-requested(length, length);
     callback drag-moved(length, length);
     callback drag-ended();
@@ -153,6 +157,11 @@ export component AssetsSnippetModal inherits Rectangle {
                         name-field := DialogTextField {
                             width: parent.width;
                             label: "Name";
+                            field-id: "snippet.name";
+                            field-kind: "label";
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             required: true;
                             value: root.name;
                             invalid: root.validation-message != "";
@@ -160,6 +169,28 @@ export component AssetsSnippetModal inherits Rectangle {
 
                             value-changed(value) => {
                                 root.draft-changed("name", value);
+                            }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                );
                             }
                         }
 
@@ -219,14 +250,40 @@ export component AssetsSnippetModal inherits Rectangle {
                         title: "Script";
                         description: "Use multiline shell content without falling back to a web-style textarea.";
 
-                        DialogTextField {
+                        script-field := DialogTextField {
                             width: parent.width;
                             label: "Command body";
+                            field-id: "snippet.script";
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             multiline: true;
                             value: root.script;
 
                             value-changed(value) => {
                                 root.draft-changed("script", value);
+                            }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                );
                             }
                         }
                     }

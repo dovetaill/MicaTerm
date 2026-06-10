@@ -231,6 +231,49 @@ fn sync_vault_modal_contract_wires_public_and_secret_fields_into_text_context_me
 }
 
 #[test]
+fn snippet_modal_contract_wires_name_and_script_fields_into_text_context_menu_bridge() {
+    let source = fs::read_to_string("ui/components/assets-snippet-modal.slint")
+        .expect("read snippet modal source");
+
+    for marker in [
+        "callback text-context-menu-requested(",
+        "in property <string> text-context-menu-action-id: \"\";",
+        "in property <string> text-context-menu-action-field-id: \"\";",
+        "in property <int> text-context-menu-action-sequence: 0;",
+        "field-id: \"snippet.name\";",
+        "field-id: \"snippet.script\";",
+    ] {
+        assert!(
+            source.contains(marker),
+            "snippet modal should wire text fields into the shared text context-menu bridge marker `{marker}`"
+        );
+    }
+}
+
+#[test]
+fn snippet_package_modal_contract_applies_shared_text_context_menu_actions() {
+    let source = fs::read_to_string("ui/components/assets-snippet-package-modal.slint")
+        .expect("read snippet package modal source");
+
+    for marker in [
+        "in property <string> text-context-menu-action-id: \"\";",
+        "in property <string> text-context-menu-action-field-id: \"\";",
+        "in property <int> text-context-menu-action-sequence: 0;",
+        "function apply-text-context-menu-action() {",
+        "if root.text-context-menu-action-id == \"copy\" {",
+        "name-input.copy();",
+        "name-input.paste();",
+        "name-input.select-all();",
+        "changed text-context-menu-action-sequence => {",
+    ] {
+        assert!(
+            source.contains(marker),
+            "snippet package modal should apply shared text context-menu actions locally via marker `{marker}`"
+        );
+    }
+}
+
+#[test]
 fn dialog_select_contract_exposes_modal_local_popup_primitives() {
     let source =
         fs::read_to_string("ui/components/modal-chrome.slint").expect("read modal chrome source");
