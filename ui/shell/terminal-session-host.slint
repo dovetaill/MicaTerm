@@ -375,12 +375,14 @@ export component TerminalSessionHost inherits Rectangle {
     callback surface-resize-requested(int, int);
     callback normalize-hit-col(int, int) -> int;
     callback normalize-selection-hit-col(int, int) -> int;
-    callback resolve-selection-gesture-range(int, int, int, int, int) -> TerminalGestureSelectionRange;
+    callback selection-begin-requested(int, int, int, int);
+    callback selection-update-requested(int, int, int);
+    callback selection-finish-requested();
     callback copy-selection-requested(int, int, int, int);
-    callback selection-changed();
+    callback select-all-requested();
     callback paste-requested();
     callback local-action-requested(string);
-    callback scroll-requested(int, int, int, bool, bool, bool);
+    callback scroll-requested(int, int, int, int, bool, bool, bool);
     callback scroll-thumb-drag-requested(float);
     callback scroll-jump-requested(float);
     callback mouse-input(string, string, int, int, bool, bool, bool);
@@ -417,18 +419,11 @@ export component TerminalSessionHost inherits Rectangle {
     private property <float> wheel-delta-remainder: 0;
     private property <float> wheel-delta-threshold: 120;
     private property <int> wheel-lines-per-notch: 6;
-    private property <int> selection-anchor-row: -1;
-    private property <int> selection-anchor-col: -1;
-    private property <int> selection-focus-row: -1;
-    private property <int> selection-focus-col: -1;
     private property <int> selection-click-streak: 0;
     private property <int> selection-click-row: -1;
     private property <int> selection-click-col: -1;
     private property <bool> selection-click-window-active: false;
-    private property <int> selection-gesture-mode: 0;
-    private property <int> selection-gesture-origin-row: -1;
-    private property <int> selection-gesture-origin-col: -1;
-    private property <bool> selection-drag-active: false;
+    in property <bool> selection-drag-active: false;
     private property <bool> link-open-candidate: false;
     private property <bool> link-press-active: false;
     private property <bool> scrollbar-thumb-drag-active: false;
@@ -838,24 +833,6 @@ export component TerminalSessionHost inherits Rectangle {
         surface-resize-coalesce-timer.restart();
     }
 
-    function clear-selection() {
-        root.selection-anchor-row = -1;
-        root.selection-anchor-col = -1;
-        root.selection-focus-row = -1;
-        root.selection-focus-col = -1;
-        root.reset-selection-gesture();
-        root.link-open-candidate = false;
-        root.link-press-active = false;
-        root.sync-selection-state();
-    }
-
-    function reset-selection-gesture() {
-        root.selection-gesture-mode = 0;
-        root.selection-gesture-origin-row = -1;
-        root.selection-gesture-origin-col = -1;
-        root.selection-drag-active = false;
-    }
-
     function track-selection-click-streak(row: int, col: int) {
         if root.selection-click-window-active
             && root.selection-click-row == row
@@ -868,91 +845,6 @@ export component TerminalSessionHost inherits Rectangle {
         root.selection-click-col = col;
         root.selection-click-window-active = true;
         selection-click-reset-timer.restart();
-    }
-
-    function begin-selection-gesture(mode: int, row: int, col: int) {
-        root.selection-gesture-mode = mode;
-        root.selection-gesture-origin-row = row;
-        root.selection-gesture-origin-col = col;
-        root.selection-drag-active = true;
-        if mode == 0 {
-            root.selection-anchor-row = root.viewport-row-to-buffer-row(row);
-            root.selection-anchor-col = col;
-            root.selection-focus-row = root.viewport-row-to-buffer-row(row);
-            root.selection-focus-col = col;
-            root.sync-selection-state();
-        } else {
-            root.update-selection-gesture(row, col, col);
-        }
-    }
-
-    function update-selection-gesture(row: int, col: int, selection-col: int) {
-        if root.selection-gesture-origin-row < 0 || root.selection-gesture-origin-col < 0 {
-            return;
-        }
-
-        if root.selection-gesture-mode == 0 {
-            root.selection-anchor-row = root.viewport-row-to-buffer-row(root.selection-gesture-origin-row);
-            root.selection-anchor-col = root.selection-gesture-origin-col;
-            root.selection-focus-row = root.viewport-row-to-buffer-row(row);
-            root.selection-focus-col = selection-col;
-        } else {
-            let gesture_range = root.resolve-selection-gesture-range(
-                root.selection-gesture-mode,
-                root.selection-gesture-origin-row,
-                root.selection-gesture-origin-col,
-                row,
-                col,
-            );
-            root.selection-anchor-row = gesture_range.start_row;
-            root.selection-anchor-col = gesture_range.start_col;
-            root.selection-focus-row = gesture_range.end_row;
-            root.selection-focus-col = gesture_range.end_col;
-        }
-
-        root.sync-selection-state();
-    }
-
-    function finish-selection-gesture() {
-        if root.selection-gesture-mode == 0
-            && root.selection-anchor-row == root.selection-focus-row
-            && root.selection-anchor-col == root.selection-focus-col {
-            root.clear-selection();
-            return;
-        }
-
-        root.reset-selection-gesture();
-    }
-
-    function sync-selection-state() {
-        let next-active = root.local-selection-active();
-        let next-start-row = next-active ? root.local-normalized-selection-start-row() : -1;
-        let next-start-col = next-active ? root.local-normalized-selection-start-col() : -1;
-        let next-end-row = next-active ? root.local-normalized-selection-end-row() : -1;
-        let next-end-col = next-active ? root.local-normalized-selection-end-col() : -1;
-        let changed = root.selection-active != next-active
-            || root.selection-start-row != next-start-row
-            || root.selection-start-col != next-start-col
-            || root.selection-end-row != next-end-row
-            || root.selection-end-col != next-end-col;
-
-        if root.local-selection-active() {
-            root.selection-active = next-active;
-            root.selection-start-row = next-start-row;
-            root.selection-start-col = next-start-col;
-            root.selection-end-row = next-end-row;
-            root.selection-end-col = next-end-col;
-        } else {
-            root.selection-active = next-active;
-            root.selection-start-row = next-start-row;
-            root.selection-start-col = next-start-col;
-            root.selection-end-row = next-end-row;
-            root.selection-end-col = next-end-col;
-        }
-
-        if changed {
-            root.selection-changed();
-        }
     }
 
     function close-context-menu() {
@@ -970,61 +862,6 @@ export component TerminalSessionHost inherits Rectangle {
             && root.link-hovered
             && !root.selection-drag-active
             && !root.context-menu-open;
-    }
-
-    function local-selection-active() -> bool {
-        return root.selection-anchor-row >= 0
-            && root.selection-focus-row >= 0
-            && (root.local-ordered-selection-start-row() != root.local-ordered-selection-end-row()
-                || root.local-ordered-selection-start-col() != root.local-ordered-selection-end-col());
-    }
-
-    function local-ordered-selection-start-row() -> int {
-        return root.selection-anchor-row < root.selection-focus-row
-            || (root.selection-anchor-row == root.selection-focus-row
-                && root.selection-anchor-col <= root.selection-focus-col)
-            ? root.selection-anchor-row
-            : root.selection-focus-row;
-    }
-
-    function local-ordered-selection-start-col() -> int {
-        return root.selection-anchor-row < root.selection-focus-row
-            || (root.selection-anchor-row == root.selection-focus-row
-                && root.selection-anchor-col <= root.selection-focus-col)
-            ? root.selection-anchor-col
-            : root.selection-focus-col;
-    }
-
-    function local-ordered-selection-end-row() -> int {
-        return root.selection-anchor-row > root.selection-focus-row
-            || (root.selection-anchor-row == root.selection-focus-row
-                && root.selection-anchor-col > root.selection-focus-col)
-            ? root.selection-anchor-row
-            : root.selection-focus-row;
-    }
-
-    function local-ordered-selection-end-col() -> int {
-        return root.selection-anchor-row > root.selection-focus-row
-            || (root.selection-anchor-row == root.selection-focus-row
-                && root.selection-anchor-col > root.selection-focus-col)
-            ? root.selection-anchor-col
-            : root.selection-focus-col;
-    }
-
-    function local-normalized-selection-start-row() -> int {
-        return root.local-ordered-selection-start-row();
-    }
-
-    function local-normalized-selection-start-col() -> int {
-        return root.local-ordered-selection-start-col();
-    }
-
-    function local-normalized-selection-end-row() -> int {
-        return root.local-ordered-selection-end-row();
-    }
-
-    function local-normalized-selection-end-col() -> int {
-        return root.local-ordered-selection-end-col();
     }
 
     function has-selection() -> bool {
@@ -1416,7 +1253,6 @@ export component TerminalSessionHost inherits Rectangle {
 
     changed mode => {
         root.close-context-menu();
-        root.clear-selection();
         root.connection-progress-diagnostics-expanded = false;
         root.sync-cursor-blink-timer(true);
         if root.mode == "terminal" {
@@ -1428,7 +1264,6 @@ export component TerminalSessionHost inherits Rectangle {
 
     changed session-id => {
         root.close-context-menu();
-        root.clear-selection();
         root.connection-progress-diagnostics-expanded = false;
         root.sync-cursor-blink-timer(true);
         if root.mode == "terminal" && root.session-id != "" {
@@ -1454,24 +1289,6 @@ export component TerminalSessionHost inherits Rectangle {
 
     changed session-cursor-blinking => {
         root.sync-cursor-blink-timer(true);
-    }
-
-    changed session-rows => {
-        if root.has-selection() {
-            root.clear-selection();
-        }
-    }
-
-    changed session-cols => {
-        if root.has-selection() {
-            root.clear-selection();
-        }
-    }
-
-    changed session-alternate-screen-active => {
-        if root.has-selection() {
-            root.clear-selection();
-        }
     }
 
     changed width => {
@@ -1598,11 +1415,11 @@ export component TerminalSessionHost inherits Rectangle {
                     accept
                 } else if (event.modifiers.shift && event.text == Key.PageUp
                     && !event.modifiers.control && !event.modifiers.alt) {
-                    root.scroll-requested(max(1, root.session-rows - 2), 0, 0, true, false, false);
+                    root.scroll-requested(max(1, root.session-rows - 2), 0, 0, 0, true, false, false);
                     accept
                 } else if (event.modifiers.shift && event.text == Key.PageDown
                     && !event.modifiers.control && !event.modifiers.alt) {
-                    root.scroll-requested(-max(1, root.session-rows - 2), 0, 0, true, false, false);
+                    root.scroll-requested(-max(1, root.session-rows - 2), 0, 0, 0, true, false, false);
                     accept
                 } else if (event.modifiers.shift && event.text == Key.Home
                     && !event.modifiers.control && !event.modifiers.alt) {
@@ -1963,6 +1780,10 @@ export component TerminalSessionHost inherits Rectangle {
                                 row,
                                 root.terminal-hit-col(self.mouse-x),
                             );
+                            let selection-col = root.normalize-selection-hit-col(
+                                row,
+                                root.terminal-selection-hit-col(self.mouse-x),
+                            );
                             root.wheel-delta-remainder = root.wheel-delta-remainder
                                 + (((event.delta-y / 1px) / root.wheel-delta-threshold)
                                     * root.wheel-lines-per-notch);
@@ -1975,6 +1796,7 @@ export component TerminalSessionHost inherits Rectangle {
                                     delta-lines,
                                     row,
                                     col,
+                                    selection-col,
                                     event.modifiers.shift,
                                     event.modifiers.control,
                                     event.modifiers.alt,
@@ -2024,11 +1846,11 @@ export component TerminalSessionHost inherits Rectangle {
                                     event.modifiers.alt,
                                 );
                             } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.left && root.selection-click-streak == 2 {
-                                root.begin-selection-gesture(1, row, col);
+                                root.selection-begin-requested(1, row, col, selection-col);
                             } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.left && root.selection-click-streak >= 3 {
-                                root.begin-selection-gesture(2, row, col);
+                                root.selection-begin-requested(2, row, col, selection-col);
                             } else {
-                                root.begin-selection-gesture(0, row, col);
+                                root.selection-begin-requested(0, row, col, selection-col);
                             }
                         } else if event.kind == PointerEventKind.move {
                             if root.session-mouse-grabbed && !event.modifiers.shift {
@@ -2059,7 +1881,7 @@ export component TerminalSessionHost inherits Rectangle {
                                 }
                                 if root.selection-drag-active {
                                     terminal-input.focus();
-                                    root.update-selection-gesture(row, col, selection-col);
+                                    root.selection-update-requested(row, col, selection-col);
                                 }
                             }
                         } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
@@ -2087,7 +1909,7 @@ export component TerminalSessionHost inherits Rectangle {
                                     event.modifiers.alt,
                                 );
                             } else {
-                                root.finish-selection-gesture();
+                                root.selection-finish-requested();
                             }
                         } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
                             terminal-input.focus();
@@ -2318,11 +2140,7 @@ export component TerminalSessionHost inherits Rectangle {
 
                         invoked => {
                             root.close-context-menu();
-                            root.selection-anchor-row = root.visible-top-buffer-row();
-                            root.selection-anchor-col = 0;
-                            root.selection-focus-row = root.visible-bottom-buffer-row-exclusive() - 1;
-                            root.selection-focus-col = max(0, root.session-cols);
-                            root.sync-selection-state();
+                            root.select-all-requested();
                             terminal-input.focus();
                         }
                     }

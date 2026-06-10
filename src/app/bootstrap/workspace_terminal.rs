@@ -259,59 +259,39 @@ pub(super) fn normalize_active_workspace_selection_hit_col(
         .unwrap_or(col.max(0))
 }
 
-fn workspace_terminal_selection_from_window(
-    window: &AppWindow,
-    surface: &TerminalSurfaceState,
-) -> Option<crate::app::terminal_model::WorkspaceTerminalSelection> {
-    if !window.get_workspace_session_selection_active() {
-        return None;
-    }
-
-    let start_row = window.get_workspace_session_selection_start_row();
-    let start_col = window.get_workspace_session_selection_start_col();
-    let end_row = window.get_workspace_session_selection_end_row();
-    let end_col = window.get_workspace_session_selection_end_col();
-    if start_row < 0 || start_col < 0 || end_row < 0 || end_col < 0 {
-        return None;
-    }
-
-    Some(
-        crate::app::terminal_model::WorkspaceTerminalSelection::from_surface(
-            surface,
-            crate::app::terminal_model::TerminalSelectionModel::new(
-                start_row as u32,
-                start_col as u32,
-                end_row as u32,
-                end_col as u32,
-            ),
-        ),
-    )
-}
-
-pub(super) fn sync_active_workspace_terminal_selection_from_window(
-    window: &AppWindow,
-    state: &mut ShellViewModel,
-) -> bool {
-    let next = state
-        .active_workspace_terminal_surface()
-        .and_then(|surface| workspace_terminal_selection_from_window(window, surface));
-    state.set_workspace_terminal_selection(next)
-}
-
 pub(super) fn clear_invalid_active_workspace_terminal_selection(
     state: &mut ShellViewModel,
 ) -> bool {
-    let Some(surface) = state.active_workspace_terminal_surface() else {
-        return false;
+    let Some(surface) = state.active_workspace_terminal_surface().cloned() else {
+        let selection_changed = state.set_workspace_terminal_selection(None);
+        let drag_changed = state.set_workspace_terminal_selection_drag(None);
+        return selection_changed || drag_changed;
     };
+
+    let mut changed = false;
     if state
-        .active_workspace_terminal_selection()
-        .is_some_and(|selection| !selection.matches_surface(surface))
+        .workspace_terminal_selection_drag()
+        .is_some_and(|drag| {
+            drag.session_id == surface.session_id && !drag.matches_surface(&surface)
+        })
     {
-        state.clear_active_workspace_terminal_selection()
-    } else {
-        false
+        changed |= state.clear_active_workspace_terminal_selection_drag();
+        changed |= state.clear_active_workspace_terminal_selection();
     }
+
+    if let Some(drag) = state.active_workspace_terminal_selection_drag() {
+        let next = drag.selection_for_surface(&surface).map(|range| {
+            crate::app::terminal_model::WorkspaceTerminalSelection::from_surface(&surface, range)
+        });
+        changed |= state.set_workspace_terminal_selection(next);
+    } else if state
+        .active_workspace_terminal_selection()
+        .is_some_and(|selection| !selection.matches_surface(&surface))
+    {
+        changed |= state.clear_active_workspace_terminal_selection();
+    }
+
+    changed
 }
 
 pub(super) fn active_workspace_terminal_selection(
@@ -326,7 +306,145 @@ pub(super) fn active_workspace_terminal_selection(
 pub(super) fn active_workspace_terminal_selection_buffer_range(
     state: &ShellViewModel,
 ) -> Option<crate::app::terminal_model::TerminalSelectionModel> {
-    active_workspace_terminal_selection(state).map(|selection| selection.range)
+    active_workspace_terminal_selection(state)
+        .map(|selection| selection.range)
+        .filter(|range| !empty_selection(*range))
+}
+
+pub(super) fn active_workspace_terminal_selection_drag_active(state: &ShellViewModel) -> bool {
+    state.active_workspace_terminal_selection_drag().is_some()
+}
+
+fn empty_selection(range: crate::app::terminal_model::TerminalSelectionModel) -> bool {
+    range.start_row == range.end_row && range.start_col == range.end_col
+}
+
+pub(super) fn begin_active_workspace_terminal_selection(
+    state: &mut ShellViewModel,
+    gesture_mode: i32,
+    row: i32,
+    col: i32,
+    selection_col: i32,
+) -> bool {
+    let Some(surface) = state.active_workspace_terminal_surface().cloned() else {
+        return false;
+    };
+
+    let safe_row = row.max(0) as u32;
+    let safe_col = col.max(0) as u32;
+    let safe_selection_col = selection_col.max(0) as u32;
+    let mode = crate::app::ssh::runtime::TerminalSelectionGestureMode::from_code(gesture_mode);
+    let drag = match mode {
+        crate::app::ssh::runtime::TerminalSelectionGestureMode::Cell => {
+            crate::app::terminal_model::WorkspaceTerminalSelectionDrag::cell_from_surface(
+                &surface,
+                safe_row,
+                safe_col,
+                safe_selection_col,
+            )
+        }
+        crate::app::ssh::runtime::TerminalSelectionGestureMode::Word
+        | crate::app::ssh::runtime::TerminalSelectionGestureMode::Line => {
+            crate::app::terminal_model::WorkspaceTerminalSelectionDrag::expanded_from_surface(
+                &surface,
+                mode,
+                safe_row,
+                safe_col,
+                safe_selection_col,
+            )
+        }
+    };
+    let next_selection = drag.selection_for_surface(&surface).map(|range| {
+        crate::app::terminal_model::WorkspaceTerminalSelection::from_surface(&surface, range)
+    });
+
+    state.set_workspace_terminal_selection_drag(Some(drag))
+        || state.set_workspace_terminal_selection(next_selection)
+}
+
+pub(super) fn update_active_workspace_terminal_selection(
+    state: &mut ShellViewModel,
+    row: i32,
+    col: i32,
+    selection_col: i32,
+) -> bool {
+    let Some(surface) = state.active_workspace_terminal_surface().cloned() else {
+        return false;
+    };
+    let Some(mut drag) = state.active_workspace_terminal_selection_drag() else {
+        return false;
+    };
+
+    drag.update_pointer(
+        row.max(0) as u32,
+        col.max(0) as u32,
+        selection_col.max(0) as u32,
+    );
+    let next_selection = drag.selection_for_surface(&surface).map(|range| {
+        crate::app::terminal_model::WorkspaceTerminalSelection::from_surface(&surface, range)
+    });
+
+    state.set_workspace_terminal_selection_drag(Some(drag))
+        || state.set_workspace_terminal_selection(next_selection)
+}
+
+pub(super) fn remember_active_workspace_terminal_selection_pointer(
+    state: &mut ShellViewModel,
+    row: i32,
+    col: i32,
+    selection_col: i32,
+) -> bool {
+    let Some(mut drag) = state.active_workspace_terminal_selection_drag() else {
+        return false;
+    };
+    drag.update_pointer(
+        row.max(0) as u32,
+        col.max(0) as u32,
+        selection_col.max(0) as u32,
+    );
+    state.set_workspace_terminal_selection_drag(Some(drag))
+}
+
+pub(super) fn finish_active_workspace_terminal_selection(state: &mut ShellViewModel) -> bool {
+    let Some(surface) = state.active_workspace_terminal_surface().cloned() else {
+        let selection_changed = state.set_workspace_terminal_selection(None);
+        let drag_changed = state.set_workspace_terminal_selection_drag(None);
+        return selection_changed || drag_changed;
+    };
+    let Some(drag) = state.active_workspace_terminal_selection_drag() else {
+        return false;
+    };
+
+    let next_selection = drag.selection_for_surface(&surface).map(|range| {
+        crate::app::terminal_model::WorkspaceTerminalSelection::from_surface(&surface, range)
+    });
+    let selection_changed = match next_selection {
+        Some(selection) if !empty_selection(selection.range) => {
+            state.set_workspace_terminal_selection(Some(selection))
+        }
+        _ => state.clear_active_workspace_terminal_selection(),
+    };
+    let drag_changed = state.clear_active_workspace_terminal_selection_drag();
+    selection_changed || drag_changed
+}
+
+pub(super) fn select_all_active_workspace_terminal(state: &mut ShellViewModel) -> bool {
+    let Some(surface) = state.active_workspace_terminal_surface().cloned() else {
+        return false;
+    };
+
+    let end_row = surface
+        .rows
+        .saturating_add(surface.viewport_max_offset_lines)
+        .saturating_sub(1);
+    let next_selection = crate::app::terminal_model::WorkspaceTerminalSelection::from_surface(
+        &surface,
+        crate::app::terminal_model::TerminalSelectionModel::new(0, 0, end_row, surface.cols),
+    );
+
+    let selection_changed = state.set_workspace_terminal_selection(Some(next_selection));
+    let drag_changed = state.clear_active_workspace_terminal_selection_drag();
+    selection_changed || drag_changed
 }
 
 pub(super) fn sync_active_workspace_terminal_selection_projection(
@@ -334,7 +452,9 @@ pub(super) fn sync_active_workspace_terminal_selection_projection(
     state: &ShellViewModel,
 ) {
     let selection = active_workspace_terminal_selection_buffer_range(state);
+    let drag_active = active_workspace_terminal_selection_drag_active(state);
     window.set_workspace_session_selection_active(selection.is_some());
+    window.set_workspace_session_selection_drag_active(drag_active);
     window.set_workspace_session_selection_start_row(
         selection
             .map(|selection| i32::try_from(selection.start_row).unwrap_or(i32::MAX))
@@ -355,43 +475,6 @@ pub(super) fn sync_active_workspace_terminal_selection_projection(
             .map(|selection| i32::try_from(selection.end_col).unwrap_or(i32::MAX))
             .unwrap_or(-1),
     );
-}
-
-pub(super) fn resolve_active_workspace_selection_gesture_range(
-    state: &ShellViewModel,
-    gesture_mode: i32,
-    anchor_row: i32,
-    anchor_col: i32,
-    focus_row: i32,
-    focus_col: i32,
-) -> crate::TerminalGestureSelectionRange {
-    let Some(surface) = state.active_workspace_terminal_surface() else {
-        let safe_anchor_row = anchor_row.max(0);
-        let safe_anchor_col = anchor_col.max(0);
-        let safe_focus_row = focus_row.max(0);
-        let safe_focus_col = focus_col.max(0);
-        return crate::TerminalGestureSelectionRange {
-            start_row: safe_anchor_row.min(safe_focus_row),
-            start_col: safe_anchor_col.min(safe_focus_col),
-            end_row: safe_anchor_row.max(safe_focus_row),
-            end_col: safe_anchor_col.max(safe_focus_col),
-        };
-    };
-
-    let range = surface.selection_gesture_range(
-        crate::app::ssh::runtime::TerminalSelectionGestureMode::from_code(gesture_mode),
-        anchor_row.max(0) as u32,
-        anchor_col.max(0) as u32,
-        focus_row.max(0) as u32,
-        focus_col.max(0) as u32,
-    );
-
-    crate::TerminalGestureSelectionRange {
-        start_row: i32::try_from(range.start_row).unwrap_or(i32::MAX),
-        start_col: i32::try_from(range.start_col).unwrap_or(i32::MAX),
-        end_row: i32::try_from(range.end_row).unwrap_or(i32::MAX),
-        end_col: i32::try_from(range.end_col).unwrap_or(i32::MAX),
-    }
 }
 
 pub(super) fn openable_url_at_active_workspace_surface(

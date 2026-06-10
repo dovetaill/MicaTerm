@@ -8926,15 +8926,109 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let window_handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
-    window.on_workspace_session_selection_changed(move || {
+    window.on_workspace_session_selection_begin_requested(
+        move |gesture_mode, row, col, selection_col| {
+            let Some(window) = window_handle.upgrade() else {
+                return;
+            };
+            let mut state = state.borrow_mut();
+            if !workspace_terminal::begin_active_workspace_terminal_selection(
+                &mut state,
+                gesture_mode,
+                row,
+                col,
+                selection_col,
+            ) {
+                return;
+            }
+            if workspace_session_uses_host_selection_overlay(&window) {
+                workspace_terminal::sync_active_workspace_terminal_selection_projection(
+                    &window, &state,
+                );
+                return;
+            }
+            sync_workspace_session_state_with_manager(
+                &window,
+                &mut state,
+                &mut workspace_follow_tracker_ref.borrow_mut(),
+                session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+            );
+        },
+    );
+
+    let state = Rc::clone(&view_model);
+    let window_handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    window.on_workspace_session_selection_update_requested(move |row, col, selection_col| {
         let Some(window) = window_handle.upgrade() else {
             return;
         };
         let mut state = state.borrow_mut();
-        workspace_terminal::sync_active_workspace_terminal_selection_from_window(
-            &window, &mut state,
-        );
+        if !workspace_terminal::update_active_workspace_terminal_selection(
+            &mut state,
+            row,
+            col,
+            selection_col,
+        ) {
+            return;
+        }
         if workspace_session_uses_host_selection_overlay(&window) {
+            workspace_terminal::sync_active_workspace_terminal_selection_projection(
+                &window, &state,
+            );
+            return;
+        }
+        sync_workspace_session_state_with_manager(
+            &window,
+            &mut state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
+    });
+
+    let state = Rc::clone(&view_model);
+    let window_handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    window.on_workspace_session_selection_finish_requested(move || {
+        let Some(window) = window_handle.upgrade() else {
+            return;
+        };
+        let mut state = state.borrow_mut();
+        if !workspace_terminal::finish_active_workspace_terminal_selection(&mut state) {
+            return;
+        }
+        if workspace_session_uses_host_selection_overlay(&window) {
+            workspace_terminal::sync_active_workspace_terminal_selection_projection(
+                &window, &state,
+            );
+            return;
+        }
+        sync_workspace_session_state_with_manager(
+            &window,
+            &mut state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
+    });
+
+    let state = Rc::clone(&view_model);
+    let window_handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    window.on_workspace_session_select_all_requested(move || {
+        let Some(window) = window_handle.upgrade() else {
+            return;
+        };
+        let mut state = state.borrow_mut();
+        if !workspace_terminal::select_all_active_workspace_terminal(&mut state) {
+            return;
+        }
+        if workspace_session_uses_host_selection_overlay(&window) {
+            workspace_terminal::sync_active_workspace_terminal_selection_projection(
+                &window, &state,
+            );
             return;
         }
         sync_workspace_session_state_with_manager(
@@ -8956,21 +9050,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let state = state.borrow();
         workspace_terminal::normalize_active_workspace_selection_hit_col(&state, row, col)
     });
-
-    let state = Rc::clone(&view_model);
-    window.on_workspace_session_resolve_selection_gesture_range(
-        move |gesture_mode, anchor_row, anchor_col, focus_row, focus_col| {
-            let state = state.borrow();
-            workspace_terminal::resolve_active_workspace_selection_gesture_range(
-                &state,
-                gesture_mode,
-                anchor_row,
-                anchor_col,
-                focus_row,
-                focus_col,
-            )
-        },
-    );
 
     let state = Rc::clone(&view_model);
     let session_bridge_copy_ref = session_bridge.clone();
@@ -9130,34 +9209,60 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let scroll_projection_refresh_timer_ref = Rc::clone(&scroll_projection_refresh_timer);
     let scroll_projection_refresh_gate_ref = Rc::clone(&scroll_projection_refresh_gate);
-    window.on_workspace_session_scroll_requested(move |delta_lines, row, col, shift, ctrl, alt| {
-        {
-            let state = view_model_ref.borrow();
-            workspace_terminal::forward_active_workspace_scroll(
-                &state,
-                session_bridge_ref.as_deref(),
-                WorkspaceScrollInput {
-                    delta_lines,
-                    row,
-                    col,
-                    shift,
-                    ctrl,
-                    alt,
-                },
-            );
-        }
+    window.on_workspace_session_scroll_requested(
+        move |delta_lines, row, col, selection_col, shift, ctrl, alt| {
+            let drag_active = {
+                let mut state = view_model_ref.borrow_mut();
+                let drag_active =
+                    workspace_terminal::active_workspace_terminal_selection_drag_active(&state);
+                if drag_active {
+                    workspace_terminal::remember_active_workspace_terminal_selection_pointer(
+                        &mut state,
+                        row,
+                        col,
+                        selection_col,
+                    );
+                }
+                workspace_terminal::forward_active_workspace_scroll(
+                    &state,
+                    session_bridge_ref.as_deref(),
+                    WorkspaceScrollInput {
+                        delta_lines,
+                        row,
+                        col,
+                        shift,
+                        ctrl,
+                        alt,
+                    },
+                );
+                drag_active
+            };
 
-        if let Some(window) = window_handle.upgrade() {
-            workspace_terminal::schedule_workspace_scroll_projection_refresh(
-                &window,
-                Rc::clone(&view_model_ref),
-                session_bridge_ref.clone(),
-                Rc::clone(&workspace_follow_tracker_ref),
-                Rc::clone(&scroll_projection_refresh_timer_ref),
-                Rc::clone(&scroll_projection_refresh_gate_ref),
-            );
-        }
-    });
+            if drag_active {
+                if let Some(window) = window_handle.upgrade() {
+                    let mut state = view_model_ref.borrow_mut();
+                    sync_workspace_session_state_with_manager(
+                        &window,
+                        &mut state,
+                        &mut workspace_follow_tracker_ref.borrow_mut(),
+                        session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+                    );
+                }
+                return;
+            }
+
+            if let Some(window) = window_handle.upgrade() {
+                workspace_terminal::schedule_workspace_scroll_projection_refresh(
+                    &window,
+                    Rc::clone(&view_model_ref),
+                    session_bridge_ref.clone(),
+                    Rc::clone(&workspace_follow_tracker_ref),
+                    Rc::clone(&scroll_projection_refresh_timer_ref),
+                    Rc::clone(&scroll_projection_refresh_gate_ref),
+                );
+            }
+        },
+    );
 
     let view_model_ref = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();

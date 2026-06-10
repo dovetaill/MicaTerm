@@ -77,10 +77,22 @@ impl ShellViewModel {
         self.workspace_terminal_selection
     }
 
+    pub fn workspace_terminal_selection_drag(&self) -> Option<WorkspaceTerminalSelectionDrag> {
+        self.workspace_terminal_selection_drag
+    }
+
     pub fn active_workspace_terminal_selection(&self) -> Option<WorkspaceTerminalSelection> {
         let surface = self.active_workspace_terminal_surface()?;
         self.workspace_terminal_selection
             .filter(|selection| selection.session_id == surface.session_id)
+    }
+
+    pub fn active_workspace_terminal_selection_drag(
+        &self,
+    ) -> Option<WorkspaceTerminalSelectionDrag> {
+        let surface = self.active_workspace_terminal_surface()?;
+        self.workspace_terminal_selection_drag
+            .filter(|drag| drag.session_id == surface.session_id)
     }
 
     pub fn set_workspace_terminal_selection(
@@ -95,6 +107,18 @@ impl ShellViewModel {
         true
     }
 
+    pub fn set_workspace_terminal_selection_drag(
+        &mut self,
+        drag: Option<WorkspaceTerminalSelectionDrag>,
+    ) -> bool {
+        if self.workspace_terminal_selection_drag == drag {
+            return false;
+        }
+
+        self.workspace_terminal_selection_drag = drag;
+        true
+    }
+
     pub fn clear_active_workspace_terminal_selection(&mut self) -> bool {
         let Some(surface) = self.active_workspace_terminal_surface() else {
             return false;
@@ -104,6 +128,21 @@ impl ShellViewModel {
             .is_some_and(|selection| selection.session_id == surface.session_id)
         {
             self.workspace_terminal_selection = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn clear_active_workspace_terminal_selection_drag(&mut self) -> bool {
+        let Some(surface) = self.active_workspace_terminal_surface() else {
+            return false;
+        };
+        if self
+            .workspace_terminal_selection_drag
+            .is_some_and(|drag| drag.session_id == surface.session_id)
+        {
+            self.workspace_terminal_selection_drag = None;
             true
         } else {
             false

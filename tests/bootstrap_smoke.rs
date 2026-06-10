@@ -4601,6 +4601,23 @@ fn choose_terminal_context_menu_copy(app: &AppWindow, menu_origin: LogicalPositi
     settle_terminal_projection();
 }
 
+fn choose_terminal_context_menu_select_all(app: &AppWindow, menu_origin: LogicalPosition) {
+    let select_all_row_position = LogicalPosition::new(menu_origin.x + 20.0, menu_origin.y + 96.0);
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: select_all_row_position,
+    });
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position: select_all_row_position,
+        button: PointerEventButton::Left,
+    });
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position: select_all_row_position,
+        button: PointerEventButton::Left,
+    });
+    settle_terminal_projection();
+}
+
 fn drag_within_first_terminal_cell(app: &AppWindow) {
     let drag_start = LogicalPosition::new(
         app.get_layout_workspace_session_native_surface_x()
@@ -11578,6 +11595,78 @@ fn workspace_terminal_selection_rows_stay_bound_to_buffer_when_scrolling() {
 }
 
 #[test]
+fn workspace_terminal_drag_selection_survives_scrollback_reprojection() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(ScrollProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    let drag_position = LogicalPosition::new(
+        app.get_layout_workspace_session_native_surface_x()
+            + (app.get_workspace_session_cell_width() * 2.5),
+        app.get_layout_titlebar_height()
+            + app.get_layout_workspace_session_native_surface_y()
+            + (app.get_workspace_session_cell_height() * 23.5),
+    );
+
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: drag_position,
+    });
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position: drag_position,
+        button: PointerEventButton::Left,
+    });
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: drag_position,
+    });
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "precondition: dragging inside the bottom terminal row should activate selection before the viewport scrolls"
+    );
+    assert_eq!(app.get_workspace_session_selection_start_row(), 28);
+    assert_eq!(app.get_workspace_session_selection_end_row(), 28);
+
+    app.window().dispatch_event(WindowEvent::PointerScrolled {
+        position: drag_position,
+        delta_x: 0.0,
+        delta_y: 60.0,
+    });
+    settle_terminal_projection();
+
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: drag_position,
+    });
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position: drag_position,
+        button: PointerEventButton::Left,
+    });
+    settle_terminal_projection();
+
+    assert_eq!(app.get_workspace_session_viewport_offset_lines(), 6);
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "dragging after a wheel scroll should keep the terminal selection active instead of collapsing it to the rebased viewport origin"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_start_row(),
+        25,
+        "continuing a drag after scrolling up should extend the selection into the newly revealed older buffer rows"
+    );
+    assert_eq!(
+        app.get_workspace_session_selection_end_row(),
+        28,
+        "continuing a drag after scrolling should keep the original anchor buffer row instead of rebasing it to the current viewport row"
+    );
+}
+
+#[test]
 fn workspace_terminal_selection_restores_from_rust_truth_after_native_host_props_are_clobbered() {
     let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
@@ -11629,6 +11718,58 @@ fn workspace_terminal_selection_restores_from_rust_truth_after_native_host_props
     assert_eq!(
         app.get_workspace_session_selection_end_col(),
         expected_end_col
+    );
+}
+
+#[test]
+fn workspace_terminal_context_menu_select_all_covers_full_scrollback() {
+    run_on_large_stack(
+        "workspace_terminal_context_menu_select_all_covers_full_scrollback",
+        workspace_terminal_context_menu_select_all_covers_full_scrollback_body,
+    );
+}
+
+fn workspace_terminal_context_menu_select_all_covers_full_scrollback_body() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text("", slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("clear clipboard");
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(ScrollbackCopyLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    let menu_origin = terminal_interaction_position(&app);
+    open_terminal_context_menu(&app, menu_origin);
+    choose_terminal_context_menu_select_all(&app, menu_origin);
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "terminal context-menu Select All should leave an active Rust-owned selection behind"
+    );
+    assert_eq!(app.get_workspace_session_selection_start_row(), 0);
+    assert_eq!(app.get_workspace_session_selection_start_col(), 0);
+    assert_eq!(app.get_workspace_session_selection_end_row(), 6);
+    assert_eq!(app.get_workspace_session_selection_end_col(), 20);
+
+    app.invoke_workspace_session_copy_selection_requested(0, 0, 0, 0);
+
+    let copied = i_slint_backend_selector::with_platform(|platform| {
+        Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
+    })
+    .expect("read clipboard");
+
+    assert_eq!(
+        copied.as_deref(),
+        Some("zero\none\ntwo\nthree\nfour\nfive\n"),
+        "terminal context-menu Select All should cover the entire scrollback buffer instead of clipping the selection to the visible viewport"
     );
 }
 

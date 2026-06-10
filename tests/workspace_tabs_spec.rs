@@ -1089,8 +1089,10 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should project selection activity so native shortcut fallbacks can see current terminal selection state"
     );
     assert!(
-        terminal_host.contains("function sync-selection-state()"),
-        "TerminalSessionHost should centralize selection projection updates instead of leaving native copy fallback state stale"
+        terminal_host.contains("callback selection-begin-requested(int, int, int, int);")
+            && terminal_host.contains("callback selection-update-requested(int, int, int);")
+            && terminal_host.contains("callback selection-finish-requested();"),
+        "TerminalSessionHost should route selection gesture ownership through explicit Rust callbacks instead of mutating host-owned selection state locally"
     );
     assert!(
         terminal_host.contains("event.modifiers.shift && event.text == Key.PageUp"),
