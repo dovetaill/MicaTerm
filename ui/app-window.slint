@@ -425,6 +425,7 @@ export component AppWindow inherits Window {
     in-out property <bool> workspace-session-viewport-at-bottom: true;
     in-out property <bool> workspace-session-alternate-screen-active: false;
     in-out property <bool> workspace-session-selection-active: false;
+    in-out property <bool> workspace-session-selection-drag-active: false;
     in-out property <int> workspace-session-selection-start-row: -1;
     in-out property <int> workspace-session-selection-start-col: -1;
     in-out property <int> workspace-session-selection-end-row: -1;
@@ -643,9 +644,11 @@ export component AppWindow inherits Window {
     callback workspace-session-resize-requested(int, int);
     callback workspace-session-normalize-hit-col(int, int) -> int;
     callback workspace-session-normalize-selection-hit-col(int, int) -> int;
-    callback workspace-session-resolve-selection-gesture-range(int, int, int, int, int) -> TerminalGestureSelectionRange;
+    callback workspace-session-selection-begin-requested(int, int, int, int);
+    callback workspace-session-selection-update-requested(int, int, int);
+    callback workspace-session-selection-finish-requested();
     callback workspace-session-copy-selection-requested(int, int, int, int);
-    callback workspace-session-selection-changed();
+    callback workspace-session-select-all-requested();
     callback workspace-session-paste-requested();
     callback workspace-session-local-action-requested(string);
     callback workspace-sftp-back-requested();
@@ -665,7 +668,7 @@ export component AppWindow inherits Window {
     callback workspace-sftp-upload-requested();
     callback workspace-sftp-new-folder-requested();
     callback workspace-sftp-retry-requested();
-    callback workspace-session-scroll-requested(int, int, int, bool, bool, bool);
+    callback workspace-session-scroll-requested(int, int, int, int, bool, bool, bool);
     callback workspace-session-scroll-thumb-drag-requested(float);
     callback workspace-session-scroll-jump-requested(float);
     callback workspace-session-mouse-input(string, string, int, int, bool, bool, bool);
@@ -1238,6 +1241,7 @@ export component AppWindow inherits Window {
                         workspace-session-viewport-at-bottom: root.workspace-session-viewport-at-bottom;
                         workspace-session-alternate-screen-active: root.workspace-session-alternate-screen-active;
                         workspace-session-selection-active <=> root.workspace-session-selection-active;
+                        workspace-session-selection-drag-active: root.workspace-session-selection-drag-active;
                         workspace-session-selection-start-row <=> root.workspace-session-selection-start-row;
                         workspace-session-selection-start-col <=> root.workspace-session-selection-start-col;
                         workspace-session-selection-end-row <=> root.workspace-session-selection-end-row;
@@ -1311,22 +1315,24 @@ export component AppWindow inherits Window {
                             return root.workspace-session-normalize-selection-hit-col(row, col);
                         }
 
-                        resolve-selection-gesture-range(mode, anchor-row, anchor-col, focus-row, focus-col) => {
-                            return root.workspace-session-resolve-selection-gesture-range(
-                                mode,
-                                anchor-row,
-                                anchor-col,
-                                focus-row,
-                                focus-col,
-                            );
+                        selection-begin-requested(mode, row, col, selection-col) => {
+                            root.workspace-session-selection-begin-requested(mode, row, col, selection-col);
+                        }
+
+                        selection-update-requested(row, col, selection-col) => {
+                            root.workspace-session-selection-update-requested(row, col, selection-col);
+                        }
+
+                        selection-finish-requested() => {
+                            root.workspace-session-selection-finish-requested();
                         }
 
                         copy-selection-requested(start-row, start-col, end-row, end-col) => {
                             root.workspace-session-copy-selection-requested(start-row, start-col, end-row, end-col);
                         }
 
-                        selection-changed() => {
-                            root.workspace-session-selection-changed();
+                        select-all-requested() => {
+                            root.workspace-session-select-all-requested();
                         }
 
                         paste-requested() => {
@@ -1417,8 +1423,8 @@ export component AppWindow inherits Window {
                             root.queue-workspace-sftp-tooltip-close(source-id);
                         }
 
-                        scroll-requested(delta-lines, row, col, shift, ctrl, alt) => {
-                            root.workspace-session-scroll-requested(delta-lines, row, col, shift, ctrl, alt);
+                        scroll-requested(delta-lines, row, col, selection-col, shift, ctrl, alt) => {
+                            root.workspace-session-scroll-requested(delta-lines, row, col, selection-col, shift, ctrl, alt);
                         }
 
                         scroll-thumb-drag-requested(ratio) => {

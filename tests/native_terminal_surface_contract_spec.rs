@@ -174,7 +174,7 @@ fn bitmap_host_selection_source_exposes_local_overlay_contract() {
     );
     assert!(
         bootstrap_source.contains("if workspace_session_uses_host_selection_overlay(&window) {"),
-        "selection-changed callback should skip Rust-side software-surface syncs when the Slint host owns the live bitmap selection overlay"
+        "Rust-owned selection callbacks should still be able to short-circuit presenter refresh work when the Slint bitmap host draws the live overlay"
     );
     assert!(
         bootstrap_source
@@ -184,23 +184,26 @@ fn bitmap_host_selection_source_exposes_local_overlay_contract() {
 }
 
 #[test]
-fn workspace_terminal_selection_callback_routes_bitmap_host_changes_through_rust_truth() {
+fn workspace_terminal_selection_callbacks_route_bitmap_host_changes_through_rust_truth() {
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
-    let selection_changed_block = block_between(
+    let selection_callback_block = block_between(
         &bootstrap_source,
-        "window.on_workspace_session_selection_changed(move || {",
+        "window.on_workspace_session_selection_begin_requested(",
         "window.on_workspace_session_normalize_hit_col(move |row, col| {",
     );
-    let sync_from_window = selection_changed_block
-        .find("workspace_terminal::sync_active_workspace_terminal_selection_from_window(")
-        .expect("selection callback should sync bitmap/native host props into Rust state");
-    let host_overlay_guard = selection_changed_block
+    let begin_handler = selection_callback_block
+        .find("workspace_terminal::begin_active_workspace_terminal_selection(")
+        .expect("selection begin callback should mutate Rust-owned terminal selection state");
+    let sync_projection = selection_callback_block
+        .find("workspace_terminal::sync_active_workspace_terminal_selection_projection(")
+        .expect("bitmap-host selection callbacks should project Rust-owned selection truth back into Slint state synchronously");
+    let host_overlay_guard = selection_callback_block
         .find("if workspace_session_uses_host_selection_overlay(&window) {")
         .expect("bitmap host overlay guard");
 
     assert!(
-        sync_from_window < host_overlay_guard,
-        "bitmap host selection changes should still be synchronized back into the Rust-owned workspace terminal selection truth before any render-mode-specific early return can skip presenter refresh work"
+        begin_handler < host_overlay_guard && sync_projection > begin_handler,
+        "bitmap host selection callbacks should update Rust-owned selection truth first, then synchronously project it back into Slint before any render-mode-specific early return skips presenter refresh work"
     );
 }
 

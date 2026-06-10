@@ -97,6 +97,7 @@ export component WorkspacePane inherits Rectangle {
     in property <bool> workspace-session-viewport-at-bottom: true;
     in property <bool> workspace-session-alternate-screen-active: false;
     in-out property <bool> workspace-session-selection-active: false;
+    in property <bool> workspace-session-selection-drag-active: false;
     in-out property <int> workspace-session-selection-start-row: -1;
     in-out property <int> workspace-session-selection-start-col: -1;
     in-out property <int> workspace-session-selection-end-row: -1;
@@ -149,12 +150,14 @@ export component WorkspacePane inherits Rectangle {
     callback surface-resize-requested(int, int);
     callback normalize-hit-col(int, int) -> int;
     callback normalize-selection-hit-col(int, int) -> int;
-    callback resolve-selection-gesture-range(int, int, int, int, int) -> TerminalGestureSelectionRange;
+    callback selection-begin-requested(int, int, int, int);
+    callback selection-update-requested(int, int, int);
+    callback selection-finish-requested();
     callback copy-selection-requested(int, int, int, int);
-    callback selection-changed();
+    callback select-all-requested();
     callback paste-requested();
     callback local-action-requested(string);
-    callback scroll-requested(int, int, int, bool, bool, bool);
+    callback scroll-requested(int, int, int, int, bool, bool, bool);
     callback scroll-thumb-drag-requested(float);
     callback scroll-jump-requested(float);
     callback mouse-input(string, string, int, int, bool, bool, bool);
@@ -502,6 +505,7 @@ export component WorkspacePane inherits Rectangle {
                 session-viewport-at-bottom: root.workspace-session-viewport-at-bottom;
                 session-alternate-screen-active: root.workspace-session-alternate-screen-active;
                 selection-active <=> root.workspace-session-selection-active;
+                selection-drag-active: root.workspace-session-selection-drag-active;
                 selection-start-row <=> root.workspace-session-selection-start-row;
                 selection-start-col <=> root.workspace-session-selection-start-col;
                 selection-end-row <=> root.workspace-session-selection-end-row;
@@ -528,16 +532,24 @@ export component WorkspacePane inherits Rectangle {
                     return root.normalize-selection-hit-col(row, col);
                 }
 
-                resolve-selection-gesture-range(mode, anchor-row, anchor-col, focus-row, focus-col) => {
-                    return root.resolve-selection-gesture-range(mode, anchor-row, anchor-col, focus-row, focus-col);
+                selection-begin-requested(mode, row, col, selection-col) => {
+                    root.selection-begin-requested(mode, row, col, selection-col);
+                }
+
+                selection-update-requested(row, col, selection-col) => {
+                    root.selection-update-requested(row, col, selection-col);
+                }
+
+                selection-finish-requested() => {
+                    root.selection-finish-requested();
                 }
 
                 copy-selection-requested(start-row, start-col, end-row, end-col) => {
                     root.copy-selection-requested(start-row, start-col, end-row, end-col);
                 }
 
-                selection-changed() => {
-                    root.selection-changed();
+                select-all-requested() => {
+                    root.select-all-requested();
                 }
 
                 paste-requested() => {
@@ -548,8 +560,8 @@ export component WorkspacePane inherits Rectangle {
                     root.local-action-requested(action-id);
                 }
 
-                scroll-requested(delta-lines, row, col, shift, ctrl, alt) => {
-                    root.scroll-requested(delta-lines, row, col, shift, ctrl, alt);
+                scroll-requested(delta-lines, row, col, selection-col, shift, ctrl, alt) => {
+                    root.scroll-requested(delta-lines, row, col, selection-col, shift, ctrl, alt);
                 }
 
                 scroll-thumb-drag-requested(ratio) => {

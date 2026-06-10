@@ -5,7 +5,8 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use crate::app::ssh::runtime::{
-    TerminalCellState, TerminalCursorShape, TerminalShellIntegrationState, TerminalSurfaceState,
+    TerminalCellState, TerminalCursorShape, TerminalSelectionGestureMode,
+    TerminalShellIntegrationState, TerminalSurfaceState,
 };
 use crate::app::terminal_semantic::SemanticSpan;
 use crate::theme::{AppThemeSpec, SearchMatchHighlightStrength, SemanticStyleRole};
@@ -187,6 +188,157 @@ impl WorkspaceTerminalSelection {
             range.end_col,
         ))
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WorkspaceTerminalSelectionDrag {
+    pub session_id: Uuid,
+    pub rows: u32,
+    pub cols: u32,
+    pub alternate_screen_active: bool,
+    pub mode: TerminalSelectionGestureMode,
+    pub engaged: bool,
+    pub anchor_range: TerminalSelectionModel,
+    pub anchor_buffer_row: u32,
+    pub anchor_buffer_col: u32,
+    pub pointer_row: u32,
+    pub pointer_col: u32,
+    pub pointer_selection_col: u32,
+}
+
+impl WorkspaceTerminalSelectionDrag {
+    pub fn cell_from_surface(
+        surface: &TerminalSurfaceState,
+        row: u32,
+        col: u32,
+        selection_col: u32,
+    ) -> Self {
+        let pointer_row = row.min(surface.rows.saturating_sub(1));
+        let pointer_col = col.min(surface.cols.saturating_sub(1));
+        let pointer_selection_col = selection_col.min(surface.cols);
+        let anchor_buffer_row = surface.viewport_row_to_buffer_row(pointer_row);
+        let anchor_buffer_col = pointer_col.min(surface.cols);
+        Self {
+            session_id: surface.session_id,
+            rows: surface.rows,
+            cols: surface.cols,
+            alternate_screen_active: surface.alternate_screen_active,
+            mode: TerminalSelectionGestureMode::Cell,
+            engaged: false,
+            anchor_range: TerminalSelectionModel::new(
+                anchor_buffer_row,
+                anchor_buffer_col,
+                anchor_buffer_row,
+                anchor_buffer_col,
+            ),
+            anchor_buffer_row,
+            anchor_buffer_col,
+            pointer_row,
+            pointer_col,
+            pointer_selection_col,
+        }
+    }
+
+    pub fn expanded_from_surface(
+        surface: &TerminalSurfaceState,
+        mode: TerminalSelectionGestureMode,
+        row: u32,
+        col: u32,
+        selection_col: u32,
+    ) -> Self {
+        let pointer_row = row.min(surface.rows.saturating_sub(1));
+        let pointer_col = col.min(surface.cols.saturating_sub(1));
+        let pointer_selection_col = selection_col.min(surface.cols);
+        let anchor_buffer_row = surface.viewport_row_to_buffer_row(pointer_row);
+        let anchor_buffer_col = pointer_col.min(surface.cols);
+        let anchor_range = surface.selection_gesture_range(
+            mode,
+            pointer_row,
+            pointer_col,
+            pointer_row,
+            pointer_col,
+        );
+        Self {
+            session_id: surface.session_id,
+            rows: surface.rows,
+            cols: surface.cols,
+            alternate_screen_active: surface.alternate_screen_active,
+            mode,
+            engaged: true,
+            anchor_range: TerminalSelectionModel::new(
+                anchor_range.start_row,
+                anchor_range.start_col,
+                anchor_range.end_row,
+                anchor_range.end_col,
+            ),
+            anchor_buffer_row,
+            anchor_buffer_col,
+            pointer_row,
+            pointer_col,
+            pointer_selection_col,
+        }
+    }
+
+    pub fn matches_surface(&self, surface: &TerminalSurfaceState) -> bool {
+        self.session_id == surface.session_id
+            && self.rows == surface.rows
+            && self.cols == surface.cols
+            && self.alternate_screen_active == surface.alternate_screen_active
+    }
+
+    pub fn update_pointer(&mut self, row: u32, col: u32, selection_col: u32) {
+        self.pointer_row = row.min(self.rows.saturating_sub(1));
+        self.pointer_col = col.min(self.cols.saturating_sub(1));
+        self.pointer_selection_col = selection_col.min(self.cols);
+        self.engaged = true;
+    }
+
+    pub fn selection_for_surface(
+        &self,
+        surface: &TerminalSurfaceState,
+    ) -> Option<TerminalSelectionModel> {
+        if !self.matches_surface(surface) {
+            return None;
+        }
+
+        match self.mode {
+            TerminalSelectionGestureMode::Cell => {
+                self.engaged.then_some(TerminalSelectionModel::new(
+                    self.anchor_buffer_row,
+                    self.anchor_buffer_col,
+                    surface.viewport_row_to_buffer_row(self.pointer_row),
+                    self.pointer_selection_col,
+                ))
+            }
+            TerminalSelectionGestureMode::Word | TerminalSelectionGestureMode::Line => {
+                let focus_range = surface.selection_gesture_range(
+                    self.mode,
+                    self.pointer_row,
+                    self.pointer_col,
+                    self.pointer_row,
+                    self.pointer_col,
+                );
+                Some(merge_selection_models(
+                    self.anchor_range,
+                    TerminalSelectionModel::new(
+                        focus_range.start_row,
+                        focus_range.start_col,
+                        focus_range.end_row,
+                        focus_range.end_col,
+                    ),
+                ))
+            }
+        }
+    }
+}
+
+fn merge_selection_models(
+    left: TerminalSelectionModel,
+    right: TerminalSelectionModel,
+) -> TerminalSelectionModel {
+    let start = (left.start_row, left.start_col).min((right.start_row, right.start_col));
+    let end = (left.end_row, left.end_col).max((right.end_row, right.end_col));
+    TerminalSelectionModel::new(start.0, start.1, end.0, end.1)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
