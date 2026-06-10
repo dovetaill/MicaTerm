@@ -43,7 +43,9 @@ use crate::shell::assets::{
 };
 use crate::shell::context_menu::{
     ContextMenuActionNode, ContextMenuActionState, ContextMenuSurface, ContextTargetKind,
-    SelectionContext, resolve_action_tree, resolve_action_tree_for_surface,
+    SelectionContext, TEXT_CONTEXT_MENU_WIDTH, resolve_action_tree,
+    resolve_action_tree_for_surface, resolve_text_context_menu_origin,
+    text_context_menu_copy_allowed, text_context_menu_height, text_context_menu_paste_allowed,
 };
 use crate::shell::keychain::{
     KeychainDeleteError, KeychainItemKind, create_keychain_node, delete_keychain_node,
@@ -758,6 +760,25 @@ pub struct WorkspaceTabContextMenuState {
     pub close_right_enabled: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TextContextMenuState {
+    pub open: bool,
+    pub field_id: String,
+    pub field_kind: String,
+    pub anchor_x: f32,
+    pub anchor_y: f32,
+    pub origin_x: f32,
+    pub origin_y: f32,
+    pub read_only: bool,
+    pub is_secret: bool,
+    pub has_selection: bool,
+    pub clipboard_has_text: bool,
+    pub supports_multiline: bool,
+    pub copy_enabled: bool,
+    pub paste_enabled: bool,
+    pub select_all_enabled: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellViewModel {
     pub show_welcome: bool,
@@ -810,6 +831,7 @@ pub struct ShellViewModel {
     workspace_tabs: Vec<WorkspaceTab>,
     workspace_tab_order: Vec<String>,
     workspace_tab_context_menu_state: WorkspaceTabContextMenuState,
+    text_context_menu_state: TextContextMenuState,
     hidden_workspace_terminal_session_ids: HashSet<String>,
     active_workspace_tab_id: Option<String>,
     active_workspace_session_id: Option<String>,
@@ -903,6 +925,7 @@ impl Default for ShellViewModel {
             workspace_tabs: Vec::new(),
             workspace_tab_order: Vec::new(),
             workspace_tab_context_menu_state: WorkspaceTabContextMenuState::default(),
+            text_context_menu_state: TextContextMenuState::default(),
             hidden_workspace_terminal_session_ids: HashSet::new(),
             active_workspace_tab_id: None,
             active_workspace_session_id: None,
@@ -1401,6 +1424,7 @@ impl ShellViewModel {
         anchor_x: f32,
         anchor_y: f32,
     ) {
+        self.close_text_context_menu();
         self.context_menu_surface = Some(surface);
         let target_kind =
             self.resolve_context_target_kind_for_selection(target_kind, target_id.as_deref());
@@ -1483,6 +1507,64 @@ impl ShellViewModel {
         self.context_menu_child_flows_left = false;
         self.context_menu_open_path.clear();
         self.context_menu_feedback_text.clear();
+    }
+
+    pub fn text_context_menu_state(&self) -> &TextContextMenuState {
+        &self.text_context_menu_state
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_text_context_menu(
+        &mut self,
+        field_id: &str,
+        field_kind: &str,
+        read_only: bool,
+        is_secret: bool,
+        has_selection: bool,
+        clipboard_has_text: bool,
+        supports_multiline: bool,
+        anchor_x: f32,
+        anchor_y: f32,
+        host_width: f32,
+        host_height: f32,
+    ) {
+        self.close_context_menu();
+        self.close_workspace_tab_context_menu();
+
+        let copy_enabled = text_context_menu_copy_allowed(field_kind, is_secret, has_selection);
+        let paste_enabled = text_context_menu_paste_allowed(read_only, clipboard_has_text);
+        let select_all_enabled = true;
+        let menu_height = text_context_menu_height(select_all_enabled);
+        let (origin_x, origin_y) = resolve_text_context_menu_origin(
+            host_width,
+            host_height,
+            anchor_x,
+            anchor_y,
+            TEXT_CONTEXT_MENU_WIDTH,
+            menu_height,
+        );
+
+        self.text_context_menu_state = TextContextMenuState {
+            open: true,
+            field_id: field_id.to_string(),
+            field_kind: field_kind.to_string(),
+            anchor_x,
+            anchor_y,
+            origin_x,
+            origin_y,
+            read_only,
+            is_secret,
+            has_selection,
+            clipboard_has_text,
+            supports_multiline,
+            copy_enabled,
+            paste_enabled,
+            select_all_enabled,
+        };
+    }
+
+    pub fn close_text_context_menu(&mut self) {
+        self.text_context_menu_state = TextContextMenuState::default();
     }
 
     pub fn set_context_menu_open_path(&mut self, path: Vec<usize>) {

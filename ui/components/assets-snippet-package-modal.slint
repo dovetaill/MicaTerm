@@ -46,6 +46,7 @@ export component AssetsSnippetPackageModal inherits Rectangle {
     callback close-requested();
     callback confirm-requested();
     callback name-changed(string);
+    callback text-context-menu-requested(string, string, bool, bool, bool, bool, length, length);
     callback drag-requested(length, length);
     callback drag-moved(length, length);
     callback drag-ended();
@@ -56,6 +57,10 @@ export component AssetsSnippetPackageModal inherits Rectangle {
 
     public function focus-input() {
         name-input.focus();
+    }
+
+    function name-field-has-selection() -> bool {
+        return name-input.cursor-position_byte-offset != name-input.anchor-position-byte-offset;
     }
 
     modal-focus := FocusScope {
@@ -184,6 +189,29 @@ export component AssetsSnippetPackageModal inherits Rectangle {
                 border-width: 1px;
                 border-color: root.validation-message == "" ? ThemeTokens.divider-subtle : ThemeTokens.accent;
                 background: ThemeTokens.inspector-surface;
+
+                name-field-right-click-hit-area := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+                    mouse-cursor: MouseCursor.text;
+
+                    pointer-event(event) => {
+                        if event.kind == PointerEventKind.down
+                            && event.button == PointerEventButton.right
+                        {
+                            root.text-context-menu-requested(
+                                "snippet-package-name",
+                                "snippet-package-name",
+                                false,
+                                false,
+                                root.name-field-has-selection(),
+                                false,
+                                self.absolute-position.x + self.mouse-x,
+                                self.absolute-position.y + self.mouse-y,
+                            );
+                        }
+                    }
+                }
 
                 name-input := TextInput {
                     x: 12px;

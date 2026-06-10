@@ -135,6 +135,24 @@ fn workspace_tab_context_menu_dismiss_layer_closes_on_pointer_events() {
 }
 
 #[test]
+fn window_shell_routes_text_context_menu_through_overlay_without_focus_steal() {
+    let content = std::fs::read_to_string("ui/app-window.slint").unwrap();
+
+    assert!(
+        content.contains("text-context-menu-dismiss-layer := TouchArea {"),
+        "app window should expose a dismiss layer for the text context menu once ordinary fields can right-click locally"
+    );
+    assert!(
+        content.contains("text-context-menu-overlay := TextContextMenuOverlay {"),
+        "app window should host the shared text context menu overlay instead of forcing every field to paint above modal siblings on its own"
+    );
+    assert!(
+        !content.contains("text-context-menu-overlay.focus-menu();"),
+        "text context menu overlays must not steal focus from the owning TextInput"
+    );
+}
+
+#[test]
 fn window_shell_exposes_minimum_window_budget() {
     let spec = window_command_spec();
 

@@ -66,6 +66,9 @@ pub const CONTEXT_MENU_ROW_HEIGHT: f32 = 32.0;
 pub const CONTEXT_MENU_ROW_GAP: f32 = 4.0;
 pub const CONTEXT_MENU_VERTICAL_PADDING: f32 = 8.0;
 pub const CONTEXT_MENU_DIVIDER_HEIGHT: f32 = 1.0;
+pub const TEXT_CONTEXT_MENU_WIDTH: f32 = 164.0;
+pub const TEXT_CONTEXT_MENU_ROW_HEIGHT: f32 = 32.0;
+pub const TEXT_CONTEXT_MENU_VERTICAL_PADDING: f32 = 8.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MenuPlacementInput {
@@ -109,6 +112,61 @@ impl Rect {
             && pointer.1 >= self.top()
             && pointer.1 <= self.bottom()
     }
+}
+
+pub fn text_context_menu_field_kind_allows_secret_copy(field_kind: &str) -> bool {
+    matches!(
+        field_kind,
+        "public-key"
+            | "fingerprint"
+            | "path"
+            | "label"
+            | "comment"
+            | "public-metadata"
+            | "snippet-package-name"
+    )
+}
+
+pub fn text_context_menu_copy_allowed(
+    field_kind: &str,
+    is_secret: bool,
+    has_selection: bool,
+) -> bool {
+    has_selection && (!is_secret || text_context_menu_field_kind_allows_secret_copy(field_kind))
+}
+
+pub fn text_context_menu_paste_allowed(read_only: bool, clipboard_has_text: bool) -> bool {
+    !read_only && clipboard_has_text
+}
+
+pub fn text_context_menu_height(show_select_all: bool) -> f32 {
+    let row_count = if show_select_all { 3.0 } else { 2.0 };
+    TEXT_CONTEXT_MENU_VERTICAL_PADDING * 2.0 + row_count * TEXT_CONTEXT_MENU_ROW_HEIGHT
+}
+
+pub fn resolve_text_context_menu_origin(
+    host_width: f32,
+    host_height: f32,
+    anchor_x: f32,
+    anchor_y: f32,
+    menu_width: f32,
+    menu_height: f32,
+) -> (f32, f32) {
+    let unclamped_x = if anchor_x + menu_width > host_width {
+        anchor_x - menu_width
+    } else {
+        anchor_x
+    };
+    let unclamped_y = if anchor_y + menu_height > host_height {
+        anchor_y - menu_height
+    } else {
+        anchor_y
+    };
+
+    (
+        unclamped_x.clamp(0.0, (host_width - menu_width).max(0.0)),
+        unclamped_y.clamp(0.0, (host_height - menu_height).max(0.0)),
+    )
 }
 
 pub fn resolve_action_tree(

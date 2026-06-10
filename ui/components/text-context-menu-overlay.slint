@@ -1,0 +1,97 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
+
+component TextContextMenuRow inherits Rectangle {
+    in property <string> action-id: "";
+    in property <string> title: "";
+    in property <bool> enabled: true;
+    callback invoked(string);
+
+    height: 32px;
+    border-radius: ThemeTokens.modal-control-radius;
+    background: row-touch.pressed ? ThemeTokens.control-pressed-surface
+        : row-touch.has-hover ? ThemeTokens.control-hover-surface
+        : transparent;
+    opacity: root.enabled ? 1.0 : 0.56;
+
+    Text {
+        x: 12px;
+        y: 0px;
+        width: parent.width - 24px;
+        height: parent.height;
+        text: root.title;
+        color: ThemeTokens.text-primary;
+        font-family: AppTypography.ui-font-family;
+        font-size: AppTypography.ui-font-size-body;
+        font-weight: AppTypography.ui-font-weight-regular;
+        vertical-alignment: center;
+    }
+
+    row-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.enabled;
+
+        clicked => {
+            root.invoked(root.action-id);
+        }
+    }
+}
+
+export component TextContextMenuOverlay inherits Rectangle {
+    in property <string> field-id: "";
+    in property <bool> copy-enabled: false;
+    in property <bool> paste-enabled: false;
+    in property <bool> select-all-enabled: false;
+    callback action-invoked(string);
+
+    private property <length> row-height: 32px;
+    private property <length> vertical-padding: 8px;
+
+    width: 164px;
+    height: root.vertical-padding * 2
+        + root.row-height * (root.select-all-enabled ? 3 : 2);
+    border-radius: ThemeTokens.modal-radius;
+    border-width: 1px;
+    border-color: ThemeTokens.modal-field-border;
+    background: ThemeTokens.modal-section-surface;
+
+    copy-row := TextContextMenuRow {
+        x: 8px;
+        y: root.vertical-padding;
+        width: parent.width - 16px;
+        action-id: "copy";
+        title: "Copy";
+        enabled: root.copy-enabled;
+
+        invoked(action-id) => {
+            root.action-invoked(action-id);
+        }
+    }
+
+    paste-row := TextContextMenuRow {
+        x: 8px;
+        y: copy-row.y + copy-row.height;
+        width: parent.width - 16px;
+        action-id: "paste";
+        title: "Paste";
+        enabled: root.paste-enabled;
+
+        invoked(action-id) => {
+            root.action-invoked(action-id);
+        }
+    }
+
+    if root.select-all-enabled : select-all-row := TextContextMenuRow {
+        x: 8px;
+        y: paste-row.y + paste-row.height;
+        width: parent.width - 16px;
+        action-id: "select-all";
+        title: "Select All";
+        enabled: root.select-all-enabled;
+
+        invoked(action-id) => {
+            root.action-invoked(action-id);
+        }
+    }
+}

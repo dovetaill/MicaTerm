@@ -2323,6 +2323,25 @@ fn sync_workspace_tab_context_menu_state(window: &AppWindow, state: &ShellViewMo
     window.set_workspace_tab_context_menu_close_left_enabled(menu.close_left_enabled);
 }
 
+fn sync_text_context_menu_state(window: &AppWindow, state: &ShellViewModel) {
+    let menu = state.text_context_menu_state();
+    window.set_text_context_menu_open(menu.open);
+    window.set_text_context_menu_field_id(menu.field_id.clone().into());
+    window.set_text_context_menu_field_kind(menu.field_kind.clone().into());
+    window.set_text_context_menu_anchor_x(menu.anchor_x);
+    window.set_text_context_menu_anchor_y(menu.anchor_y);
+    window.set_text_context_menu_origin_x(menu.origin_x);
+    window.set_text_context_menu_origin_y(menu.origin_y);
+    window.set_text_context_menu_read_only(menu.read_only);
+    window.set_text_context_menu_secret(menu.is_secret);
+    window.set_text_context_menu_has_selection(menu.has_selection);
+    window.set_text_context_menu_clipboard_has_text(menu.clipboard_has_text);
+    window.set_text_context_menu_supports_multiline(menu.supports_multiline);
+    window.set_text_context_menu_copy_enabled(menu.copy_enabled);
+    window.set_text_context_menu_paste_enabled(menu.paste_enabled);
+    window.set_text_context_menu_select_all_enabled(menu.select_all_enabled);
+}
+
 fn show_workspace_tab_tooltip(
     window: &AppWindow,
     state: &ShellViewModel,
@@ -4808,6 +4827,7 @@ fn sync_workspace_tabs_with_manager(
 ) {
     sync_workspace_tab_items(window, state);
     sync_workspace_tab_context_menu_state(window, state);
+    sync_text_context_menu_state(window, state);
     sync_workspace_session_state_with_manager(window, state, follow_tracker, manager);
 }
 
@@ -4853,6 +4873,7 @@ fn sync_shell_layout(
     sync_workspace_native_terminal_surface_geometry(window);
     assets_keychain::update_context_menu_placement(window, state);
     assets_keychain::sync_assets_context_menu_state(window, state);
+    sync_text_context_menu_state(window, state);
 }
 
 fn current_window_size(window: &AppWindow) -> (u32, u32) {
@@ -8054,6 +8075,57 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let mut state = state.borrow_mut();
         state.close_workspace_tab_context_menu();
         sync_workspace_tab_context_menu_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_text_context_menu_requested(
+        move |field_id,
+              field_kind,
+              read_only,
+              is_secret,
+              has_selection,
+              supports_multiline,
+              anchor_x,
+              anchor_y| {
+            let window = handle.unwrap();
+            let mut state = state.borrow_mut();
+            let clipboard_has_text = workspace_terminal::system_clipboard_text()
+                .is_some_and(|text| !text.trim_end_matches('\0').is_empty());
+            let (width, height) = current_window_size(&window);
+            state.open_text_context_menu(
+                field_id.as_str(),
+                field_kind.as_str(),
+                read_only,
+                is_secret,
+                has_selection,
+                clipboard_has_text,
+                supports_multiline,
+                anchor_x,
+                anchor_y,
+                width as f32,
+                height as f32,
+            );
+            sync_text_context_menu_state(&window, &state);
+        },
+    );
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_close_text_context_menu_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.close_text_context_menu();
+        sync_text_context_menu_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_text_context_menu_action_invoked(move |_action_id, _field_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.close_text_context_menu();
+        sync_text_context_menu_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);

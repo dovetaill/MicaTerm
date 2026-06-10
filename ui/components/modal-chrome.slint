@@ -587,9 +587,13 @@ export component DialogInlineBanner inherits Rectangle {
 export component DialogTextField inherits Rectangle {
     in property <string> label: "";
     in property <string> value: "";
+    in property <string> field-id: "";
+    in property <string> field-kind: root.password-mode ? "secret" : root.multiline ? "multiline" : "text";
     in property <bool> required: false;
     in property <bool> multiline: false;
     in property <bool> password-mode: false;
+    in property <bool> read-only: false;
+    in property <bool> context-menu-secret: root.password-mode;
     in property <bool> invalid: false;
     in property <string> helper-text: "";
     in property <string> trailing-action-text: "";
@@ -600,6 +604,7 @@ export component DialogTextField inherits Rectangle {
     callback trailing-action-requested();
     callback trailing-icon-requested();
     callback submitted();
+    callback text-context-menu-requested(string, string, bool, bool, bool, bool, length, length);
 
     private property <length> field-height: root.multiline ? 120px : 40px;
     private property <length> helper-height: root.helper-text == "" ? 0px : helper-metric.preferred-height + 2px;
@@ -612,6 +617,10 @@ export component DialogTextField inherits Rectangle {
         root.width - 24px - root.trailing-action-width - root.trailing-icon-width
     );
     private property <length> text-input-height: max(0px, root.field-height - 20px);
+    private property <length> context-menu-hit-width: max(
+        0px,
+        root.width - root.trailing-action-width - root.trailing-icon-width
+    );
     private property <bool> active: field-input.has-focus;
     private property <bool> hovered: top-padding-focus.has-hover
         || bottom-padding-focus.has-hover
@@ -629,6 +638,10 @@ export component DialogTextField inherits Rectangle {
 
     public function select-all() {
         field-input.select-all();
+    }
+
+    function has-selection() -> bool {
+        return field-input.cursor-position_byte-offset != field-input.anchor-position-byte-offset;
     }
 
     Text {
@@ -679,6 +692,29 @@ export component DialogTextField inherits Rectangle {
             : ThemeTokens.modal-field-border;
         background: ThemeTokens.modal-field-surface;
 
+        field-right-click-hit-area := TouchArea {
+            x: 0px;
+            y: 0px;
+            width: root.context-menu-hit-width;
+            height: parent.height;
+            mouse-cursor: MouseCursor.text;
+
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                    root.text-context-menu-requested(
+                        root.field-id,
+                        root.field-kind,
+                        root.read-only,
+                        root.context-menu-secret,
+                        root.has-selection(),
+                        root.multiline,
+                        self.absolute-position.x + self.mouse-x,
+                        self.absolute-position.y + self.mouse-y,
+                    );
+                }
+            }
+        }
+
         field-input := TextInput {
             x: root.text-input-x;
             y: root.text-input-y;
@@ -688,6 +724,7 @@ export component DialogTextField inherits Rectangle {
             color: ThemeTokens.text-primary;
             single-line: !root.multiline;
             input-type: root.password-mode ? InputType.password : InputType.text;
+            read-only: root.read-only;
             selection-background-color: ThemeTokens.focus-ring;
             selection-foreground-color: ThemeTokens.text-primary;
             font-family: AppTypography.ui-font-family;
@@ -742,7 +779,7 @@ export component DialogTextField inherits Rectangle {
         }
 
         right-padding-focus := TouchArea {
-            x: parent.width - 12px - root.trailing-action-width - root.trailing-icon-width;
+            x: max(0px, root.context-menu-hit-width - 12px);
             y: 0px;
             width: 12px;
             height: parent.height;

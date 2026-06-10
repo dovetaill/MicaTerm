@@ -19,6 +19,7 @@ import { SettingsModal } from "components/settings-modal.slint";
 import { SyncVaultModal } from "components/sync-vault-modal.slint";
 import { SshHostKeyConfirmModal } from "components/ssh-host-key-confirm-modal.slint";
 import { StatusPill } from "components/status-pill.slint";
+import { TextContextMenuOverlay } from "components/text-context-menu-overlay.slint";
 import { WorkspacePasteWarningModal } from "components/workspace-paste-warning-modal.slint";
 import { ThemeTokens } from "theme/tokens.slint";
 import { AppTypography } from "theme/typography.slint";
@@ -452,6 +453,21 @@ export component AppWindow inherits Window {
     in-out property <[AssetsContextMenuItem]> assets-context-menu-primary-items: [];
     in-out property <[AssetsContextMenuItem]> assets-context-menu-secondary-items: [];
     in-out property <[AssetsContextMenuItem]> assets-context-menu-tertiary-items: [];
+    in-out property <bool> text-context-menu-open: false;
+    in-out property <string> text-context-menu-field-id: "";
+    in-out property <string> text-context-menu-field-kind: "";
+    in-out property <length> text-context-menu-anchor-x: 0px;
+    in-out property <length> text-context-menu-anchor-y: 0px;
+    in-out property <length> text-context-menu-origin-x: 0px;
+    in-out property <length> text-context-menu-origin-y: 0px;
+    in-out property <bool> text-context-menu-read-only: false;
+    in-out property <bool> text-context-menu-secret: false;
+    in-out property <bool> text-context-menu-has-selection: false;
+    in-out property <bool> text-context-menu-clipboard-has-text: false;
+    in-out property <bool> text-context-menu-supports-multiline: false;
+    in-out property <bool> text-context-menu-copy-enabled: false;
+    in-out property <bool> text-context-menu-paste-enabled: false;
+    in-out property <bool> text-context-menu-select-all-enabled: false;
     in-out property <string> context-menu-feedback-text: "";
     in-out property <[SidebarNavItem]> sidebar-items: [];
     in-out property <length> shell-body-height-cache: 852px;
@@ -689,6 +705,9 @@ export component AppWindow inherits Window {
     callback asset-activated(string);
     callback toggle-expanded-requested(string);
     callback asset-context-menu-requested(string, string, length, length);
+    callback text-context-menu-requested(string, string, bool, bool, bool, bool, length, length);
+    callback text-context-menu-action-invoked(string, string);
+    callback close-text-context-menu-requested();
     callback shell-interaction-requested();
     callback assets-context-menu-action-invoked(string);
     callback assets-context-menu-key-pressed(string);
@@ -3134,6 +3153,37 @@ export component AppWindow inherits Window {
                 main-workspace.restore-primary-focus();
                 root.blocking-modal-focus-restore-requested();
             }
+        }
+    }
+
+    text-context-menu-dismiss-layer := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        visible: root.text-context-menu-open;
+        enabled: root.text-context-menu-open;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down {
+                root.close-text-context-menu-requested();
+            }
+        }
+
+        clicked => {
+            root.close-text-context-menu-requested();
+        }
+    }
+
+    text-context-menu-overlay := TextContextMenuOverlay {
+        visible: root.text-context-menu-open;
+        x: root.text-context-menu-origin-x;
+        y: root.text-context-menu-origin-y;
+        field-id: root.text-context-menu-field-id;
+        copy-enabled: root.text-context-menu-copy-enabled;
+        paste-enabled: root.text-context-menu-paste-enabled;
+        select-all-enabled: root.text-context-menu-select-all-enabled;
+
+        action-invoked(action-id) => {
+            root.text-context-menu-action-invoked(action-id, root.text-context-menu-field-id);
         }
     }
 
