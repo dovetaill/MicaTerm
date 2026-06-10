@@ -549,8 +549,11 @@ fn terminal_host_declares_double_and_triple_click_selection_gestures() {
         "TerminalSessionHost should track pointer click streak state so double-click and triple-click can map to stable local selection gestures"
     );
     assert!(
-        terminal_host.contains("private property <int> selection-gesture-mode: 0;"),
-        "TerminalSessionHost should expose a gesture mode state so follow-up drags can keep token vs row expansion semantics instead of falling back to plain range drag"
+        terminal_host.contains("in property <bool> selection-drag-active: false;")
+            && terminal_host.contains("callback selection-begin-requested(int, int, int, int);")
+            && terminal_host.contains("callback selection-update-requested(int, int, int);")
+            && terminal_host.contains("callback selection-finish-requested();"),
+        "TerminalSessionHost should route gesture mode and drag ownership through explicit Rust callbacks plus drag-active projection so follow-up drags keep token vs row expansion semantics without reviving host-owned selection state"
     );
     assert!(
         terminal_host.contains("if event.kind == PointerEventKind.down && event.button == PointerEventButton.left && root.selection-click-streak == 2")
