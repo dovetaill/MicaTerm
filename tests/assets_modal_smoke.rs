@@ -525,6 +525,84 @@ fn ssh_modal_host_field_padding_right_click_keeps_field_ownership() {
 }
 
 #[test]
+fn ssh_modal_host_field_context_menu_copy_and_paste_actions_work() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let app_weak = app.as_weak();
+    app.on_asset_ssh_modal_draft_changed(move |field, value| {
+        let app = app_weak.upgrade().expect("upgrade app");
+        if field.as_str() == "host" {
+            app.set_asset_ssh_modal_host(value);
+        }
+    });
+
+    app.show().expect("show app window");
+    app.window()
+        .dispatch_event(WindowEvent::WindowActiveChanged(true));
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-ssh-connection".into());
+    settle_modal_ui();
+
+    let host_field = ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::host-field")
+        .next()
+        .expect("find ssh host field");
+    let host_input = descendant_by_id(&host_field, "DialogTextField::field-input");
+    let host_input_position = element_center(&host_input);
+
+    dispatch_pointer_click(&app, host_input_position, PointerEventButton::Left);
+    dispatch_text_sequence(&app, "Alpha");
+    dispatch_text_key_chord(&app, "a", true, false, false);
+
+    set_clipboard_text("sentinel-before-copy-row");
+    dispatch_pointer_click(&app, host_input_position, PointerEventButton::Right);
+    assert!(
+        app.get_text_context_menu_open(),
+        "right-clicking a bridged SSH text field should open the shared text context menu"
+    );
+
+    let text_menu_overlay =
+        ElementHandle::find_by_element_id(&app, "AppWindow::text-context-menu-overlay")
+            .next()
+            .expect("find text context menu overlay");
+    let copy_row = descendant_by_id(&text_menu_overlay, "TextContextMenuOverlay::copy-row");
+    dispatch_pointer_click(&app, element_center(&copy_row), PointerEventButton::Left);
+
+    assert!(
+        !app.get_text_context_menu_open(),
+        "invoking the copy row should dismiss the shared text context menu"
+    );
+
+    assert_eq!(
+        clipboard_text(),
+        "Alpha",
+        "the shared text context menu copy row should forward to the owning SSH host field selection"
+    );
+
+    dispatch_pointer_click(&app, host_input_position, PointerEventButton::Left);
+    dispatch_text_key_chord(&app, "a", true, false, false);
+    set_clipboard_text("Beta");
+    dispatch_pointer_click(&app, host_input_position, PointerEventButton::Right);
+    assert!(
+        app.get_text_context_menu_open(),
+        "right-clicking again should reopen the shared text context menu for paste"
+    );
+
+    let text_menu_overlay =
+        ElementHandle::find_by_element_id(&app, "AppWindow::text-context-menu-overlay")
+            .next()
+            .expect("find text context menu overlay");
+    let paste_row = descendant_by_id(&text_menu_overlay, "TextContextMenuOverlay::paste-row");
+    dispatch_pointer_click(&app, element_center(&paste_row), PointerEventButton::Left);
+
+    assert_eq!(
+        app.get_asset_ssh_modal_host().as_str(),
+        "Beta",
+        "the shared text context menu paste row should insert clipboard text back into the owning SSH host field"
+    );
+}
+
+#[test]
 fn snippet_package_select_fully_fits_inside_its_layout_group() {
     i_slint_backend_testing::init_no_event_loop();
 

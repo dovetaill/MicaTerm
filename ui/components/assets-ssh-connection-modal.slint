@@ -49,9 +49,13 @@ export component AssetsSshConnectionModal inherits Rectangle {
     in property <string> feedback-message: "";
     in property <bool> can-confirm: false;
     in property <int> focus-sequence: 0;
+    in property <string> text-context-menu-action-id: "";
+    in property <string> text-context-menu-action-field-id: "";
+    in property <int> text-context-menu-action-sequence: 0;
     callback close-requested();
     callback draft-changed(string, string);
     callback action-requested(string);
+    callback text-context-menu-requested(string, string, bool, bool, bool, bool, length, length);
     callback drag-requested(length, length);
     callback drag-moved(length, length);
     callback drag-ended();
@@ -223,6 +227,11 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             compact-name-field := DialogTextField {
                                 width: parent.width;
                                 label: "Name";
+                                field-id: "ssh.name";
+                                field-kind: "label";
+                                text-context-menu-action-id: root.text-context-menu-action-id;
+                                active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                                text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                                 required: true;
                                 value: root.name;
                                 invalid: root.validation-message != "";
@@ -231,37 +240,140 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 value-changed(value) => {
                                     root.draft-changed("name", value);
                                 }
+
+                                text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                ) => {
+                                    root.text-context-menu-requested(
+                                        field-id,
+                                        field-kind,
+                                        read-only,
+                                        is-secret,
+                                        has-selection,
+                                        supports-multiline,
+                                        anchor-x,
+                                        anchor-y,
+                                    );
+                                }
                             }
 
-                            DialogTextField {
+                            compact-host-field := DialogTextField {
                                 width: parent.width;
                                 label: "Host";
+                                field-id: "ssh.host";
+                                field-kind: "text";
+                                text-context-menu-action-id: root.text-context-menu-action-id;
+                                active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                                text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                                 required: true;
                                 value: root.host;
 
                                 value-changed(value) => {
                                     root.draft-changed("host", value);
                                 }
+
+                                text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                ) => {
+                                    root.text-context-menu-requested(
+                                        field-id,
+                                        field-kind,
+                                        read-only,
+                                        is-secret,
+                                        has-selection,
+                                        supports-multiline,
+                                        anchor-x,
+                                        anchor-y,
+                                    );
+                                }
                             }
 
-                            DialogTextField {
+                            compact-user-field := DialogTextField {
                                 width: parent.width;
                                 label: "User";
+                                field-id: "ssh.user";
+                                field-kind: "text";
+                                text-context-menu-action-id: root.text-context-menu-action-id;
+                                active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                                text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                                 required: true;
                                 value: root.user;
 
                                 value-changed(value) => {
                                     root.draft-changed("user", value);
                                 }
+
+                                text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                ) => {
+                                    root.text-context-menu-requested(
+                                        field-id,
+                                        field-kind,
+                                        read-only,
+                                        is-secret,
+                                        has-selection,
+                                        supports-multiline,
+                                        anchor-x,
+                                        anchor-y,
+                                    );
+                                }
                             }
 
-                            DialogTextField {
+                            compact-port-field := DialogTextField {
                                 width: parent.width;
                                 label: "Port";
+                                field-id: "ssh.port";
+                                field-kind: "text";
+                                text-context-menu-action-id: root.text-context-menu-action-id;
+                                active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                                text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                                 value: root.port;
 
                                 value-changed(value) => {
                                     root.draft-changed("port", value);
+                                }
+
+                                text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                ) => {
+                                    root.text-context-menu-requested(
+                                        field-id,
+                                        field-kind,
+                                        read-only,
+                                        is-secret,
+                                        has-selection,
+                                        supports-multiline,
+                                        anchor-x,
+                                        anchor-y,
+                                    );
                                 }
                             }
                         }
@@ -278,6 +390,11 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 wide-name-field := DialogTextField {
                                     width: max(0px, (parent.width - 14px) / 2);
                                     label: "Name";
+                                    field-id: "ssh.name";
+                                    field-kind: "label";
+                                    text-context-menu-action-id: root.text-context-menu-action-id;
+                                    active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                                    text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                                     required: true;
                                     value: root.name;
                                     invalid: root.validation-message != "";
@@ -286,16 +403,65 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                     value-changed(value) => {
                                         root.draft-changed("name", value);
                                     }
+
+                                    text-context-menu-requested(
+                                        field-id,
+                                        field-kind,
+                                        read-only,
+                                        is-secret,
+                                        has-selection,
+                                        supports-multiline,
+                                        anchor-x,
+                                        anchor-y,
+                                    ) => {
+                                        root.text-context-menu-requested(
+                                            field-id,
+                                            field-kind,
+                                            read-only,
+                                            is-secret,
+                                            has-selection,
+                                            supports-multiline,
+                                            anchor-x,
+                                            anchor-y,
+                                        );
+                                    }
                                 }
 
                                 host-field := DialogTextField {
                                     width: max(0px, (parent.width - 14px) / 2);
                                     label: "Host";
+                                    field-id: "ssh.host";
+                                    field-kind: "text";
+                                    text-context-menu-action-id: root.text-context-menu-action-id;
+                                    active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                                    text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                                     required: true;
                                     value: root.host;
 
                                     value-changed(value) => {
                                         root.draft-changed("host", value);
+                                    }
+
+                                    text-context-menu-requested(
+                                        field-id,
+                                        field-kind,
+                                        read-only,
+                                        is-secret,
+                                        has-selection,
+                                        supports-multiline,
+                                        anchor-x,
+                                        anchor-y,
+                                    ) => {
+                                        root.text-context-menu-requested(
+                                            field-id,
+                                            field-kind,
+                                            read-only,
+                                            is-secret,
+                                            has-selection,
+                                            supports-multiline,
+                                            anchor-x,
+                                            anchor-y,
+                                        );
                                     }
                                 }
                             }
@@ -313,21 +479,75 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 user-field := DialogTextField {
                                     width: max(0px, parent.width - 156px);
                                     label: "User";
+                                    field-id: "ssh.user";
+                                    field-kind: "text";
+                                    text-context-menu-action-id: root.text-context-menu-action-id;
+                                    active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                                    text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                                     required: true;
                                     value: root.user;
 
                                     value-changed(value) => {
                                         root.draft-changed("user", value);
                                     }
+
+                                    text-context-menu-requested(
+                                        field-id,
+                                        field-kind,
+                                        read-only,
+                                        is-secret,
+                                        has-selection,
+                                        supports-multiline,
+                                        anchor-x,
+                                        anchor-y,
+                                    ) => {
+                                        root.text-context-menu-requested(
+                                            field-id,
+                                            field-kind,
+                                            read-only,
+                                            is-secret,
+                                            has-selection,
+                                            supports-multiline,
+                                            anchor-x,
+                                            anchor-y,
+                                        );
+                                    }
                                 }
 
                                 port-field := DialogTextField {
                                     width: 142px;
                                     label: "Port";
+                                    field-id: "ssh.port";
+                                    field-kind: "text";
+                                    text-context-menu-action-id: root.text-context-menu-action-id;
+                                    active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                                    text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                                     value: root.port;
 
                                     value-changed(value) => {
                                         root.draft-changed("port", value);
+                                    }
+
+                                    text-context-menu-requested(
+                                        field-id,
+                                        field-kind,
+                                        read-only,
+                                        is-secret,
+                                        has-selection,
+                                        supports-multiline,
+                                        anchor-x,
+                                        anchor-y,
+                                    ) => {
+                                        root.text-context-menu-requested(
+                                            field-id,
+                                            field-kind,
+                                            read-only,
+                                            is-secret,
+                                            has-selection,
+                                            supports-multiline,
+                                            anchor-x,
+                                            anchor-y,
+                                        );
                                     }
                                 }
                             }
@@ -832,15 +1052,42 @@ export component AssetsSshConnectionModal inherits Rectangle {
                         title: "Notes";
                         description: root.dense-layout ? "" : "Use this for host purpose, environment, or operator hints instead of overloading the profile name.";
 
-                        DialogTextField {
+                        remark-field := DialogTextField {
                             width: parent.width;
                             label: "Remark";
+                            field-id: "ssh.remark";
+                            field-kind: "comment";
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             value: root.remark;
                             multiline: true;
                             helper-text: "Use this area for host purpose, environment, or operator hints instead of overloading the profile name.";
 
                             value-changed(value) => {
                                 root.draft-changed("remark", value);
+                            }
+
+                            text-context-menu-requested(
+                                field-id,
+                                field-kind,
+                                read-only,
+                                is-secret,
+                                has-selection,
+                                supports-multiline,
+                                anchor-x,
+                                anchor-y,
+                            ) => {
+                                root.text-context-menu-requested(
+                                    field-id,
+                                    field-kind,
+                                    read-only,
+                                    is-secret,
+                                    has-selection,
+                                    supports-multiline,
+                                    anchor-x,
+                                    anchor-y,
+                                );
                             }
                         }
                     }

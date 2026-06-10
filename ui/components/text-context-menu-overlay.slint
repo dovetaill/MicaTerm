@@ -32,8 +32,12 @@ component TextContextMenuRow inherits Rectangle {
         height: parent.height;
         enabled: root.enabled;
 
-        clicked => {
-            root.invoked(root.action-id);
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down
+                && event.button == PointerEventButton.left
+            {
+                root.invoked(root.action-id);
+            }
         }
     }
 }

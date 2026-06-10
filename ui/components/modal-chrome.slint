@@ -600,6 +600,9 @@ export component DialogTextField inherits Rectangle {
     in property <bool> trailing-icon-visible: false;
     in property <image> trailing-icon-source;
     in property <string> trailing-icon-label: "";
+    in property <string> text-context-menu-action-id: "";
+    in property <string> active-text-context-menu-field-id: "";
+    in property <int> text-context-menu-action-sequence: 0;
     callback value-changed(string);
     callback trailing-action-requested();
     callback trailing-icon-requested();
@@ -621,6 +624,8 @@ export component DialogTextField inherits Rectangle {
         0px,
         root.width - root.trailing-action-width - root.trailing-icon-width
     );
+    private property <int> context-menu-anchor-offset: -1;
+    private property <int> context-menu-cursor-offset: -1;
     private property <bool> active: field-input.has-focus;
     private property <bool> hovered: top-padding-focus.has-hover
         || bottom-padding-focus.has-hover
@@ -640,8 +645,37 @@ export component DialogTextField inherits Rectangle {
         field-input.select-all();
     }
 
+    public function copy-selection() {
+        field-input.copy();
+        field-input.focus();
+    }
+
+    public function paste-clipboard() {
+        field-input.paste();
+        field-input.focus();
+    }
+
     function has-selection() -> bool {
         return field-input.cursor-position_byte-offset != field-input.anchor-position-byte-offset;
+    }
+
+    function apply-text-context-menu-action() {
+        if root.field-id != "" && root.field-id == root.active-text-context-menu-field-id {
+            if root.context-menu-anchor-offset >= 0 && root.context-menu-cursor-offset >= 0 {
+                field-input.focus();
+                field-input.set-selection-offsets(
+                    root.context-menu-anchor-offset,
+                    root.context-menu-cursor-offset,
+                );
+            }
+            if root.text-context-menu-action-id == "copy" {
+                root.copy-selection();
+            } else if root.text-context-menu-action-id == "paste" {
+                root.paste-clipboard();
+            } else if root.text-context-menu-action-id == "select-all" {
+                root.select-all();
+            }
+        }
     }
 
     Text {
@@ -701,6 +735,8 @@ export component DialogTextField inherits Rectangle {
 
             pointer-event(event) => {
                 if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                    root.context-menu-anchor-offset = field-input.anchor-position-byte-offset;
+                    root.context-menu-cursor-offset = field-input.cursor-position_byte-offset;
                     root.text-context-menu-requested(
                         root.field-id,
                         root.field-kind,
@@ -824,6 +860,10 @@ export component DialogTextField inherits Rectangle {
         font-size: 11px;
         font-weight: AppTypography.ui-font-weight-regular;
         wrap: word-wrap;
+    }
+
+    changed text-context-menu-action-sequence => {
+        root.apply-text-context-menu-action();
     }
 }
 

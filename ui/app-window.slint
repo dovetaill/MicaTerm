@@ -468,6 +468,9 @@ export component AppWindow inherits Window {
     in-out property <bool> text-context-menu-copy-enabled: false;
     in-out property <bool> text-context-menu-paste-enabled: false;
     in-out property <bool> text-context-menu-select-all-enabled: false;
+    in-out property <string> text-context-menu-action-id: "";
+    in-out property <string> text-context-menu-action-field-id: "";
+    in-out property <int> text-context-menu-action-sequence: 0;
     in-out property <string> context-menu-feedback-text: "";
     in-out property <[SidebarNavItem]> sidebar-items: [];
     in-out property <length> shell-body-height-cache: 852px;
@@ -732,6 +735,71 @@ export component AppWindow inherits Window {
         root.shell-body-height-cache = max(0px, root.height - titlebar.height);
     }
 
+    function text-context-menu-copy-allowed(
+        field-kind: string,
+        is-secret: bool,
+        has-selection: bool,
+    ) -> bool {
+        return has-selection
+            && (
+                !is-secret
+                    || field-kind == "public-key"
+                    || field-kind == "fingerprint"
+                    || field-kind == "path"
+                    || field-kind == "label"
+                    || field-kind == "comment"
+                    || field-kind == "public-metadata"
+                    || field-kind == "snippet-package-name"
+            );
+    }
+
+    function open-text-context-menu(
+        field-id: string,
+        field-kind: string,
+        read-only: bool,
+        is-secret: bool,
+        has-selection: bool,
+        supports-multiline: bool,
+        anchor-x: length,
+        anchor-y: length,
+    ) {
+        let menu-width = 164px;
+        let menu-height = 8px * 2 + 32px * 3;
+        let unclamped-x = anchor-x + menu-width > root.width ? anchor-x - menu-width : anchor-x;
+        let unclamped-y = anchor-y + menu-height > root.height ? anchor-y - menu-height : anchor-y;
+
+        root.text-context-menu-field-id = field-id;
+        root.text-context-menu-field-kind = field-kind;
+        root.text-context-menu-anchor-x = anchor-x;
+        root.text-context-menu-anchor-y = anchor-y;
+        root.text-context-menu-origin-x = max(0px, min(root.width - menu-width, unclamped-x));
+        root.text-context-menu-origin-y = max(0px, min(root.height - menu-height, unclamped-y));
+        root.text-context-menu-read-only = read-only;
+        root.text-context-menu-secret = is-secret;
+        root.text-context-menu-has-selection = has-selection;
+        root.text-context-menu-clipboard-has-text = !read-only;
+        root.text-context-menu-supports-multiline = supports-multiline;
+        root.text-context-menu-action-id = "";
+        root.text-context-menu-action-field-id = field-id;
+        root.text-context-menu-copy-enabled = root.text-context-menu-copy-allowed(
+            field-kind,
+            is-secret,
+            has-selection,
+        );
+        root.text-context-menu-paste-enabled = !read-only;
+        root.text-context-menu-select-all-enabled = true;
+        root.text-context-menu-open = true;
+    }
+
+    function close-text-context-menu() {
+        root.text-context-menu-open = false;
+        root.text-context-menu-field-id = "";
+        root.text-context-menu-field-kind = "";
+        root.text-context-menu-copy-enabled = false;
+        root.text-context-menu-paste-enabled = false;
+        root.text-context-menu-select-all-enabled = false;
+    }
+
     changed width => {
         root.sync-shell-body-height();
         root.shell-layout-invalidated(self.width, self.height);
@@ -854,6 +922,36 @@ export component AppWindow inherits Window {
         if root.workspace-session-host-mode == "sftp" && !root.workspace-sftp-path-editing {
             main-workspace.restore-primary-focus();
         }
+    }
+
+    text-context-menu-requested(
+        field-id,
+        field-kind,
+        read-only,
+        is-secret,
+        has-selection,
+        supports-multiline,
+        anchor-x,
+        anchor-y,
+    ) => {
+        root.open-text-context-menu(
+            field-id,
+            field-kind,
+            read-only,
+            is-secret,
+            has-selection,
+            supports-multiline,
+            anchor-x,
+            anchor-y,
+        );
+    }
+
+    close-text-context-menu-requested => {
+        root.close-text-context-menu();
+    }
+
+    text-context-menu-action-invoked(_action-id, _field-id) => {
+        root.close-text-context-menu();
     }
 
     changed workspace-sftp-focus-sequence => {
@@ -2575,6 +2673,9 @@ export component AppWindow inherits Window {
             validation-message: root.asset-modal-validation-message;
             can-confirm: root.asset-modal-can-confirm;
             focus-sequence: root.asset-modal-focus-sequence;
+            text-context-menu-action-id: root.text-context-menu-action-id;
+            text-context-menu-action-field-id: root.text-context-menu-action-field-id;
+            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
 
             close-requested => {
                 root.close-asset-modal-requested();
@@ -2586,6 +2687,28 @@ export component AppWindow inherits Window {
 
             action-requested(action-id) => {
                 root.asset-ssh-modal-action-requested(action-id);
+            }
+
+            text-context-menu-requested(
+                field-id,
+                field-kind,
+                read-only,
+                is-secret,
+                has-selection,
+                supports-multiline,
+                anchor-x,
+                anchor-y,
+            ) => {
+                root.text-context-menu-requested(
+                    field-id,
+                    field-kind,
+                    read-only,
+                    is-secret,
+                    has-selection,
+                    supports-multiline,
+                    anchor-x,
+                    anchor-y,
+                );
             }
 
             drag-requested(pointer-x, pointer-y) => {
@@ -3164,12 +3287,12 @@ export component AppWindow inherits Window {
 
         pointer-event(event) => {
             if event.kind == PointerEventKind.down {
-                root.close-text-context-menu-requested();
+                root.close-text-context-menu();
             }
         }
 
         clicked => {
-            root.close-text-context-menu-requested();
+            root.close-text-context-menu();
         }
     }
 
@@ -3183,6 +3306,10 @@ export component AppWindow inherits Window {
         select-all-enabled: root.text-context-menu-select-all-enabled;
 
         action-invoked(action-id) => {
+            root.text-context-menu-action-id = action-id;
+            root.text-context-menu-action-field-id = root.text-context-menu-field-id;
+            root.text-context-menu-action-sequence += 1;
+            root.close-text-context-menu();
             root.text-context-menu-action-invoked(action-id, root.text-context-menu-field-id);
         }
     }

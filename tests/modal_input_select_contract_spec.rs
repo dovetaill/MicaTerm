@@ -127,6 +127,29 @@ fn text_context_menu_overlay_contract_exposes_copy_paste_actions() {
 }
 
 #[test]
+fn ssh_modal_contract_wires_public_fields_into_text_context_menu_bridge() {
+    let source = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
+        .expect("read ssh modal source");
+
+    for marker in [
+        "callback text-context-menu-requested(",
+        "in property <string> text-context-menu-action-id: \"\";",
+        "in property <string> text-context-menu-action-field-id: \"\";",
+        "in property <int> text-context-menu-action-sequence: 0;",
+        "field-id: \"ssh.name\";",
+        "field-id: \"ssh.host\";",
+        "field-id: \"ssh.user\";",
+        "field-id: \"ssh.port\";",
+        "field-id: \"ssh.remark\";",
+    ] {
+        assert!(
+            source.contains(marker),
+            "ssh modal should wire public text fields into the shared text context-menu bridge marker `{marker}`"
+        );
+    }
+}
+
+#[test]
 fn dialog_select_contract_exposes_modal_local_popup_primitives() {
     let source =
         fs::read_to_string("ui/components/modal-chrome.slint").expect("read modal chrome source");
