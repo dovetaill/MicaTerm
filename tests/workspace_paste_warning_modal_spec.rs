@@ -1,10 +1,46 @@
 use std::fs;
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::time::Duration;
+
+use mica_term::AppWindow;
+use slint::ComponentHandle;
+use slint::platform::{PointerEventButton, WindowEvent};
+
+use i_slint_backend_testing::ElementHandle;
 
 fn slice_after<'a>(source: &'a str, marker: &str) -> &'a str {
     source
         .split_once(marker)
         .map(|(_, tail)| tail)
         .expect("marker should exist in source")
+}
+
+fn settle_modal_ui() {
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+}
+
+fn element_center(element: &ElementHandle) -> slint::LogicalPosition {
+    slint::LogicalPosition::new(
+        element.absolute_position().x + element.size().width / 2.0,
+        element.absolute_position().y + element.size().height / 2.0,
+    )
+}
+
+fn dispatch_pointer_click(
+    app: &AppWindow,
+    position: slint::LogicalPosition,
+    button: PointerEventButton,
+) {
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position });
+    app.window()
+        .dispatch_event(WindowEvent::PointerPressed { position, button });
+    settle_modal_ui();
+    app.window()
+        .dispatch_event(WindowEvent::PointerReleased { position, button });
+    settle_modal_ui();
 }
 
 #[test]
@@ -102,5 +138,54 @@ fn paste_warning_modal_separates_review_enter_from_editor_enter() {
                 .contains("enter-enabled: !root.workspace-paste-warning-editor-focused;")
             && paste_modal_shell.contains("enter-requested => {"),
         "the review mode should keep Enter wired to paste by default, but hand Enter back to the editor once the draft field gains focus"
+    );
+}
+
+#[test]
+fn paste_warning_editor_right_click_keeps_enter_bound_to_the_editor() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let confirm_count = Rc::new(RefCell::new(0usize));
+    let confirm_count_ref = Rc::clone(&confirm_count);
+    app.on_workspace_paste_warning_confirm_requested(move || {
+        *confirm_count_ref.borrow_mut() += 1;
+    });
+
+    app.show().expect("show app window");
+    app.window()
+        .dispatch_event(WindowEvent::WindowActiveChanged(true));
+    app.set_workspace_paste_warning_modal_open(true);
+    app.set_workspace_paste_warning_editor_mode(true);
+    app.set_workspace_paste_warning_text("line 1\nline 2\nline 3\nline 4".into());
+    settle_modal_ui();
+
+    let paste_input = ElementHandle::find_by_element_id(&app, "WorkspacePasteWarningModal::paste-input")
+        .next()
+        .expect("find paste warning editor input");
+    let paste_input_position = element_center(&paste_input);
+
+    dispatch_pointer_click(&app, paste_input_position, PointerEventButton::Left);
+    assert!(
+        app.get_workspace_paste_warning_editor_focused(),
+        "clicking into the paste review editor should mark the editor as focused before right-click testing begins"
+    );
+
+    dispatch_pointer_click(&app, paste_input_position, PointerEventButton::Right);
+    assert!(
+        app.get_workspace_paste_warning_editor_focused(),
+        "right-clicking inside the paste review editor should not blur it before Enter handling runs"
+    );
+
+    app.window()
+        .dispatch_event(WindowEvent::KeyPressed { text: "\n".into() });
+    app.window()
+        .dispatch_event(WindowEvent::KeyReleased { text: "\n".into() });
+    settle_modal_ui();
+
+    assert_eq!(
+        *confirm_count.borrow(),
+        0,
+        "after clicking into the editor, right-click plus Enter should keep Enter in the editor path instead of re-triggering modal confirm"
     );
 }

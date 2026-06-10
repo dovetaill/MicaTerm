@@ -42,6 +42,37 @@ fn dialog_text_field_contract_only_uses_focus_helpers_outside_text_viewport() {
 }
 
 #[test]
+fn dialog_text_field_contract_declares_local_right_click_pointer_handling() {
+    let source =
+        fs::read_to_string("ui/components/modal-chrome.slint").expect("read modal chrome source");
+    let dialog_text_field_block = source
+        .split("export component DialogTextField inherits Rectangle {")
+        .nth(1)
+        .expect("extract dialog text field block");
+    let dialog_text_field_block = dialog_text_field_block
+        .split("export component ModalHeaderBar inherits Rectangle {")
+        .next()
+        .expect("truncate dialog text field block");
+
+    assert!(
+        dialog_text_field_block.contains("pointer-event(event) =>")
+            && dialog_text_field_block.contains("PointerEventButton.right"),
+        "dialog text fields should keep right-click detection local to the field chrome so future text context menus do not depend on a global transparent overlay"
+    );
+}
+
+#[test]
+fn bare_snippet_package_input_contract_keeps_right_click_handling_local() {
+    let source = fs::read_to_string("ui/components/assets-snippet-package-modal.slint")
+        .expect("read snippet package modal source");
+
+    assert!(
+        source.contains("PointerEventButton.right"),
+        "the bare snippet package TextInput outlier should also declare a local right-click hook instead of remaining outside the shared text-menu bridge"
+    );
+}
+
+#[test]
 fn dialog_select_contract_exposes_modal_local_popup_primitives() {
     let source =
         fs::read_to_string("ui/components/modal-chrome.slint").expect("read modal chrome source");

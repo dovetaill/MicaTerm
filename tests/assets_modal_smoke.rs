@@ -11,13 +11,14 @@ use mica_term::app::ssh::known_hosts::{KnownHostCheck, KnownHostsService};
 use mica_term::app::window_effects::default_platform_window_effects;
 use russh::keys::{HashAlg, PublicKey};
 use slint::Model;
-use slint::platform::WindowEvent;
-use slint::{ComponentHandle, ModelRc, VecModel};
+use slint::platform::{Key, PointerEventButton, WindowEvent};
+use slint::{ComponentHandle, LogicalPosition, ModelRc, VecModel};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::Duration;
 
 use anyhow::Result;
 use i_slint_backend_testing::ElementHandle;
@@ -67,6 +68,108 @@ fn sample_public_key() -> PublicKey {
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILM+rvN+ot98qgEN796jTiQfZfG1KaT0PtFDJ/XFSqti test-1@example.com",
     )
     .expect("parse public key")
+}
+
+fn settle_modal_ui() {
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+}
+
+fn element_center(element: &ElementHandle) -> LogicalPosition {
+    LogicalPosition::new(
+        element.absolute_position().x + element.size().width / 2.0,
+        element.absolute_position().y + element.size().height / 2.0,
+    )
+}
+
+fn descendant_by_id(element: &ElementHandle, id: &str) -> ElementHandle {
+    element
+        .query_descendants()
+        .match_id(id)
+        .find_first()
+        .unwrap_or_else(|| panic!("missing descendant `{id}`"))
+}
+
+fn dispatch_pointer_click(app: &AppWindow, position: LogicalPosition, button: PointerEventButton) {
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position });
+    app.window()
+        .dispatch_event(WindowEvent::PointerPressed { position, button });
+    settle_modal_ui();
+    app.window()
+        .dispatch_event(WindowEvent::PointerReleased { position, button });
+    settle_modal_ui();
+}
+
+fn dispatch_modifier_pressed(app: &AppWindow, modifier: Key) {
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: modifier.into(),
+    });
+}
+
+fn dispatch_modifier_released(app: &AppWindow, modifier: Key) {
+    app.window().dispatch_event(WindowEvent::KeyReleased {
+        text: modifier.into(),
+    });
+}
+
+fn dispatch_text_key_chord(app: &AppWindow, key_text: &str, ctrl: bool, shift: bool, alt: bool) {
+    if shift {
+        dispatch_modifier_pressed(app, Key::Shift);
+    }
+    if ctrl {
+        dispatch_modifier_pressed(app, Key::Control);
+    }
+    if alt {
+        dispatch_modifier_pressed(app, Key::Alt);
+    }
+
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: key_text.into(),
+    });
+    app.window().dispatch_event(WindowEvent::KeyReleased {
+        text: key_text.into(),
+    });
+
+    if alt {
+        dispatch_modifier_released(app, Key::Alt);
+    }
+    if ctrl {
+        dispatch_modifier_released(app, Key::Control);
+    }
+    if shift {
+        dispatch_modifier_released(app, Key::Shift);
+    }
+    settle_modal_ui();
+}
+
+fn dispatch_text_sequence(app: &AppWindow, text: &str) {
+    for ch in text.chars() {
+        let key = ch.to_string();
+        app.window().dispatch_event(WindowEvent::KeyPressed {
+            text: key.clone().into(),
+        });
+        app.window().dispatch_event(WindowEvent::KeyReleased {
+            text: key.into(),
+        });
+    }
+    settle_modal_ui();
+}
+
+fn set_clipboard_text(text: &str) {
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text(text, slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("seed clipboard text");
+}
+
+fn clipboard_text() -> String {
+    i_slint_backend_selector::with_platform(|platform| {
+        Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
+    })
+    .expect("read clipboard text")
+    .unwrap_or_default()
 }
 
 #[test]
@@ -330,6 +433,94 @@ fn ssh_keychain_identity_flow_uses_inset_select_and_keeps_summary_visible() {
     assert!(
         summary_bottom <= card_bottom - 10.0,
         "identity authentication summary should stay fully visible inside its summary card, summary_bottom={summary_bottom}, card_bottom={card_bottom}"
+    );
+}
+
+#[test]
+fn ssh_modal_host_field_right_click_keeps_selection_and_typing_ownership() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let app_weak = app.as_weak();
+    app.on_asset_ssh_modal_draft_changed(move |field, value| {
+        let app = app_weak.upgrade().expect("upgrade app");
+        if field.as_str() == "host" {
+            app.set_asset_ssh_modal_host(value);
+        }
+    });
+
+    app.show().expect("show app window");
+    app.window()
+        .dispatch_event(WindowEvent::WindowActiveChanged(true));
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-ssh-connection".into());
+    settle_modal_ui();
+
+    let host_field = ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::host-field")
+        .next()
+        .expect("find ssh host field");
+    let host_input = descendant_by_id(&host_field, "DialogTextField::field-input");
+    let host_input_position = element_center(&host_input);
+
+    dispatch_pointer_click(&app, host_input_position, PointerEventButton::Left);
+    dispatch_text_sequence(&app, "Alpha");
+
+    dispatch_text_key_chord(&app, "a", true, false, false);
+    set_clipboard_text("sentinel-before-right-click");
+    dispatch_pointer_click(&app, host_input_position, PointerEventButton::Right);
+    dispatch_text_key_chord(&app, "c", true, false, false);
+
+    assert_eq!(
+        clipboard_text(),
+        "Alpha",
+        "after a modal field selection is made, right-click should not clear the current selection before copy runs"
+    );
+
+    dispatch_text_sequence(&app, "Z");
+
+    assert_eq!(
+        app.get_asset_ssh_modal_host().as_str(),
+        "Z",
+        "after right-clicking a selected modal field, the next typed character should still replace the same field selection instead of leaking to another surface or dropping focus"
+    );
+}
+
+#[test]
+fn ssh_modal_host_field_padding_right_click_keeps_field_ownership() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let app_weak = app.as_weak();
+    app.on_asset_ssh_modal_draft_changed(move |field, value| {
+        let app = app_weak.upgrade().expect("upgrade app");
+        if field.as_str() == "host" {
+            app.set_asset_ssh_modal_host(value);
+        }
+    });
+
+    app.show().expect("show app window");
+    app.window()
+        .dispatch_event(WindowEvent::WindowActiveChanged(true));
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-ssh-connection".into());
+    settle_modal_ui();
+
+    let host_field = ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::host-field")
+        .next()
+        .expect("find ssh host field");
+    let host_input = descendant_by_id(&host_field, "DialogTextField::field-input");
+    let right_padding = descendant_by_id(&host_field, "DialogTextField::right-padding-focus");
+
+    dispatch_pointer_click(&app, element_center(&host_input), PointerEventButton::Left);
+    dispatch_text_sequence(&app, "Alpha");
+
+    dispatch_pointer_click(&app, element_center(&right_padding), PointerEventButton::Right);
+    dispatch_text_sequence(&app, "Z");
+
+    assert_eq!(
+        app.get_asset_ssh_modal_host().as_str(),
+        "AlphaZ",
+        "right-clicking a dialog text field padding gutter should not steal the active field ownership away from the input"
     );
 }
 

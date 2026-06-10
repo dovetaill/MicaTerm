@@ -34,8 +34,12 @@ use mica_term::app::vault::provider::git_repo::{
 use mica_term::app::vault::provider::mock::MockVaultProvider;
 use mica_term::app::vault::provider::{ProviderCapabilities, VaultProvider};
 use mica_term::app::window_effects::default_platform_window_effects;
+use slint::ComponentHandle;
+use slint::platform::{Key, PointerEventButton, WindowEvent};
 use tokio::sync::mpsc;
 use uuid::Uuid;
+
+use i_slint_backend_testing::ElementHandle;
 
 struct FakeLauncher;
 
@@ -253,6 +257,112 @@ fn wait_for_condition(timeout: Duration, mut predicate: impl FnMut() -> bool) {
         i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
         slint::platform::update_timers_and_animations();
     }
+}
+
+fn settle_modal_ui() {
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+}
+
+fn element_center(element: &ElementHandle) -> slint::LogicalPosition {
+    slint::LogicalPosition::new(
+        element.absolute_position().x + element.size().width / 2.0,
+        element.absolute_position().y + element.size().height / 2.0,
+    )
+}
+
+fn descendant_by_id(element: &ElementHandle, id: &str) -> ElementHandle {
+    element
+        .query_descendants()
+        .match_id(id)
+        .find_first()
+        .unwrap_or_else(|| panic!("missing descendant `{id}`"))
+}
+
+fn dispatch_pointer_click(
+    app: &AppWindow,
+    position: slint::LogicalPosition,
+    button: PointerEventButton,
+) {
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position });
+    app.window()
+        .dispatch_event(WindowEvent::PointerPressed { position, button });
+    settle_modal_ui();
+    app.window()
+        .dispatch_event(WindowEvent::PointerReleased { position, button });
+    settle_modal_ui();
+}
+
+fn dispatch_modifier_pressed(app: &AppWindow, modifier: Key) {
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: modifier.into(),
+    });
+}
+
+fn dispatch_modifier_released(app: &AppWindow, modifier: Key) {
+    app.window().dispatch_event(WindowEvent::KeyReleased {
+        text: modifier.into(),
+    });
+}
+
+fn dispatch_text_key_chord(app: &AppWindow, key_text: &str, ctrl: bool, shift: bool, alt: bool) {
+    if shift {
+        dispatch_modifier_pressed(app, Key::Shift);
+    }
+    if ctrl {
+        dispatch_modifier_pressed(app, Key::Control);
+    }
+    if alt {
+        dispatch_modifier_pressed(app, Key::Alt);
+    }
+
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: key_text.into(),
+    });
+    app.window().dispatch_event(WindowEvent::KeyReleased {
+        text: key_text.into(),
+    });
+
+    if alt {
+        dispatch_modifier_released(app, Key::Alt);
+    }
+    if ctrl {
+        dispatch_modifier_released(app, Key::Control);
+    }
+    if shift {
+        dispatch_modifier_released(app, Key::Shift);
+    }
+    settle_modal_ui();
+}
+
+fn dispatch_text_sequence(app: &AppWindow, text: &str) {
+    for ch in text.chars() {
+        let key = ch.to_string();
+        app.window().dispatch_event(WindowEvent::KeyPressed {
+            text: key.clone().into(),
+        });
+        app.window().dispatch_event(WindowEvent::KeyReleased {
+            text: key.into(),
+        });
+    }
+    settle_modal_ui();
+}
+
+fn set_clipboard_text(text: &str) {
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text(text, slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("seed clipboard text");
+}
+
+fn clipboard_text() -> String {
+    i_slint_backend_selector::with_platform(|platform| {
+        Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
+    })
+    .expect("read clipboard text")
+    .unwrap_or_default()
 }
 
 fn sample_bootstrap_bundle_with_primary_and_mirror() -> BootstrapBundle {
@@ -1345,5 +1455,62 @@ fn remote_head_refresh_failure_keeps_sync_settings_non_blocking() {
         app.get_sync_modal_error_text()
             .to_string()
             .contains("token expired")
+    );
+}
+
+#[test]
+fn sync_modal_repository_field_right_click_keeps_selection_and_typing_owner() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let app_weak = app.as_weak();
+    app.on_sync_modal_draft_changed(move |field, value| {
+        let app = app_weak.upgrade().expect("upgrade app");
+        if field.as_str() == "git-base-url" {
+            app.set_sync_modal_git_base_url(value);
+        }
+    });
+
+    app.show().expect("show app window");
+    app.window()
+        .dispatch_event(WindowEvent::WindowActiveChanged(true));
+    app.set_sync_modal_open(true);
+    app.set_sync_modal_mode("configured".into());
+    app.set_sync_modal_git_auth_mode("https".into());
+    settle_modal_ui();
+
+    let sync_modal = ElementHandle::find_by_element_type_name(&app, "SyncVaultModal")
+        .next()
+        .expect("find sync vault modal");
+    let base_url_field = sync_modal
+        .query_descendants()
+        .match_inherits("DialogTextField")
+        .find_all()
+        .into_iter()
+        .find(|field| field.size().height > 0.0)
+        .expect("find first visible sync modal text field");
+    let base_url_input = descendant_by_id(&base_url_field, "DialogTextField::field-input");
+    let base_url_position = element_center(&base_url_input);
+
+    dispatch_pointer_click(&app, base_url_position, PointerEventButton::Left);
+    dispatch_text_sequence(&app, "https://vault.example.com");
+
+    dispatch_text_key_chord(&app, "a", true, false, false);
+    set_clipboard_text("sentinel-before-right-click");
+    dispatch_pointer_click(&app, base_url_position, PointerEventButton::Right);
+    dispatch_text_key_chord(&app, "c", true, false, false);
+
+    assert_eq!(
+        clipboard_text(),
+        "https://vault.example.com",
+        "sync modal text fields should preserve the active selection across a right-click before copy runs"
+    );
+
+    dispatch_text_sequence(&app, "Z");
+
+    assert_eq!(
+        app.get_sync_modal_git_base_url().as_str(),
+        "Z",
+        "after right-clicking a selected sync modal field, the next typed character should still replace the same field selection"
     );
 }
