@@ -750,6 +750,163 @@ fn snippet_package_name_field_context_menu_copy_and_paste_actions_work() {
 }
 
 #[test]
+fn ssh_modal_text_context_menu_outside_click_dismisses_without_stealing_input_ownership() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let app_weak = app.as_weak();
+    app.on_asset_ssh_modal_draft_changed(move |field, value| {
+        let app = app_weak.upgrade().expect("upgrade app");
+        if field.as_str() == "host" {
+            app.set_asset_ssh_modal_host(value);
+        }
+    });
+
+    app.show().expect("show app window");
+    app.window()
+        .dispatch_event(WindowEvent::WindowActiveChanged(true));
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-ssh-connection".into());
+    settle_modal_ui();
+
+    let host_field = ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::host-field")
+        .next()
+        .expect("find ssh host field");
+    let host_input = descendant_by_id(&host_field, "DialogTextField::field-input");
+    let host_input_position = element_center(&host_input);
+
+    dispatch_pointer_click(&app, host_input_position, PointerEventButton::Left);
+    dispatch_text_sequence(&app, "Alpha");
+    dispatch_text_key_chord(&app, "a", true, false, false);
+    dispatch_pointer_click(&app, host_input_position, PointerEventButton::Right);
+
+    assert!(
+        app.get_text_context_menu_open(),
+        "precondition: right-clicking the SSH host field should open the shared text context menu before outside-click dismissal runs"
+    );
+
+    dispatch_pointer_click(&app, LogicalPosition::new(4.0, 4.0), PointerEventButton::Left);
+
+    assert!(
+        !app.get_text_context_menu_open(),
+        "clicking outside the shared text context menu should dismiss it"
+    );
+
+    dispatch_text_sequence(&app, "Z");
+
+    assert_eq!(
+        app.get_asset_ssh_modal_host().as_str(),
+        "Z",
+        "dismissing the shared text context menu with an outside click should not steal the owning field away from subsequent typing"
+    );
+}
+
+#[test]
+fn ssh_modal_text_context_menu_escape_closes_menu_before_modal_and_preserves_input_ownership() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let app_weak = app.as_weak();
+    app.on_asset_ssh_modal_draft_changed(move |field, value| {
+        let app = app_weak.upgrade().expect("upgrade app");
+        if field.as_str() == "host" {
+            app.set_asset_ssh_modal_host(value);
+        }
+    });
+
+    app.show().expect("show app window");
+    app.window()
+        .dispatch_event(WindowEvent::WindowActiveChanged(true));
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-ssh-connection".into());
+    settle_modal_ui();
+
+    let host_field = ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::host-field")
+        .next()
+        .expect("find ssh host field");
+    let host_input = descendant_by_id(&host_field, "DialogTextField::field-input");
+    let host_input_position = element_center(&host_input);
+
+    dispatch_pointer_click(&app, host_input_position, PointerEventButton::Left);
+    dispatch_text_sequence(&app, "Alpha");
+    dispatch_text_key_chord(&app, "a", true, false, false);
+    dispatch_pointer_click(&app, host_input_position, PointerEventButton::Right);
+
+    assert!(
+        app.get_text_context_menu_open(),
+        "precondition: right-clicking the SSH host field should open the shared text context menu before Escape dismissal runs"
+    );
+
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: Key::Escape.into(),
+    });
+    app.window().dispatch_event(WindowEvent::KeyReleased {
+        text: Key::Escape.into(),
+    });
+    settle_modal_ui();
+
+    assert!(
+        !app.get_text_context_menu_open(),
+        "pressing Escape with the shared text context menu open should dismiss the menu first"
+    );
+    assert!(
+        app.get_asset_modal_open(),
+        "pressing Escape while the shared text context menu is open should not close the underlying SSH modal"
+    );
+
+    dispatch_text_sequence(&app, "Z");
+
+    assert_eq!(
+        app.get_asset_ssh_modal_host().as_str(),
+        "Z",
+        "after Escape dismisses the shared text context menu, the owning SSH host field should still receive the next typed character"
+    );
+}
+
+#[test]
+fn ssh_modal_text_context_menu_closes_on_window_blur() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let app_weak = app.as_weak();
+    app.on_asset_ssh_modal_draft_changed(move |field, value| {
+        let app = app_weak.upgrade().expect("upgrade app");
+        if field.as_str() == "host" {
+            app.set_asset_ssh_modal_host(value);
+        }
+    });
+
+    app.show().expect("show app window");
+    app.window()
+        .dispatch_event(WindowEvent::WindowActiveChanged(true));
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-ssh-connection".into());
+    settle_modal_ui();
+
+    let host_field = ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::host-field")
+        .next()
+        .expect("find ssh host field");
+    let host_input = descendant_by_id(&host_field, "DialogTextField::field-input");
+    let host_input_position = element_center(&host_input);
+
+    dispatch_pointer_click(&app, host_input_position, PointerEventButton::Left);
+    dispatch_pointer_click(&app, host_input_position, PointerEventButton::Right);
+
+    assert!(
+        app.get_text_context_menu_open(),
+        "precondition: right-clicking the SSH host field should open the shared text context menu before blur dismissal runs"
+    );
+
+    app.set_is_window_active(false);
+    settle_modal_ui();
+
+    assert!(
+        !app.get_text_context_menu_open(),
+        "deactivating the window should dismiss the shared text context menu so stale overlays do not survive across blur/focus transitions"
+    );
+}
+
+#[test]
 fn snippet_package_select_fully_fits_inside_its_layout_group() {
     i_slint_backend_testing::init_no_event_loop();
 

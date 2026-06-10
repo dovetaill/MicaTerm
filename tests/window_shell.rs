@@ -153,6 +153,17 @@ fn window_shell_routes_text_context_menu_through_overlay_without_focus_steal() {
 }
 
 #[test]
+fn window_shell_clamps_text_context_menu_origin_inside_the_window_bounds() {
+    let content = std::fs::read_to_string("ui/app-window.slint").unwrap();
+
+    assert!(
+        content.contains("root.text-context-menu-origin-x = max(0px, min(root.width - menu-width, unclamped-x));")
+            && content.contains("root.text-context-menu-origin-y = max(0px, min(root.height - menu-height, unclamped-y));"),
+        "app window should clamp the shared text context menu origin inside the viewport instead of letting right-edge or bottom-edge fields overflow off-screen"
+    );
+}
+
+#[test]
 fn window_shell_exposes_minimum_window_budget() {
     let spec = window_command_spec();
 

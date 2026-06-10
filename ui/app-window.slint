@@ -800,6 +800,15 @@ export component AppWindow inherits Window {
         root.text-context-menu-select-all-enabled = false;
     }
 
+    function dismiss-text-context-menu-if-open() -> bool {
+        if root.text-context-menu-open {
+            root.close-text-context-menu();
+            return true;
+        }
+
+        return false;
+    }
+
     changed width => {
         root.sync-shell-body-height();
         root.shell-layout-invalidated(self.width, self.height);
@@ -873,6 +882,12 @@ export component AppWindow inherits Window {
             root.workspace-paste-warning-focus-sequence = root.workspace-paste-warning-focus-sequence + 1;
         } else {
             root.workspace-paste-warning-editor-focused = false;
+        }
+    }
+
+    changed is-window-active => {
+        if !root.is-window-active {
+            root.close-text-context-menu();
         }
     }
 
@@ -2236,7 +2251,9 @@ export component AppWindow inherits Window {
         }
 
         escape-requested => {
-            root.sync-modal-close-requested();
+            if !root.dismiss-text-context-menu-if-open() {
+                root.sync-modal-close-requested();
+            }
         }
 
         sync-vault-modal-overlay := SyncVaultModal {
@@ -2534,7 +2551,8 @@ export component AppWindow inherits Window {
         }
 
         escape-requested => {
-            if asset-snippet-modal-overlay.select-overlay-open {
+            if root.dismiss-text-context-menu-if-open() {
+            } else if asset-snippet-modal-overlay.select-overlay-open {
                 asset-snippet-modal-overlay.dismiss-open-select();
             } else {
                 root.close-asset-modal-requested();
@@ -2629,7 +2647,9 @@ export component AppWindow inherits Window {
         }
 
         escape-requested => {
-            root.close-asset-modal-requested();
+            if !root.dismiss-text-context-menu-if-open() {
+                root.close-asset-modal-requested();
+            }
         }
 
         asset-snippet-package-modal-overlay := AssetsSnippetPackageModal {
@@ -2818,7 +2838,8 @@ export component AppWindow inherits Window {
         }
 
         escape-requested => {
-            if asset-ssh-modal-overlay.select-overlay-open {
+            if root.dismiss-text-context-menu-if-open() {
+            } else if asset-ssh-modal-overlay.select-overlay-open {
                 asset-ssh-modal-overlay.dismiss-open-select();
             } else {
                 root.close-asset-modal-requested();
@@ -2843,7 +2864,9 @@ export component AppWindow inherits Window {
         }
 
         escape-requested => {
-            root.close-asset-modal-requested();
+            if !root.dismiss-text-context-menu-if-open() {
+                root.close-asset-modal-requested();
+            }
         }
 
         keychain-identity-modal-overlay := AssetsKeychainIdentityModal {
@@ -2939,7 +2962,9 @@ export component AppWindow inherits Window {
         }
 
         escape-requested => {
-            root.close-asset-modal-requested();
+            if !root.dismiss-text-context-menu-if-open() {
+                root.close-asset-modal-requested();
+            }
         }
 
         keychain-ssh-key-modal-overlay := AssetsKeychainSshKeyModal {
@@ -3214,9 +3239,11 @@ export component AppWindow inherits Window {
         }
 
         escape-requested => {
-            root.workspace-paste-warning-cancel-requested();
-            main-workspace.restore-primary-focus();
-            root.blocking-modal-focus-restore-requested();
+            if !root.dismiss-text-context-menu-if-open() {
+                root.workspace-paste-warning-cancel-requested();
+                main-workspace.restore-primary-focus();
+                root.blocking-modal-focus-restore-requested();
+            }
         }
 
         enter-requested => {
