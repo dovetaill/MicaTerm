@@ -1623,11 +1623,27 @@ fn terminal_surface_allows_interactive_zmodem_drop(state: &ShellViewModel) -> bo
         return true;
     };
     if surface.alternate_screen_active || surface.mouse_grabbed {
+        tracing::info!(
+            target: "app.drop",
+            target = "terminal",
+            alternate_screen_active = surface.alternate_screen_active,
+            mouse_grabbed = surface.mouse_grabbed,
+            "terminal external drop blocked interactive rz fallback by terminal mode"
+        );
         return false;
     }
-
-    let shell = surface.shell_integration;
-    !shell.has_markers || (shell.input_active && !shell.command_running)
+    if surface.shell_integration.has_markers
+        && (!surface.shell_integration.input_active || surface.shell_integration.command_running)
+    {
+        tracing::info!(
+            target: "app.drop",
+            target = "terminal",
+            input_active = surface.shell_integration.input_active,
+            command_running = surface.shell_integration.command_running,
+            "terminal external drop ignoring shell marker state for interactive rz fallback"
+        );
+    }
+    true
 }
 
 fn local_paths_are_zmodem_files(local_paths: &[PathBuf]) -> bool {
@@ -1655,8 +1671,19 @@ fn terminal_current_working_directory_for_drop(
         session_id = %session_id,
         "terminal external drop has no tracked cwd; probing remote shell cwd"
     );
-    let Some(cwd) = manager.resolve_current_working_directory(session_id)? else {
-        return Ok(None);
+    let cwd = match manager.resolve_current_working_directory(session_id) {
+        Ok(Some(cwd)) => cwd,
+        Ok(None) => return Ok(None),
+        Err(err) => {
+            tracing::warn!(
+                target: "app.drop",
+                target = "terminal",
+                session_id = %session_id,
+                error = %err,
+                "terminal external drop remote cwd probe failed"
+            );
+            return Ok(None);
+        }
     };
     tracing::info!(
         target: "app.drop",

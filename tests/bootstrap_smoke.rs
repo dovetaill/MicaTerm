@@ -1025,6 +1025,7 @@ struct RecordingSftpState {
     remote_command_exists_calls: Arc<Mutex<Vec<String>>>,
     remote_command_probe_delay: Arc<Mutex<Option<Duration>>>,
     remote_cwd_probe_calls: Arc<Mutex<usize>>,
+    remote_cwd_probe_error: Arc<Mutex<Option<String>>>,
     zmodem_exec_upload_calls: Arc<Mutex<Vec<(String, Vec<String>)>>>,
     interactive_zmodem_upload_calls: Arc<Mutex<Vec<Vec<String>>>>,
     remote_rz_available: Arc<Mutex<Option<bool>>>,
@@ -1093,6 +1094,13 @@ impl RecordingSftpState {
                 .lock()
                 .expect("lock remote cwd probe calls"),
         )
+    }
+
+    fn set_remote_cwd_probe_error(&self, error: impl Into<String>) {
+        *self
+            .remote_cwd_probe_error
+            .lock()
+            .expect("lock remote cwd probe error") = Some(error.into());
     }
 
     fn take_zmodem_exec_upload_calls(&self) -> Vec<(String, Vec<String>)> {
@@ -2206,6 +2214,15 @@ impl SessionRuntimeControl for RecordingSftpRuntimeControl {
             .remote_cwd_probe_calls
             .lock()
             .expect("lock remote cwd probe calls") += 1;
+        if let Some(error) = self
+            .state
+            .remote_cwd_probe_error
+            .lock()
+            .expect("lock remote cwd probe error")
+            .clone()
+        {
+            return Err(anyhow!(error));
+        }
         Ok(self
             .state
             .remote_cwd
@@ -15915,6 +15932,67 @@ fn terminal_file_drop_uses_interactive_rz_when_cwd_is_unavailable() {
 }
 
 #[test]
+fn terminal_file_drop_uses_interactive_rz_when_cwd_probe_fails() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    sftp_state.set_remote_cwd_probe_error("remote cwd probe timed out");
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(DelayedCwdRecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("terminal-drop-upload-cwd-probe-error-rz");
+    let upload_path = temp_root.join("release.env");
+    fs::create_dir_all(temp_root.as_path()).expect("create terminal drop temp root");
+    fs::write(&upload_path, b"PORT=22\n").expect("write terminal drop source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "terminal"
+            && !app.get_active_workspace_session_id().is_empty()
+    });
+
+    app.set_workspace_terminal_external_drop_paths(ModelRc::new(VecModel::from(vec![
+        SharedString::from(upload_path.to_string_lossy().to_string()),
+    ])));
+    app.invoke_workspace_terminal_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        !sftp_state
+            .interactive_zmodem_upload_calls
+            .lock()
+            .expect("lock interactive zmodem upload calls")
+            .is_empty()
+    });
+
+    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(sftp_state.take_remote_cwd_probe_calls(), 1);
+    assert_eq!(
+        sftp_state.take_interactive_zmodem_upload_calls(),
+        vec![vec![upload_path.to_string_lossy().to_string()]]
+    );
+    assert_eq!(
+        sftp_state.take_upload_file_calls(),
+        Vec::<(String, Vec<u8>)>::new(),
+        "cwd probe failures should not force a fake SFTP fallback"
+    );
+    assert!(
+        !app.get_transfer_center_feedback_text()
+            .as_str()
+            .starts_with("Transfer failed:"),
+        "cwd probe failures should not be presented as failed SFTP transfer tasks"
+    );
+}
+
+#[test]
 fn terminal_file_drop_uses_interactive_rz_when_surface_is_not_projected() {
     let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
@@ -16040,6 +16118,78 @@ fn terminal_file_drop_uses_interactive_rz_when_application_cursor_mode_is_set() 
             .expect("lock terminal drop upload calls")
             .is_empty(),
         "application cursor mode alone should not force a fake SFTP fallback"
+    );
+}
+
+#[test]
+fn terminal_file_drop_uses_interactive_rz_when_shell_markers_are_not_ready() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(DelayedCwdRecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("terminal-drop-upload-shell-markers-rz");
+    let upload_path = temp_root.join("release.env");
+    fs::create_dir_all(temp_root.as_path()).expect("create terminal drop temp root");
+    fs::write(&upload_path, b"PORT=22\n").expect("write terminal drop source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "terminal"
+            && !app.get_active_workspace_session_id().is_empty()
+    });
+
+    let session_id = Uuid::parse_str(app.get_active_workspace_session_id().as_str())
+        .expect("active terminal session id should be a uuid");
+    let mut surface = terminal_surface_with_cells(session_id, 2, 24, 80, vec!["ready".into()]);
+    surface.shell_integration = TerminalShellIntegrationState {
+        has_markers: true,
+        input_active: false,
+        command_running: true,
+        last_command_exit_code: None,
+    };
+    sftp_state.emit_surface(surface);
+    flush_runtime_projection();
+
+    app.set_workspace_terminal_external_drop_paths(ModelRc::new(VecModel::from(vec![
+        SharedString::from(upload_path.to_string_lossy().to_string()),
+    ])));
+    app.invoke_workspace_terminal_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        !sftp_state
+            .interactive_zmodem_upload_calls
+            .lock()
+            .expect("lock interactive zmodem upload calls")
+            .is_empty()
+    });
+
+    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(sftp_state.take_remote_cwd_probe_calls(), 1);
+    assert_eq!(
+        sftp_state.take_interactive_zmodem_upload_calls(),
+        vec![vec![upload_path.to_string_lossy().to_string()]]
+    );
+    assert_eq!(
+        sftp_state.take_upload_file_calls(),
+        Vec::<(String, Vec<u8>)>::new(),
+        "shell marker state alone should not force a fake SFTP fallback"
+    );
+    assert!(
+        !app.get_transfer_center_feedback_text()
+            .as_str()
+            .contains("not safe to start interactive rz"),
+        "shell marker state alone should not block interactive rz fallback"
     );
 }
 
