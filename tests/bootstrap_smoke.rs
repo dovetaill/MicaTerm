@@ -18801,6 +18801,12 @@ fn native_windowing_bridge_wires_os_file_drop_events_into_sftp_callbacks() {
             && !windows_drop_handler_source.contains("unimplemented!()"),
         "Windows IDropTarget must implement QueryInterface so OS file drops reliably enter winit"
     );
+    assert!(
+        windows_drop_handler_source.contains("pt: POINTL")
+            && !windows_drop_handler_source.contains("pt: *const POINTL")
+            && windows_drop_handler_source.contains("ReleaseStgMedium"),
+        "Windows IDropTarget callbacks must match the COM POINTL-by-value ABI and release the drop STGMEDIUM"
+    );
 }
 
 #[test]

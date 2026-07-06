@@ -70,23 +70,23 @@ pub struct IDropTargetVtbl {
     pub parent: IUnknownVtbl,
     pub DragEnter: unsafe extern "system" fn(
         This: *mut IDropTarget,
-        pDataObj: *const IDataObject,
+        pDataObj: *mut IDataObject,
         grfKeyState: u32,
-        pt: *const POINTL,
+        pt: POINTL,
         pdwEffect: *mut u32,
     ) -> HRESULT,
     pub DragOver: unsafe extern "system" fn(
         This: *mut IDropTarget,
         grfKeyState: u32,
-        pt: *const POINTL,
+        pt: POINTL,
         pdwEffect: *mut u32,
     ) -> HRESULT,
     pub DragLeave: unsafe extern "system" fn(This: *mut IDropTarget) -> HRESULT,
     pub Drop: unsafe extern "system" fn(
         This: *mut IDropTarget,
-        pDataObj: *const IDataObject,
+        pDataObj: *mut IDataObject,
         grfKeyState: u32,
-        pt: *const POINTL,
+        pt: POINTL,
         pdwEffect: *mut u32,
     ) -> HRESULT,
 }

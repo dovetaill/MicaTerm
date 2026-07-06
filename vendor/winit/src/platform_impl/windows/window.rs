@@ -1192,6 +1192,11 @@ impl InitData<'_> {
                 unsafe { &mut (*file_drop_handler.data).interface as *mut _ as *mut c_void };
 
             assert_eq!(unsafe { RegisterDragDrop(win.window, handler_interface_ptr) }, S_OK);
+            tracing::info!(
+                target: "winit.drop",
+                hwnd = win.window,
+                "registered Windows file drop target"
+            );
             Some(file_drop_handler)
         } else {
             None
