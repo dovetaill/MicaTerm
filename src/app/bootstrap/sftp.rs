@@ -326,6 +326,8 @@ pub(super) struct SftpTransferBackgroundMessage {
     pub tasks: Vec<crate::app::sftp::TransferTask>,
     pub refresh_remote_path: Option<String>,
     pub error: Option<String>,
+    pub open_queue_drawer: bool,
+    pub open_transfer_center: bool,
 }
 
 #[derive(Debug)]
@@ -397,6 +399,8 @@ fn project_transfer_queue_update(
         tasks: queue.tasks.clone(),
         refresh_remote_path: None,
         error: None,
+        open_queue_drawer: false,
+        open_transfer_center: false,
     });
 }
 
@@ -428,6 +432,8 @@ fn run_transfer_queue_in_background(
             tasks: queue.tasks.clone(),
             refresh_remote_path,
             error,
+            open_queue_drawer: false,
+            open_transfer_center: false,
         });
     });
 }
@@ -468,6 +474,8 @@ pub(super) fn schedule_sftp_upload_paths(
                     tasks: Vec::new(),
                     refresh_remote_path: None,
                     error: Some(err.to_string()),
+                    open_queue_drawer: false,
+                    open_transfer_center: false,
                 });
             }
         }
@@ -503,6 +511,8 @@ pub(super) fn schedule_sftp_download_entries(
                         tasks: Vec::new(),
                         refresh_remote_path: None,
                         error: Some(err.to_string()),
+                        open_queue_drawer: false,
+                        open_transfer_center: false,
                     });
                     return;
                 }
@@ -1012,6 +1022,14 @@ pub(super) fn drain_sftp_transfer_background_messages(
         changed |= merged;
         tasks_changed |= merged;
         changed |= state.recompute_sftp_queue_summary();
+        if message.open_queue_drawer && !state.sftp_queue_drawer_open {
+            state.sftp_queue_drawer_open = true;
+            changed = true;
+        }
+        if message.open_transfer_center && !state.transfer_center_open() {
+            state.toggle_transfer_center();
+            changed = true;
+        }
         if state.settings_modal_download_conflict_default()
             == crate::app::ui_preferences::DownloadConflictDefault::Ask
             && !state.sftp_conflict_modal_state().open
@@ -1516,27 +1534,43 @@ pub(super) fn schedule_quick_browser_upload_from_paths(
     scheduled
 }
 
+fn send_terminal_drop_transfer_center_request(
+    result_tx: &std::sync::mpsc::Sender<SftpTransferBackgroundMessage>,
+    session_id: Uuid,
+) {
+    let _ = result_tx.send(SftpTransferBackgroundMessage {
+        session_id: session_id.to_string(),
+        tasks: Vec::new(),
+        refresh_remote_path: None,
+        error: None,
+        open_queue_drawer: true,
+        open_transfer_center: true,
+    });
+}
+
+fn send_terminal_drop_error(
+    result_tx: &std::sync::mpsc::Sender<SftpTransferBackgroundMessage>,
+    session_id: Uuid,
+    error: String,
+) {
+    let _ = result_tx.send(SftpTransferBackgroundMessage {
+        session_id: session_id.to_string(),
+        tasks: Vec::new(),
+        refresh_remote_path: None,
+        error: Some(error),
+        open_queue_drawer: false,
+        open_transfer_center: false,
+    });
+}
+
 fn schedule_terminal_cwd_upload_from_paths(
-    state: &mut ShellViewModel,
     manager: &SessionManager,
+    session_id: Uuid,
+    target_dir: String,
     transfer_result_tx: &std::sync::mpsc::Sender<SftpTransferBackgroundMessage>,
     local_paths: Vec<PathBuf>,
 ) -> anyhow::Result<bool> {
     let path_count = local_paths.len();
-    let Some(session_id) = state
-        .active_workspace_terminal_session_id()
-        .and_then(|session_id| Uuid::parse_str(session_id).ok())
-    else {
-        return Err(anyhow::anyhow!(
-            "the active workspace session is not a terminal"
-        ));
-    };
-    let target_dir =
-        terminal_current_working_directory_for_drop(manager, session_id)?.ok_or_else(|| {
-            anyhow::anyhow!(
-                "the active terminal has not reported its current working directory yet"
-            )
-        })?;
     tracing::info!(
         target: "app.drop",
         target = "terminal",
@@ -1561,6 +1595,9 @@ fn schedule_terminal_cwd_upload_from_paths(
         local_paths,
         transfer_result_tx,
     );
+    if scheduled {
+        send_terminal_drop_transfer_center_request(transfer_result_tx, session_id);
+    }
     tracing::info!(
         target: "app.drop",
         target = "terminal",
@@ -1568,12 +1605,6 @@ fn schedule_terminal_cwd_upload_from_paths(
         path_count,
         "terminal external drop upload scheduling finished"
     );
-    if scheduled {
-        state.sftp_queue_drawer_open = true;
-        if !state.transfer_center_open() {
-            state.toggle_transfer_center();
-        }
-    }
     Ok(scheduled)
 }
 
@@ -1628,18 +1659,13 @@ fn terminal_current_working_directory_for_drop(
 }
 
 fn schedule_terminal_zmodem_drop_from_paths(
-    state: &ShellViewModel,
     manager: &SessionManager,
+    session_id: Uuid,
     local_paths: Vec<PathBuf>,
 ) -> anyhow::Result<bool> {
     if !local_paths_are_zmodem_files(local_paths.as_slice()) {
         return Ok(false);
     }
-    if !terminal_surface_allows_automatic_zmodem_drop(state) {
-        return Ok(false);
-    }
-
-    let session_id = active_workspace_session_uuid_for_terminal(state)?;
     if let Some(zmodem_state) = manager.zmodem_state(session_id) {
         if zmodem_state.phase == ZmodemTransferPhase::AwaitingUploadSelection {
             tracing::info!(
@@ -1697,6 +1723,55 @@ fn schedule_terminal_zmodem_drop_from_paths(
         "terminal external drop starting rz over dedicated exec channel"
     );
     manager.start_zmodem_upload_to_remote_dir(session_id, local_paths, remote_dir)?;
+    Ok(true)
+}
+
+fn schedule_terminal_external_drop_from_paths(
+    state: &ShellViewModel,
+    manager: &SessionManager,
+    transfer_result_tx: &std::sync::mpsc::Sender<SftpTransferBackgroundMessage>,
+    local_paths: Vec<PathBuf>,
+) -> anyhow::Result<bool> {
+    if local_paths.is_empty() {
+        return Ok(false);
+    }
+    let session_id = active_workspace_session_uuid_for_terminal(state)?;
+    let allow_automatic_zmodem = terminal_surface_allows_automatic_zmodem_drop(state)
+        && local_paths_are_zmodem_files(local_paths.as_slice());
+    let manager = manager.clone();
+    let transfer_result_tx = transfer_result_tx.clone();
+    std::thread::spawn(move || {
+        let result = (|| -> anyhow::Result<()> {
+            if allow_automatic_zmodem
+                && schedule_terminal_zmodem_drop_from_paths(
+                    &manager,
+                    session_id,
+                    local_paths.clone(),
+                )?
+            {
+                return Ok(());
+            }
+
+            let target_dir = terminal_current_working_directory_for_drop(&manager, session_id)?
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "the active terminal has not reported its current working directory yet"
+                    )
+                })?;
+            schedule_terminal_cwd_upload_from_paths(
+                &manager,
+                session_id,
+                target_dir,
+                &transfer_result_tx,
+                local_paths,
+            )?;
+            Ok(())
+        })();
+
+        if let Err(err) = result {
+            send_terminal_drop_error(&transfer_result_tx, session_id, err.to_string());
+        }
+    });
     Ok(true)
 }
 
@@ -1812,6 +1887,8 @@ pub(super) fn apply_pending_sftp_context_action(
                     tasks: Vec::new(),
                     refresh_remote_path: error.is_none().then_some(refresh_path),
                     error,
+                    open_queue_drawer: false,
+                    open_transfer_center: false,
                 });
             });
             true
@@ -1836,6 +1913,8 @@ pub(super) fn apply_pending_sftp_context_action(
                     tasks: Vec::new(),
                     refresh_remote_path: error.is_none().then_some(refresh_path),
                     error,
+                    open_queue_drawer: false,
+                    open_transfer_center: false,
                 });
             });
             true
@@ -1865,6 +1944,8 @@ pub(super) fn apply_pending_sftp_context_action(
                     tasks: Vec::new(),
                     refresh_remote_path: error.is_none().then_some(refresh_path),
                     error,
+                    open_queue_drawer: false,
+                    open_transfer_center: false,
                 });
             });
             true
@@ -1892,6 +1973,8 @@ pub(super) fn apply_pending_sftp_context_action(
                     tasks: Vec::new(),
                     refresh_remote_path: error.is_none().then_some(refresh_path),
                     error,
+                    open_queue_drawer: false,
+                    open_transfer_center: false,
                 });
             });
             true
@@ -2775,20 +2858,12 @@ pub(super) fn bind_sftp_callbacks(
             "terminal external drop requested"
         );
         let result = session_bridge_ref.as_ref().map(|session_bridge| {
-            match schedule_terminal_zmodem_drop_from_paths(
+            schedule_terminal_external_drop_from_paths(
                 &state,
                 &session_bridge.manager,
-                local_paths.clone(),
-            ) {
-                Ok(true) => Ok(true),
-                Ok(false) => schedule_terminal_cwd_upload_from_paths(
-                    &mut state,
-                    &session_bridge.manager,
-                    &transfer_result_tx_ref,
-                    local_paths,
-                ),
-                Err(err) => Err(err),
-            }
+                &transfer_result_tx_ref,
+                local_paths,
+            )
         });
         window.set_workspace_terminal_external_drop_paths(ModelRc::new(VecModel::from(vec![])));
 
@@ -2799,7 +2874,7 @@ pub(super) fn bind_sftp_callbacks(
                     &mut state,
                     effects_ref.as_ref(),
                     &mut workspace_follow_tracker_ref.borrow_mut(),
-                    session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+                    None,
                 );
             }
             Some(Err(err)) => {
@@ -2819,7 +2894,7 @@ pub(super) fn bind_sftp_callbacks(
                     &mut state,
                     effects_ref.as_ref(),
                     &mut workspace_follow_tracker_ref.borrow_mut(),
-                    session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+                    None,
                 );
             }
             None => {}

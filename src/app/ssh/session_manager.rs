@@ -217,14 +217,18 @@ pub trait SessionRuntimeControl: Send {
 
 type LaunchFuture =
     Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>;
+type SharedSessionRuntimeControl = Arc<Mutex<Box<dyn SessionRuntimeControl>>>;
 
-fn release_and_disconnect_runtime_control(runtime_control: Box<dyn SessionRuntimeControl>) {
+fn release_and_disconnect_runtime_control(runtime_control: SharedSessionRuntimeControl) {
     let _ = release_and_disconnect_runtime_control_with_outcome(runtime_control);
 }
 
 fn release_and_disconnect_runtime_control_with_outcome(
-    runtime_control: Box<dyn SessionRuntimeControl>,
+    runtime_control: SharedSessionRuntimeControl,
 ) -> RuntimeControlReleaseOutcome {
+    let runtime_control = runtime_control
+        .lock()
+        .expect("lock session runtime control for release");
     // Drop scrollback/terminal state before the network-side graceful disconnect finishes.
     let terminal_memory_release_succeeded = runtime_control.release_terminal_memory().is_ok();
     let runtime_disconnect_succeeded = runtime_control.disconnect().is_ok();
@@ -271,6 +275,16 @@ impl SessionManager {
 
     pub fn runtime_handle(&self) -> tokio::runtime::Handle {
         self.runtime_handle.clone()
+    }
+
+    fn runtime_control_for_session(&self, session_id: Uuid) -> Result<SharedSessionRuntimeControl> {
+        self.registry
+            .lock()
+            .expect("lock session registry")
+            .runtime_controls
+            .get(&session_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))
     }
 
     pub fn open_session(
@@ -412,16 +426,18 @@ impl SessionManager {
     }
 
     pub fn resolve_current_working_directory(&self, session_id: Uuid) -> Result<Option<String>> {
-        let mut registry = self.registry.lock().expect("lock session registry");
-        let runtime_control = registry
-            .runtime_controls
-            .get(&session_id)
-            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
-        let cwd = runtime_control.resolve_current_working_directory()?;
+        let cwd = self
+            .runtime_control_for_session(session_id)?
+            .lock()
+            .expect("lock session runtime control for cwd probe")
+            .resolve_current_working_directory()?;
         if let Some(cwd) = cwd.as_ref() {
-            registry
-                .current_working_directories
-                .insert(session_id, cwd.clone());
+            let mut registry = self.registry.lock().expect("lock session registry");
+            if registry.sessions.contains_key(&session_id) {
+                registry
+                    .current_working_directories
+                    .insert(session_id, cwd.clone());
+            }
         }
         Ok(cwd)
     }
@@ -812,31 +828,36 @@ impl SessionManager {
     }
 
     pub fn send_session_text_input(&self, session_id: Uuid, text: String) -> Result<()> {
-        let registry = self.registry.lock().expect("lock session registry");
-        let runtime_control = registry
-            .runtime_controls
-            .get(&session_id)
-            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
-        runtime_control.send_text_input(text)
+        self.runtime_control_for_session(session_id)?
+            .lock()
+            .expect("lock session runtime control for text input")
+            .send_text_input(text)
     }
 
     pub fn send_session_key_input(&self, session_id: Uuid, event: TerminalKeyEvent) -> Result<()> {
-        let registry = self.registry.lock().expect("lock session registry");
-        let runtime_control = registry
-            .runtime_controls
-            .get(&session_id)
-            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
-        runtime_control.send_key_input(event)
+        self.runtime_control_for_session(session_id)?
+            .lock()
+            .expect("lock session runtime control for key input")
+            .send_key_input(event)
     }
 
     pub fn resize_session(&self, session_id: Uuid, rows: u32, cols: u32) -> Result<()> {
-        let mut registry = self.registry.lock().expect("lock session registry");
-        if let Some(runtime_control) = registry.runtime_controls.get(&session_id) {
-            return runtime_control.resize(rows, cols);
-        }
-        if registry.sessions.contains_key(&session_id) {
-            registry.pending_resizes.insert(session_id, (rows, cols));
-            return Ok(());
+        let runtime_control = {
+            let mut registry = self.registry.lock().expect("lock session registry");
+            if let Some(runtime_control) = registry.runtime_controls.get(&session_id).cloned() {
+                Some(runtime_control)
+            } else if registry.sessions.contains_key(&session_id) {
+                registry.pending_resizes.insert(session_id, (rows, cols));
+                return Ok(());
+            } else {
+                None
+            }
+        };
+        if let Some(runtime_control) = runtime_control {
+            return runtime_control
+                .lock()
+                .expect("lock session runtime control for resize")
+                .resize(rows, cols);
         }
         Err(anyhow!("session runtime is not ready for `{session_id}`"))
     }
@@ -846,30 +867,24 @@ impl SessionManager {
         session_id: Uuid,
         event: TerminalMouseInput,
     ) -> Result<()> {
-        let registry = self.registry.lock().expect("lock session registry");
-        let runtime_control = registry
-            .runtime_controls
-            .get(&session_id)
-            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
-        runtime_control.send_mouse_input(event)
+        self.runtime_control_for_session(session_id)?
+            .lock()
+            .expect("lock session runtime control for mouse input")
+            .send_mouse_input(event)
     }
 
     pub fn send_session_paste(&self, session_id: Uuid, text: String) -> Result<()> {
-        let registry = self.registry.lock().expect("lock session registry");
-        let runtime_control = registry
-            .runtime_controls
-            .get(&session_id)
-            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
-        runtime_control.send_paste(text)
+        self.runtime_control_for_session(session_id)?
+            .lock()
+            .expect("lock session runtime control for paste")
+            .send_paste(text)
     }
 
     pub fn start_zmodem_upload(&self, session_id: Uuid, local_paths: Vec<PathBuf>) -> Result<()> {
-        let registry = self.registry.lock().expect("lock session registry");
-        let runtime_control = registry
-            .runtime_controls
-            .get(&session_id)
-            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
-        runtime_control.start_zmodem_upload(local_paths)
+        self.runtime_control_for_session(session_id)?
+            .lock()
+            .expect("lock session runtime control for zmodem upload")
+            .start_zmodem_upload(local_paths)
     }
 
     pub fn start_interactive_zmodem_upload(
@@ -877,21 +892,17 @@ impl SessionManager {
         session_id: Uuid,
         local_paths: Vec<PathBuf>,
     ) -> Result<()> {
-        let registry = self.registry.lock().expect("lock session registry");
-        let runtime_control = registry
-            .runtime_controls
-            .get(&session_id)
-            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
-        runtime_control.start_interactive_zmodem_upload(local_paths)
+        self.runtime_control_for_session(session_id)?
+            .lock()
+            .expect("lock session runtime control for interactive zmodem upload")
+            .start_interactive_zmodem_upload(local_paths)
     }
 
     pub fn remote_command_exists(&self, session_id: Uuid, command_name: &str) -> Result<bool> {
-        let registry = self.registry.lock().expect("lock session registry");
-        let runtime_control = registry
-            .runtime_controls
-            .get(&session_id)
-            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
-        runtime_control.remote_command_exists(command_name.to_string())
+        self.runtime_control_for_session(session_id)?
+            .lock()
+            .expect("lock session runtime control for remote command probe")
+            .remote_command_exists(command_name.to_string())
     }
 
     pub fn start_zmodem_upload_to_remote_dir(
@@ -900,12 +911,10 @@ impl SessionManager {
         local_paths: Vec<PathBuf>,
         remote_dir: String,
     ) -> Result<()> {
-        let registry = self.registry.lock().expect("lock session registry");
-        let runtime_control = registry
-            .runtime_controls
-            .get(&session_id)
-            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
-        runtime_control.start_zmodem_upload_to_remote_dir(local_paths, remote_dir)
+        self.runtime_control_for_session(session_id)?
+            .lock()
+            .expect("lock session runtime control for zmodem exec upload")
+            .start_zmodem_upload_to_remote_dir(local_paths, remote_dir)
     }
 
     pub fn start_zmodem_download(
@@ -914,30 +923,24 @@ impl SessionManager {
         local_dir: PathBuf,
         conflict_policy: ZmodemDownloadConflictPolicy,
     ) -> Result<()> {
-        let registry = self.registry.lock().expect("lock session registry");
-        let runtime_control = registry
-            .runtime_controls
-            .get(&session_id)
-            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
-        runtime_control.start_zmodem_download(local_dir, conflict_policy)
+        self.runtime_control_for_session(session_id)?
+            .lock()
+            .expect("lock session runtime control for zmodem download")
+            .start_zmodem_download(local_dir, conflict_policy)
     }
 
     pub fn cancel_zmodem_transfer(&self, session_id: Uuid) -> Result<()> {
-        let registry = self.registry.lock().expect("lock session registry");
-        let runtime_control = registry
-            .runtime_controls
-            .get(&session_id)
-            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
-        runtime_control.cancel_zmodem_transfer()
+        self.runtime_control_for_session(session_id)?
+            .lock()
+            .expect("lock session runtime control for zmodem cancel")
+            .cancel_zmodem_transfer()
     }
 
     pub fn dismiss_zmodem_transfer(&self, session_id: Uuid) -> Result<()> {
-        let registry = self.registry.lock().expect("lock session registry");
-        let runtime_control = registry
-            .runtime_controls
-            .get(&session_id)
-            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
-        runtime_control.dismiss_zmodem_transfer()
+        self.runtime_control_for_session(session_id)?
+            .lock()
+            .expect("lock session runtime control for zmodem dismiss")
+            .dismiss_zmodem_transfer()
     }
 
     pub fn selection_text_from_buffer_rows(
@@ -948,14 +951,11 @@ impl SessionManager {
         end_row: u32,
         end_col: u32,
     ) -> Result<String> {
-        let runtime_result = {
-            let registry = self.registry.lock().expect("lock session registry");
-            let runtime_control = registry
-                .runtime_controls
-                .get(&session_id)
-                .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
-            runtime_control.selection_text_from_buffer_rows(start_row, start_col, end_row, end_col)
-        };
+        let runtime_result = self
+            .runtime_control_for_session(session_id)?
+            .lock()
+            .expect("lock session runtime control for selection text")
+            .selection_text_from_buffer_rows(start_row, start_col, end_row, end_col);
 
         match runtime_result {
             Ok(Some(text)) => return Ok(text),
@@ -981,14 +981,11 @@ impl SessionManager {
     }
 
     pub fn scroll_session_viewport(&self, session_id: Uuid, delta: i32) -> Result<()> {
-        let surface = {
-            let registry = self.registry.lock().expect("lock session registry");
-            let runtime_control = registry
-                .runtime_controls
-                .get(&session_id)
-                .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
-            runtime_control.scroll_viewport_lines(delta)?
-        };
+        let surface = self
+            .runtime_control_for_session(session_id)?
+            .lock()
+            .expect("lock session runtime control for scroll")
+            .scroll_viewport_lines(delta)?;
 
         update_terminal_surface(&self.registry, session_id, surface);
         Ok(())
@@ -1047,13 +1044,16 @@ impl SessionManager {
         };
 
         for session_id in session_ids {
-            let surface = {
+            let Some(runtime_control) = ({
                 let registry = self.registry.lock().expect("lock session registry");
-                let Some(runtime_control) = registry.runtime_controls.get(&session_id) else {
-                    continue;
-                };
-                runtime_control.update_theme(mode, variant)?
+                registry.runtime_controls.get(&session_id).cloned()
+            }) else {
+                continue;
             };
+            let surface = runtime_control
+                .lock()
+                .expect("lock session runtime control for theme update")
+                .update_theme(mode, variant)?;
 
             if let Some(surface) = surface {
                 update_terminal_surface(&self.registry, session_id, surface);
@@ -1313,7 +1313,7 @@ struct SessionRegistry {
     zmodem_transfers: HashMap<Uuid, ZmodemTransferState>,
     terminal_shell_integration: HashMap<Uuid, TerminalShellIntegrationState>,
     terminal_surface_revisions: HashMap<Uuid, usize>,
-    runtime_controls: HashMap<Uuid, Box<dyn SessionRuntimeControl>>,
+    runtime_controls: HashMap<Uuid, SharedSessionRuntimeControl>,
     sftp_bindings: HashMap<Uuid, SftpSessionBinding>,
     disabled_enhancement_sessions: HashSet<Uuid>,
     pending_disconnects: HashSet<Uuid>,
@@ -1606,13 +1606,17 @@ fn mark_runtime_surface_dirty(registry: &Arc<Mutex<SessionRegistry>>, session_id
 }
 
 fn refresh_runtime_surface(registry: &Arc<Mutex<SessionRegistry>>, session_id: Uuid) {
-    let surface = {
+    let runtime_control = {
         let registry = registry.lock().expect("lock session registry");
-        registry
-            .runtime_controls
-            .get(&session_id)
-            .and_then(|runtime_control| runtime_control.terminal_surface().ok())
+        registry.runtime_controls.get(&session_id).cloned()
     };
+    let surface = runtime_control.and_then(|runtime_control| {
+        runtime_control
+            .lock()
+            .expect("lock session runtime control for surface refresh")
+            .terminal_surface()
+            .ok()
+    });
 
     if let Some(surface) = surface {
         update_terminal_surface(registry, session_id, surface);
@@ -1697,18 +1701,20 @@ fn attach_runtime_control(
         {
             (true, None, registry.theme_mode, registry.theme_variant)
         } else {
-            registry.runtime_controls.insert(
-                session_id,
+            let shared_runtime_control = Arc::new(Mutex::new(
                 runtime_control.take().expect("runtime control available"),
-            );
-            if let Some(binding) = registry
-                .runtime_controls
-                .get(&session_id)
-                .and_then(|runtime_control| runtime_control.sftp_runtime())
+            ));
+            if let Some(binding) = shared_runtime_control
+                .lock()
+                .expect("lock session runtime control for sftp binding")
+                .sftp_runtime()
                 .map(|runtime| SftpSessionBinding::connecting(session_id, runtime))
             {
                 registry.sftp_bindings.insert(session_id, binding);
             }
+            registry
+                .runtime_controls
+                .insert(session_id, shared_runtime_control);
             (
                 false,
                 registry.pending_resizes.remove(&session_id),
@@ -1719,22 +1725,22 @@ fn attach_runtime_control(
     };
 
     if should_disconnect && let Some(runtime_control) = runtime_control {
-        release_and_disconnect_runtime_control(runtime_control);
+        release_and_disconnect_runtime_control(Arc::new(Mutex::new(runtime_control)));
         return;
     }
 
-    let theme_surface = {
+    let theme_runtime_control = {
         let registry_guard = registry.lock().expect("lock session registry");
-        registry_guard
-            .runtime_controls
-            .get(&session_id)
-            .and_then(|runtime_control| {
-                runtime_control
-                    .update_theme(theme_mode, theme_variant)
-                    .ok()
-                    .flatten()
-            })
+        registry_guard.runtime_controls.get(&session_id).cloned()
     };
+    let theme_surface = theme_runtime_control.and_then(|runtime_control| {
+        runtime_control
+            .lock()
+            .expect("lock session runtime control for theme update")
+            .update_theme(theme_mode, theme_variant)
+            .ok()
+            .flatten()
+    });
     if let Some(surface) = theme_surface {
         update_terminal_surface(registry, session_id, surface);
     } else {
@@ -1742,9 +1748,15 @@ fn attach_runtime_control(
     }
 
     if let Some((rows, cols)) = pending_resize {
-        let registry = registry.lock().expect("lock session registry");
-        if let Some(runtime_control) = registry.runtime_controls.get(&session_id) {
-            let _ = runtime_control.resize(rows, cols);
+        let runtime_control = {
+            let registry = registry.lock().expect("lock session registry");
+            registry.runtime_controls.get(&session_id).cloned()
+        };
+        if let Some(runtime_control) = runtime_control {
+            let _ = runtime_control
+                .lock()
+                .expect("lock session runtime control for pending resize")
+                .resize(rows, cols);
         }
     }
 }
@@ -2041,10 +2053,10 @@ mod tests {
             );
             registry_guard.runtime_controls.insert(
                 session_id,
-                Box::new(CountingRuntimeControl::new(
+                Arc::new(Mutex::new(Box::new(CountingRuntimeControl::new(
                     runtime_surface,
                     Arc::clone(&terminal_surface_calls),
-                )),
+                )))),
             );
         }
         update_terminal_surface(&registry, session_id, initial_surface);
@@ -2093,10 +2105,10 @@ mod tests {
             );
             registry_guard.runtime_controls.insert(
                 session_id,
-                Box::new(CountingRuntimeControl::new(
+                Arc::new(Mutex::new(Box::new(CountingRuntimeControl::new(
                     runtime_surface.clone(),
                     Arc::clone(&terminal_surface_calls),
-                )),
+                )))),
             );
         }
         update_terminal_surface(&registry, session_id, initial_surface);

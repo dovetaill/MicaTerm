@@ -1023,6 +1023,7 @@ struct RecordingSftpState {
     upload_file_calls: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
     text_input_calls: Arc<Mutex<Vec<String>>>,
     remote_command_exists_calls: Arc<Mutex<Vec<String>>>,
+    remote_command_probe_delay: Arc<Mutex<Option<Duration>>>,
     remote_cwd_probe_calls: Arc<Mutex<usize>>,
     zmodem_exec_upload_calls: Arc<Mutex<Vec<(String, Vec<String>)>>>,
     interactive_zmodem_upload_calls: Arc<Mutex<Vec<Vec<String>>>>,
@@ -1076,6 +1077,13 @@ impl RecordingSftpState {
                 .lock()
                 .expect("lock remote command probe calls"),
         )
+    }
+
+    fn set_remote_command_probe_delay(&self, delay: Duration) {
+        *self
+            .remote_command_probe_delay
+            .lock()
+            .expect("lock remote command probe delay") = Some(delay);
     }
 
     fn take_remote_cwd_probe_calls(&self) -> usize {
@@ -2164,6 +2172,14 @@ impl SessionRuntimeControl for RecordingSftpRuntimeControl {
             .lock()
             .expect("lock remote command probe calls")
             .push(command_name.clone());
+        if let Some(delay) = *self
+            .state
+            .remote_command_probe_delay
+            .lock()
+            .expect("lock remote command probe delay")
+        {
+            std::thread::sleep(delay);
+        }
         let rz_available = self
             .state
             .remote_rz_available
@@ -15915,6 +15931,79 @@ fn terminal_file_drop_falls_back_to_sftp_current_directory_when_rz_is_missing() 
     assert!(
         app.get_transfer_center_open(),
         "terminal SFTP fallback uploads should surface the transfer center after queueing work"
+    );
+}
+
+#[test]
+fn terminal_file_drop_sftp_fallback_does_not_block_ui_while_probing_remote() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    sftp_state.set_remote_rz_available(false);
+    sftp_state.set_remote_command_probe_delay(Duration::from_millis(800));
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("terminal-drop-upload-async-sftp-fallback");
+    let upload_path = temp_root.join("release.env");
+    fs::create_dir_all(temp_root.as_path()).expect("create terminal drop temp root");
+    fs::write(&upload_path, b"PORT=22\n").expect("write terminal drop source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "terminal"
+            && !app.get_active_workspace_session_id().is_empty()
+    });
+
+    app.set_workspace_terminal_external_drop_paths(ModelRc::new(VecModel::from(vec![
+        SharedString::from(upload_path.to_string_lossy().to_string()),
+    ])));
+    let started = Instant::now();
+    app.invoke_workspace_terminal_external_drop_requested();
+    let elapsed = started.elapsed();
+
+    assert!(
+        elapsed < Duration::from_millis(300),
+        "terminal drop UI callback should only enqueue background work; took {elapsed:?}"
+    );
+
+    let started = Instant::now();
+    flush_runtime_projection();
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_millis(300),
+        "terminal drop background probe should not block the next UI projection tick; took {elapsed:?}"
+    );
+
+    wait_for_condition(Duration::from_secs(3), || {
+        flush_runtime_projection();
+        !sftp_state
+            .upload_file_calls
+            .lock()
+            .expect("lock terminal drop upload calls")
+            .is_empty()
+    });
+
+    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(
+        sftp_state.take_upload_file_calls(),
+        vec![("/srv/app/release.env".to_string(), b"PORT=22\n".to_vec())]
+    );
+    assert!(
+        app.get_sftp_queue_drawer_open(),
+        "async terminal SFTP fallback should still open the shared transfer queue drawer"
+    );
+    assert!(
+        app.get_transfer_center_open(),
+        "async terminal SFTP fallback should still surface the transfer center"
     );
 }
 
