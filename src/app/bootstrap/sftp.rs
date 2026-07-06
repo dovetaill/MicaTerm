@@ -1615,7 +1615,12 @@ fn schedule_terminal_cwd_upload_from_paths(
 
 fn terminal_surface_allows_interactive_zmodem_drop(state: &ShellViewModel) -> bool {
     let Some(surface) = state.active_workspace_terminal_surface() else {
-        return false;
+        tracing::info!(
+            target: "app.drop",
+            target = "terminal",
+            "terminal external drop has no surface snapshot; allowing interactive rz fallback"
+        );
+        return true;
     };
     if surface.alternate_screen_active || surface.mouse_grabbed {
         return false;
@@ -1753,6 +1758,7 @@ fn schedule_terminal_external_drop_from_paths(
     let allow_interactive_zmodem = terminal_surface_allows_interactive_zmodem_drop(state);
     let manager = manager.clone();
     let transfer_result_tx = transfer_result_tx.clone();
+    let path_count = local_paths.len();
     std::thread::spawn(move || {
         let result = (|| -> anyhow::Result<()> {
             if local_paths_are_zmodem_files(local_paths.as_slice())
@@ -1783,6 +1789,14 @@ fn schedule_terminal_external_drop_from_paths(
         })();
 
         if let Err(err) = result {
+            tracing::warn!(
+                target: "app.drop",
+                target = "terminal",
+                session_id = %session_id,
+                path_count,
+                error = %err,
+                "terminal external drop failed in background"
+            );
             send_terminal_drop_error(&transfer_result_tx, session_id, err.to_string());
         }
     });

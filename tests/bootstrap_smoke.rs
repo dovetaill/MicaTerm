@@ -1197,6 +1197,11 @@ struct DelayedCwdRecordingSftpLauncher {
 }
 
 #[derive(Clone)]
+struct NoSurfaceDelayedCwdRecordingSftpLauncher {
+    state: RecordingSftpState,
+}
+
+#[derive(Clone)]
 struct DelayedReadRecordingSftpLauncher {
     state: RecordingSftpState,
     read_delay_by_path: Arc<BTreeMap<String, Duration>>,
@@ -2562,6 +2567,37 @@ impl SessionRuntimeLauncher for DelayedCwdRecordingSftpLauncher {
                 state: state.clone(),
                 runtime: SftpRuntimeHandle::new(Arc::new(RecordingSftpBackend {
                     responses,
+                    state,
+                })),
+            }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SessionRuntimeLauncher for NoSurfaceDelayedCwdRecordingSftpLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        _session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let state = self.state.clone();
+        Box::pin(async move {
+            state.set_event_tx(event_tx.clone());
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            Ok(Box::new(RecordingSftpRuntimeControl {
+                state: state.clone(),
+                runtime: SftpRuntimeHandle::new(Arc::new(RecordingSftpBackend {
+                    responses: BTreeMap::new(),
                     state,
                 })),
             }) as Box<dyn SessionRuntimeControl>)
@@ -15875,6 +15911,71 @@ fn terminal_file_drop_uses_interactive_rz_when_cwd_is_unavailable() {
             .expect("lock terminal drop upload calls")
             .is_empty(),
         "interactive rz fallback should not schedule an SFTP upload"
+    );
+}
+
+#[test]
+fn terminal_file_drop_uses_interactive_rz_when_surface_is_not_projected() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(NoSurfaceDelayedCwdRecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("terminal-drop-upload-no-surface-interactive-rz");
+    let upload_path = temp_root.join("release.env");
+    fs::create_dir_all(temp_root.as_path()).expect("create terminal drop temp root");
+    fs::write(&upload_path, b"PORT=22\n").expect("write terminal drop source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "terminal"
+            && !app.get_active_workspace_session_id().is_empty()
+    });
+
+    app.set_workspace_terminal_external_drop_paths(ModelRc::new(VecModel::from(vec![
+        SharedString::from(upload_path.to_string_lossy().to_string()),
+    ])));
+    app.invoke_workspace_terminal_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        !sftp_state
+            .interactive_zmodem_upload_calls
+            .lock()
+            .expect("lock interactive zmodem upload calls")
+            .is_empty()
+    });
+
+    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(sftp_state.take_remote_cwd_probe_calls(), 1);
+    assert_eq!(sftp_state.take_text_input_calls(), Vec::<String>::new());
+    assert_eq!(
+        sftp_state.take_zmodem_exec_upload_calls(),
+        Vec::<(String, Vec<String>)>::new()
+    );
+    assert_eq!(
+        sftp_state.take_interactive_zmodem_upload_calls(),
+        vec![vec![upload_path.to_string_lossy().to_string()]]
+    );
+    assert_eq!(
+        sftp_state.take_upload_file_calls(),
+        Vec::<(String, Vec<u8>)>::new(),
+        "missing terminal surface should not force a fake SFTP fallback"
+    );
+    assert!(
+        !app.get_transfer_center_feedback_text()
+            .as_str()
+            .starts_with("Transfer failed:"),
+        "missing terminal surface should not be reported as a failed transfer task"
     );
 }
 
