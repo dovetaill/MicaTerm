@@ -1204,7 +1204,14 @@ enum PostSessionDrain {
 }
 
 fn strip_lrzsz_autostart_invocation(bytes: &[u8]) -> &[u8] {
-    for marker in [b"rz\r\n".as_slice(), b"rz\r".as_slice(), b"rz\n".as_slice()] {
+    for marker in [
+        b" rz\r\n".as_slice(),
+        b" rz\r".as_slice(),
+        b" rz\n".as_slice(),
+        b"rz\r\n".as_slice(),
+        b"rz\r".as_slice(),
+        b"rz\n".as_slice(),
+    ] {
         if let Some(stripped) = bytes.strip_suffix(marker) {
             return stripped;
         }
@@ -1220,15 +1227,24 @@ fn strip_post_session_zmodem_noise(bytes: &[u8]) -> PostSessionDrain {
             return PostSessionDrain::Pending(Vec::new());
         }
 
-        if remaining.starts_with(b"rz\r\n") {
-            offset += 4;
+        if let Some(marker_len) = [
+            b" rz\r\n".as_slice(),
+            b" rz\r".as_slice(),
+            b" rz\n".as_slice(),
+            b"rz\r\n".as_slice(),
+            b"rz\r".as_slice(),
+            b"rz\n".as_slice(),
+        ]
+        .iter()
+        .find_map(|marker| remaining.starts_with(marker).then_some(marker.len()))
+        {
+            offset += marker_len;
             continue;
         }
-        if remaining.starts_with(b"rz\r") || remaining.starts_with(b"rz\n") {
-            offset += 3;
-            continue;
-        }
-        if is_prefix_of_any(remaining, &[b"rz\r\n", b"rz\r", b"rz\n"]) {
+        if is_prefix_of_any(
+            remaining,
+            &[b" rz\r\n", b" rz\r", b" rz\n", b"rz\r\n", b"rz\r", b"rz\n"],
+        ) {
             return PostSessionDrain::Pending(remaining.to_vec());
         }
 
@@ -1434,8 +1450,28 @@ mod tests {
     }
 
     #[test]
+    fn strips_history_friendly_interactive_rz_invocation_before_upload_prefix() {
+        let mut controller = ZmodemController::default();
+
+        let terminal_bytes = controller.intercept_remote_bytes(b"prompt\n rz\r**\x18B01");
+
+        assert_eq!(terminal_bytes, b"prompt\n".to_vec());
+        let state = controller
+            .take_modal_state_change()
+            .expect("zmodem state changed")
+            .expect("upload state");
+        assert_eq!(state.direction, ZmodemTransferDirection::Upload);
+        assert_eq!(state.phase, ZmodemTransferPhase::AwaitingUploadSelection);
+    }
+
+    #[test]
     fn post_session_drain_swallows_zmodem_tail_before_prompt() {
         match strip_post_session_zmodem_noise(b"OOroot@host:~# ") {
+            PostSessionDrain::Plain(bytes) => assert_eq!(bytes, b"root@host:~# "),
+            PostSessionDrain::Pending(bytes) => panic!("unexpected pending bytes: {bytes:?}"),
+        }
+
+        match strip_post_session_zmodem_noise(b" rz\rOOroot@host:~# ") {
             PostSessionDrain::Plain(bytes) => assert_eq!(bytes, b"root@host:~# "),
             PostSessionDrain::Pending(bytes) => panic!("unexpected pending bytes: {bytes:?}"),
         }

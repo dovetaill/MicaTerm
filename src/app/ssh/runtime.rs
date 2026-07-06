@@ -205,6 +205,9 @@ enum RuntimeCommand {
     StartZmodemUpload {
         local_paths: Vec<PathBuf>,
     },
+    StartInteractiveZmodemUpload {
+        local_paths: Vec<PathBuf>,
+    },
     StartZmodemDownload {
         local_dir: PathBuf,
         conflict_policy: ZmodemDownloadConflictPolicy,
@@ -418,6 +421,12 @@ impl SshSessionRuntime {
             .map_err(|_| anyhow!("ssh runtime zmodem upload channel is closed"))
     }
 
+    pub fn start_interactive_zmodem_upload(&self, local_paths: Vec<PathBuf>) -> Result<()> {
+        self.command_tx
+            .send(RuntimeCommand::StartInteractiveZmodemUpload { local_paths })
+            .map_err(|_| anyhow!("ssh runtime interactive zmodem upload channel is closed"))
+    }
+
     pub fn remote_command_exists(&self, command_name: String) -> Result<bool> {
         self.async_runtime.block_on(remote_command_exists(
             Arc::clone(&self.handle),
@@ -581,6 +590,10 @@ impl SessionRuntimeControl for SshSessionRuntime {
 
     fn start_zmodem_upload(&self, local_paths: Vec<PathBuf>) -> Result<()> {
         SshSessionRuntime::start_zmodem_upload(self, local_paths)
+    }
+
+    fn start_interactive_zmodem_upload(&self, local_paths: Vec<PathBuf>) -> Result<()> {
+        SshSessionRuntime::start_interactive_zmodem_upload(self, local_paths)
     }
 
     fn remote_command_exists(&self, command_name: String) -> Result<bool> {

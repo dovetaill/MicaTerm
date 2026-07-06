@@ -1531,7 +1531,12 @@ fn schedule_terminal_cwd_upload_from_paths(
             "the active workspace session is not a terminal"
         ));
     };
-    let target_dir = terminal_current_working_directory_for_drop(manager, session_id)?;
+    let target_dir =
+        terminal_current_working_directory_for_drop(manager, session_id)?.ok_or_else(|| {
+            anyhow::anyhow!(
+                "the active terminal has not reported its current working directory yet"
+            )
+        })?;
     tracing::info!(
         target: "app.drop",
         target = "terminal",
@@ -1598,9 +1603,9 @@ fn active_workspace_session_uuid_for_terminal(state: &ShellViewModel) -> anyhow:
 fn terminal_current_working_directory_for_drop(
     manager: &SessionManager,
     session_id: Uuid,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<Option<String>> {
     if let Some(cwd) = manager.current_working_directory(session_id) {
-        return Ok(cwd);
+        return Ok(Some(cwd));
     }
 
     tracing::info!(
@@ -1610,9 +1615,7 @@ fn terminal_current_working_directory_for_drop(
         "terminal external drop has no tracked cwd; probing remote shell cwd"
     );
     let Some(cwd) = manager.resolve_current_working_directory(session_id)? else {
-        return Err(anyhow::anyhow!(
-            "the active terminal has not reported its current working directory yet"
-        ));
+        return Ok(None);
     };
     tracing::info!(
         target: "app.drop",
@@ -1621,7 +1624,7 @@ fn terminal_current_working_directory_for_drop(
         remote_dir = cwd.as_str(),
         "terminal external drop resolved cwd via remote probe"
     );
-    Ok(cwd)
+    Ok(Some(cwd))
 }
 
 fn schedule_terminal_zmodem_drop_from_paths(
@@ -1652,8 +1655,13 @@ fn schedule_terminal_zmodem_drop_from_paths(
         }
     }
 
-    let remote_dir = terminal_current_working_directory_for_drop(manager, session_id)?;
     if !manager.remote_command_exists(session_id, "rz")? {
+        let remote_dir = terminal_current_working_directory_for_drop(manager, session_id)?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "the active terminal has not reported its current working directory yet"
+                )
+            })?;
         tracing::info!(
             target: "app.drop",
             target = "terminal",
@@ -1665,6 +1673,19 @@ fn schedule_terminal_zmodem_drop_from_paths(
         );
         return Ok(false);
     }
+
+    let Some(remote_dir) = terminal_current_working_directory_for_drop(manager, session_id)? else {
+        tracing::info!(
+            target: "app.drop",
+            target = "terminal",
+            method = "zmodem",
+            session_id = %session_id,
+            path_count = local_paths.len(),
+            "terminal external drop starting interactive rz fallback because cwd is unavailable"
+        );
+        manager.start_interactive_zmodem_upload(session_id, local_paths)?;
+        return Ok(true);
+    };
 
     tracing::info!(
         target: "app.drop",

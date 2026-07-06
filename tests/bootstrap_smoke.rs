@@ -1025,6 +1025,7 @@ struct RecordingSftpState {
     remote_command_exists_calls: Arc<Mutex<Vec<String>>>,
     remote_cwd_probe_calls: Arc<Mutex<usize>>,
     zmodem_exec_upload_calls: Arc<Mutex<Vec<(String, Vec<String>)>>>,
+    interactive_zmodem_upload_calls: Arc<Mutex<Vec<Vec<String>>>>,
     remote_rz_available: Arc<Mutex<Option<bool>>>,
     remote_cwd: Arc<Mutex<Option<String>>>,
     mkdir_calls: Arc<Mutex<Vec<String>>>,
@@ -1092,6 +1093,15 @@ impl RecordingSftpState {
                 .zmodem_exec_upload_calls
                 .lock()
                 .expect("lock zmodem exec upload calls"),
+        )
+    }
+
+    fn take_interactive_zmodem_upload_calls(&self) -> Vec<Vec<String>> {
+        std::mem::take(
+            &mut *self
+                .interactive_zmodem_upload_calls
+                .lock()
+                .expect("lock interactive zmodem upload calls"),
         )
     }
 
@@ -2193,6 +2203,20 @@ impl SessionRuntimeControl for RecordingSftpRuntimeControl {
                     .map(|path| path.to_string_lossy().to_string())
                     .collect(),
             ));
+        Ok(())
+    }
+
+    fn start_interactive_zmodem_upload(&self, local_paths: Vec<PathBuf>) -> Result<()> {
+        self.state
+            .interactive_zmodem_upload_calls
+            .lock()
+            .expect("lock interactive zmodem upload calls")
+            .push(
+                local_paths
+                    .into_iter()
+                    .map(|path| path.to_string_lossy().to_string())
+                    .collect(),
+            );
         Ok(())
     }
 
@@ -15767,6 +15791,68 @@ fn terminal_file_drop_resolves_remote_cwd_when_shell_markers_are_missing() {
             .expect("lock terminal drop upload calls")
             .is_empty(),
         "terminal file drops should still prefer exec-channel rz after probing cwd"
+    );
+}
+
+#[test]
+fn terminal_file_drop_uses_interactive_rz_when_cwd_is_unavailable() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(DelayedCwdRecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("terminal-drop-upload-interactive-rz");
+    let upload_path = temp_root.join("release.env");
+    fs::create_dir_all(temp_root.as_path()).expect("create terminal drop temp root");
+    fs::write(&upload_path, b"PORT=22\n").expect("write terminal drop source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "terminal"
+            && !app.get_active_workspace_session_id().is_empty()
+    });
+
+    app.set_workspace_terminal_external_drop_paths(ModelRc::new(VecModel::from(vec![
+        SharedString::from(upload_path.to_string_lossy().to_string()),
+    ])));
+    app.invoke_workspace_terminal_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        !sftp_state
+            .interactive_zmodem_upload_calls
+            .lock()
+            .expect("lock interactive zmodem upload calls")
+            .is_empty()
+    });
+
+    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(sftp_state.take_remote_cwd_probe_calls(), 1);
+    assert_eq!(sftp_state.take_text_input_calls(), Vec::<String>::new());
+    assert_eq!(
+        sftp_state.take_zmodem_exec_upload_calls(),
+        Vec::<(String, Vec<String>)>::new()
+    );
+    assert_eq!(
+        sftp_state.take_interactive_zmodem_upload_calls(),
+        vec![vec![upload_path.to_string_lossy().to_string()]]
+    );
+    assert!(
+        sftp_state
+            .upload_file_calls
+            .lock()
+            .expect("lock terminal drop upload calls")
+            .is_empty(),
+        "interactive rz fallback should not schedule an SFTP upload"
     );
 }
 
