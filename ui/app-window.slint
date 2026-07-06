@@ -18,6 +18,7 @@ import { SftpRemoteFileModal } from "components/sftp-remote-file-modal.slint";
 import { SettingsModal } from "components/settings-modal.slint";
 import { SyncVaultModal } from "components/sync-vault-modal.slint";
 import { SshHostKeyConfirmModal } from "components/ssh-host-key-confirm-modal.slint";
+import { ZmodemTransferModal } from "components/zmodem-transfer-modal.slint";
 import { StatusPill } from "components/status-pill.slint";
 import { TextContextMenuOverlay } from "components/text-context-menu-overlay.slint";
 import { WorkspacePasteWarningModal } from "components/workspace-paste-warning-modal.slint";
@@ -173,6 +174,8 @@ export component AppWindow inherits Window {
     in-out property <bool> sftp-queue-drawer-open: false;
     in-out property <bool> sftp-panel-drop-target-active: false;
     in-out property <[string]> sftp-panel-external-drop-paths: [];
+    in-out property <bool> workspace-terminal-drop-target-active: false;
+    in-out property <[string]> workspace-terminal-external-drop-paths: [];
     in-out property <bool> show-global-menu: false;
     in-out property <bool> is-window-maximized: false;
     in-out property <bool> is-window-active: true;
@@ -233,6 +236,26 @@ export component AppWindow inherits Window {
     in-out property <string> sftp-remote-file-modal-error-text: "";
     in-out property <bool> sftp-remote-file-modal-can-save: false;
     in-out property <int> sftp-remote-file-modal-focus-sequence: 0;
+    in-out property <bool> zmodem-transfer-modal-open: false;
+    in-out property <string> zmodem-transfer-modal-title: "";
+    in-out property <string> zmodem-transfer-modal-headline: "";
+    in-out property <string> zmodem-transfer-modal-status-text: "";
+    in-out property <string> zmodem-transfer-modal-detail-text: "";
+    in-out property <string> zmodem-transfer-modal-error-text: "";
+    in-out property <string> zmodem-transfer-modal-current-file: "";
+    in-out property <string> zmodem-transfer-modal-file-counter-text: "";
+    in-out property <string> zmodem-transfer-modal-progress-text: "";
+    in-out property <float> zmodem-transfer-modal-progress-value: 0;
+    in-out property <bool> zmodem-transfer-modal-progress-determinate: false;
+    in-out property <string> zmodem-transfer-modal-primary-action-label: "";
+    in-out property <bool> zmodem-transfer-modal-primary-action-visible: false;
+    in-out property <bool> zmodem-transfer-modal-primary-action-enabled: false;
+    in-out property <string> zmodem-transfer-modal-secondary-action-label: "Close";
+    in-out property <bool> zmodem-transfer-modal-secondary-action-visible: true;
+    in-out property <bool> zmodem-transfer-modal-secondary-action-enabled: true;
+    in-out property <string> zmodem-transfer-modal-tertiary-action-label: "";
+    in-out property <bool> zmodem-transfer-modal-tertiary-action-visible: false;
+    in-out property <bool> zmodem-transfer-modal-tertiary-action-enabled: false;
     in-out property <string> asset-ssh-modal-name: "";
     in-out property <string> asset-ssh-modal-host: "";
     in-out property <string> asset-ssh-modal-user: "";
@@ -602,9 +625,15 @@ export component AppWindow inherits Window {
     callback sftp-panel-reenable-follow-requested();
     callback sftp-panel-external-drop-hover-changed(bool);
     callback sftp-panel-external-drop-requested();
+    callback workspace-terminal-external-drop-hover-changed(bool);
+    callback workspace-terminal-external-drop-requested();
     callback sftp-remote-file-modal-close-requested();
     callback sftp-remote-file-modal-save-requested();
     callback sftp-remote-file-modal-content-changed(string);
+    callback zmodem-transfer-modal-primary-action-requested();
+    callback zmodem-transfer-modal-secondary-action-requested();
+    callback zmodem-transfer-modal-tertiary-action-requested();
+    callback zmodem-transfer-modal-close-requested();
     callback toggle-global-menu-requested();
     callback close-global-menu-requested();
     callback toggle-theme-mode-requested();
@@ -912,6 +941,14 @@ export component AppWindow inherits Window {
 
     changed sftp-remote-file-modal-open => {
         if root.sftp-remote-file-modal-open {
+            root.blocking-modal-offset-x = 0px;
+            root.blocking-modal-offset-y = 0px;
+            root.blocking-modal-focus-sequence = root.blocking-modal-focus-sequence + 1;
+        }
+    }
+
+    changed zmodem-transfer-modal-open => {
+        if root.zmodem-transfer-modal-open {
             root.blocking-modal-offset-x = 0px;
             root.blocking-modal-offset-y = 0px;
             root.blocking-modal-focus-sequence = root.blocking-modal-focus-sequence + 1;
@@ -1299,6 +1336,7 @@ export component AppWindow inherits Window {
                         workspace-sftp-path: root.workspace-sftp-path;
                         workspace-sftp-path-editing: root.workspace-sftp-path-editing;
                         workspace-sftp-focus-sequence: root.workspace-sftp-focus-sequence;
+                        workspace-terminal-drop-target-active: root.workspace-terminal-drop-target-active;
                         workspace-sftp-can-go-back: root.workspace-sftp-can-go-back;
                         workspace-sftp-can-go-forward: root.workspace-sftp-can-go-forward;
                         workspace-sftp-can-go-up: root.workspace-sftp-can-go-up;
@@ -2143,7 +2181,7 @@ export component AppWindow inherits Window {
         y: titlebar.height;
         width: root.width;
         height: root.height - titlebar.height;
-        enabled: root.sync-modal-open || root.settings-modal-open || root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open || root.ssh-host-key-modal-open || root.workspace-paste-warning-modal-open || root.open-saved-ssh-modal-open || root.sftp-conflict-modal-open || root.sftp-remote-file-modal-open;
+        enabled: root.sync-modal-open || root.settings-modal-open || root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open || root.ssh-host-key-modal-open || root.workspace-paste-warning-modal-open || root.open-saved-ssh-modal-open || root.sftp-conflict-modal-open || root.sftp-remote-file-modal-open || root.zmodem-transfer-modal-open;
 
         clicked => { }
     }
@@ -3441,6 +3479,92 @@ export component AppWindow inherits Window {
 
             content-changed(value) => {
                 root.sftp-remote-file-modal-content-changed(value);
+            }
+
+            drag-requested(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.blocking-modal-drag-ended();
+            }
+
+            focus-restore-requested => {
+                main-workspace.restore-primary-focus();
+                root.blocking-modal-focus-restore-requested();
+            }
+        }
+    }
+
+    if root.zmodem-transfer-modal-open : zmodem-transfer-modal-shell := BlockingModalShell {
+        host-titlebar-height: titlebar.height;
+        modal-width: 560px;
+        modal-height: 408px;
+        offset-x: root.blocking-modal-offset-x;
+        offset-y: root.blocking-modal-offset-y;
+        focus-sequence: root.blocking-modal-focus-sequence;
+        enter-enabled: root.zmodem-transfer-modal-primary-action-visible
+            && root.zmodem-transfer-modal-primary-action-enabled;
+
+        focus-restore-requested => {
+            main-workspace.restore-primary-focus();
+            root.blocking-modal-focus-restore-requested();
+        }
+
+        consume-event => {
+        }
+
+        escape-requested => {
+            root.zmodem-transfer-modal-close-requested();
+        }
+
+        enter-requested => {
+            root.zmodem-transfer-modal-primary-action-requested();
+        }
+
+        zmodem-transfer-modal-overlay := ZmodemTransferModal {
+            x: 0px;
+            y: 0px;
+            width: zmodem-transfer-modal-shell.content-width;
+            height: zmodem-transfer-modal-shell.content-height;
+            dialog-title: root.zmodem-transfer-modal-title;
+            headline: root.zmodem-transfer-modal-headline;
+            status-text: root.zmodem-transfer-modal-status-text;
+            detail-text: root.zmodem-transfer-modal-detail-text;
+            error-text: root.zmodem-transfer-modal-error-text;
+            current-file: root.zmodem-transfer-modal-current-file;
+            file-counter-text: root.zmodem-transfer-modal-file-counter-text;
+            progress-text: root.zmodem-transfer-modal-progress-text;
+            progress-value: root.zmodem-transfer-modal-progress-value;
+            progress-determinate: root.zmodem-transfer-modal-progress-determinate;
+            primary-action-label: root.zmodem-transfer-modal-primary-action-label;
+            primary-action-visible: root.zmodem-transfer-modal-primary-action-visible;
+            primary-action-enabled: root.zmodem-transfer-modal-primary-action-enabled;
+            secondary-action-label: root.zmodem-transfer-modal-secondary-action-label;
+            secondary-action-visible: root.zmodem-transfer-modal-secondary-action-visible;
+            secondary-action-enabled: root.zmodem-transfer-modal-secondary-action-enabled;
+            tertiary-action-label: root.zmodem-transfer-modal-tertiary-action-label;
+            tertiary-action-visible: root.zmodem-transfer-modal-tertiary-action-visible;
+            tertiary-action-enabled: root.zmodem-transfer-modal-tertiary-action-enabled;
+
+            primary-action-requested => {
+                root.zmodem-transfer-modal-primary-action-requested();
+            }
+
+            secondary-action-requested => {
+                root.zmodem-transfer-modal-secondary-action-requested();
+            }
+
+            tertiary-action-requested => {
+                root.zmodem-transfer-modal-tertiary-action-requested();
+            }
+
+            close-action-requested => {
+                root.zmodem-transfer-modal-close-requested();
             }
 
             drag-requested(pointer-x, pointer-y) => {

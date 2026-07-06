@@ -149,9 +149,8 @@ fn dispatch_text_sequence(app: &AppWindow, text: &str) {
         app.window().dispatch_event(WindowEvent::KeyPressed {
             text: key.clone().into(),
         });
-        app.window().dispatch_event(WindowEvent::KeyReleased {
-            text: key.into(),
-        });
+        app.window()
+            .dispatch_event(WindowEvent::KeyReleased { text: key.into() });
     }
     settle_modal_ui();
 }
@@ -456,9 +455,10 @@ fn ssh_modal_host_field_right_click_keeps_selection_and_typing_ownership() {
     app.set_asset_modal_kind("new-ssh-connection".into());
     settle_modal_ui();
 
-    let host_field = ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::host-field")
-        .next()
-        .expect("find ssh host field");
+    let host_field =
+        ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::host-field")
+            .next()
+            .expect("find ssh host field");
     let host_input = descendant_by_id(&host_field, "DialogTextField::field-input");
     let host_input_position = element_center(&host_input);
 
@@ -505,16 +505,21 @@ fn ssh_modal_host_field_padding_right_click_keeps_field_ownership() {
     app.set_asset_modal_kind("new-ssh-connection".into());
     settle_modal_ui();
 
-    let host_field = ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::host-field")
-        .next()
-        .expect("find ssh host field");
+    let host_field =
+        ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::host-field")
+            .next()
+            .expect("find ssh host field");
     let host_input = descendant_by_id(&host_field, "DialogTextField::field-input");
     let right_padding = descendant_by_id(&host_field, "DialogTextField::right-padding-focus");
 
     dispatch_pointer_click(&app, element_center(&host_input), PointerEventButton::Left);
     dispatch_text_sequence(&app, "Alpha");
 
-    dispatch_pointer_click(&app, element_center(&right_padding), PointerEventButton::Right);
+    dispatch_pointer_click(
+        &app,
+        element_center(&right_padding),
+        PointerEventButton::Right,
+    );
     dispatch_text_sequence(&app, "Z");
 
     assert_eq!(
@@ -544,9 +549,10 @@ fn ssh_modal_host_field_context_menu_copy_and_paste_actions_work() {
     app.set_asset_modal_kind("new-ssh-connection".into());
     settle_modal_ui();
 
-    let host_field = ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::host-field")
-        .next()
-        .expect("find ssh host field");
+    let host_field =
+        ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::host-field")
+            .next()
+            .expect("find ssh host field");
     let host_input = descendant_by_id(&host_field, "DialogTextField::field-input");
     let host_input_position = element_center(&host_input);
 
@@ -625,10 +631,9 @@ fn snippet_modal_script_field_context_menu_preserves_multiline_paste_without_ter
     app.set_asset_modal_kind("new-snippet".into());
     settle_modal_ui();
 
-    let script_field =
-        ElementHandle::find_by_element_id(&app, "AssetsSnippetModal::script-field")
-            .next()
-            .expect("find snippet script field");
+    let script_field = ElementHandle::find_by_element_id(&app, "AssetsSnippetModal::script-field")
+        .next()
+        .expect("find snippet script field");
     let script_input = descendant_by_id(&script_field, "DialogTextField::field-input");
     let script_position = element_center(&script_input);
     let multiline_script = "echo alpha\n\tprintf 'beta'\n  gamma";
@@ -769,9 +774,10 @@ fn ssh_modal_text_context_menu_outside_click_dismisses_without_stealing_input_ow
     app.set_asset_modal_kind("new-ssh-connection".into());
     settle_modal_ui();
 
-    let host_field = ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::host-field")
-        .next()
-        .expect("find ssh host field");
+    let host_field =
+        ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::host-field")
+            .next()
+            .expect("find ssh host field");
     let host_input = descendant_by_id(&host_field, "DialogTextField::field-input");
     let host_input_position = element_center(&host_input);
 
@@ -785,7 +791,11 @@ fn ssh_modal_text_context_menu_outside_click_dismisses_without_stealing_input_ow
         "precondition: right-clicking the SSH host field should open the shared text context menu before outside-click dismissal runs"
     );
 
-    dispatch_pointer_click(&app, LogicalPosition::new(4.0, 4.0), PointerEventButton::Left);
+    dispatch_pointer_click(
+        &app,
+        LogicalPosition::new(4.0, 4.0),
+        PointerEventButton::Left,
+    );
 
     assert!(
         !app.get_text_context_menu_open(),
@@ -821,9 +831,10 @@ fn ssh_modal_text_context_menu_escape_closes_menu_before_modal_and_preserves_inp
     app.set_asset_modal_kind("new-ssh-connection".into());
     settle_modal_ui();
 
-    let host_field = ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::host-field")
-        .next()
-        .expect("find ssh host field");
+    let host_field =
+        ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::host-field")
+            .next()
+            .expect("find ssh host field");
     let host_input = descendant_by_id(&host_field, "DialogTextField::field-input");
     let host_input_position = element_center(&host_input);
 
@@ -883,9 +894,10 @@ fn ssh_modal_text_context_menu_closes_on_window_blur() {
     app.set_asset_modal_kind("new-ssh-connection".into());
     settle_modal_ui();
 
-    let host_field = ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::host-field")
-        .next()
-        .expect("find ssh host field");
+    let host_field =
+        ElementHandle::find_by_element_id(&app, "AssetsSshConnectionModal::host-field")
+            .next()
+            .expect("find ssh host field");
     let host_input = descendant_by_id(&host_field, "DialogTextField::field-input");
     let host_input_position = element_center(&host_input);
 

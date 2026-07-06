@@ -92,9 +92,8 @@ fn dispatch_text_sequence(app: &AppWindow, text: &str) {
         app.window().dispatch_event(WindowEvent::KeyPressed {
             text: key.clone().into(),
         });
-        app.window().dispatch_event(WindowEvent::KeyReleased {
-            text: key.into(),
-        });
+        app.window()
+            .dispatch_event(WindowEvent::KeyReleased { text: key.into() });
     }
     settle_modal_ui();
 }
@@ -275,9 +274,10 @@ fn keychain_identity_name_field_right_click_keeps_selection_and_focus() {
     app.set_asset_modal_kind("new-keychain-identity".into());
     settle_modal_ui();
 
-    let name_field = ElementHandle::find_by_element_id(&app, "AssetsKeychainIdentityModal::name-field")
-        .next()
-        .expect("find identity name field");
+    let name_field =
+        ElementHandle::find_by_element_id(&app, "AssetsKeychainIdentityModal::name-field")
+            .next()
+            .expect("find identity name field");
     let name_input = descendant_by_id(&name_field, "DialogTextField::field-input");
 
     dispatch_pointer_click(&app, element_center(&name_input), PointerEventButton::Left);
@@ -304,8 +304,7 @@ fn keychain_identity_name_field_right_click_keeps_selection_and_focus() {
 }
 
 #[test]
-fn keychain_identity_password_field_context_menu_pastes_without_exposing_copy_even_when_revealed()
-{
+fn keychain_identity_password_field_context_menu_pastes_without_exposing_copy_even_when_revealed() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -446,9 +445,10 @@ fn keychain_ssh_key_modal_private_and_public_material_follow_context_menu_policy
         "private key material should keep shared Paste support even while Copy stays disabled"
     );
 
-    let body_scroll = ElementHandle::find_by_element_id(&app, "AssetsKeychainSshKeyModal::body-scroll")
-        .next()
-        .expect("find keychain ssh key body scroll");
+    let body_scroll =
+        ElementHandle::find_by_element_id(&app, "AssetsKeychainSshKeyModal::body-scroll")
+            .next()
+            .expect("find keychain ssh key body scroll");
     let scroll_position = element_center(&body_scroll);
     app.window().dispatch_event(WindowEvent::PointerMoved {
         position: scroll_position,

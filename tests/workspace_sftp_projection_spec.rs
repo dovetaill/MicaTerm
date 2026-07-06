@@ -756,27 +756,22 @@ fn workspace_sftp_background_path_change_resets_stale_viewport_to_the_top() {
 
     session.current_path = "/home".into();
     session.history = SftpPathHistory::with_initial("/home");
-    session.entries = [
-        "admin",
-        "deploy",
-        "wwwroot",
-        "zzz-last",
-    ]
-    .iter()
-    .map(|name| {
-        sample_sftp_entry(
-            &format!("home-{name}"),
-            name,
-            &format!("/home/{name}"),
-            SftpDirectoryEntryKind::Directory,
-            Some(1_777_000_000),
-            None,
-            Some("rwxr-xr-x"),
-            Some("root"),
-            Some("root"),
-        )
-    })
-    .collect();
+    session.entries = ["admin", "deploy", "wwwroot", "zzz-last"]
+        .iter()
+        .map(|name| {
+            sample_sftp_entry(
+                &format!("home-{name}"),
+                name,
+                &format!("/home/{name}"),
+                SftpDirectoryEntryKind::Directory,
+                Some(1_777_000_000),
+                None,
+                Some("rwxr-xr-x"),
+                Some("root"),
+                Some("root"),
+            )
+        })
+        .collect();
 
     view_model.set_file_browser_session(session);
 

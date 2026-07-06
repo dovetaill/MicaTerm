@@ -60,6 +60,8 @@ use mica_term::app::ssh::runtime::{
     SessionRuntimeEvent, TerminalKeyEvent, TerminalKeyKind, TerminalMouseButton,
     TerminalMouseEventKind, TerminalMouseInput, TerminalRuntimeDefaults, TerminalSession,
     TerminalShellIntegrationState, TerminalSurfaceState, UnknownHostKeyError,
+    ZmodemDownloadConflictPolicy, ZmodemTransferDirection, ZmodemTransferPhase,
+    ZmodemTransferState,
 };
 use mica_term::app::ssh::session_manager::{
     EnhancementPolicy, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher,
@@ -1018,6 +1020,7 @@ struct RecordingSftpState {
     read_dir_calls: Arc<Mutex<Vec<String>>>,
     download_file_calls: Arc<Mutex<Vec<String>>>,
     upload_file_calls: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
+    text_input_calls: Arc<Mutex<Vec<String>>>,
     mkdir_calls: Arc<Mutex<Vec<String>>>,
     rename_calls: Arc<Mutex<Vec<(String, String)>>>,
     remove_file_calls: Arc<Mutex<Vec<String>>>,
@@ -1053,6 +1056,10 @@ impl RecordingSftpState {
                 .lock()
                 .expect("lock sftp upload file calls"),
         )
+    }
+
+    fn take_text_input_calls(&self) -> Vec<String> {
+        std::mem::take(&mut *self.text_input_calls.lock().expect("lock text input calls"))
     }
 
     fn take_mkdir_calls(&self) -> Vec<String> {
@@ -1113,6 +1120,7 @@ struct RecordingSftpLauncher {
 
 struct RecordingSftpRuntimeControl {
     runtime: SftpRuntimeHandle,
+    state: RecordingSftpState,
 }
 
 #[derive(Clone)]
@@ -2087,7 +2095,12 @@ impl SessionRuntimeControl for RecordingSftpRuntimeControl {
         Ok(())
     }
 
-    fn send_text_input(&self, _text: String) -> Result<()> {
+    fn send_text_input(&self, text: String) -> Result<()> {
+        self.state
+            .text_input_calls
+            .lock()
+            .expect("lock text input calls")
+            .push(text);
         Ok(())
     }
 
@@ -2116,7 +2129,7 @@ impl SessionRuntimeLauncher for RecordingSftpLauncher {
     fn launch(
         &self,
         profile: ConnectionProfile,
-        _session_id: uuid::Uuid,
+        session_id: uuid::Uuid,
         _attempt_id: uuid::Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
@@ -2178,12 +2191,161 @@ impl SessionRuntimeLauncher for RecordingSftpLauncher {
             state.set_event_tx(event_tx.clone());
             let _ = event_tx.send(SessionRuntimeEvent::Connected);
             let _ = event_tx.send(SessionRuntimeEvent::CurrentDirectoryChanged(cwd.into()));
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(
+                terminal_surface_with_cells(session_id, 1, 24, 80, vec!["ready".into()]),
+            ));
             Ok(Box::new(RecordingSftpRuntimeControl {
+                state: state.clone(),
                 runtime: SftpRuntimeHandle::new(Arc::new(RecordingSftpBackend {
                     responses,
                     state,
                 })),
             }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+#[derive(Clone, Default)]
+struct ZmodemModalState {
+    event_tx: Arc<Mutex<Option<mpsc::UnboundedSender<SessionRuntimeEvent>>>>,
+}
+
+impl ZmodemModalState {
+    fn set_event_tx(&self, event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>) {
+        *self.event_tx.lock().expect("lock zmodem event tx") = Some(event_tx);
+    }
+
+    fn emit_transfer_state(&self, state: Option<ZmodemTransferState>) {
+        if let Some(event_tx) = self.event_tx.lock().expect("lock zmodem event tx").as_ref() {
+            let _ = event_tx.send(SessionRuntimeEvent::ZmodemStateChanged(state));
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ZmodemModalLauncher {
+    state: ZmodemModalState,
+}
+
+struct ZmodemModalRuntimeControl {
+    state: ZmodemModalState,
+    session_id: Uuid,
+}
+
+impl SessionRuntimeControl for ZmodemModalRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_text_input(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_key_input(&self, _event: TerminalKeyEvent) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_paste(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+
+    fn cancel_zmodem_transfer(&self) -> Result<()> {
+        self.state.emit_transfer_state(None);
+        Ok(())
+    }
+
+    fn dismiss_zmodem_transfer(&self) -> Result<()> {
+        self.state.emit_transfer_state(None);
+        Ok(())
+    }
+
+    fn start_zmodem_download(
+        &self,
+        _local_dir: std::path::PathBuf,
+        _conflict_policy: ZmodemDownloadConflictPolicy,
+    ) -> Result<()> {
+        self.state.emit_transfer_state(Some(ZmodemTransferState {
+            direction: ZmodemTransferDirection::Download,
+            phase: ZmodemTransferPhase::Running,
+            title: "Receive Files with ZMODEM".into(),
+            headline: "Receiving files".into(),
+            status_text: "Transfer in progress".into(),
+            detail_text: "Writing files into the selected download directory.".into(),
+            error_text: String::new(),
+            current_file_name: "logs.tar.gz".into(),
+            files_completed: 0,
+            files_total: Some(1),
+            bytes_transferred: 512,
+            bytes_total: Some(1024),
+            local_file_path: None,
+            local_reveal_path: None,
+        }));
+        Ok(())
+    }
+
+    fn terminal_surface(&self) -> Result<TerminalSurfaceState> {
+        Ok(terminal_surface_with_cells(
+            self.session_id,
+            1,
+            24,
+            80,
+            vec!["ready".into()],
+        ))
+    }
+}
+
+impl SessionRuntimeLauncher for ZmodemModalLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let state = self.state.clone();
+        Box::pin(async move {
+            state.set_event_tx(event_tx.clone());
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::CurrentDirectoryChanged(
+                "/srv/app".into(),
+            ));
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(
+                terminal_surface_with_cells(session_id, 1, 24, 80, vec!["ready".into()]),
+            ));
+            state.emit_transfer_state(Some(ZmodemTransferState {
+                direction: ZmodemTransferDirection::Download,
+                phase: ZmodemTransferPhase::AwaitingDownloadDirectory,
+                title: "Receive Files with ZMODEM".into(),
+                headline: "Choose a download folder".into(),
+                status_text: "Remote host is ready to send files".into(),
+                detail_text: "Pick a local directory to receive the incoming transfer.".into(),
+                error_text: String::new(),
+                current_file_name: String::new(),
+                files_completed: 0,
+                files_total: Some(1),
+                bytes_transferred: 0,
+                bytes_total: Some(1024),
+                local_file_path: None,
+                local_reveal_path: None,
+            }));
+            Ok(Box::new(ZmodemModalRuntimeControl { state, session_id })
+                as Box<dyn SessionRuntimeControl>)
         })
     }
 
@@ -2256,6 +2418,7 @@ impl SessionRuntimeLauncher for DelayedCwdRecordingSftpLauncher {
             state.set_event_tx(event_tx.clone());
             let _ = event_tx.send(SessionRuntimeEvent::Connected);
             Ok(Box::new(RecordingSftpRuntimeControl {
+                state: state.clone(),
                 runtime: SftpRuntimeHandle::new(Arc::new(RecordingSftpBackend {
                     responses,
                     state,
@@ -2354,6 +2517,7 @@ impl SessionRuntimeLauncher for DelayedReadRecordingSftpLauncher {
             let _ = event_tx.send(SessionRuntimeEvent::Connected);
             let _ = event_tx.send(SessionRuntimeEvent::CurrentDirectoryChanged(cwd.into()));
             Ok(Box::new(RecordingSftpRuntimeControl {
+                state: state.clone(),
                 runtime: SftpRuntimeHandle::new(Arc::new(DelayedRecordingSftpBackend {
                     responses,
                     read_delay_by_path,
@@ -2388,6 +2552,7 @@ impl SessionRuntimeLauncher for FixtureSftpLauncher {
             let _ = event_tx.send(SessionRuntimeEvent::Connected);
             let _ = event_tx.send(SessionRuntimeEvent::CurrentDirectoryChanged(cwd.into()));
             Ok(Box::new(RecordingSftpRuntimeControl {
+                state: state.clone(),
                 runtime: SftpRuntimeHandle::new(Arc::new(RecordingSftpBackend {
                     responses,
                     state,
@@ -15379,6 +15544,202 @@ fn external_sftp_drop_callbacks_toggle_overlay_and_queue_background_uploads() {
 }
 
 #[test]
+fn terminal_file_drop_probes_rz_then_falls_back_to_sftp_current_directory() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("terminal-drop-upload");
+    let upload_path = temp_root.join("release.env");
+    fs::create_dir_all(temp_root.as_path()).expect("create terminal drop temp root");
+    fs::write(&upload_path, b"PORT=22\n").expect("write terminal drop source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "terminal"
+            && !app.get_active_workspace_session_id().is_empty()
+    });
+
+    app.invoke_workspace_terminal_external_drop_hover_changed(true);
+    flush_runtime_projection();
+    assert!(
+        app.get_workspace_terminal_drop_target_active(),
+        "terminal drag hover should expose a dedicated drop overlay once the active session knows its current directory"
+    );
+
+    app.set_workspace_terminal_external_drop_paths(ModelRc::new(VecModel::from(vec![
+        SharedString::from(upload_path.to_string_lossy().to_string()),
+    ])));
+    app.invoke_workspace_terminal_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        !sftp_state
+            .text_input_calls
+            .lock()
+            .expect("lock terminal drop text input calls")
+            .is_empty()
+    });
+    let text_inputs = sftp_state.take_text_input_calls();
+    assert!(
+        text_inputs
+            .iter()
+            .any(|input| input.contains("command -v rz") && input.contains("then rz")),
+        "terminal file drops should probe rz before falling back to SFTP"
+    );
+    assert!(
+        sftp_state
+            .upload_file_calls
+            .lock()
+            .expect("lock terminal drop upload calls")
+            .is_empty(),
+        "terminal file drops should not use SFTP until the rz probe times out"
+    );
+
+    settle_sync_scheduler(Duration::from_secs(4));
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        !sftp_state
+            .upload_file_calls
+            .lock()
+            .expect("lock terminal drop upload calls")
+            .is_empty()
+    });
+
+    assert_eq!(
+        sftp_state.take_upload_file_calls(),
+        vec![("/srv/app/release.env".to_string(), b"PORT=22\n".to_vec())]
+    );
+    assert!(
+        app.get_sftp_queue_drawer_open(),
+        "terminal drop uploads should open the shared transfer queue drawer so the user gets immediate feedback"
+    );
+    assert!(
+        app.get_transfer_center_open(),
+        "terminal drop uploads should surface the transfer center after queueing work"
+    );
+    assert!(
+        !app.get_workspace_terminal_drop_target_active(),
+        "drop completion should clear the terminal hover overlay"
+    );
+}
+
+#[test]
+fn zmodem_modal_closes_when_runtime_only_updates_transfer_state() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(ZmodemModalLauncher {
+            state: ZmodemModalState::default(),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_zmodem_transfer_modal_open()
+            && app
+                .get_zmodem_transfer_modal_primary_action_label()
+                .as_str()
+                == "Choose Folder"
+            && app
+                .get_zmodem_transfer_modal_secondary_action_label()
+                .as_str()
+                == "Cancel"
+    });
+
+    app.invoke_zmodem_transfer_modal_secondary_action_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        !app.get_zmodem_transfer_modal_open()
+    });
+}
+
+#[test]
+fn zmodem_completed_download_modal_exposes_done_open_folder_and_open() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let zmodem_state = ZmodemModalState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(ZmodemModalLauncher {
+            state: zmodem_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("zmodem-completed-download-actions");
+    fs::create_dir_all(temp_root.as_path()).expect("create zmodem completion temp root");
+    let local_file = temp_root.join("reqable-app-android-arm64.apk");
+    fs::write(&local_file, b"apk").expect("write zmodem completion file");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_zmodem_transfer_modal_open()
+    });
+
+    zmodem_state.emit_transfer_state(Some(ZmodemTransferState {
+        direction: ZmodemTransferDirection::Download,
+        phase: ZmodemTransferPhase::Completed,
+        title: "ZMODEM Download".into(),
+        headline: "Download complete".into(),
+        status_text: "Received 1 file(s) with ZMODEM.".into(),
+        detail_text: "The downloaded files are available in the folder you selected.".into(),
+        error_text: String::new(),
+        current_file_name: String::new(),
+        files_completed: 1,
+        files_total: Some(1),
+        bytes_transferred: 3,
+        bytes_total: Some(3),
+        local_file_path: Some(local_file.clone()),
+        local_reveal_path: Some(local_file),
+    }));
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_zmodem_transfer_modal_primary_action_label()
+            .as_str()
+            == "Done"
+            && app.get_zmodem_transfer_modal_primary_action_visible()
+            && app
+                .get_zmodem_transfer_modal_secondary_action_label()
+                .as_str()
+                == "Open Folder"
+            && app.get_zmodem_transfer_modal_secondary_action_visible()
+            && app.get_zmodem_transfer_modal_secondary_action_enabled()
+            && app
+                .get_zmodem_transfer_modal_tertiary_action_label()
+                .as_str()
+                == "Open"
+            && app.get_zmodem_transfer_modal_tertiary_action_visible()
+            && app.get_zmodem_transfer_modal_tertiary_action_enabled()
+    });
+
+    app.invoke_zmodem_transfer_modal_primary_action_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        !app.get_zmodem_transfer_modal_open()
+    });
+}
+
+#[test]
 fn transfer_center_receives_live_rows_from_background_sftp_transfers() {
     let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
@@ -15939,6 +16300,18 @@ fn download_conflicts_apply_preferred_default_and_auto_open_when_asking() {
             && bootstrap_sftp.contains("crate::app::ui_preferences::DownloadConflictDefault::Ask")
             && bootstrap_sftp.contains("state.open_transfer_conflict_modal("),
         "download scheduling should honor the persisted default conflict policy, and Ask should auto-open the conflict modal when a local download collision is reported"
+    );
+}
+
+#[test]
+fn zmodem_download_ask_default_does_not_silently_autorename() {
+    let bootstrap = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        bootstrap.contains("DownloadConflictDefault::Ask\n                    | crate::app::ui_preferences::DownloadConflictDefault::Overwrite")
+            && bootstrap.contains("DownloadConflictDefault::AutoRename => {\n                        ZmodemDownloadConflictPolicy::AutoRename")
+            && bootstrap.contains("repeated `sz file` replaces `file`"),
+        "ZMODEM cannot show the SFTP conflict modal yet, so the Ask default must not silently auto-rename repeated sz downloads"
     );
 }
 
@@ -18403,6 +18776,9 @@ fn transfer_summary_recomputes_current_session_counts_when_switching_tabs() {
 fn native_windowing_bridge_wires_os_file_drop_events_into_sftp_callbacks() {
     let windowing_source =
         fs::read_to_string("src/app/bootstrap/windowing.rs").expect("read windowing source");
+    let windows_drop_handler_source =
+        fs::read_to_string("vendor/winit/src/platform_impl/windows/drop_handler.rs")
+            .expect("read windows drop handler source");
 
     assert!(
         windowing_source.contains("WindowEvent::HoveredFile")
@@ -18413,6 +18789,17 @@ fn native_windowing_bridge_wires_os_file_drop_events_into_sftp_callbacks() {
         windowing_source.contains("WindowEvent::DroppedFile")
             && windowing_source.contains("invoke_sftp_panel_external_drop_requested"),
         "native windowing should forward dropped files into the quick-browser upload callback"
+    );
+    assert!(
+        windowing_source.contains("invoke_workspace_terminal_external_drop_hover_changed")
+            && windowing_source.contains("invoke_workspace_terminal_external_drop_requested"),
+        "native windowing should also bridge hovered and dropped files into the workspace-terminal drag-upload callbacks"
+    );
+    assert!(
+        windows_drop_handler_source.contains("IID_IDROPTARGET")
+            && windows_drop_handler_source.contains("E_NOINTERFACE")
+            && !windows_drop_handler_source.contains("unimplemented!()"),
+        "Windows IDropTarget must implement QueryInterface so OS file drops reliably enter winit"
     );
 }
 

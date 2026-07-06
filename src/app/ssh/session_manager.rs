@@ -3,6 +3,7 @@
 use anyhow::{Context, Result, anyhow};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -23,6 +24,7 @@ use crate::app::ssh::profile::ConnectionProfile;
 use crate::app::ssh::runtime::{
     SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput, TerminalShellIntegrationState,
     TerminalSurfaceSignature, TerminalSurfaceState, UnknownHostKeyError,
+    ZmodemDownloadConflictPolicy, ZmodemTransferState,
 };
 use crate::theme::{ThemeMode, ThemeVariant};
 
@@ -142,6 +144,22 @@ pub trait SessionRuntimeControl: Send {
     fn send_key_input(&self, event: TerminalKeyEvent) -> Result<()>;
     fn send_mouse_input(&self, event: TerminalMouseInput) -> Result<()>;
     fn send_paste(&self, text: String) -> Result<()>;
+    fn start_zmodem_upload(&self, _local_paths: Vec<PathBuf>) -> Result<()> {
+        Err(anyhow!("session runtime does not support zmodem uploads"))
+    }
+    fn start_zmodem_download(
+        &self,
+        _local_dir: PathBuf,
+        _conflict_policy: ZmodemDownloadConflictPolicy,
+    ) -> Result<()> {
+        Err(anyhow!("session runtime does not support zmodem downloads"))
+    }
+    fn cancel_zmodem_transfer(&self) -> Result<()> {
+        Err(anyhow!("session runtime does not support zmodem transfers"))
+    }
+    fn dismiss_zmodem_transfer(&self) -> Result<()> {
+        Err(anyhow!("session runtime does not support zmodem transfers"))
+    }
     fn selection_text_from_buffer_rows(
         &self,
         _start_row: u32,
@@ -371,6 +389,15 @@ impl SessionManager {
             .cloned()
     }
 
+    pub fn zmodem_state(&self, session_id: Uuid) -> Option<ZmodemTransferState> {
+        self.registry
+            .lock()
+            .expect("lock session registry")
+            .zmodem_transfers
+            .get(&session_id)
+            .cloned()
+    }
+
     pub fn remember_enhancement_fallback(&self, profile: &ConnectionProfile, shell: &str) {
         let mut registry = self.registry.lock().expect("lock session registry");
         registry
@@ -480,6 +507,15 @@ impl SessionManager {
     ) -> Result<SftpRemoteMetadata> {
         let runtime = self.sftp_runtime(session_id)?;
         runtime.stat(remote_path).await
+    }
+
+    pub async fn sftp_path_exists_async(
+        &self,
+        session_id: Uuid,
+        remote_path: &str,
+    ) -> Result<bool> {
+        let runtime = self.sftp_runtime(session_id)?;
+        runtime.path_exists(remote_path).await
     }
 
     pub async fn sftp_open_file_reader_async(
@@ -790,6 +826,47 @@ impl SessionManager {
         runtime_control.send_paste(text)
     }
 
+    pub fn start_zmodem_upload(&self, session_id: Uuid, local_paths: Vec<PathBuf>) -> Result<()> {
+        let registry = self.registry.lock().expect("lock session registry");
+        let runtime_control = registry
+            .runtime_controls
+            .get(&session_id)
+            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
+        runtime_control.start_zmodem_upload(local_paths)
+    }
+
+    pub fn start_zmodem_download(
+        &self,
+        session_id: Uuid,
+        local_dir: PathBuf,
+        conflict_policy: ZmodemDownloadConflictPolicy,
+    ) -> Result<()> {
+        let registry = self.registry.lock().expect("lock session registry");
+        let runtime_control = registry
+            .runtime_controls
+            .get(&session_id)
+            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
+        runtime_control.start_zmodem_download(local_dir, conflict_policy)
+    }
+
+    pub fn cancel_zmodem_transfer(&self, session_id: Uuid) -> Result<()> {
+        let registry = self.registry.lock().expect("lock session registry");
+        let runtime_control = registry
+            .runtime_controls
+            .get(&session_id)
+            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
+        runtime_control.cancel_zmodem_transfer()
+    }
+
+    pub fn dismiss_zmodem_transfer(&self, session_id: Uuid) -> Result<()> {
+        let registry = self.registry.lock().expect("lock session registry");
+        let runtime_control = registry
+            .runtime_controls
+            .get(&session_id)
+            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
+        runtime_control.dismiss_zmodem_transfer()
+    }
+
     pub fn selection_text_from_buffer_rows(
         &self,
         session_id: Uuid,
@@ -946,6 +1023,7 @@ impl SessionManager {
             let terminal_surface_present_before =
                 registry.terminal_surfaces.remove(&session_id).is_some();
             registry.current_working_directories.remove(&session_id);
+            registry.zmodem_transfers.remove(&session_id);
             registry.terminal_surface_revisions.remove(&session_id);
             registry.pending_disconnects.remove(&session_id);
             registry.pending_resizes.remove(&session_id);
@@ -1159,6 +1237,7 @@ struct SessionRegistry {
     connection_attempts: HashMap<Uuid, ConnectionAttemptState>,
     terminal_surfaces: HashMap<Uuid, TerminalSurfaceState>,
     current_working_directories: HashMap<Uuid, String>,
+    zmodem_transfers: HashMap<Uuid, ZmodemTransferState>,
     terminal_shell_integration: HashMap<Uuid, TerminalShellIntegrationState>,
     terminal_surface_revisions: HashMap<Uuid, usize>,
     runtime_controls: HashMap<Uuid, Box<dyn SessionRuntimeControl>>,
@@ -1181,6 +1260,7 @@ impl Default for SessionRegistry {
             connection_attempts: HashMap::new(),
             terminal_surfaces: HashMap::new(),
             current_working_directories: HashMap::new(),
+            zmodem_transfers: HashMap::new(),
             terminal_shell_integration: HashMap::new(),
             terminal_surface_revisions: HashMap::new(),
             runtime_controls: HashMap::new(),
@@ -1262,6 +1342,14 @@ fn apply_runtime_event(
                 .expect("lock session registry")
                 .current_working_directories
                 .insert(session_id, path);
+        }
+        SessionRuntimeEvent::ZmodemStateChanged(state) => {
+            let mut registry = registry.lock().expect("lock session registry");
+            if let Some(state) = state {
+                registry.zmodem_transfers.insert(session_id, state);
+            } else {
+                registry.zmodem_transfers.remove(&session_id);
+            }
         }
         SessionRuntimeEvent::ShellIntegrationChanged(shell_state) => {
             let mut registry = registry.lock().expect("lock session registry");
@@ -1594,6 +1682,7 @@ fn clear_runtime_control(registry: &Arc<Mutex<SessionRegistry>>, session_id: Uui
     mark_sftp_binding_disconnected(&mut registry, session_id);
     registry.pending_disconnects.remove(&session_id);
     registry.pending_resizes.remove(&session_id);
+    registry.zmodem_transfers.remove(&session_id);
     let surface_seqno = registry
         .terminal_surfaces
         .get(&session_id)

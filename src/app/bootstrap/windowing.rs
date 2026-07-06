@@ -2,6 +2,15 @@
 
 use super::*;
 use crate::app::windowing::{ModalOffset, begin_modal_drag, update_modal_drag};
+#[cfg(target_os = "windows")]
+use crate::app::windows_frame::resolve_host_window_hwnd;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExternalDropTarget {
+    None,
+    Sftp,
+    Terminal,
+}
 
 #[cfg(target_os = "windows")]
 pub(super) fn sync_windows_true_window_placement(
@@ -36,9 +45,13 @@ pub(super) fn bind_windows_window_state_tracking(
     let handle = window.as_weak();
     let modifiers = Rc::new(RefCell::new(NativeTerminalModifierState::default()));
     let sftp_drop_hover_active = Rc::new(RefCell::new(false));
-    let sftp_drop_paths = Rc::new(RefCell::new(Vec::<PathBuf>::new()));
+    let terminal_drop_hover_active = Rc::new(RefCell::new(false));
+    let external_drop_paths = Rc::new(RefCell::new(Vec::<PathBuf>::new()));
+    let external_drop_target = Rc::new(RefCell::new(ExternalDropTarget::None));
     let last_pointer_position = Rc::new(RefCell::new(None::<(f32, f32)>));
-    let sftp_drop_flush_timer = Rc::new(Timer::default());
+    let external_drop_hover_timer = Rc::new(Timer::default());
+    let external_drop_flush_timer = Rc::new(Timer::default());
+    let external_drop_flush_pending = Rc::new(Cell::new(false));
     window
         .window()
         .on_winit_window_event(move |_slint_window, event| {
@@ -152,57 +165,159 @@ pub(super) fn bind_windows_window_state_tracking(
             }
 
             if let winit::event::WindowEvent::CursorMoved { position, .. } = event {
-                *last_pointer_position.borrow_mut() = Some((position.x as f32, position.y as f32));
+                *last_pointer_position.borrow_mut() =
+                    Some(logical_pointer_from_physical(&handle.unwrap(), position.x, position.y));
+                if !external_drop_paths.borrow().is_empty() {
+                    refresh_external_drop_target(
+                        &handle.unwrap(),
+                        &sftp_drop_hover_active,
+                        &terminal_drop_hover_active,
+                        &external_drop_target,
+                        *last_pointer_position.borrow(),
+                    );
+                }
             }
 
             if let winit::event::WindowEvent::HoveredFile(path) = event {
                 let window = handle.unwrap();
-                let accepts_drop =
-                    sftp_drop_target_contains(&window, *last_pointer_position.borrow());
-                update_sftp_drop_hover_state(&window, &sftp_drop_hover_active, accepts_drop);
-                if accepts_drop {
-                    let mut pending_paths = sftp_drop_paths.borrow_mut();
+                let was_empty = external_drop_paths.borrow().is_empty();
+                {
+                    let mut pending_paths = external_drop_paths.borrow_mut();
                     if !pending_paths.iter().any(|pending| pending == path) {
                         pending_paths.push(path.clone());
                     }
+                }
+                tracing::info!(
+                    target: "app.drop",
+                    path_count = external_drop_paths.borrow().len(),
+                    "external file hover entered window"
+                );
+                refresh_external_drop_target(
+                    &window,
+                    &sftp_drop_hover_active,
+                    &terminal_drop_hover_active,
+                    &external_drop_target,
+                    *last_pointer_position.borrow(),
+                );
+                if was_empty {
+                    let hover_timer_ref = Rc::clone(&external_drop_hover_timer);
+                    let hover_timer_closure_ref = Rc::clone(&hover_timer_ref);
+                    let handle_ref = handle.clone();
+                    let external_drop_paths_ref = Rc::clone(&external_drop_paths);
+                    let external_drop_target_ref = Rc::clone(&external_drop_target);
+                    let sftp_drop_hover_active_ref = Rc::clone(&sftp_drop_hover_active);
+                    let terminal_drop_hover_active_ref = Rc::clone(&terminal_drop_hover_active);
+                    let last_pointer_position_ref = Rc::clone(&last_pointer_position);
+                    hover_timer_ref.start(
+                        TimerMode::Repeated,
+                        Duration::from_millis(16),
+                        move || {
+                            let Some(window) = handle_ref.upgrade() else {
+                                hover_timer_closure_ref.stop();
+                                return;
+                            };
+                            if external_drop_paths_ref.borrow().is_empty() {
+                                hover_timer_closure_ref.stop();
+                                return;
+                            }
+                            refresh_external_drop_target(
+                                &window,
+                                &sftp_drop_hover_active_ref,
+                                &terminal_drop_hover_active_ref,
+                                &external_drop_target_ref,
+                                *last_pointer_position_ref.borrow(),
+                            );
+                        },
+                    );
                 }
             }
 
             if matches!(event, winit::event::WindowEvent::HoveredFileCancelled) {
-                sftp_drop_flush_timer.stop();
-                sftp_drop_paths.borrow_mut().clear();
                 let window = handle.unwrap();
-                update_sftp_drop_hover_state(&window, &sftp_drop_hover_active, false);
+                if external_drop_flush_pending.get() {
+                    tracing::debug!(
+                        target: "app.drop",
+                        "ignored hover-cancel while external drop flush is pending"
+                    );
+                    external_drop_hover_timer.stop();
+                    return EventResult::Propagate;
+                }
+                external_drop_hover_timer.stop();
+                external_drop_flush_timer.stop();
+                clear_external_drop_state(
+                    &window,
+                    &external_drop_paths,
+                    &external_drop_target,
+                    &sftp_drop_hover_active,
+                    &terminal_drop_hover_active,
+                );
             }
 
             if let winit::event::WindowEvent::DroppedFile(path) = event {
                 let window = handle.unwrap();
-                if !sftp_drop_target_contains(&window, *last_pointer_position.borrow()) {
-                    sftp_drop_flush_timer.stop();
-                    sftp_drop_paths.borrow_mut().clear();
-                    update_sftp_drop_hover_state(&window, &sftp_drop_hover_active, false);
-                    return EventResult::Propagate;
-                }
-
+                external_drop_hover_timer.stop();
                 {
-                    let mut pending_paths = sftp_drop_paths.borrow_mut();
+                    let mut pending_paths = external_drop_paths.borrow_mut();
                     if !pending_paths.iter().any(|pending| pending == path) {
                         pending_paths.push(path.clone());
                     }
                 }
-                update_sftp_drop_hover_state(&window, &sftp_drop_hover_active, true);
-                let timer_ref = Rc::clone(&sftp_drop_flush_timer);
+                tracing::info!(
+                    target: "app.drop",
+                    path_count = external_drop_paths.borrow().len(),
+                    "external file drop entered app event handler"
+                );
+                refresh_external_drop_target(
+                    &window,
+                    &sftp_drop_hover_active,
+                    &terminal_drop_hover_active,
+                    &external_drop_target,
+                    *last_pointer_position.borrow(),
+                );
+                let drop_target = *external_drop_target.borrow();
+                if drop_target == ExternalDropTarget::None {
+                    external_drop_flush_pending.set(false);
+                    tracing::info!(
+                        target: "app.drop",
+                        pointer_x = ?last_pointer_position.borrow().map(|position| position.0),
+                        pointer_y = ?last_pointer_position.borrow().map(|position| position.1),
+                        host_mode = window.get_workspace_session_host_mode().as_str(),
+                        terminal_x = window.get_layout_workspace_session_native_surface_x(),
+                        terminal_y = window.get_layout_titlebar_height()
+                            + window.get_layout_workspace_session_native_surface_y(),
+                        terminal_width = window.get_layout_workspace_session_native_surface_width(),
+                        terminal_height = window.get_layout_workspace_session_native_surface_height(),
+                        "external file drop had no matching app target"
+                    );
+                    external_drop_flush_timer.stop();
+                    clear_external_drop_state(
+                        &window,
+                        &external_drop_paths,
+                        &external_drop_target,
+                        &sftp_drop_hover_active,
+                        &terminal_drop_hover_active,
+                    );
+                    return EventResult::Propagate;
+                }
+
+                let timer_ref = Rc::clone(&external_drop_flush_timer);
                 let handle = handle.clone();
                 let sftp_drop_hover_active_ref = Rc::clone(&sftp_drop_hover_active);
-                let sftp_drop_paths_ref = Rc::clone(&sftp_drop_paths);
+                let terminal_drop_hover_active_ref = Rc::clone(&terminal_drop_hover_active);
+                let external_drop_paths_ref = Rc::clone(&external_drop_paths);
+                let external_drop_target_ref = Rc::clone(&external_drop_target);
+                let external_drop_flush_pending_ref = Rc::clone(&external_drop_flush_pending);
+                external_drop_flush_pending.set(true);
                 timer_ref.start(
                     TimerMode::SingleShot,
                     Duration::from_millis(24),
                     move || {
+                        external_drop_flush_pending_ref.set(false);
                         let Some(window) = handle.upgrade() else {
                             return;
                         };
-                        let pending_paths = std::mem::take(&mut *sftp_drop_paths_ref.borrow_mut());
+                        let pending_paths =
+                            std::mem::take(&mut *external_drop_paths_ref.borrow_mut());
                         if pending_paths.is_empty() {
                             return;
                         }
@@ -211,11 +326,40 @@ pub(super) fn bind_windows_window_state_tracking(
                             .into_iter()
                             .map(|path| SharedString::from(path.to_string_lossy().to_string()))
                             .collect::<Vec<_>>();
-                        window.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(
-                            dropped_paths,
-                        )));
-                        window.invoke_sftp_panel_external_drop_requested();
+                        match *external_drop_target_ref.borrow() {
+                            ExternalDropTarget::Sftp => {
+                                tracing::info!(
+                                    target: "app.drop",
+                                    path_count = dropped_paths.len(),
+                                    target = "sftp",
+                                    "routing external file drop"
+                                );
+                                window.set_sftp_panel_external_drop_paths(ModelRc::new(
+                                    VecModel::from(dropped_paths),
+                                ));
+                                window.invoke_sftp_panel_external_drop_requested();
+                            }
+                            ExternalDropTarget::Terminal => {
+                                tracing::info!(
+                                    target: "app.drop",
+                                    path_count = dropped_paths.len(),
+                                    target = "terminal",
+                                    "routing external file drop"
+                                );
+                                window.set_workspace_terminal_external_drop_paths(ModelRc::new(
+                                    VecModel::from(dropped_paths),
+                                ));
+                                window.invoke_workspace_terminal_external_drop_requested();
+                            }
+                            ExternalDropTarget::None => {}
+                        }
+                        *external_drop_target_ref.borrow_mut() = ExternalDropTarget::None;
                         update_sftp_drop_hover_state(&window, &sftp_drop_hover_active_ref, false);
+                        update_terminal_drop_hover_state(
+                            &window,
+                            &terminal_drop_hover_active_ref,
+                            false,
+                        );
                     },
                 );
             }
@@ -248,6 +392,103 @@ pub(super) fn bind_windows_window_state_tracking(
         });
 }
 
+fn logical_pointer_from_physical(window: &AppWindow, x: f64, y: f64) -> (f32, f32) {
+    let scale_factor = window.window().scale_factor().max(1.0) as f32;
+    (x as f32 / scale_factor, y as f32 / scale_factor)
+}
+
+fn refresh_external_drop_target(
+    window: &AppWindow,
+    sftp_drop_hover_active: &Rc<RefCell<bool>>,
+    terminal_drop_hover_active: &Rc<RefCell<bool>>,
+    external_drop_target: &Rc<RefCell<ExternalDropTarget>>,
+    cached_pointer: Option<(f32, f32)>,
+) {
+    let drop_target = resolve_external_drop_target(
+        window,
+        resolve_external_drop_pointer(window, cached_pointer),
+    );
+    *external_drop_target.borrow_mut() = drop_target;
+    update_sftp_drop_hover_state(
+        window,
+        sftp_drop_hover_active,
+        drop_target == ExternalDropTarget::Sftp,
+    );
+    update_terminal_drop_hover_state(
+        window,
+        terminal_drop_hover_active,
+        drop_target == ExternalDropTarget::Terminal,
+    );
+}
+
+fn clear_external_drop_state(
+    window: &AppWindow,
+    external_drop_paths: &Rc<RefCell<Vec<PathBuf>>>,
+    external_drop_target: &Rc<RefCell<ExternalDropTarget>>,
+    sftp_drop_hover_active: &Rc<RefCell<bool>>,
+    terminal_drop_hover_active: &Rc<RefCell<bool>>,
+) {
+    external_drop_paths.borrow_mut().clear();
+    *external_drop_target.borrow_mut() = ExternalDropTarget::None;
+    update_sftp_drop_hover_state(window, sftp_drop_hover_active, false);
+    update_terminal_drop_hover_state(window, terminal_drop_hover_active, false);
+}
+
+fn resolve_external_drop_target(
+    window: &AppWindow,
+    pointer: Option<(f32, f32)>,
+) -> ExternalDropTarget {
+    if sftp_drop_target_contains(window, pointer) {
+        ExternalDropTarget::Sftp
+    } else if workspace_terminal_drop_target_contains(window, pointer) {
+        ExternalDropTarget::Terminal
+    } else if window.get_workspace_session_host_mode() == "terminal"
+        && !window.get_active_workspace_session_id().is_empty()
+    {
+        ExternalDropTarget::Terminal
+    } else {
+        ExternalDropTarget::None
+    }
+}
+
+fn resolve_external_drop_pointer(
+    window: &AppWindow,
+    cached_pointer: Option<(f32, f32)>,
+) -> Option<(f32, f32)> {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(pointer) = query_windows_drop_pointer(window) {
+            return Some(pointer);
+        }
+    }
+
+    let _ = window;
+    cached_pointer
+}
+
+#[cfg(target_os = "windows")]
+fn query_windows_drop_pointer(window: &AppWindow) -> Option<(f32, f32)> {
+    use windows_sys::Win32::Foundation::{HWND, POINT};
+    use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+    let hwnd = resolve_host_window_hwnd(window).map(|value| value as HWND)?;
+    let mut point = POINT { x: 0, y: 0 };
+    unsafe {
+        if GetCursorPos(&mut point) == 0 {
+            return None;
+        }
+        if ScreenToClient(hwnd, &mut point) == 0 {
+            return None;
+        }
+    }
+    Some(logical_pointer_from_physical(
+        window,
+        f64::from(point.x),
+        f64::from(point.y),
+    ))
+}
+
 fn sftp_drop_target_contains(window: &AppWindow, pointer: Option<(f32, f32)>) -> bool {
     let Some((pointer_x, pointer_y)) = pointer else {
         return false;
@@ -267,6 +508,33 @@ fn sftp_drop_target_contains(window: &AppWindow, pointer: Option<(f32, f32)>) ->
         && pointer_y <= origin_y + height
 }
 
+fn workspace_terminal_drop_target_contains(
+    window: &AppWindow,
+    pointer: Option<(f32, f32)>,
+) -> bool {
+    if window.get_workspace_session_host_mode() != "terminal" {
+        return false;
+    }
+
+    let Some((pointer_x, pointer_y)) = pointer else {
+        return false;
+    };
+
+    let origin_x = window.get_layout_workspace_session_native_surface_x();
+    let origin_y = window.get_layout_titlebar_height()
+        + window.get_layout_workspace_session_native_surface_y();
+    let width = window.get_layout_workspace_session_native_surface_width();
+    let height = window.get_layout_workspace_session_native_surface_height();
+    if width <= 0.0 || height <= 0.0 {
+        return false;
+    }
+
+    pointer_x >= origin_x
+        && pointer_x <= origin_x + width
+        && pointer_y >= origin_y
+        && pointer_y <= origin_y + height
+}
+
 fn update_sftp_drop_hover_state(window: &AppWindow, hover_state: &Rc<RefCell<bool>>, active: bool) {
     if *hover_state.borrow() == active {
         return;
@@ -274,6 +542,19 @@ fn update_sftp_drop_hover_state(window: &AppWindow, hover_state: &Rc<RefCell<boo
 
     *hover_state.borrow_mut() = active;
     window.invoke_sftp_panel_external_drop_hover_changed(active);
+}
+
+fn update_terminal_drop_hover_state(
+    window: &AppWindow,
+    hover_state: &Rc<RefCell<bool>>,
+    active: bool,
+) {
+    if *hover_state.borrow() == active {
+        return;
+    }
+
+    *hover_state.borrow_mut() = active;
+    window.invoke_workspace_terminal_external_drop_hover_changed(active);
 }
 
 pub(super) fn sync_sync_modal_state(window: &AppWindow, state: &ShellViewModel) {

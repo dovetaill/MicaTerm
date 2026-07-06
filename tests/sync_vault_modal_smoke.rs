@@ -342,9 +342,8 @@ fn dispatch_text_sequence(app: &AppWindow, text: &str) {
         app.window().dispatch_event(WindowEvent::KeyPressed {
             text: key.clone().into(),
         });
-        app.window().dispatch_event(WindowEvent::KeyReleased {
-            text: key.into(),
-        });
+        app.window()
+            .dispatch_event(WindowEvent::KeyReleased { text: key.into() });
     }
     settle_modal_ui();
 }
@@ -1537,9 +1536,10 @@ fn sync_modal_base_url_context_menu_copy_and_paste_actions_work() {
     app.set_sync_modal_git_auth_mode("https".into());
     settle_modal_ui();
 
-    let base_url_field = ElementHandle::find_by_element_id(&app, "SyncVaultModal::git-base-url-field")
-        .next()
-        .expect("find sync base url field");
+    let base_url_field =
+        ElementHandle::find_by_element_id(&app, "SyncVaultModal::git-base-url-field")
+            .next()
+            .expect("find sync base url field");
     let base_url_input = descendant_by_id(&base_url_field, "DialogTextField::field-input");
     let base_url_position = element_center(&base_url_input);
 
@@ -1610,9 +1610,9 @@ fn sync_modal_master_password_pastes_without_exposing_copy_even_when_revealed() 
 
     let password_input =
         ElementHandle::find_by_element_id(&app, "SyncVaultModal::master-password-field")
-        .next()
-        .map(|password_field| descendant_by_id(&password_field, "DialogTextField::field-input"))
-        .expect("find sync master password input");
+            .next()
+            .map(|password_field| descendant_by_id(&password_field, "DialogTextField::field-input"))
+            .expect("find sync master password input");
     let password_position = element_center(&password_input);
 
     dispatch_pointer_click(&app, password_position, PointerEventButton::Left);

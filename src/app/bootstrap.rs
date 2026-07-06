@@ -86,7 +86,8 @@ use crate::app::ssh::proxy::resolve_proxy_chain;
 use crate::app::ssh::runtime::{
     SessionRuntimeEvent, SshSessionRuntime, TerminalKeyEvent, TerminalMouseButton,
     TerminalMouseEventKind, TerminalMouseInput, TerminalRuntimeDefaults, TerminalSurfaceState,
-    UnknownHostKeyError, load_optional_stored_secret_bundle, stored_secret_lookup_message,
+    UnknownHostKeyError, ZmodemDownloadConflictPolicy, ZmodemTransferPhase, ZmodemTransferState,
+    load_optional_stored_secret_bundle, stored_secret_lookup_message,
 };
 #[cfg(test)]
 use crate::app::ssh::session_manager::EnhancedSessionState;
@@ -3024,6 +3025,7 @@ fn workspace_blocks_native_terminal_surface(window: &AppWindow) -> bool {
         || window.get_open_saved_ssh_modal_open()
         || window.get_sftp_conflict_modal_open()
         || window.get_sftp_remote_file_modal_open()
+        || window.get_zmodem_transfer_modal_open()
 }
 
 fn workspace_native_terminal_rect(window: &AppWindow) -> NativeTerminalSurfaceRect {
@@ -4438,6 +4440,225 @@ fn projected_workspace_session_host_mode(
     host_mode
 }
 
+fn format_zmodem_transfer_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit_index = 0usize;
+    while value >= 1024.0 && unit_index + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit_index += 1;
+    }
+
+    if unit_index == 0 {
+        format!("{bytes} {}", UNITS[unit_index])
+    } else {
+        format!("{value:.1} {}", UNITS[unit_index])
+    }
+}
+
+fn sync_zmodem_transfer_modal_state(
+    window: &AppWindow,
+    state: &ShellViewModel,
+    manager: Option<&SessionManager>,
+) {
+    let transfer = manager.and_then(|manager| active_workspace_zmodem_state(state, manager));
+
+    let Some(transfer) = transfer else {
+        window.set_zmodem_transfer_modal_open(false);
+        window.set_zmodem_transfer_modal_title("".into());
+        window.set_zmodem_transfer_modal_headline("".into());
+        window.set_zmodem_transfer_modal_status_text("".into());
+        window.set_zmodem_transfer_modal_detail_text("".into());
+        window.set_zmodem_transfer_modal_error_text("".into());
+        window.set_zmodem_transfer_modal_current_file("".into());
+        window.set_zmodem_transfer_modal_file_counter_text("".into());
+        window.set_zmodem_transfer_modal_progress_text("".into());
+        window.set_zmodem_transfer_modal_progress_value(0.0);
+        window.set_zmodem_transfer_modal_progress_determinate(false);
+        window.set_zmodem_transfer_modal_primary_action_label("".into());
+        window.set_zmodem_transfer_modal_primary_action_visible(false);
+        window.set_zmodem_transfer_modal_primary_action_enabled(false);
+        window.set_zmodem_transfer_modal_secondary_action_label("Close".into());
+        window.set_zmodem_transfer_modal_secondary_action_visible(true);
+        window.set_zmodem_transfer_modal_secondary_action_enabled(true);
+        window.set_zmodem_transfer_modal_tertiary_action_label("".into());
+        window.set_zmodem_transfer_modal_tertiary_action_visible(false);
+        window.set_zmodem_transfer_modal_tertiary_action_enabled(false);
+        sync_workspace_native_terminal_surface_geometry(window);
+        return;
+    };
+
+    let total_files = transfer.files_total.unwrap_or(0);
+    let current_file_ordinal = if transfer.current_file_name.is_empty() {
+        transfer.files_completed.min(total_files)
+    } else if total_files > 0 {
+        transfer
+            .files_completed
+            .saturating_add(1)
+            .min(total_files.max(1))
+    } else {
+        transfer.files_completed.saturating_add(1)
+    };
+    let file_counter_text = if total_files > 0 {
+        if current_file_ordinal > 0 {
+            format!("File {current_file_ordinal} of {total_files}")
+        } else {
+            format!("{total_files} file(s) queued")
+        }
+    } else if transfer.files_completed > 0 {
+        format!("{} file(s) processed", transfer.files_completed)
+    } else {
+        String::new()
+    };
+    let current_file = if transfer.current_file_name.trim().is_empty() {
+        String::new()
+    } else {
+        format!("Current file: {}", transfer.current_file_name)
+    };
+    let progress_determinate = transfer.bytes_total.is_some_and(|total| total > 0);
+    let progress_text = match transfer.bytes_total {
+        Some(total) if total > 0 => format!(
+            "{} / {}",
+            format_zmodem_transfer_bytes(
+                transfer
+                    .bytes_transferred
+                    .min(total.max(transfer.bytes_transferred))
+            ),
+            format_zmodem_transfer_bytes(total.max(transfer.bytes_transferred)),
+        ),
+        _ if transfer.bytes_transferred > 0 => {
+            format!(
+                "{} transferred",
+                format_zmodem_transfer_bytes(transfer.bytes_transferred)
+            )
+        }
+        _ => String::new(),
+    };
+    let progress_value = transfer
+        .bytes_total
+        .filter(|total| *total > 0)
+        .map(|total| {
+            (transfer
+                .bytes_transferred
+                .min(total.max(transfer.bytes_transferred)) as f32
+                / total.max(transfer.bytes_transferred) as f32)
+                .clamp(0.0, 1.0)
+        })
+        .unwrap_or(0.0);
+    let can_open_file = transfer
+        .local_file_path
+        .as_ref()
+        .is_some_and(|path| crate::app::sftp::can_open_file_path_locally(path.as_path()));
+    let can_open_folder = transfer
+        .local_reveal_path
+        .as_ref()
+        .is_some_and(|path| crate::app::sftp::can_open_folder_path_locally(path.as_path()));
+    let (
+        primary_action_label,
+        primary_action_visible,
+        primary_action_enabled,
+        secondary_action_label,
+        secondary_action_visible,
+        secondary_action_enabled,
+        tertiary_action_label,
+        tertiary_action_visible,
+        tertiary_action_enabled,
+    ) = match transfer.phase {
+        ZmodemTransferPhase::AwaitingUploadSelection => (
+            "Choose Files",
+            true,
+            true,
+            "Cancel",
+            true,
+            true,
+            "",
+            false,
+            false,
+        ),
+        ZmodemTransferPhase::AwaitingDownloadDirectory => (
+            "Choose Folder",
+            true,
+            true,
+            "Cancel",
+            true,
+            true,
+            "",
+            false,
+            false,
+        ),
+        ZmodemTransferPhase::Running => ("", false, false, "Cancel", true, true, "", false, false),
+        ZmodemTransferPhase::Completed => {
+            let show_local_actions =
+                transfer.direction == crate::app::ssh::runtime::ZmodemTransferDirection::Download;
+            (
+                "Done",
+                true,
+                true,
+                "Open Folder",
+                show_local_actions && can_open_folder,
+                show_local_actions && can_open_folder,
+                "Open",
+                show_local_actions && can_open_file,
+                show_local_actions && can_open_file,
+            )
+        }
+        ZmodemTransferPhase::Failed | ZmodemTransferPhase::Cancelled => {
+            ("", false, false, "Close", true, true, "", false, false)
+        }
+    };
+
+    window.set_zmodem_transfer_modal_open(true);
+    window.set_zmodem_transfer_modal_title(transfer.title.into());
+    window.set_zmodem_transfer_modal_headline(transfer.headline.into());
+    window.set_zmodem_transfer_modal_status_text(transfer.status_text.into());
+    window.set_zmodem_transfer_modal_detail_text(transfer.detail_text.into());
+    window.set_zmodem_transfer_modal_error_text(transfer.error_text.into());
+    window.set_zmodem_transfer_modal_current_file(current_file.into());
+    window.set_zmodem_transfer_modal_file_counter_text(file_counter_text.into());
+    window.set_zmodem_transfer_modal_progress_text(progress_text.into());
+    window.set_zmodem_transfer_modal_progress_value(progress_value);
+    window.set_zmodem_transfer_modal_progress_determinate(progress_determinate);
+    window.set_zmodem_transfer_modal_primary_action_label(primary_action_label.into());
+    window.set_zmodem_transfer_modal_primary_action_visible(primary_action_visible);
+    window.set_zmodem_transfer_modal_primary_action_enabled(primary_action_enabled);
+    window.set_zmodem_transfer_modal_secondary_action_label(secondary_action_label.into());
+    window.set_zmodem_transfer_modal_secondary_action_visible(secondary_action_visible);
+    window.set_zmodem_transfer_modal_secondary_action_enabled(secondary_action_enabled);
+    window.set_zmodem_transfer_modal_tertiary_action_label(tertiary_action_label.into());
+    window.set_zmodem_transfer_modal_tertiary_action_visible(tertiary_action_visible);
+    window.set_zmodem_transfer_modal_tertiary_action_enabled(tertiary_action_enabled);
+    sync_workspace_native_terminal_surface_geometry(window);
+}
+
+fn active_workspace_zmodem_state(
+    state: &ShellViewModel,
+    manager: &SessionManager,
+) -> Option<ZmodemTransferState> {
+    active_workspace_session_uuid(state).and_then(|session_id| manager.zmodem_state(session_id))
+}
+
+fn open_zmodem_completed_file_locally(transfer: &ZmodemTransferState) -> Result<()> {
+    if transfer.phase != ZmodemTransferPhase::Completed {
+        return Err(anyhow!("ZMODEM transfer is not complete"));
+    }
+    let local_path = transfer
+        .local_file_path
+        .as_ref()
+        .ok_or_else(|| anyhow!("ZMODEM transfer has no single completed file to open"))?;
+    crate::app::sftp::open_path_locally(local_path.as_path())
+}
+
+fn reveal_zmodem_completed_download_locally(transfer: &ZmodemTransferState) -> Result<()> {
+    if transfer.phase != ZmodemTransferPhase::Completed {
+        return Err(anyhow!("ZMODEM transfer is not complete"));
+    }
+    let local_path = transfer
+        .local_reveal_path
+        .as_ref()
+        .ok_or_else(|| anyhow!("ZMODEM transfer has no local folder to open"))?;
+    crate::app::sftp::reveal_path_locally(local_path.as_path())
+}
+
 fn sync_workspace_session_state_with_manager(
     window: &AppWindow,
     state: &mut ShellViewModel,
@@ -4449,6 +4670,12 @@ fn sync_workspace_session_state_with_manager(
     window.set_workspace_session_host_mode(
         projected_workspace_session_host_mode(state, manager).into(),
     );
+    if window.get_workspace_terminal_drop_target_active()
+        && (window.get_workspace_session_host_mode() != "terminal"
+            || !sftp::workspace_terminal_accepts_external_drop(state, manager))
+    {
+        window.set_workspace_terminal_drop_target_active(false);
+    }
     window.set_workspace_session_search_open(state.workspace_terminal_search_open());
     window.set_workspace_session_search_query(state.workspace_terminal_search_query().into());
     window.set_workspace_session_search_match_count(
@@ -4502,6 +4729,7 @@ fn sync_workspace_session_state_with_manager(
         window.set_workspace_session_can_reconnect(false);
     }
 
+    sync_zmodem_transfer_modal_state(window, state, manager);
     sftp::sync_workspace_sftp_state(window, state);
 }
 
@@ -6539,6 +6767,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     Some(&manager),
                 );
+            } else if window.get_zmodem_transfer_modal_open()
+                || active_workspace_session_uuid(&state)
+                    .and_then(|session_id| manager.zmodem_state(session_id))
+                    .is_some()
+            {
+                sync_zmodem_transfer_modal_state(&window, &state, Some(&manager));
             }
             let (
                 sftp_projection_changed,
@@ -7994,6 +8228,171 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             session_bridge_ref.as_deref(),
             &mut workspace_follow_tracker_ref.borrow_mut(),
         );
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let effects_ref = Rc::clone(&effects);
+    window.on_zmodem_transfer_modal_primary_action_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let Some(session_bridge) = session_bridge_ref.as_ref() else {
+            return;
+        };
+        let Some(session_id) = active_workspace_session_uuid(&state) else {
+            return;
+        };
+        let Some(zmodem_state) = session_bridge.manager.zmodem_state(session_id) else {
+            return;
+        };
+
+        let action_result = match zmodem_state.phase {
+            ZmodemTransferPhase::AwaitingUploadSelection => rfd::FileDialog::new()
+                .set_title("Send Files with ZMODEM")
+                .pick_files()
+                .map(|local_paths| {
+                    session_bridge
+                        .manager
+                        .start_zmodem_upload(session_id, local_paths)
+                })
+                .unwrap_or(Ok(())),
+            ZmodemTransferPhase::AwaitingDownloadDirectory => {
+                // ZMODEM cannot pause for the SFTP conflict modal yet. Keep
+                // auto-rename opt-in so repeated `sz file` replaces `file`
+                // instead of silently creating `file(1)`.
+                let conflict_policy = match state.settings_modal_download_conflict_default() {
+                    crate::app::ui_preferences::DownloadConflictDefault::Ask
+                    | crate::app::ui_preferences::DownloadConflictDefault::Overwrite => {
+                        ZmodemDownloadConflictPolicy::Overwrite
+                    }
+                    crate::app::ui_preferences::DownloadConflictDefault::AutoRename => {
+                        ZmodemDownloadConflictPolicy::AutoRename
+                    }
+                };
+                rfd::FileDialog::new()
+                    .set_title("Receive Files with ZMODEM")
+                    .pick_folder()
+                    .map(|local_dir| {
+                        session_bridge.manager.start_zmodem_download(
+                            session_id,
+                            local_dir,
+                            conflict_policy,
+                        )
+                    })
+                    .unwrap_or(Ok(()))
+            }
+            ZmodemTransferPhase::Completed => {
+                session_bridge.manager.dismiss_zmodem_transfer(session_id)
+            }
+            _ => Ok(()),
+        };
+
+        if let Err(err) = action_result {
+            state.show_transfer_center_feedback("error", format!("ZMODEM action failed: {err}"));
+            shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let effects_ref = Rc::clone(&effects);
+    window.on_zmodem_transfer_modal_secondary_action_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let Some(session_bridge) = session_bridge_ref.as_ref() else {
+            return;
+        };
+        let Some(session_id) = active_workspace_session_uuid(&state) else {
+            return;
+        };
+        let Some(zmodem_state) = session_bridge.manager.zmodem_state(session_id) else {
+            return;
+        };
+
+        let result = match zmodem_state.phase {
+            ZmodemTransferPhase::AwaitingUploadSelection
+            | ZmodemTransferPhase::AwaitingDownloadDirectory
+            | ZmodemTransferPhase::Running => {
+                session_bridge.manager.cancel_zmodem_transfer(session_id)
+            }
+            ZmodemTransferPhase::Completed => {
+                reveal_zmodem_completed_download_locally(&zmodem_state)
+            }
+            ZmodemTransferPhase::Failed | ZmodemTransferPhase::Cancelled => {
+                session_bridge.manager.dismiss_zmodem_transfer(session_id)
+            }
+        };
+
+        if let Err(err) = result {
+            state.show_transfer_center_feedback("error", format!("ZMODEM action failed: {err}"));
+            shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let effects_ref = Rc::clone(&effects);
+    window.on_zmodem_transfer_modal_tertiary_action_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let Some(session_bridge) = session_bridge_ref.as_ref() else {
+            return;
+        };
+        let Some(session_id) = active_workspace_session_uuid(&state) else {
+            return;
+        };
+        let Some(zmodem_state) = session_bridge.manager.zmodem_state(session_id) else {
+            return;
+        };
+
+        let result = match zmodem_state.phase {
+            ZmodemTransferPhase::Completed => open_zmodem_completed_file_locally(&zmodem_state),
+            _ => Ok(()),
+        };
+
+        if let Err(err) = result {
+            state.show_transfer_center_feedback("error", format!("ZMODEM action failed: {err}"));
+            shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let effects_ref = Rc::clone(&effects);
+    window.on_zmodem_transfer_modal_close_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let Some(session_bridge) = session_bridge_ref.as_ref() else {
+            return;
+        };
+        let Some(session_id) = active_workspace_session_uuid(&state) else {
+            return;
+        };
+        let Some(zmodem_state) = session_bridge.manager.zmodem_state(session_id) else {
+            return;
+        };
+
+        let result = match zmodem_state.phase {
+            ZmodemTransferPhase::AwaitingUploadSelection
+            | ZmodemTransferPhase::AwaitingDownloadDirectory
+            | ZmodemTransferPhase::Running => {
+                session_bridge.manager.cancel_zmodem_transfer(session_id)
+            }
+            ZmodemTransferPhase::Completed
+            | ZmodemTransferPhase::Failed
+            | ZmodemTransferPhase::Cancelled => {
+                session_bridge.manager.dismiss_zmodem_transfer(session_id)
+            }
+        };
+
+        if let Err(err) = result {
+            state.show_transfer_center_feedback("error", format!("ZMODEM action failed: {err}"));
+            shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        }
     });
 
     let state = Rc::clone(&view_model);

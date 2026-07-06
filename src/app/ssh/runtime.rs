@@ -6,6 +6,7 @@ mod pump;
 mod sftp_backend;
 mod terminal;
 mod transport;
+mod zmodem;
 
 pub use auth::UnknownHostKeyError;
 pub(crate) use auth::{load_optional_stored_secret_bundle, stored_secret_lookup_message};
@@ -20,6 +21,9 @@ pub use terminal::{
     DEFAULT_TERMINAL_SCROLLBACK_LINES, TerminalSession, encode_named_key_input,
     extract_current_working_directory_from_osc7, negotiated_terminal_environment,
 };
+pub use zmodem::{
+    ZmodemDownloadConflictPolicy, ZmodemTransferDirection, ZmodemTransferPhase, ZmodemTransferState,
+};
 
 use self::auth::ConnectionProgressReporter;
 use self::pump::run_channel_pump;
@@ -27,6 +31,7 @@ use self::sftp_backend::RusshSftpBackend;
 use self::terminal::{apply_remote_output, await_channel_success, negotiate_terminal_environment};
 use self::transport::{connect_target_handle_for_profile, ssh_client_config};
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -166,6 +171,7 @@ pub enum SessionRuntimeEvent {
     ConnectionProgress(ConnectionProgressEvent),
     EnhancedSessionStateChanged(EnhancedSessionState),
     CurrentDirectoryChanged(String),
+    ZmodemStateChanged(Option<ZmodemTransferState>),
     ShellIntegrationChanged(TerminalShellIntegrationState),
     SurfaceChanged(TerminalSurfaceState),
     SurfaceDirty,
@@ -189,6 +195,15 @@ enum RuntimeCommand {
     KeyInput(TerminalKeyEvent),
     MouseInput(TerminalMouseInput),
     Paste(String),
+    StartZmodemUpload {
+        local_paths: Vec<PathBuf>,
+    },
+    StartZmodemDownload {
+        local_dir: PathBuf,
+        conflict_policy: ZmodemDownloadConflictPolicy,
+    },
+    CancelZmodem,
+    DismissZmodem,
     Resize {
         rows: u32,
         cols: u32,
@@ -387,6 +402,37 @@ impl SshSessionRuntime {
             .map_err(|_| anyhow!("ssh runtime paste channel is closed"))
     }
 
+    pub fn start_zmodem_upload(&self, local_paths: Vec<PathBuf>) -> Result<()> {
+        self.command_tx
+            .send(RuntimeCommand::StartZmodemUpload { local_paths })
+            .map_err(|_| anyhow!("ssh runtime zmodem upload channel is closed"))
+    }
+
+    pub fn start_zmodem_download(
+        &self,
+        local_dir: PathBuf,
+        conflict_policy: ZmodemDownloadConflictPolicy,
+    ) -> Result<()> {
+        self.command_tx
+            .send(RuntimeCommand::StartZmodemDownload {
+                local_dir,
+                conflict_policy,
+            })
+            .map_err(|_| anyhow!("ssh runtime zmodem download channel is closed"))
+    }
+
+    pub fn cancel_zmodem_transfer(&self) -> Result<()> {
+        self.command_tx
+            .send(RuntimeCommand::CancelZmodem)
+            .map_err(|_| anyhow!("ssh runtime zmodem cancel channel is closed"))
+    }
+
+    pub fn dismiss_zmodem_transfer(&self) -> Result<()> {
+        self.command_tx
+            .send(RuntimeCommand::DismissZmodem)
+            .map_err(|_| anyhow!("ssh runtime zmodem dismiss channel is closed"))
+    }
+
     pub fn selection_text_from_buffer_rows(
         &self,
         start_row: u32,
@@ -478,6 +524,26 @@ impl SessionRuntimeControl for SshSessionRuntime {
 
     fn send_paste(&self, text: String) -> Result<()> {
         SshSessionRuntime::send_paste(self, text)
+    }
+
+    fn start_zmodem_upload(&self, local_paths: Vec<PathBuf>) -> Result<()> {
+        SshSessionRuntime::start_zmodem_upload(self, local_paths)
+    }
+
+    fn start_zmodem_download(
+        &self,
+        local_dir: PathBuf,
+        conflict_policy: ZmodemDownloadConflictPolicy,
+    ) -> Result<()> {
+        SshSessionRuntime::start_zmodem_download(self, local_dir, conflict_policy)
+    }
+
+    fn cancel_zmodem_transfer(&self) -> Result<()> {
+        SshSessionRuntime::cancel_zmodem_transfer(self)
+    }
+
+    fn dismiss_zmodem_transfer(&self) -> Result<()> {
+        SshSessionRuntime::dismiss_zmodem_transfer(self)
     }
 
     fn selection_text_from_buffer_rows(

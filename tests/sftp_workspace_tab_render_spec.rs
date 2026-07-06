@@ -524,7 +524,10 @@ fn workspace_sftp_context_menu_close_restores_shortcut_focus_for_escape_clear() 
     let assets_context_menu_open_block = app_window
         .split("changed assets-context-menu-open => {")
         .nth(1)
-        .and_then(|rest| rest.split("changed workspace-tab-context-menu-open => {").next())
+        .and_then(|rest| {
+            rest.split("changed workspace-tab-context-menu-open => {")
+                .next()
+        })
         .expect("assets context-menu open change block");
 
     assert!(
@@ -753,7 +756,8 @@ fn workspace_sftp_and_tab_chrome_clip_to_their_owned_bounds() {
         "workspace SFTP toolbar should clip its own chrome so right-edge actions cannot visually overrun the main workspace"
     );
     assert!(
-        tabbar.contains("export component TabBar inherits Rectangle {") && tabbar.contains("clip: true;"),
+        tabbar.contains("export component TabBar inherits Rectangle {")
+            && tabbar.contains("clip: true;"),
         "workspace tabbar should clip overflowing tab chips/new-tab chrome instead of drawing XFTP/tab controls beyond the available workspace width"
     );
 }

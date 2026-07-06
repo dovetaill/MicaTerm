@@ -4,8 +4,13 @@ use std::path::PathBuf;
 use std::ptr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::dpi::PhysicalPosition;
+use crate::event::WindowEvent;
 use windows_sys::core::{IUnknown, GUID, HRESULT};
-use windows_sys::Win32::Foundation::{DV_E_FORMATETC, HWND, POINTL, S_OK};
+use windows_sys::Win32::Foundation::{
+    DV_E_FORMATETC, E_NOINTERFACE, E_POINTER, HWND, POINT, POINTL, S_OK,
+};
+use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
 use windows_sys::Win32::System::Com::{IDataObject, DVASPECT_CONTENT, FORMATETC, TYMED_HGLOBAL};
 use windows_sys::Win32::System::Ole::{CF_HDROP, DROPEFFECT_COPY, DROPEFFECT_NONE};
 use windows_sys::Win32::UI::Shell::{DragFinish, DragQueryFileW, HDROP};
@@ -16,9 +21,24 @@ use crate::platform_impl::platform::definitions::{
     IDataObjectVtbl, IDropTarget, IDropTargetVtbl, IUnknownVtbl,
 };
 use crate::platform_impl::platform::WindowId;
+use crate::platform_impl::platform::DEVICE_ID;
 
 use crate::event::Event;
 use crate::window::WindowId as RootWindowId;
+
+const IID_IUNKNOWN: GUID = GUID {
+    data1: 0x00000000,
+    data2: 0x0000,
+    data3: 0x0000,
+    data4: [0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46],
+};
+
+const IID_IDROPTARGET: GUID = GUID {
+    data1: 0x00000122,
+    data2: 0x0000,
+    data3: 0x0000,
+    data4: [0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46],
+};
 
 #[repr(C)]
 pub struct FileDropHandlerData {
@@ -51,13 +71,24 @@ impl FileDropHandler {
 
     // Implement IUnknown
     pub unsafe extern "system" fn QueryInterface(
-        _this: *mut IUnknown,
-        _riid: *const GUID,
-        _ppvObject: *mut *mut c_void,
+        this: *mut IUnknown,
+        riid: *const GUID,
+        ppvObject: *mut *mut c_void,
     ) -> HRESULT {
-        // This function doesn't appear to be required for an `IDropTarget`.
-        // An implementation would be nice however.
-        unimplemented!();
+        if ppvObject.is_null() || riid.is_null() {
+            return E_POINTER;
+        }
+
+        unsafe {
+            *ppvObject = ptr::null_mut();
+            if guid_eq(&*riid, &IID_IUNKNOWN) || guid_eq(&*riid, &IID_IDROPTARGET) {
+                *ppvObject = this as *mut c_void;
+                Self::AddRef(this);
+                return S_OK;
+            }
+        }
+
+        E_NOINTERFACE
     }
 
     pub unsafe extern "system" fn AddRef(this: *mut IUnknown) -> u32 {
@@ -80,11 +111,12 @@ impl FileDropHandler {
         this: *mut IDropTarget,
         pDataObj: *const IDataObject,
         _grfKeyState: u32,
-        _pt: *const POINTL,
+        pt: *const POINTL,
         pdwEffect: *mut u32,
     ) -> HRESULT {
         use crate::event::WindowEvent::HoveredFile;
         let drop_handler = unsafe { Self::from_interface(this) };
+        drop_handler.emit_drag_cursor_moved(pt);
         let hdrop = unsafe {
             Self::iterate_filenames(pDataObj, |filename| {
                 drop_handler.send_event(Event::WindowEvent {
@@ -106,10 +138,11 @@ impl FileDropHandler {
     pub unsafe extern "system" fn DragOver(
         this: *mut IDropTarget,
         _grfKeyState: u32,
-        _pt: *const POINTL,
+        pt: *const POINTL,
         pdwEffect: *mut u32,
     ) -> HRESULT {
         let drop_handler = unsafe { Self::from_interface(this) };
+        drop_handler.emit_drag_cursor_moved(pt);
         unsafe {
             *pdwEffect = drop_handler.cursor_effect;
         }
@@ -134,11 +167,12 @@ impl FileDropHandler {
         this: *mut IDropTarget,
         pDataObj: *const IDataObject,
         _grfKeyState: u32,
-        _pt: *const POINTL,
+        pt: *const POINTL,
         _pdwEffect: *mut u32,
     ) -> HRESULT {
         use crate::event::WindowEvent::DroppedFile;
         let drop_handler = unsafe { Self::from_interface(this) };
+        drop_handler.emit_drag_cursor_moved(pt);
         let hdrop = unsafe {
             Self::iterate_filenames(pDataObj, |filename| {
                 drop_handler.send_event(Event::WindowEvent {
@@ -214,6 +248,37 @@ impl FileDropHandlerData {
     fn send_event(&self, event: Event<()>) {
         (self.send_event)(event);
     }
+
+    fn emit_drag_cursor_moved(&self, point: *const POINTL) {
+        if point.is_null() {
+            return;
+        }
+
+        let mut client_point = POINT {
+            x: unsafe { (*point).x },
+            y: unsafe { (*point).y },
+        };
+        unsafe {
+            if ScreenToClient(self.window, &mut client_point) == 0 {
+                return;
+            }
+        }
+
+        self.send_event(Event::WindowEvent {
+            window_id: RootWindowId(WindowId(self.window)),
+            event: WindowEvent::CursorMoved {
+                device_id: DEVICE_ID,
+                position: PhysicalPosition::new(client_point.x as f64, client_point.y as f64),
+            },
+        });
+    }
+}
+
+fn guid_eq(left: &GUID, right: &GUID) -> bool {
+    left.data1 == right.data1
+        && left.data2 == right.data2
+        && left.data3 == right.data3
+        && left.data4 == right.data4
 }
 
 impl Drop for FileDropHandler {

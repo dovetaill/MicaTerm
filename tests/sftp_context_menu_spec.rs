@@ -477,7 +477,13 @@ fn sftp_row_context_menus_do_not_mix_in_blank_area_create_actions() {
         &ready_file_selection(vec!["entry-release"]),
     );
 
-    for action_id in ["upload-files", "upload-folder", "new-folder", "new-file", "paste-sftp"] {
+    for action_id in [
+        "upload-files",
+        "upload-folder",
+        "new-folder",
+        "new-file",
+        "paste-sftp",
+    ] {
         assert!(
             !folder_actions.iter().any(|node| node.id == action_id),
             "folder row context menus should not expose blank-area action `{action_id}` because it operates on the current directory, not the clicked folder"

@@ -356,6 +356,7 @@ export component TerminalSessionHost inherits Rectangle {
     in property <int> session-viewport-max-offset-lines: 0;
     in property <bool> session-viewport-at-bottom: true;
     in property <bool> session-alternate-screen-active: false;
+    in property <bool> external-drop-target-active: false;
     in property <float> session-device-scale-factor: 1.0;
     in-out property <bool> selection-active: false;
     in-out property <int> selection-start-row: -1;
@@ -2153,6 +2154,64 @@ export component TerminalSessionHost inherits Rectangle {
                             root.close-context-menu();
                             root.search-open-requested();
                         }
+                    }
+                }
+            }
+
+            terminal-drop-overlay := Rectangle {
+                x: root.terminal-surface-origin-x();
+                y: root.terminal-surface-origin-y();
+                width: root.snapped-terminal-content-width();
+                height: root.snapped-terminal-content-height();
+                z: 26;
+                border-radius: 16px;
+                border-width: 1px;
+                border-color: ThemeTokens.link-accent;
+                background: ThemeTokens.terminal-selection-surface;
+                opacity: root.external-drop-target-active ? 0.98 : 0;
+                animate opacity { duration: 120ms; easing: ease-out; }
+
+                Rectangle {
+                    x: 14px;
+                    y: 14px;
+                    width: max(0px, parent.width - 28px);
+                    height: max(0px, parent.height - 28px);
+                    border-radius: 12px;
+                    border-width: 1px;
+                    border-color: ThemeTokens.link-accent;
+                    background: transparent;
+                }
+
+                Rectangle {
+                    x: max(20px, (parent.width - self.width) / 2);
+                    y: max(20px, (parent.height - self.height) / 2);
+                    width: min(parent.width - 40px, 320px);
+                    height: 92px;
+                    border-radius: 14px;
+                    border-width: 1px;
+                    border-color: ThemeTokens.link-accent;
+                    background: ThemeTokens.modal-section-surface;
+
+                    Text {
+                        x: 16px;
+                        y: 18px;
+                        width: parent.width - 32px;
+                        text: "Drop files to upload";
+                        color: ThemeTokens.text-primary;
+                        font-size: 17px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                    }
+
+                    Text {
+                        x: 16px;
+                        y: 48px;
+                        width: parent.width - 32px;
+                        text: "Upload directly into the current terminal directory.";
+                        color: ThemeTokens.text-secondary;
+                        font-size: 12px;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
                     }
                 }
             }

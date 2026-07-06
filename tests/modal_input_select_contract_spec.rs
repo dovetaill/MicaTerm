@@ -150,8 +150,7 @@ fn ssh_modal_contract_wires_public_fields_into_text_context_menu_bridge() {
 }
 
 #[test]
-fn keychain_identity_modal_contract_wires_public_and_secret_fields_into_text_context_menu_bridge()
-{
+fn keychain_identity_modal_contract_wires_public_and_secret_fields_into_text_context_menu_bridge() {
     let source = fs::read_to_string("ui/components/assets-keychain-identity-modal.slint")
         .expect("read keychain identity modal source");
 

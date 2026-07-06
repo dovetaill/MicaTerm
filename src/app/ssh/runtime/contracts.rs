@@ -468,18 +468,12 @@ impl TerminalSurfaceState {
         focus_col: u32,
     ) -> TerminalSelectionRange {
         match mode {
-            TerminalSelectionGestureMode::Cell => self.cell_selection_range(
-                anchor_row,
-                anchor_col,
-                focus_row,
-                focus_col,
-            ),
-            TerminalSelectionGestureMode::Word => self.word_selection_range(
-                anchor_row,
-                anchor_col,
-                focus_row,
-                focus_col,
-            ),
+            TerminalSelectionGestureMode::Cell => {
+                self.cell_selection_range(anchor_row, anchor_col, focus_row, focus_col)
+            }
+            TerminalSelectionGestureMode::Word => {
+                self.word_selection_range(anchor_row, anchor_col, focus_row, focus_col)
+            }
             TerminalSelectionGestureMode::Line => self.line_selection_range(anchor_row, focus_row),
         }
     }
@@ -586,7 +580,10 @@ impl TerminalSurfaceState {
             let token_cells = &row_cells[run_start_index..=run_end_index];
             if token_cells.len() > 1 && token_cells.iter().all(|cell| cell.width > 1) {
                 let logical_start = row_cells[..run_start_index].iter().count() as u32;
-                return Some((logical_start, logical_start.saturating_add(token_cells.len() as u32)));
+                return Some((
+                    logical_start,
+                    logical_start.saturating_add(token_cells.len() as u32),
+                ));
             }
         }
 
@@ -623,19 +620,9 @@ fn merge_selection_ranges(
     right: TerminalSelectionRange,
 ) -> TerminalSelectionRange {
     if (left.start_row, left.start_col) <= (right.start_row, right.start_col) {
-        TerminalSelectionRange::new(
-            left.start_row,
-            left.start_col,
-            right.end_row,
-            right.end_col,
-        )
+        TerminalSelectionRange::new(left.start_row, left.start_col, right.end_row, right.end_col)
     } else {
-        TerminalSelectionRange::new(
-            right.start_row,
-            right.start_col,
-            left.end_row,
-            left.end_col,
-        )
+        TerminalSelectionRange::new(right.start_row, right.start_col, left.end_row, left.end_col)
     }
 }
 
@@ -650,7 +637,10 @@ fn selection_token_class(cell: &TerminalCellState) -> Option<SelectionTokenClass
     }
 }
 
-fn cell_matches_selection_class(cell: &TerminalCellState, token_class: SelectionTokenClass) -> bool {
+fn cell_matches_selection_class(
+    cell: &TerminalCellState,
+    token_class: SelectionTokenClass,
+) -> bool {
     match (selection_token_class(cell), token_class) {
         (Some(SelectionTokenClass::Shellish), SelectionTokenClass::Shellish) => true,
         (Some(SelectionTokenClass::NonWhitespace), SelectionTokenClass::NonWhitespace) => true,
@@ -662,19 +652,7 @@ fn is_shellish_token_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric()
         || matches!(
             ch,
-            '_' | '.'
-                | '/'
-                | '\\'
-                | ':'
-                | '@'
-                | '%'
-                | '+'
-                | '='
-                | '~'
-                | '-'
-                | '#'
-                | '?'
-                | '&'
+            '_' | '.' | '/' | '\\' | ':' | '@' | '%' | '+' | '=' | '~' | '-' | '#' | '?' | '&'
         )
 }
 

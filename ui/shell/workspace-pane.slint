@@ -23,6 +23,7 @@ export component WorkspacePane inherits Rectangle {
     in property <string> workspace-sftp-path: "";
     in property <bool> workspace-sftp-path-editing: false;
     in property <int> workspace-sftp-focus-sequence: 0;
+    in property <bool> workspace-terminal-drop-target-active: false;
     in property <bool> workspace-sftp-can-go-back: false;
     in property <bool> workspace-sftp-can-go-forward: false;
     in property <bool> workspace-sftp-can-go-up: false;
@@ -504,6 +505,7 @@ export component WorkspacePane inherits Rectangle {
                 session-viewport-max-offset-lines: root.workspace-session-viewport-max-offset-lines;
                 session-viewport-at-bottom: root.workspace-session-viewport-at-bottom;
                 session-alternate-screen-active: root.workspace-session-alternate-screen-active;
+                external-drop-target-active: root.workspace-terminal-drop-target-active;
                 selection-active <=> root.workspace-session-selection-active;
                 selection-drag-active: root.workspace-session-selection-drag-active;
                 selection-start-row <=> root.workspace-session-selection-start-row;

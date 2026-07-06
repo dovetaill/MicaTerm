@@ -71,6 +71,7 @@ windows-sys = { version = "0.59", features = [
 ] }
 zeroize = "1.8.2"
 zstd = "0.13.3"
+zmodem2 = "0.7.1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = [

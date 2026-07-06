@@ -1,0 +1,244 @@
+import {
+    DialogActionButton,
+    DialogInlineBanner,
+    DialogSectionCard,
+    ModalFooterBar,
+    ModalHeaderBar,
+} from "./modal-chrome.slint";
+import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
+
+component ZmodemProgressBar inherits Rectangle {
+    in property <float> value: 0;
+    in property <bool> determinate: false;
+
+    private property <float> clamped-value: max(0.0, min(1.0, root.value));
+
+    border-radius: 5px;
+    background: ThemeTokens.utility-panel-progress-track;
+    clip: true;
+
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.determinate ? parent.width * root.clamped-value : parent.width * 0.34;
+        height: parent.height;
+        border-radius: 5px;
+        background: ThemeTokens.accent;
+        opacity: root.determinate ? 1 : 0.82;
+    }
+}
+
+export component ZmodemTransferModal inherits Rectangle {
+    in property <string> dialog-title: "ZMODEM Transfer";
+    in property <string> headline: "";
+    in property <string> status-text: "";
+    in property <string> detail-text: "";
+    in property <string> error-text: "";
+    in property <string> current-file: "";
+    in property <string> file-counter-text: "";
+    in property <string> progress-text: "";
+    in property <float> progress-value: 0;
+    in property <bool> progress-determinate: false;
+    in property <string> primary-action-label: "";
+    in property <bool> primary-action-visible: false;
+    in property <bool> primary-action-enabled: false;
+    in property <string> secondary-action-label: "Close";
+    in property <bool> secondary-action-visible: true;
+    in property <bool> secondary-action-enabled: true;
+    in property <string> tertiary-action-label: "";
+    in property <bool> tertiary-action-visible: false;
+    in property <bool> tertiary-action-enabled: false;
+    callback primary-action-requested();
+    callback secondary-action-requested();
+    callback tertiary-action-requested();
+    callback close-action-requested();
+    callback drag-requested(length, length);
+    callback drag-moved(length, length);
+    callback drag-ended();
+    callback focus-restore-requested();
+    private property <length> footer-height: ThemeTokens.modal-footer-min-height;
+
+    background: transparent;
+
+    modal-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+
+        header := ModalHeaderBar {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            title: root.dialog-title;
+            subtitle: root.headline;
+            prominent: true;
+
+            close-requested => {
+                root.close-action-requested();
+            }
+
+            drag-requested(pointer-x, pointer-y) => {
+                root.drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.drag-ended();
+            }
+
+            focus-restore-requested => {
+                root.focus-restore-requested();
+            }
+        }
+
+        body := Rectangle {
+            x: 0px;
+            y: header.height;
+            width: parent.width;
+            height: parent.height - header.height - footer.height;
+            background: ThemeTokens.modal-body-surface;
+
+            VerticalLayout {
+                x: 16px;
+                y: 16px;
+                width: parent.width - 32px;
+                height: parent.height - 32px;
+                spacing: 10px;
+
+                DialogSectionCard {
+                    width: parent.width;
+                    padding-horizontal: 16px;
+                    padding-vertical: 14px;
+                    spacing: 10px;
+                    surface: ThemeTokens.modal-section-alt-surface;
+
+                    if root.status-text != "" : Text {
+                        width: parent.width;
+                        text: root.status-text;
+                        color: ThemeTokens.text-primary;
+                        wrap: word-wrap;
+                        font-size: AppTypography.ui-font-size-body;
+                        font-weight: 700;
+                    }
+
+                    if root.detail-text != "" : Text {
+                        width: parent.width;
+                        text: root.detail-text;
+                        color: ThemeTokens.text-secondary;
+                        wrap: word-wrap;
+                        font-size: 12px;
+                    }
+                }
+
+                if root.error-text != "" : DialogInlineBanner {
+                    width: parent.width;
+                    tone: "error";
+                    message: root.error-text;
+                }
+
+                if root.current-file != "" || root.file-counter-text != "" || root.progress-text != "" : DialogSectionCard {
+                    width: parent.width;
+                    padding-horizontal: 16px;
+                    padding-vertical: 14px;
+                    spacing: 10px;
+
+                    if root.current-file != "" : Text {
+                        width: parent.width;
+                        text: root.current-file;
+                        color: ThemeTokens.text-primary;
+                        wrap: word-wrap;
+                        overflow: elide;
+                    }
+
+                    if root.file-counter-text != "" : Text {
+                        width: parent.width;
+                        text: root.file-counter-text;
+                        color: ThemeTokens.text-secondary;
+                        font-size: 11px;
+                    }
+
+                    if root.progress-text != "" || root.progress-determinate : Rectangle {
+                        width: parent.width;
+                        height: 32px;
+                        background: transparent;
+
+                        ZmodemProgressBar {
+                            x: 0px;
+                            y: 6px;
+                            width: parent.width;
+                            height: 8px;
+                            value: root.progress-value;
+                            determinate: root.progress-determinate;
+                        }
+
+                        if root.progress-text != "" : Text {
+                            x: 0px;
+                            y: 18px;
+                            width: parent.width;
+                            text: root.progress-text;
+                            color: ThemeTokens.text-secondary;
+                            font-size: 10px;
+                        }
+                    }
+                }
+            }
+        }
+
+        footer := ModalFooterBar {
+            x: 0px;
+            y: parent.height - root.footer-height;
+            width: parent.width;
+            height: root.footer-height;
+
+            Rectangle {
+                height: 0px;
+                vertical-stretch: 1;
+                background: transparent;
+            }
+
+            HorizontalLayout {
+                height: 38px;
+                spacing: 10px;
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: transparent;
+                }
+
+                if root.secondary-action-visible : DialogActionButton {
+                    width: root.secondary-action-label == "Open Folder" ? 132px : 96px;
+                    label: root.secondary-action-label;
+                    enabled: root.secondary-action-enabled;
+
+                    clicked => {
+                        root.secondary-action-requested();
+                    }
+                }
+
+                if root.tertiary-action-visible : DialogActionButton {
+                    width: 96px;
+                    label: root.tertiary-action-label;
+                    enabled: root.tertiary-action-enabled;
+
+                    clicked => {
+                        root.tertiary-action-requested();
+                    }
+                }
+
+                if root.primary-action-visible : DialogActionButton {
+                    width: 116px;
+                    label: root.primary-action-label;
+                    primary: true;
+                    enabled: root.primary-action-enabled;
+
+                    clicked => {
+                        root.primary-action-requested();
+                    }
+                }
+            }
+        }
+    }
+}

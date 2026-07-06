@@ -5,10 +5,9 @@ use std::fs;
 #[test]
 fn packaged_memory_baseline_docs_define_windows_matrix_and_primary_metrics() {
     let readme = fs::read_to_string("readme.md").expect("read readme");
-    let verification = fs::read_to_string(
-        "docs/plans/2026-06-09-memory-footprint-reduction/verification.md",
-    )
-    .expect("read memory verification playbook");
+    let verification =
+        fs::read_to_string("docs/plans/2026-06-09-memory-footprint-reduction/verification.md")
+            .expect("read memory verification playbook");
 
     assert!(
         readme.contains("docs/plans/2026-06-09-memory-footprint-reduction/verification.md"),

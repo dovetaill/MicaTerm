@@ -1,5 +1,5 @@
-use std::fs;
 use std::cell::RefCell;
+use std::fs;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -160,9 +160,10 @@ fn paste_warning_editor_right_click_keeps_enter_bound_to_the_editor() {
     app.set_workspace_paste_warning_text("line 1\nline 2\nline 3\nline 4".into());
     settle_modal_ui();
 
-    let paste_input = ElementHandle::find_by_element_id(&app, "WorkspacePasteWarningModal::paste-input")
-        .next()
-        .expect("find paste warning editor input");
+    let paste_input =
+        ElementHandle::find_by_element_id(&app, "WorkspacePasteWarningModal::paste-input")
+            .next()
+            .expect("find paste warning editor input");
     let paste_input_position = element_center(&paste_input);
 
     dispatch_pointer_click(&app, paste_input_position, PointerEventButton::Left);
