@@ -51,8 +51,15 @@ pub(super) async fn await_channel_success(
     }
 }
 
-pub fn negotiated_terminal_environment() -> [(&'static str, &'static str); 1] {
-    [("COLORTERM", "truecolor")]
+pub fn cwd_tracking_prompt_command() -> &'static str {
+    r#"printf '\033]7;file://%s%s\007' "${HOSTNAME:-remote}" "$PWD""#
+}
+
+pub fn negotiated_terminal_environment() -> [(&'static str, &'static str); 2] {
+    [
+        ("COLORTERM", "truecolor"),
+        ("PROMPT_COMMAND", cwd_tracking_prompt_command()),
+    ]
 }
 
 pub(super) async fn negotiate_terminal_environment(

@@ -1,3 +1,4 @@
+use mica_term::app::ssh::runtime::negotiated_terminal_environment;
 use mica_term::app::ssh::shell_integration::{
     BootstrapOptions, MicaPrivateAction, ShellIntegrationEvent, ShellKind, build_shell_bootstrap,
     parse_shell_integration_events, runtime_shell_events,
@@ -42,6 +43,51 @@ fn bash_bootstrap_builder_prefers_standard_markers_and_gates_private_channel() {
     assert!(script.contains("TERM_PROGRAM=mica-term"));
     assert!(script.contains("MICA_TERM_ENHANCED=1"));
     assert!(!script.contains("OSC 133"));
+}
+
+#[test]
+fn negotiated_prompt_command_emits_cwd_without_enhanced_bootstrap() {
+    let prompt_command = negotiated_terminal_environment()
+        .into_iter()
+        .find_map(|(name, value)| (name == "PROMPT_COMMAND").then_some(value))
+        .expect("cwd PROMPT_COMMAND should be negotiated");
+    assert!(prompt_command.contains(r#"\033]7;file://"#));
+    assert!(!prompt_command.contains("MICA_TERM_ENHANCED"));
+
+    let session = "bash --noprofile --norc -i <<'EOF'\nexit\nEOF";
+    let output = Command::new("script")
+        .args(["-qefc", session, "/dev/null"])
+        .env("TERM", "xterm-256color")
+        .env("HOSTNAME", "mica-cwd-test")
+        .env("PROMPT_COMMAND", prompt_command)
+        .output()
+        .expect("run bash prompt cwd tracking session");
+
+    assert!(
+        output.status.success(),
+        "bash prompt cwd tracking session should exit successfully"
+    );
+    let events = parse_shell_integration_events(&output.stdout);
+    let cwd = std::env::current_dir()
+        .expect("current dir")
+        .to_string_lossy()
+        .to_string();
+    assert!(
+        events.iter().any(|event| {
+            matches!(
+                event,
+                ShellIntegrationEvent::CurrentDirectory(path) if path == &cwd
+            )
+        }),
+        "negotiated PROMPT_COMMAND should emit an OSC7 cwd marker"
+    );
+
+    let parsed = runtime_shell_events(&output.stdout);
+    let sanitized = String::from_utf8_lossy(&parsed.sanitized_bytes);
+    assert!(
+        !sanitized.contains("]7;file://"),
+        "OSC7 cwd markers should be stripped from visible terminal output"
+    );
 }
 
 #[test]

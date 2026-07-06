@@ -48,6 +48,7 @@ use crate::app::ssh::connection_progress::{ConnectionHeadlineState, ConnectionPr
 use crate::app::ssh::credentials::{CredentialStore, SystemCredentialStore};
 use crate::app::ssh::profile::ConnectionProfile;
 use crate::app::ssh::session_manager::{EnhancedSessionState, SessionRuntimeControl};
+use crate::app::ssh::shell_integration::runtime_shell_events;
 use crate::theme::{ThemeMode, ThemeVariant};
 
 const DEFAULT_TERMINAL_ROWS: usize = 24;
@@ -333,7 +334,7 @@ impl SshSessionRuntime {
         progress.set_headline(ConnectionHeadlineState::Connected);
         let _ = event_tx.send(SessionRuntimeEvent::Connected);
         if !pending_output.is_empty() {
-            apply_remote_output(&terminal, &pending_output);
+            apply_initial_remote_output(&terminal, &event_tx, &pending_output);
         }
 
         let handle = Arc::new(handle);
@@ -532,6 +533,20 @@ impl SshSessionRuntime {
         self.command_tx
             .send(RuntimeCommand::Disconnect)
             .map_err(|_| anyhow!("ssh runtime disconnect channel is closed"))
+    }
+}
+
+fn apply_initial_remote_output(
+    terminal: &Arc<Mutex<TerminalSession>>,
+    event_tx: &mpsc::UnboundedSender<SessionRuntimeEvent>,
+    bytes: &[u8],
+) {
+    let parsed = runtime_shell_events(bytes);
+    if let Some(cwd) = parsed.cwd {
+        let _ = event_tx.send(SessionRuntimeEvent::CurrentDirectoryChanged(cwd));
+    }
+    if !parsed.sanitized_bytes.is_empty() {
+        apply_remote_output(terminal, &parsed.sanitized_bytes);
     }
 }
 

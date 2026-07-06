@@ -2390,8 +2390,21 @@ fn ssh_runtime_negotiates_truecolor_environment_before_requesting_shell() {
         vec![
             "pty".to_string(),
             "env:COLORTERM".to_string(),
+            "env:PROMPT_COMMAND".to_string(),
             "shell".to_string(),
         ]
+    );
+    let prompt_command = recorded_environment
+        .iter()
+        .find_map(|(name, value)| (name == "PROMPT_COMMAND").then_some(value.as_str()))
+        .expect("PROMPT_COMMAND should be negotiated for cwd tracking");
+    assert!(
+        prompt_command.contains(r#"\033]7;file://"#) && prompt_command.contains(r#""$PWD""#),
+        "PROMPT_COMMAND should only install cwd OSC7 tracking"
+    );
+    assert!(
+        !prompt_command.contains("MICA_TERM_ENHANCED"),
+        "cwd tracking must not re-enable the retired enhanced bootstrap"
     );
 
     unsafe {
