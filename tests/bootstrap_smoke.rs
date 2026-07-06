@@ -1023,8 +1023,10 @@ struct RecordingSftpState {
     upload_file_calls: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
     text_input_calls: Arc<Mutex<Vec<String>>>,
     remote_command_exists_calls: Arc<Mutex<Vec<String>>>,
+    remote_cwd_probe_calls: Arc<Mutex<usize>>,
     zmodem_exec_upload_calls: Arc<Mutex<Vec<(String, Vec<String>)>>>,
     remote_rz_available: Arc<Mutex<Option<bool>>>,
+    remote_cwd: Arc<Mutex<Option<String>>>,
     mkdir_calls: Arc<Mutex<Vec<String>>>,
     rename_calls: Arc<Mutex<Vec<(String, String)>>>,
     remove_file_calls: Arc<Mutex<Vec<String>>>,
@@ -1075,6 +1077,15 @@ impl RecordingSftpState {
         )
     }
 
+    fn take_remote_cwd_probe_calls(&self) -> usize {
+        std::mem::take(
+            &mut *self
+                .remote_cwd_probe_calls
+                .lock()
+                .expect("lock remote cwd probe calls"),
+        )
+    }
+
     fn take_zmodem_exec_upload_calls(&self) -> Vec<(String, Vec<String>)> {
         std::mem::take(
             &mut *self
@@ -1089,6 +1100,10 @@ impl RecordingSftpState {
             .remote_rz_available
             .lock()
             .expect("lock remote rz availability") = Some(available);
+    }
+
+    fn set_remote_cwd(&self, cwd: impl Into<String>) {
+        *self.remote_cwd.lock().expect("lock remote cwd") = Some(cwd.into());
     }
 
     fn take_mkdir_calls(&self) -> Vec<String> {
@@ -2148,6 +2163,20 @@ impl SessionRuntimeControl for RecordingSftpRuntimeControl {
         Ok(command_name == "rz" && rz_available)
     }
 
+    fn resolve_current_working_directory(&self) -> Result<Option<String>> {
+        *self
+            .state
+            .remote_cwd_probe_calls
+            .lock()
+            .expect("lock remote cwd probe calls") += 1;
+        Ok(self
+            .state
+            .remote_cwd
+            .lock()
+            .expect("lock remote cwd")
+            .clone())
+    }
+
     fn start_zmodem_upload_to_remote_dir(
         &self,
         local_paths: Vec<PathBuf>,
@@ -2424,7 +2453,7 @@ impl SessionRuntimeLauncher for DelayedCwdRecordingSftpLauncher {
     fn launch(
         &self,
         profile: ConnectionProfile,
-        _session_id: uuid::Uuid,
+        session_id: uuid::Uuid,
         _attempt_id: uuid::Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
@@ -2480,6 +2509,9 @@ impl SessionRuntimeLauncher for DelayedCwdRecordingSftpLauncher {
 
             state.set_event_tx(event_tx.clone());
             let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(
+                terminal_surface_with_cells(session_id, 1, 24, 80, vec!["ready".into()]),
+            ));
             Ok(Box::new(RecordingSftpRuntimeControl {
                 state: state.clone(),
                 runtime: SftpRuntimeHandle::new(Arc::new(RecordingSftpBackend {
@@ -15677,6 +15709,68 @@ fn terminal_file_drop_uses_exec_rz_without_terminal_text_input() {
 }
 
 #[test]
+fn terminal_file_drop_resolves_remote_cwd_when_shell_markers_are_missing() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    sftp_state.set_remote_cwd("/root");
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(DelayedCwdRecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("terminal-drop-upload-probed-cwd");
+    let upload_path = temp_root.join("release.env");
+    fs::create_dir_all(temp_root.as_path()).expect("create terminal drop temp root");
+    fs::write(&upload_path, b"PORT=22\n").expect("write terminal drop source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "terminal"
+            && !app.get_active_workspace_session_id().is_empty()
+    });
+
+    app.set_workspace_terminal_external_drop_paths(ModelRc::new(VecModel::from(vec![
+        SharedString::from(upload_path.to_string_lossy().to_string()),
+    ])));
+    app.invoke_workspace_terminal_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        !sftp_state
+            .zmodem_exec_upload_calls
+            .lock()
+            .expect("lock zmodem exec upload calls")
+            .is_empty()
+    });
+
+    assert_eq!(sftp_state.take_remote_cwd_probe_calls(), 1);
+    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(sftp_state.take_text_input_calls(), Vec::<String>::new());
+    assert_eq!(
+        sftp_state.take_zmodem_exec_upload_calls(),
+        vec![(
+            "/root".to_string(),
+            vec![upload_path.to_string_lossy().to_string()]
+        )]
+    );
+    assert!(
+        sftp_state
+            .upload_file_calls
+            .lock()
+            .expect("lock terminal drop upload calls")
+            .is_empty(),
+        "terminal file drops should still prefer exec-channel rz after probing cwd"
+    );
+}
+
+#[test]
 fn terminal_file_drop_falls_back_to_sftp_current_directory_when_rz_is_missing() {
     let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
@@ -15735,6 +15829,62 @@ fn terminal_file_drop_falls_back_to_sftp_current_directory_when_rz_is_missing() 
     assert!(
         app.get_transfer_center_open(),
         "terminal SFTP fallback uploads should surface the transfer center after queueing work"
+    );
+}
+
+#[test]
+fn terminal_file_drop_probes_cwd_before_sftp_fallback_when_rz_is_missing() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    sftp_state.set_remote_rz_available(false);
+    sftp_state.set_remote_cwd("/root");
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(DelayedCwdRecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("terminal-drop-upload-probed-cwd-no-rz");
+    let upload_path = temp_root.join("release.env");
+    fs::create_dir_all(temp_root.as_path()).expect("create terminal drop temp root");
+    fs::write(&upload_path, b"PORT=22\n").expect("write terminal drop source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "terminal"
+            && !app.get_active_workspace_session_id().is_empty()
+    });
+
+    app.set_workspace_terminal_external_drop_paths(ModelRc::new(VecModel::from(vec![
+        SharedString::from(upload_path.to_string_lossy().to_string()),
+    ])));
+    app.invoke_workspace_terminal_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        !sftp_state
+            .upload_file_calls
+            .lock()
+            .expect("lock terminal drop upload calls")
+            .is_empty()
+    });
+
+    assert_eq!(sftp_state.take_remote_cwd_probe_calls(), 1);
+    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(sftp_state.take_text_input_calls(), Vec::<String>::new());
+    assert_eq!(
+        sftp_state.take_zmodem_exec_upload_calls(),
+        Vec::<(String, Vec<String>)>::new()
+    );
+    assert_eq!(
+        sftp_state.take_upload_file_calls(),
+        vec![("/root/release.env".to_string(), b"PORT=22\n".to_vec())]
     );
 }
 

@@ -152,6 +152,9 @@ pub trait SessionRuntimeControl: Send {
             "session runtime does not support remote command probes"
         ))
     }
+    fn resolve_current_working_directory(&self) -> Result<Option<String>> {
+        Ok(None)
+    }
     fn start_zmodem_upload_to_remote_dir(
         &self,
         _local_paths: Vec<PathBuf>,
@@ -401,6 +404,21 @@ impl SessionManager {
             .current_working_directories
             .get(&session_id)
             .cloned()
+    }
+
+    pub fn resolve_current_working_directory(&self, session_id: Uuid) -> Result<Option<String>> {
+        let mut registry = self.registry.lock().expect("lock session registry");
+        let runtime_control = registry
+            .runtime_controls
+            .get(&session_id)
+            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
+        let cwd = runtime_control.resolve_current_working_directory()?;
+        if let Some(cwd) = cwd.as_ref() {
+            registry
+                .current_working_directories
+                .insert(session_id, cwd.clone());
+        }
+        Ok(cwd)
     }
 
     pub fn zmodem_state(&self, session_id: Uuid) -> Option<ZmodemTransferState> {

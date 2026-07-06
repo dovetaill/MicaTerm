@@ -26,7 +26,10 @@ pub use zmodem::{
 };
 
 use self::auth::{ConnectionProgressReporter, RuntimeClientHandler};
-use self::pump::{remote_command_exists, run_channel_pump, run_zmodem_exec_upload};
+use self::pump::{
+    remote_command_exists, resolve_remote_current_working_directory, run_channel_pump,
+    run_zmodem_exec_upload,
+};
 use self::sftp_backend::RusshSftpBackend;
 use self::terminal::{apply_remote_output, await_channel_success, negotiate_terminal_environment};
 use self::transport::{connect_target_handle_for_profile, ssh_client_config};
@@ -421,6 +424,13 @@ impl SshSessionRuntime {
         ))
     }
 
+    pub fn resolve_current_working_directory(&self) -> Result<Option<String>> {
+        self.async_runtime
+            .block_on(resolve_remote_current_working_directory(Arc::clone(
+                &self.handle,
+            )))
+    }
+
     pub fn start_zmodem_upload_to_remote_dir(
         &self,
         local_paths: Vec<PathBuf>,
@@ -560,6 +570,10 @@ impl SessionRuntimeControl for SshSessionRuntime {
 
     fn remote_command_exists(&self, command_name: String) -> Result<bool> {
         SshSessionRuntime::remote_command_exists(self, command_name)
+    }
+
+    fn resolve_current_working_directory(&self) -> Result<Option<String>> {
+        SshSessionRuntime::resolve_current_working_directory(self)
     }
 
     fn start_zmodem_upload_to_remote_dir(

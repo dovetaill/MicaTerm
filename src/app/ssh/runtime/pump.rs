@@ -25,6 +25,45 @@ use super::{
 
 const ZMODEM_EXEC_UPLOAD_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 const REMOTE_COMMAND_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+const REMOTE_CWD_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+const REMOTE_INTERACTIVE_SHELL_CWD_PROBE: &str = r#"if [ -d /proc ]; then
+__mica_term_probe_emit_cwd() {
+    __mica_term_probe_pid="$1"
+    __mica_term_probe_dir="/proc/$__mica_term_probe_pid"
+    [ -r "$__mica_term_probe_dir/cwd" ] || return 1
+    __mica_term_probe_comm="$(cat "$__mica_term_probe_dir/comm" 2>/dev/null || true)"
+    case "$__mica_term_probe_comm" in
+        sh|bash|zsh|fish|dash|ksh|mksh|csh|tcsh) ;;
+        *) return 1 ;;
+    esac
+    __mica_term_probe_tty="$(ps -o tty= -p "$__mica_term_probe_pid" 2>/dev/null | tr -d '[:space:]')"
+    [ -n "$__mica_term_probe_tty" ] && [ "$__mica_term_probe_tty" != "?" ] || return 1
+    __mica_term_probe_cwd="$(readlink "$__mica_term_probe_dir/cwd" 2>/dev/null || true)"
+    case "$__mica_term_probe_cwd" in
+        /*) printf '%s\n' "$__mica_term_probe_cwd"; exit 0 ;;
+    esac
+    return 1
+}
+if [ -n "${SSH_CONNECTION:-}" ]; then
+    for __mica_term_probe_env in /proc/[0-9]*/environ; do
+        __mica_term_probe_pid="${__mica_term_probe_env%/environ}"
+        __mica_term_probe_pid="${__mica_term_probe_pid##*/}"
+        [ "$__mica_term_probe_pid" = "$$" ] && continue
+        [ -r "$__mica_term_probe_env" ] || continue
+        if tr '\000' '\n' < "$__mica_term_probe_env" 2>/dev/null | grep -Fx "SSH_CONNECTION=$SSH_CONNECTION" >/dev/null; then
+            __mica_term_probe_emit_cwd "$__mica_term_probe_pid"
+        fi
+    done
+fi
+__mica_term_probe_parent="$(ps -o ppid= -p "$$" 2>/dev/null | tr -d '[:space:]')"
+if [ -n "$__mica_term_probe_parent" ]; then
+    for __mica_term_probe_pid in $(ps -o pid= --ppid "$__mica_term_probe_parent" 2>/dev/null); do
+        [ "$__mica_term_probe_pid" = "$$" ] && continue
+        __mica_term_probe_emit_cwd "$__mica_term_probe_pid"
+    done
+fi
+fi
+exit 1"#;
 
 pub(super) async fn run_channel_pump(
     session_id: Uuid,
@@ -473,6 +512,35 @@ pub(super) async fn remote_command_exists(
     Ok(status == Some(0))
 }
 
+pub(super) async fn resolve_remote_current_working_directory(
+    handle: Arc<client::Handle<RuntimeClientHandler>>,
+) -> Result<Option<String>> {
+    let output = timeout(
+        REMOTE_CWD_PROBE_TIMEOUT,
+        remote_exec_output(
+            handle,
+            REMOTE_INTERACTIVE_SHELL_CWD_PROBE.to_string(),
+            "remote cwd probe",
+        ),
+    )
+    .await
+    .context("remote cwd probe timed out")??;
+
+    if output.exit_status != Some(0) {
+        return Ok(None);
+    }
+
+    let stdout = String::from_utf8_lossy(output.stdout.as_slice());
+    let Some(cwd) = stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with('/') && !line.is_empty())
+    else {
+        return Ok(None);
+    };
+    Ok(Some(cwd.to_string()))
+}
+
 pub(super) async fn run_zmodem_exec_upload(
     session_id: Uuid,
     handle: Arc<client::Handle<RuntimeClientHandler>>,
@@ -629,32 +697,59 @@ async fn remote_exec_exit_status(
     handle: Arc<client::Handle<RuntimeClientHandler>>,
     command: String,
 ) -> Result<Option<u32>> {
+    Ok(remote_exec_output(handle, command, "remote command probe")
+        .await?
+        .exit_status)
+}
+
+struct RemoteExecOutput {
+    exit_status: Option<u32>,
+    stdout: Vec<u8>,
+}
+
+async fn remote_exec_output(
+    handle: Arc<client::Handle<RuntimeClientHandler>>,
+    command: String,
+    request_label: &'static str,
+) -> Result<RemoteExecOutput> {
     let mut channel = handle
         .channel_open_session()
         .await
-        .context("failed to open SSH exec channel for remote command probe")?;
+        .with_context(|| format!("failed to open SSH exec channel for {request_label}"))?;
     channel
         .exec(true, command)
         .await
-        .context("failed to request remote command probe")?;
+        .with_context(|| format!("failed to request {request_label}"))?;
 
     let mut exec_accepted = false;
     let mut exit_status = None;
+    let mut stdout = Vec::new();
     while let Some(message) = channel.wait().await {
         match message {
             ChannelMsg::Success => exec_accepted = true,
             ChannelMsg::Failure if !exec_accepted => {
-                bail!("remote SSH server rejected the command probe request");
+                bail!("remote SSH server rejected the {request_label} request");
+            }
+            ChannelMsg::Data { data } => {
+                stdout.extend_from_slice(data.as_ref());
             }
             ChannelMsg::ExitStatus {
                 exit_status: status,
             } => exit_status = Some(status),
-            ChannelMsg::ExitSignal { .. } => return Ok(Some(255)),
+            ChannelMsg::ExitSignal { .. } => {
+                return Ok(RemoteExecOutput {
+                    exit_status: Some(255),
+                    stdout,
+                });
+            }
             ChannelMsg::Close | ChannelMsg::Eof => break,
             _ => {}
         }
     }
-    Ok(exit_status)
+    Ok(RemoteExecOutput {
+        exit_status,
+        stdout,
+    })
 }
 
 fn is_safe_remote_command_name(command_name: &str) -> bool {
