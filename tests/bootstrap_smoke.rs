@@ -1173,6 +1173,12 @@ impl RecordingSftpState {
             let _ = event_tx.send(SessionRuntimeEvent::CurrentDirectoryChanged(cwd.into()));
         }
     }
+
+    fn emit_surface(&self, surface: TerminalSurfaceState) {
+        if let Some(event_tx) = self.event_tx.lock().expect("lock sftp event tx").as_ref() {
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -15873,6 +15879,70 @@ fn terminal_file_drop_uses_interactive_rz_when_cwd_is_unavailable() {
 }
 
 #[test]
+fn terminal_file_drop_uses_interactive_rz_when_application_cursor_mode_is_set() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(DelayedCwdRecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("terminal-drop-upload-app-cursor-rz");
+    let upload_path = temp_root.join("release.env");
+    fs::create_dir_all(temp_root.as_path()).expect("create terminal drop temp root");
+    fs::write(&upload_path, b"PORT=22\n").expect("write terminal drop source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "terminal"
+            && !app.get_active_workspace_session_id().is_empty()
+    });
+
+    let session_id = Uuid::parse_str(app.get_active_workspace_session_id().as_str())
+        .expect("active terminal session id should be a uuid");
+    let mut surface = terminal_surface_with_cells(session_id, 2, 24, 80, vec!["ready".into()]);
+    surface.application_cursor_keys = true;
+    sftp_state.emit_surface(surface);
+    flush_runtime_projection();
+
+    app.set_workspace_terminal_external_drop_paths(ModelRc::new(VecModel::from(vec![
+        SharedString::from(upload_path.to_string_lossy().to_string()),
+    ])));
+    app.invoke_workspace_terminal_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        !sftp_state
+            .interactive_zmodem_upload_calls
+            .lock()
+            .expect("lock interactive zmodem upload calls")
+            .is_empty()
+    });
+
+    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(sftp_state.take_remote_cwd_probe_calls(), 1);
+    assert_eq!(
+        sftp_state.take_interactive_zmodem_upload_calls(),
+        vec![vec![upload_path.to_string_lossy().to_string()]]
+    );
+    assert!(
+        sftp_state
+            .upload_file_calls
+            .lock()
+            .expect("lock terminal drop upload calls")
+            .is_empty(),
+        "application cursor mode alone should not force a fake SFTP fallback"
+    );
+}
+
+#[test]
 fn terminal_file_drop_falls_back_to_sftp_current_directory_when_rz_is_missing() {
     let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
@@ -15931,6 +16001,60 @@ fn terminal_file_drop_falls_back_to_sftp_current_directory_when_rz_is_missing() 
     assert!(
         app.get_transfer_center_open(),
         "terminal SFTP fallback uploads should surface the transfer center after queueing work"
+    );
+}
+
+#[test]
+fn terminal_file_drop_reports_missing_cwd_without_enqueuing_sftp_when_rz_is_missing() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    sftp_state.set_remote_rz_available(false);
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(DelayedCwdRecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("terminal-drop-upload-no-cwd-no-rz");
+    let upload_path = temp_root.join("release.env");
+    fs::create_dir_all(temp_root.as_path()).expect("create terminal drop temp root");
+    fs::write(&upload_path, b"PORT=22\n").expect("write terminal drop source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "terminal"
+            && !app.get_active_workspace_session_id().is_empty()
+    });
+
+    app.set_workspace_terminal_external_drop_paths(ModelRc::new(VecModel::from(vec![
+        SharedString::from(upload_path.to_string_lossy().to_string()),
+    ])));
+    app.invoke_workspace_terminal_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_transfer_center_feedback_text()
+            .as_str()
+            .contains("rz is not available")
+    });
+
+    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(sftp_state.take_remote_cwd_probe_calls(), 1);
+    assert_eq!(
+        sftp_state.take_upload_file_calls(),
+        Vec::<(String, Vec<u8>)>::new()
+    );
+    assert!(
+        app.get_transfer_center_feedback_text()
+            .as_str()
+            .starts_with("Operation failed:"),
+        "missing cwd preflight errors should not be presented as a transfer task failure"
     );
 }
 

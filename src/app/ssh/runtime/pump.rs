@@ -577,7 +577,7 @@ pub(super) async fn remote_command_exists(
         bail!("remote command name is not safe to probe: `{command_name}`");
     }
 
-    let command = format!("command -v {command_name} >/dev/null 2>&1");
+    let command = remote_command_probe_command(command_name.as_str());
     let status = timeout(
         REMOTE_COMMAND_PROBE_TIMEOUT,
         remote_exec_exit_status(handle, command),
@@ -664,7 +664,11 @@ async fn run_zmodem_exec_upload_inner(
         .channel_open_session()
         .await
         .context("failed to open SSH exec channel for ZMODEM upload")?;
-    let command = format!("cd {} && rz", shell_quote_posix(remote_dir.as_str()));
+    let command = format!(
+        "{}; cd {} && rz",
+        remote_transfer_path_setup(),
+        shell_quote_posix(remote_dir.as_str())
+    );
     channel
         .exec(true, command)
         .await
@@ -832,6 +836,18 @@ fn is_safe_remote_command_name(command_name: &str) -> bool {
         && command_name
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn remote_transfer_path_setup() -> &'static str {
+    r#"PATH="${PATH:-}${HOME:+:$HOME/.local/bin:$HOME/bin}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"; export PATH"#
+}
+
+fn remote_command_probe_command(command_name: &str) -> String {
+    format!(
+        "__mica_term_probe_command={}; {}; command -v \"$__mica_term_probe_command\" >/dev/null 2>&1",
+        shell_quote_posix(command_name),
+        remote_transfer_path_setup(),
+    )
 }
 
 fn shell_quote_posix(value: &str) -> String {
@@ -1356,6 +1372,16 @@ mod tests {
         assert!(parsed.next_shell_state.has_markers);
         assert!(parsed.next_shell_state.input_active);
         assert!(!parsed.next_shell_state.command_running);
+    }
+
+    #[test]
+    fn remote_command_probe_uses_transfer_path_setup() {
+        let command = remote_command_probe_command("rz");
+
+        assert!(command.contains("__mica_term_probe_command='rz'"));
+        assert!(command.contains("${HOME:+:$HOME/.local/bin:$HOME/bin}"));
+        assert!(command.contains("/usr/local/bin"));
+        assert!(command.contains("command -v \"$__mica_term_probe_command\""));
     }
 
     #[test]

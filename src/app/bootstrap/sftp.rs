@@ -1052,7 +1052,12 @@ pub(super) fn drain_sftp_transfer_background_messages(
                 error,
                 "background SFTP transfer finished with an error"
             );
-            state.show_transfer_center_feedback("error", format!("Transfer failed: {error}"));
+            let prefix = if message.tasks.is_empty() && message.refresh_remote_path.is_none() {
+                "Operation failed"
+            } else {
+                "Transfer failed"
+            };
+            state.show_transfer_center_feedback("error", format!("{prefix}: {error}"));
             changed = true;
         }
 
@@ -1608,11 +1613,11 @@ fn schedule_terminal_cwd_upload_from_paths(
     Ok(scheduled)
 }
 
-fn terminal_surface_allows_automatic_zmodem_drop(state: &ShellViewModel) -> bool {
+fn terminal_surface_allows_interactive_zmodem_drop(state: &ShellViewModel) -> bool {
     let Some(surface) = state.active_workspace_terminal_surface() else {
         return false;
     };
-    if surface.alternate_screen_active || surface.mouse_grabbed || surface.application_cursor_keys {
+    if surface.alternate_screen_active || surface.mouse_grabbed {
         return false;
     }
 
@@ -1662,6 +1667,7 @@ fn schedule_terminal_zmodem_drop_from_paths(
     manager: &SessionManager,
     session_id: Uuid,
     local_paths: Vec<PathBuf>,
+    allow_interactive_fallback: bool,
 ) -> anyhow::Result<bool> {
     if !local_paths_are_zmodem_files(local_paths.as_slice()) {
         return Ok(false);
@@ -1681,19 +1687,22 @@ fn schedule_terminal_zmodem_drop_from_paths(
         }
     }
 
-    if !manager.remote_command_exists(session_id, "rz")? {
-        let remote_dir = terminal_current_working_directory_for_drop(manager, session_id)?
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "the active terminal has not reported its current working directory yet"
-                )
-            })?;
+    let rz_available = manager.remote_command_exists(session_id, "rz")?;
+    tracing::info!(
+        target: "app.drop",
+        target = "terminal",
+        method = "zmodem",
+        session_id = %session_id,
+        rz_available,
+        path_count = local_paths.len(),
+        "terminal external drop probed remote rz"
+    );
+    if !rz_available {
         tracing::info!(
             target: "app.drop",
             target = "terminal",
             method = "sftp",
             session_id = %session_id,
-            remote_dir = remote_dir.as_str(),
             path_count = local_paths.len(),
             "terminal external drop did not find remote rz; falling back to sftp"
         );
@@ -1701,6 +1710,11 @@ fn schedule_terminal_zmodem_drop_from_paths(
     }
 
     let Some(remote_dir) = terminal_current_working_directory_for_drop(manager, session_id)? else {
+        if !allow_interactive_fallback {
+            anyhow::bail!(
+                "the active terminal has not reported its current working directory yet, and it is not safe to start interactive rz from the current terminal state"
+            );
+        }
         tracing::info!(
             target: "app.drop",
             target = "terminal",
@@ -1736,17 +1750,17 @@ fn schedule_terminal_external_drop_from_paths(
         return Ok(false);
     }
     let session_id = active_workspace_session_uuid_for_terminal(state)?;
-    let allow_automatic_zmodem = terminal_surface_allows_automatic_zmodem_drop(state)
-        && local_paths_are_zmodem_files(local_paths.as_slice());
+    let allow_interactive_zmodem = terminal_surface_allows_interactive_zmodem_drop(state);
     let manager = manager.clone();
     let transfer_result_tx = transfer_result_tx.clone();
     std::thread::spawn(move || {
         let result = (|| -> anyhow::Result<()> {
-            if allow_automatic_zmodem
+            if local_paths_are_zmodem_files(local_paths.as_slice())
                 && schedule_terminal_zmodem_drop_from_paths(
                     &manager,
                     session_id,
                     local_paths.clone(),
+                    allow_interactive_zmodem,
                 )?
             {
                 return Ok(());
@@ -1755,7 +1769,7 @@ fn schedule_terminal_external_drop_from_paths(
             let target_dir = terminal_current_working_directory_for_drop(&manager, session_id)?
                 .ok_or_else(|| {
                     anyhow::anyhow!(
-                        "the active terminal has not reported its current working directory yet"
+                        "the active terminal has not reported its current working directory yet, and rz is not available for ZMODEM upload"
                     )
                 })?;
             schedule_terminal_cwd_upload_from_paths(
