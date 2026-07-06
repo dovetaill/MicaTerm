@@ -8,15 +8,6 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex, OnceLock};
 
 const SFTP_PARENT_ITEM_ID: &str = "__sftp_parent__";
-const TERMINAL_ZMODEM_DROP_COMMAND: &str = "if command -v rz >/dev/null 2>&1; then rz; else printf '\\r\\nrz command not found; falling back to SFTP upload.\\r\\n'; fi\r";
-const TERMINAL_ZMODEM_DROP_POLL_INTERVAL: Duration = Duration::from_millis(100);
-const TERMINAL_ZMODEM_DROP_TIMEOUT: Duration = Duration::from_secs(4);
-
-struct TerminalZmodemDropProbe {
-    session_id: Uuid,
-    local_paths: Vec<PathBuf>,
-    started_at: Instant,
-}
 
 #[derive(Clone, Default)]
 struct TransferPauseRegistry {
@@ -1613,7 +1604,6 @@ fn active_workspace_session_uuid_for_terminal(state: &ShellViewModel) -> anyhow:
 fn schedule_terminal_zmodem_drop_from_paths(
     state: &ShellViewModel,
     manager: &SessionManager,
-    pending_probe: &Rc<RefCell<Option<TerminalZmodemDropProbe>>>,
     local_paths: Vec<PathBuf>,
 ) -> anyhow::Result<bool> {
     if !local_paths_are_zmodem_files(local_paths.as_slice()) {
@@ -1639,135 +1629,37 @@ fn schedule_terminal_zmodem_drop_from_paths(
         }
     }
 
+    let remote_dir = manager
+        .current_working_directory(session_id)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "the active terminal has not reported its current working directory yet"
+            )
+        })?;
+    if !manager.remote_command_exists(session_id, "rz")? {
+        tracing::info!(
+            target: "app.drop",
+            target = "terminal",
+            method = "sftp",
+            session_id = %session_id,
+            remote_dir = remote_dir.as_str(),
+            path_count = local_paths.len(),
+            "terminal external drop did not find remote rz; falling back to sftp"
+        );
+        return Ok(false);
+    }
+
     tracing::info!(
         target: "app.drop",
         target = "terminal",
         method = "zmodem",
         session_id = %session_id,
+        remote_dir = remote_dir.as_str(),
         path_count = local_paths.len(),
-        "terminal external drop probing rz receiver"
+        "terminal external drop starting rz over dedicated exec channel"
     );
-    manager.send_session_text_input(session_id, TERMINAL_ZMODEM_DROP_COMMAND.into())?;
-    *pending_probe.borrow_mut() = Some(TerminalZmodemDropProbe {
-        session_id,
-        local_paths,
-        started_at: Instant::now(),
-    });
+    manager.start_zmodem_upload_to_remote_dir(session_id, local_paths, remote_dir)?;
     Ok(true)
-}
-
-fn start_terminal_zmodem_drop_probe_timer(
-    timer: &Rc<Timer>,
-    pending_probe: &Rc<RefCell<Option<TerminalZmodemDropProbe>>>,
-    window_handle: slint::Weak<AppWindow>,
-    view_model: Rc<RefCell<ShellViewModel>>,
-    session_bridge: Option<Rc<ShellSessionBridge>>,
-    transfer_result_tx: std::sync::mpsc::Sender<SftpTransferBackgroundMessage>,
-    effects: Rc<dyn PlatformWindowEffects>,
-    workspace_follow_tracker: Rc<RefCell<WorkspaceFollowTracker>>,
-) {
-    let timer_ref = Rc::clone(timer);
-    let pending_probe_ref = Rc::clone(pending_probe);
-    timer.start(
-        TimerMode::Repeated,
-        TERMINAL_ZMODEM_DROP_POLL_INTERVAL,
-        move || {
-            let Some(window) = window_handle.upgrade() else {
-                pending_probe_ref.borrow_mut().take();
-                timer_ref.stop();
-                return;
-            };
-            let Some(session_bridge) = session_bridge.as_ref() else {
-                pending_probe_ref.borrow_mut().take();
-                timer_ref.stop();
-                return;
-            };
-
-            let Some((session_id, timed_out)) = pending_probe_ref.borrow().as_ref().map(|probe| {
-                (
-                    probe.session_id,
-                    probe.started_at.elapsed() >= TERMINAL_ZMODEM_DROP_TIMEOUT,
-                )
-            }) else {
-                timer_ref.stop();
-                return;
-            };
-
-            if let Some(zmodem_state) = session_bridge.manager.zmodem_state(session_id) {
-                if zmodem_state.phase == ZmodemTransferPhase::AwaitingUploadSelection {
-                    let Some(probe) = pending_probe_ref.borrow_mut().take() else {
-                        timer_ref.stop();
-                        return;
-                    };
-                    tracing::info!(
-                        target: "app.drop",
-                        target = "terminal",
-                        method = "zmodem",
-                        session_id = %probe.session_id,
-                        path_count = probe.local_paths.len(),
-                        "terminal external drop rz receiver detected"
-                    );
-                    if let Err(err) = session_bridge
-                        .manager
-                        .start_zmodem_upload(probe.session_id, probe.local_paths)
-                    {
-                        let mut state = view_model.borrow_mut();
-                        state.show_transfer_center_feedback(
-                            "error",
-                            format!("Upload with rz failed: {err}"),
-                        );
-                        super::shell_chrome::sync_shell_side_regions(
-                            &window,
-                            &mut state,
-                            effects.as_ref(),
-                            &mut workspace_follow_tracker.borrow_mut(),
-                            Some(&session_bridge.manager),
-                        );
-                    }
-                    timer_ref.stop();
-                    return;
-                }
-            }
-
-            if !timed_out {
-                return;
-            }
-
-            let Some(probe) = pending_probe_ref.borrow_mut().take() else {
-                timer_ref.stop();
-                return;
-            };
-            tracing::info!(
-                target: "app.drop",
-                target = "terminal",
-                method = "sftp",
-                session_id = %probe.session_id,
-                path_count = probe.local_paths.len(),
-                "terminal external drop did not observe rz handshake; falling back to sftp"
-            );
-            let mut state = view_model.borrow_mut();
-            let result = schedule_terminal_cwd_upload_from_paths(
-                &mut state,
-                &session_bridge.manager,
-                &transfer_result_tx,
-                probe.local_paths,
-            );
-            if let Err(err) = result {
-                state.show_transfer_center_feedback(
-                    "error",
-                    format!("Upload to current directory failed: {err}"),
-                );
-            }
-            super::shell_chrome::sync_shell_side_regions(
-                &window,
-                &mut state,
-                effects.as_ref(),
-                &mut workspace_follow_tracker.borrow_mut(),
-                Some(&session_bridge.manager),
-            );
-            timer_ref.stop();
-        },
-    );
 }
 
 pub(super) fn workspace_terminal_accepts_external_drop(
@@ -2284,8 +2176,6 @@ pub(super) fn bind_sftp_callbacks(
     let sftp_result_tx = sftp_result_tx.clone();
     let sftp_transfer_result_tx = sftp_transfer_result_tx.clone();
     let sftp_local_action_result_tx = sftp_local_action_result_tx.clone();
-    let terminal_zmodem_drop_probe = Rc::new(RefCell::new(None::<TerminalZmodemDropProbe>));
-    let terminal_zmodem_drop_timer = Rc::new(Timer::default());
     let transfer_store = transfer_store.cloned();
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
@@ -2830,9 +2720,6 @@ pub(super) fn bind_sftp_callbacks(
     let session_bridge_ref = session_bridge.clone();
     let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
     let transfer_result_tx_ref = sftp_transfer_result_tx.clone();
-    let terminal_zmodem_drop_probe_ref = Rc::clone(&terminal_zmodem_drop_probe);
-    let terminal_zmodem_drop_timer_ref = Rc::clone(&terminal_zmodem_drop_timer);
-    let state_ref_for_terminal_zmodem_drop = Rc::clone(&state);
     window.on_workspace_terminal_external_drop_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -2852,22 +2739,9 @@ pub(super) fn bind_sftp_callbacks(
             match schedule_terminal_zmodem_drop_from_paths(
                 &state,
                 &session_bridge.manager,
-                &terminal_zmodem_drop_probe_ref,
                 local_paths.clone(),
             ) {
-                Ok(true) => {
-                    start_terminal_zmodem_drop_probe_timer(
-                        &terminal_zmodem_drop_timer_ref,
-                        &terminal_zmodem_drop_probe_ref,
-                        window.as_weak(),
-                        Rc::clone(&state_ref_for_terminal_zmodem_drop),
-                        session_bridge_ref.clone(),
-                        transfer_result_tx_ref.clone(),
-                        Rc::clone(&effects_ref),
-                        Rc::clone(&workspace_follow_tracker_ref),
-                    );
-                    Ok(true)
-                }
+                Ok(true) => Ok(true),
                 Ok(false) => schedule_terminal_cwd_upload_from_paths(
                     &mut state,
                     &session_bridge.manager,

@@ -147,6 +147,20 @@ pub trait SessionRuntimeControl: Send {
     fn start_zmodem_upload(&self, _local_paths: Vec<PathBuf>) -> Result<()> {
         Err(anyhow!("session runtime does not support zmodem uploads"))
     }
+    fn remote_command_exists(&self, _command_name: String) -> Result<bool> {
+        Err(anyhow!(
+            "session runtime does not support remote command probes"
+        ))
+    }
+    fn start_zmodem_upload_to_remote_dir(
+        &self,
+        _local_paths: Vec<PathBuf>,
+        _remote_dir: String,
+    ) -> Result<()> {
+        Err(anyhow!(
+            "session runtime does not support zmodem exec uploads"
+        ))
+    }
     fn start_zmodem_download(
         &self,
         _local_dir: PathBuf,
@@ -833,6 +847,29 @@ impl SessionManager {
             .get(&session_id)
             .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
         runtime_control.start_zmodem_upload(local_paths)
+    }
+
+    pub fn remote_command_exists(&self, session_id: Uuid, command_name: &str) -> Result<bool> {
+        let registry = self.registry.lock().expect("lock session registry");
+        let runtime_control = registry
+            .runtime_controls
+            .get(&session_id)
+            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
+        runtime_control.remote_command_exists(command_name.to_string())
+    }
+
+    pub fn start_zmodem_upload_to_remote_dir(
+        &self,
+        session_id: Uuid,
+        local_paths: Vec<PathBuf>,
+        remote_dir: String,
+    ) -> Result<()> {
+        let registry = self.registry.lock().expect("lock session registry");
+        let runtime_control = registry
+            .runtime_controls
+            .get(&session_id)
+            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
+        runtime_control.start_zmodem_upload_to_remote_dir(local_paths, remote_dir)
     }
 
     pub fn start_zmodem_download(

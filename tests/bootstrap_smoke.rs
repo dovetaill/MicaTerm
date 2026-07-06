@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::fs;
 use std::future::Future;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -1021,6 +1022,9 @@ struct RecordingSftpState {
     download_file_calls: Arc<Mutex<Vec<String>>>,
     upload_file_calls: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
     text_input_calls: Arc<Mutex<Vec<String>>>,
+    remote_command_exists_calls: Arc<Mutex<Vec<String>>>,
+    zmodem_exec_upload_calls: Arc<Mutex<Vec<(String, Vec<String>)>>>,
+    remote_rz_available: Arc<Mutex<Option<bool>>>,
     mkdir_calls: Arc<Mutex<Vec<String>>>,
     rename_calls: Arc<Mutex<Vec<(String, String)>>>,
     remove_file_calls: Arc<Mutex<Vec<String>>>,
@@ -1060,6 +1064,31 @@ impl RecordingSftpState {
 
     fn take_text_input_calls(&self) -> Vec<String> {
         std::mem::take(&mut *self.text_input_calls.lock().expect("lock text input calls"))
+    }
+
+    fn take_remote_command_exists_calls(&self) -> Vec<String> {
+        std::mem::take(
+            &mut *self
+                .remote_command_exists_calls
+                .lock()
+                .expect("lock remote command probe calls"),
+        )
+    }
+
+    fn take_zmodem_exec_upload_calls(&self) -> Vec<(String, Vec<String>)> {
+        std::mem::take(
+            &mut *self
+                .zmodem_exec_upload_calls
+                .lock()
+                .expect("lock zmodem exec upload calls"),
+        )
+    }
+
+    fn set_remote_rz_available(&self, available: bool) {
+        *self
+            .remote_rz_available
+            .lock()
+            .expect("lock remote rz availability") = Some(available);
     }
 
     fn take_mkdir_calls(&self) -> Vec<String> {
@@ -2101,6 +2130,40 @@ impl SessionRuntimeControl for RecordingSftpRuntimeControl {
             .lock()
             .expect("lock text input calls")
             .push(text);
+        Ok(())
+    }
+
+    fn remote_command_exists(&self, command_name: String) -> Result<bool> {
+        self.state
+            .remote_command_exists_calls
+            .lock()
+            .expect("lock remote command probe calls")
+            .push(command_name.clone());
+        let rz_available = self
+            .state
+            .remote_rz_available
+            .lock()
+            .expect("lock remote rz availability")
+            .unwrap_or(true);
+        Ok(command_name == "rz" && rz_available)
+    }
+
+    fn start_zmodem_upload_to_remote_dir(
+        &self,
+        local_paths: Vec<PathBuf>,
+        remote_dir: String,
+    ) -> Result<()> {
+        self.state
+            .zmodem_exec_upload_calls
+            .lock()
+            .expect("lock zmodem exec upload calls")
+            .push((
+                remote_dir,
+                local_paths
+                    .into_iter()
+                    .map(|path| path.to_string_lossy().to_string())
+                    .collect(),
+            ));
         Ok(())
     }
 
@@ -15544,7 +15607,7 @@ fn external_sftp_drop_callbacks_toggle_overlay_and_queue_background_uploads() {
 }
 
 #[test]
-fn terminal_file_drop_probes_rz_then_falls_back_to_sftp_current_directory() {
+fn terminal_file_drop_uses_exec_rz_without_terminal_text_input() {
     let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
     let app = AppWindow::new().unwrap();
@@ -15585,17 +15648,19 @@ fn terminal_file_drop_probes_rz_then_falls_back_to_sftp_current_directory() {
     wait_for_condition(Duration::from_secs(2), || {
         flush_runtime_projection();
         !sftp_state
-            .text_input_calls
+            .zmodem_exec_upload_calls
             .lock()
-            .expect("lock terminal drop text input calls")
+            .expect("lock zmodem exec upload calls")
             .is_empty()
     });
-    let text_inputs = sftp_state.take_text_input_calls();
-    assert!(
-        text_inputs
-            .iter()
-            .any(|input| input.contains("command -v rz") && input.contains("then rz")),
-        "terminal file drops should probe rz before falling back to SFTP"
+    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(sftp_state.take_text_input_calls(), Vec::<String>::new());
+    assert_eq!(
+        sftp_state.take_zmodem_exec_upload_calls(),
+        vec![(
+            "/srv/app".to_string(),
+            vec![upload_path.to_string_lossy().to_string()]
+        )]
     );
     assert!(
         sftp_state
@@ -15603,10 +15668,47 @@ fn terminal_file_drop_probes_rz_then_falls_back_to_sftp_current_directory() {
             .lock()
             .expect("lock terminal drop upload calls")
             .is_empty(),
-        "terminal file drops should not use SFTP until the rz probe times out"
+        "terminal file drops should prefer exec-channel rz over SFTP when rz exists"
+    );
+    assert!(
+        !app.get_workspace_terminal_drop_target_active(),
+        "drop completion should clear the terminal hover overlay"
+    );
+}
+
+#[test]
+fn terminal_file_drop_falls_back_to_sftp_current_directory_when_rz_is_missing() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    sftp_state.set_remote_rz_available(false);
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
     );
 
-    settle_sync_scheduler(Duration::from_secs(4));
+    let temp_root = sample_vault_runtime_root("terminal-drop-upload-no-rz");
+    let upload_path = temp_root.join("release.env");
+    fs::create_dir_all(temp_root.as_path()).expect("create terminal drop temp root");
+    fs::write(&upload_path, b"PORT=22\n").expect("write terminal drop source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "terminal"
+            && !app.get_active_workspace_session_id().is_empty()
+    });
+
+    app.set_workspace_terminal_external_drop_paths(ModelRc::new(VecModel::from(vec![
+        SharedString::from(upload_path.to_string_lossy().to_string()),
+    ])));
+    app.invoke_workspace_terminal_external_drop_requested();
+
     wait_for_condition(Duration::from_secs(2), || {
         flush_runtime_projection();
         !sftp_state
@@ -15616,21 +15718,23 @@ fn terminal_file_drop_probes_rz_then_falls_back_to_sftp_current_directory() {
             .is_empty()
     });
 
+    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(sftp_state.take_text_input_calls(), Vec::<String>::new());
+    assert_eq!(
+        sftp_state.take_zmodem_exec_upload_calls(),
+        Vec::<(String, Vec<String>)>::new()
+    );
     assert_eq!(
         sftp_state.take_upload_file_calls(),
         vec![("/srv/app/release.env".to_string(), b"PORT=22\n".to_vec())]
     );
     assert!(
         app.get_sftp_queue_drawer_open(),
-        "terminal drop uploads should open the shared transfer queue drawer so the user gets immediate feedback"
+        "terminal SFTP fallback uploads should open the shared transfer queue drawer"
     );
     assert!(
         app.get_transfer_center_open(),
-        "terminal drop uploads should surface the transfer center after queueing work"
-    );
-    assert!(
-        !app.get_workspace_terminal_drop_target_active(),
-        "drop completion should clear the terminal hover overlay"
+        "terminal SFTP fallback uploads should surface the transfer center after queueing work"
     );
 }
 

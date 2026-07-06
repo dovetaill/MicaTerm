@@ -267,6 +267,10 @@ impl ZmodemController {
         true
     }
 
+    pub(super) fn current_state(&self) -> Option<&ZmodemTransferState> {
+        self.modal_state.as_ref()
+    }
+
     pub(super) fn take_modal_state_change(&mut self) -> Option<Option<ZmodemTransferState>> {
         if !self.modal_dirty {
             return None;

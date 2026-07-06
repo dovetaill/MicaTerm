@@ -4,6 +4,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use anyhow::{Context, Result, anyhow, bail};
 use russh::client;
 use russh::{Channel, ChannelMsg, Disconnect};
 use tokio::sync::mpsc;
@@ -21,6 +22,9 @@ use super::{
     SURFACE_DIRTY_NOTIFICATION_INTERVAL, SessionRuntimeEvent, WORKING_SET_TRIM_IDLE_INTERVAL,
     WORKING_SET_TRIM_MIN_OUTPUT_BYTES,
 };
+
+const ZMODEM_EXEC_UPLOAD_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
+const REMOTE_COMMAND_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub(super) async fn run_channel_pump(
     session_id: Uuid,
@@ -448,6 +452,238 @@ pub(super) async fn run_channel_pump(
                 }
             }
         }
+    }
+}
+
+pub(super) async fn remote_command_exists(
+    handle: Arc<client::Handle<RuntimeClientHandler>>,
+    command_name: String,
+) -> Result<bool> {
+    if !is_safe_remote_command_name(command_name.as_str()) {
+        bail!("remote command name is not safe to probe: `{command_name}`");
+    }
+
+    let command = format!("command -v {command_name} >/dev/null 2>&1");
+    let status = timeout(
+        REMOTE_COMMAND_PROBE_TIMEOUT,
+        remote_exec_exit_status(handle, command),
+    )
+    .await
+    .context("remote command probe timed out")??;
+    Ok(status == Some(0))
+}
+
+pub(super) async fn run_zmodem_exec_upload(
+    session_id: Uuid,
+    handle: Arc<client::Handle<RuntimeClientHandler>>,
+    event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    local_paths: Vec<std::path::PathBuf>,
+    remote_dir: String,
+) {
+    let path_count = local_paths.len();
+    tracing::info!(
+        target: "app.zmodem",
+        session_id = %session_id,
+        remote_dir = remote_dir.as_str(),
+        path_count,
+        "starting zmodem upload over dedicated SSH exec channel"
+    );
+    if let Err(err) = run_zmodem_exec_upload_inner(
+        session_id,
+        Arc::clone(&handle),
+        event_tx.clone(),
+        local_paths,
+        remote_dir.clone(),
+    )
+    .await
+    {
+        tracing::warn!(
+            target: "app.zmodem",
+            session_id = %session_id,
+            remote_dir = remote_dir.as_str(),
+            error = %err,
+            "zmodem exec upload failed"
+        );
+        let _ = event_tx.send(SessionRuntimeEvent::ZmodemStateChanged(Some(
+            failed_zmodem_upload_state(err.to_string()),
+        )));
+    }
+}
+
+async fn run_zmodem_exec_upload_inner(
+    session_id: Uuid,
+    handle: Arc<client::Handle<RuntimeClientHandler>>,
+    event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    local_paths: Vec<std::path::PathBuf>,
+    remote_dir: String,
+) -> Result<()> {
+    let mut channel = handle
+        .channel_open_session()
+        .await
+        .context("failed to open SSH exec channel for ZMODEM upload")?;
+    let command = format!("cd {} && rz", shell_quote_posix(remote_dir.as_str()));
+    channel
+        .exec(true, command)
+        .await
+        .context("failed to request remote rz exec")?;
+
+    let mut zmodem = ZmodemController::default();
+    let mut pending_local_paths = Some(local_paths);
+    let mut upload_started = false;
+    let mut exec_accepted = false;
+    let mut exit_status = None;
+    let handshake_started = Instant::now();
+
+    loop {
+        let maybe_message = if upload_started {
+            channel.wait().await
+        } else {
+            let remaining = ZMODEM_EXEC_UPLOAD_HANDSHAKE_TIMEOUT
+                .checked_sub(handshake_started.elapsed())
+                .unwrap_or(Duration::ZERO);
+            if remaining.is_zero() {
+                bail!("remote rz did not emit a ZMODEM upload handshake");
+            }
+            timeout(remaining, channel.wait())
+                .await
+                .context("remote rz did not emit a ZMODEM upload handshake")?
+        };
+
+        let Some(message) = maybe_message else {
+            break;
+        };
+
+        match message {
+            ChannelMsg::Success => {
+                exec_accepted = true;
+            }
+            ChannelMsg::Failure if !exec_accepted => {
+                bail!("remote SSH server rejected the rz exec request");
+            }
+            ChannelMsg::Data { data } => {
+                let _ignored_exec_output = zmodem.intercept_remote_bytes(data.as_ref());
+                emit_zmodem_state_changes(&mut zmodem, &event_tx);
+                if !upload_started
+                    && zmodem.current_state().is_some_and(|state| {
+                        state.direction == super::ZmodemTransferDirection::Upload
+                            && state.phase == super::ZmodemTransferPhase::AwaitingUploadSelection
+                    })
+                {
+                    let local_paths = pending_local_paths
+                        .take()
+                        .ok_or_else(|| anyhow!("zmodem upload files were already consumed"))?;
+                    zmodem
+                        .start_upload(local_paths)
+                        .context("failed to start local ZMODEM upload")?;
+                    upload_started = true;
+                    emit_zmodem_state_changes(&mut zmodem, &event_tx);
+                }
+                if !drive_zmodem(&handle, channel.id(), &event_tx, &mut zmodem).await {
+                    bail!("failed to write ZMODEM upload bytes to SSH exec channel");
+                }
+            }
+            ChannelMsg::ExtendedData { .. } => {}
+            ChannelMsg::ExitStatus {
+                exit_status: status,
+            } => {
+                exit_status = Some(status);
+            }
+            ChannelMsg::ExitSignal {
+                signal_name,
+                error_message,
+                ..
+            } => {
+                bail!("remote rz exited by signal {signal_name:?}: {error_message}");
+            }
+            ChannelMsg::Eof | ChannelMsg::Close => {
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    zmodem.mark_transport_closed();
+    emit_zmodem_state_changes(&mut zmodem, &event_tx);
+
+    let Some(state) = zmodem.current_state() else {
+        bail!("remote rz closed before starting a ZMODEM upload");
+    };
+    if state.phase != super::ZmodemTransferPhase::Completed {
+        if let Some(status) = exit_status {
+            bail!("remote rz exited with status {status}");
+        }
+        bail!("remote rz closed before the ZMODEM upload completed");
+    }
+
+    tracing::info!(
+        target: "app.zmodem",
+        session_id = %session_id,
+        files_completed = state.files_completed,
+        bytes_transferred = state.bytes_transferred,
+        "zmodem exec upload completed"
+    );
+    Ok(())
+}
+
+async fn remote_exec_exit_status(
+    handle: Arc<client::Handle<RuntimeClientHandler>>,
+    command: String,
+) -> Result<Option<u32>> {
+    let mut channel = handle
+        .channel_open_session()
+        .await
+        .context("failed to open SSH exec channel for remote command probe")?;
+    channel
+        .exec(true, command)
+        .await
+        .context("failed to request remote command probe")?;
+
+    let mut exec_accepted = false;
+    let mut exit_status = None;
+    while let Some(message) = channel.wait().await {
+        match message {
+            ChannelMsg::Success => exec_accepted = true,
+            ChannelMsg::Failure if !exec_accepted => {
+                bail!("remote SSH server rejected the command probe request");
+            }
+            ChannelMsg::ExitStatus {
+                exit_status: status,
+            } => exit_status = Some(status),
+            ChannelMsg::ExitSignal { .. } => return Ok(Some(255)),
+            ChannelMsg::Close | ChannelMsg::Eof => break,
+            _ => {}
+        }
+    }
+    Ok(exit_status)
+}
+
+fn is_safe_remote_command_name(command_name: &str) -> bool {
+    !command_name.is_empty()
+        && command_name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn shell_quote_posix(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn failed_zmodem_upload_state(error_text: String) -> super::ZmodemTransferState {
+    super::ZmodemTransferState {
+        direction: super::ZmodemTransferDirection::Upload,
+        phase: super::ZmodemTransferPhase::Failed,
+        title: "ZMODEM Upload".into(),
+        headline: "Upload failed".into(),
+        status_text: "The drag upload could not be completed with rz.".into(),
+        detail_text: String::new(),
+        error_text,
+        current_file_name: String::new(),
+        files_completed: 0,
+        files_total: None,
+        bytes_transferred: 0,
+        bytes_total: None,
+        local_file_path: None,
+        local_reveal_path: None,
     }
 }
 

@@ -25,8 +25,8 @@ pub use zmodem::{
     ZmodemDownloadConflictPolicy, ZmodemTransferDirection, ZmodemTransferPhase, ZmodemTransferState,
 };
 
-use self::auth::ConnectionProgressReporter;
-use self::pump::run_channel_pump;
+use self::auth::{ConnectionProgressReporter, RuntimeClientHandler};
+use self::pump::{remote_command_exists, run_channel_pump, run_zmodem_exec_upload};
 use self::sftp_backend::RusshSftpBackend;
 use self::terminal::{apply_remote_output, await_channel_success, negotiate_terminal_environment};
 use self::transport::{connect_target_handle_for_profile, ssh_client_config};
@@ -183,6 +183,9 @@ pub struct SshSessionRuntime {
     session_id: Uuid,
     #[allow(dead_code)]
     profile: ConnectionProfile,
+    handle: Arc<russh::client::Handle<RuntimeClientHandler>>,
+    async_runtime: tokio::runtime::Handle,
+    event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     terminal: Arc<Mutex<TerminalSession>>,
     terminal_defaults: TerminalRuntimeDefaults,
     command_tx: mpsc::UnboundedSender<RuntimeCommand>,
@@ -338,6 +341,9 @@ impl SshSessionRuntime {
         let runtime = Self {
             session_id,
             profile: profile.clone(),
+            handle: Arc::clone(&handle),
+            async_runtime: tokio::runtime::Handle::current(),
+            event_tx: event_tx.clone(),
             terminal: Arc::clone(&terminal),
             terminal_defaults,
             command_tx,
@@ -406,6 +412,28 @@ impl SshSessionRuntime {
         self.command_tx
             .send(RuntimeCommand::StartZmodemUpload { local_paths })
             .map_err(|_| anyhow!("ssh runtime zmodem upload channel is closed"))
+    }
+
+    pub fn remote_command_exists(&self, command_name: String) -> Result<bool> {
+        self.async_runtime.block_on(remote_command_exists(
+            Arc::clone(&self.handle),
+            command_name,
+        ))
+    }
+
+    pub fn start_zmodem_upload_to_remote_dir(
+        &self,
+        local_paths: Vec<PathBuf>,
+        remote_dir: String,
+    ) -> Result<()> {
+        self.async_runtime.spawn(run_zmodem_exec_upload(
+            self.session_id,
+            Arc::clone(&self.handle),
+            self.event_tx.clone(),
+            local_paths,
+            remote_dir,
+        ));
+        Ok(())
     }
 
     pub fn start_zmodem_download(
@@ -528,6 +556,18 @@ impl SessionRuntimeControl for SshSessionRuntime {
 
     fn start_zmodem_upload(&self, local_paths: Vec<PathBuf>) -> Result<()> {
         SshSessionRuntime::start_zmodem_upload(self, local_paths)
+    }
+
+    fn remote_command_exists(&self, command_name: String) -> Result<bool> {
+        SshSessionRuntime::remote_command_exists(self, command_name)
+    }
+
+    fn start_zmodem_upload_to_remote_dir(
+        &self,
+        local_paths: Vec<PathBuf>,
+        remote_dir: String,
+    ) -> Result<()> {
+        SshSessionRuntime::start_zmodem_upload_to_remote_dir(self, local_paths, remote_dir)
     }
 
     fn start_zmodem_download(
