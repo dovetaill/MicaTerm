@@ -15910,7 +15910,11 @@ fn terminal_file_drop_uses_interactive_rz_when_cwd_is_unavailable() {
             .is_empty()
     });
 
-    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(
+        sftp_state.take_remote_command_exists_calls(),
+        Vec::<String>::new(),
+        "missing cwd should use PTY rz fallback without an exec-channel availability veto"
+    );
     assert_eq!(sftp_state.take_remote_cwd_probe_calls(), 1);
     assert_eq!(sftp_state.take_text_input_calls(), Vec::<String>::new());
     assert_eq!(
@@ -15973,7 +15977,11 @@ fn terminal_file_drop_uses_interactive_rz_when_cwd_probe_fails() {
             .is_empty()
     });
 
-    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(
+        sftp_state.take_remote_command_exists_calls(),
+        Vec::<String>::new(),
+        "cwd probe failures should use PTY rz fallback without an exec-channel availability veto"
+    );
     assert_eq!(sftp_state.take_remote_cwd_probe_calls(), 1);
     assert_eq!(
         sftp_state.take_interactive_zmodem_upload_calls(),
@@ -16033,7 +16041,11 @@ fn terminal_file_drop_uses_interactive_rz_when_surface_is_not_projected() {
             .is_empty()
     });
 
-    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(
+        sftp_state.take_remote_command_exists_calls(),
+        Vec::<String>::new(),
+        "missing terminal surface should not force an exec-channel availability veto"
+    );
     assert_eq!(sftp_state.take_remote_cwd_probe_calls(), 1);
     assert_eq!(sftp_state.take_text_input_calls(), Vec::<String>::new());
     assert_eq!(
@@ -16105,7 +16117,11 @@ fn terminal_file_drop_uses_interactive_rz_when_application_cursor_mode_is_set() 
             .is_empty()
     });
 
-    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(
+        sftp_state.take_remote_command_exists_calls(),
+        Vec::<String>::new(),
+        "application cursor mode should not force an exec-channel availability veto"
+    );
     assert_eq!(sftp_state.take_remote_cwd_probe_calls(), 1);
     assert_eq!(
         sftp_state.take_interactive_zmodem_upload_calls(),
@@ -16174,7 +16190,11 @@ fn terminal_file_drop_uses_interactive_rz_when_shell_markers_are_not_ready() {
             .is_empty()
     });
 
-    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(
+        sftp_state.take_remote_command_exists_calls(),
+        Vec::<String>::new(),
+        "stale shell markers should not force an exec-channel availability veto"
+    );
     assert_eq!(sftp_state.take_remote_cwd_probe_calls(), 1);
     assert_eq!(
         sftp_state.take_interactive_zmodem_upload_calls(),
@@ -16256,7 +16276,7 @@ fn terminal_file_drop_falls_back_to_sftp_current_directory_when_rz_is_missing() 
 }
 
 #[test]
-fn terminal_file_drop_reports_missing_cwd_without_enqueuing_sftp_when_rz_is_missing() {
+fn terminal_file_drop_uses_interactive_rz_when_exec_probe_misses_and_cwd_is_unavailable() {
     let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
     let app = AppWindow::new().unwrap();
@@ -16290,22 +16310,32 @@ fn terminal_file_drop_reports_missing_cwd_without_enqueuing_sftp_when_rz_is_miss
 
     wait_for_condition(Duration::from_secs(2), || {
         flush_runtime_projection();
-        app.get_transfer_center_feedback_text()
-            .as_str()
-            .contains("rz is not available")
+        !sftp_state
+            .interactive_zmodem_upload_calls
+            .lock()
+            .expect("lock interactive zmodem upload calls")
+            .is_empty()
     });
 
-    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(
+        sftp_state.take_remote_command_exists_calls(),
+        Vec::<String>::new(),
+        "missing cwd should not let an exec-channel rz probe veto the PTY rz fallback"
+    );
     assert_eq!(sftp_state.take_remote_cwd_probe_calls(), 1);
+    assert_eq!(
+        sftp_state.take_interactive_zmodem_upload_calls(),
+        vec![vec![upload_path.to_string_lossy().to_string()]]
+    );
     assert_eq!(
         sftp_state.take_upload_file_calls(),
         Vec::<(String, Vec<u8>)>::new()
     );
     assert!(
-        app.get_transfer_center_feedback_text()
+        !app.get_transfer_center_feedback_text()
             .as_str()
             .starts_with("Operation failed:"),
-        "missing cwd preflight errors should not be presented as a transfer task failure"
+        "exec-channel rz probe false negatives should not surface as a cwd preflight failure"
     );
 }
 

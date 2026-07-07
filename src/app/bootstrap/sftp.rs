@@ -1719,28 +1719,6 @@ fn schedule_terminal_zmodem_drop_from_paths(
         }
     }
 
-    let rz_available = manager.remote_command_exists(session_id, "rz")?;
-    tracing::info!(
-        target: "app.drop",
-        target = "terminal",
-        method = "zmodem",
-        session_id = %session_id,
-        rz_available,
-        path_count = local_paths.len(),
-        "terminal external drop probed remote rz"
-    );
-    if !rz_available {
-        tracing::info!(
-            target: "app.drop",
-            target = "terminal",
-            method = "sftp",
-            session_id = %session_id,
-            path_count = local_paths.len(),
-            "terminal external drop did not find remote rz; falling back to sftp"
-        );
-        return Ok(false);
-    }
-
     let Some(remote_dir) = terminal_current_working_directory_for_drop(manager, session_id)? else {
         if !allow_interactive_fallback {
             anyhow::bail!(
@@ -1758,6 +1736,43 @@ fn schedule_terminal_zmodem_drop_from_paths(
         manager.start_interactive_zmodem_upload(session_id, local_paths)?;
         return Ok(true);
     };
+
+    let rz_available = match manager.remote_command_exists(session_id, "rz") {
+        Ok(available) => available,
+        Err(err) => {
+            tracing::warn!(
+                target: "app.drop",
+                target = "terminal",
+                method = "zmodem",
+                session_id = %session_id,
+                remote_dir = remote_dir.as_str(),
+                error = %err,
+                "terminal external drop remote rz probe failed; falling back to sftp"
+            );
+            false
+        }
+    };
+    tracing::info!(
+        target: "app.drop",
+        target = "terminal",
+        method = "zmodem",
+        session_id = %session_id,
+        remote_dir = remote_dir.as_str(),
+        rz_available,
+        path_count = local_paths.len(),
+        "terminal external drop probed remote rz"
+    );
+    if !rz_available {
+        tracing::info!(
+            target: "app.drop",
+            target = "terminal",
+            method = "sftp",
+            session_id = %session_id,
+            path_count = local_paths.len(),
+            "terminal external drop did not find remote rz; falling back to sftp"
+        );
+        return Ok(false);
+    }
 
     tracing::info!(
         target: "app.drop",

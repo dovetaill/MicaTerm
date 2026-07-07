@@ -24,6 +24,7 @@ use super::{
 };
 
 const ZMODEM_EXEC_UPLOAD_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
+const INTERACTIVE_ZMODEM_UPLOAD_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 const REMOTE_COMMAND_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const REMOTE_CWD_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const INTERACTIVE_RZ_UPLOAD_COMMAND: &[u8] = b" rz\r";
@@ -66,6 +67,31 @@ fi
 fi
 exit 1"#;
 
+#[derive(Debug)]
+struct PendingInteractiveZmodemUpload {
+    local_paths: Vec<std::path::PathBuf>,
+    started_at: Instant,
+}
+
+impl PendingInteractiveZmodemUpload {
+    fn new(local_paths: Vec<std::path::PathBuf>) -> Self {
+        Self {
+            local_paths,
+            started_at: Instant::now(),
+        }
+    }
+
+    fn remaining_timeout(&self, now: Instant) -> Duration {
+        INTERACTIVE_ZMODEM_UPLOAD_HANDSHAKE_TIMEOUT
+            .checked_sub(now.saturating_duration_since(self.started_at))
+            .unwrap_or(Duration::ZERO)
+    }
+
+    fn timed_out(&self, now: Instant) -> bool {
+        self.remaining_timeout(now).is_zero()
+    }
+}
+
 pub(super) async fn run_channel_pump(
     session_id: Uuid,
     handle: Arc<client::Handle<RuntimeClientHandler>>,
@@ -85,9 +111,12 @@ pub(super) async fn run_channel_pump(
     let mut shell_integration = super::TerminalShellIntegrationState::default();
     let mut synchronized_output = SynchronizedOutputBatcher::default();
     let mut zmodem = ZmodemController::default();
-    let mut pending_interactive_zmodem_upload: Option<Vec<std::path::PathBuf>> = None;
+    let mut pending_interactive_zmodem_upload: Option<PendingInteractiveZmodemUpload> = None;
 
     'pump: loop {
+        let pending_interactive_zmodem_upload_timeout = pending_interactive_zmodem_upload
+            .as_ref()
+            .map(|pending| pending.remaining_timeout(Instant::now()));
         tokio::select! {
             maybe_command = command_rx.recv(), if command_channel_open => {
                 match maybe_command {
@@ -210,7 +239,8 @@ pub(super) async fn run_channel_pump(
                             path_count = local_paths.len(),
                             "starting zmodem upload through interactive rz fallback"
                         );
-                        pending_interactive_zmodem_upload = Some(local_paths);
+                        pending_interactive_zmodem_upload =
+                            Some(PendingInteractiveZmodemUpload::new(local_paths));
                         zmodem.note_local_input();
                         dirty_notifier.note_local_input(Instant::now());
                         if let Err(bytes) = handle
@@ -506,6 +536,28 @@ pub(super) async fn run_channel_pump(
                     let _ = event_tx.send(SessionRuntimeEvent::SurfaceDirty);
                 }
             }
+            () = sleep(pending_interactive_zmodem_upload_timeout.unwrap_or(Duration::ZERO)),
+                if pending_interactive_zmodem_upload_timeout.is_some() => {
+                if pending_interactive_zmodem_upload
+                    .as_ref()
+                    .is_some_and(|pending| pending.timed_out(Instant::now()))
+                {
+                    let pending = pending_interactive_zmodem_upload
+                        .take()
+                        .expect("pending interactive zmodem upload timed out");
+                    tracing::warn!(
+                        target: "app.zmodem",
+                        session_id = %session_id,
+                        path_count = pending.local_paths.len(),
+                        "interactive rz fallback did not emit a ZMODEM upload handshake"
+                    );
+                    let _ = event_tx.send(SessionRuntimeEvent::ZmodemStateChanged(Some(
+                        failed_zmodem_upload_state(
+                            "remote rz did not emit a ZMODEM upload handshake after the interactive fallback command".into(),
+                        ),
+                    )));
+                }
+            }
             () = async { if let Some(timer) = working_set_trim_timer.as_mut() { timer.await } }, if working_set_trim_timer.is_some() => {
                 working_set_trim_timer = None;
                 if let Some(pending_output_bytes) = working_set_trim_scheduler.take_trim_request_bytes() {
@@ -548,7 +600,7 @@ pub(super) async fn run_channel_pump(
 
 fn start_pending_interactive_zmodem_upload(
     zmodem: &mut ZmodemController,
-    pending_local_paths: &mut Option<Vec<std::path::PathBuf>>,
+    pending_local_paths: &mut Option<PendingInteractiveZmodemUpload>,
     event_tx: &mpsc::UnboundedSender<SessionRuntimeEvent>,
 ) {
     let Some(state) = zmodem.current_state() else {
@@ -560,10 +612,10 @@ fn start_pending_interactive_zmodem_upload(
         return;
     }
 
-    let Some(local_paths) = pending_local_paths.take() else {
+    let Some(pending) = pending_local_paths.take() else {
         return;
     };
-    if let Err(err) = zmodem.start_upload(local_paths) {
+    if let Err(err) = zmodem.start_upload(pending.local_paths) {
         zmodem.surface_error(err.to_string());
     }
     emit_zmodem_state_changes(zmodem, event_tx);
@@ -1251,6 +1303,24 @@ mod tests {
         let command = String::from_utf8_lossy(INTERACTIVE_RZ_UPLOAD_COMMAND);
         assert!(!command.contains("command -v"));
         assert!(!command.contains("if "));
+    }
+
+    #[test]
+    fn pending_interactive_rz_fallback_times_out_after_handshake_window() {
+        let started_at = Instant::now();
+        let pending = PendingInteractiveZmodemUpload {
+            local_paths: vec![std::path::PathBuf::from("release.env")],
+            started_at,
+        };
+
+        assert_eq!(
+            pending.remaining_timeout(started_at + Duration::from_secs(1)),
+            Duration::from_secs(3)
+        );
+        assert!(!pending.timed_out(started_at + Duration::from_secs(3)));
+        assert!(pending.timed_out(
+            started_at + INTERACTIVE_ZMODEM_UPLOAD_HANDSHAKE_TIMEOUT + Duration::from_millis(1)
+        ));
     }
 
     #[test]
