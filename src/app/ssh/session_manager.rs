@@ -425,6 +425,14 @@ impl SessionManager {
             .cloned()
     }
 
+    pub fn has_live_current_working_directory_tracking(&self, session_id: Uuid) -> bool {
+        self.registry
+            .lock()
+            .expect("lock session registry")
+            .live_current_working_directory_sessions
+            .contains(&session_id)
+    }
+
     pub fn resolve_current_working_directory(&self, session_id: Uuid) -> Result<Option<String>> {
         let cwd = self
             .runtime_control_for_session(session_id)?
@@ -1096,6 +1104,9 @@ impl SessionManager {
             let terminal_surface_present_before =
                 registry.terminal_surfaces.remove(&session_id).is_some();
             registry.current_working_directories.remove(&session_id);
+            registry
+                .live_current_working_directory_sessions
+                .remove(&session_id);
             registry.zmodem_transfers.remove(&session_id);
             registry.terminal_surface_revisions.remove(&session_id);
             registry.pending_disconnects.remove(&session_id);
@@ -1310,6 +1321,7 @@ struct SessionRegistry {
     connection_attempts: HashMap<Uuid, ConnectionAttemptState>,
     terminal_surfaces: HashMap<Uuid, TerminalSurfaceState>,
     current_working_directories: HashMap<Uuid, String>,
+    live_current_working_directory_sessions: HashSet<Uuid>,
     zmodem_transfers: HashMap<Uuid, ZmodemTransferState>,
     terminal_shell_integration: HashMap<Uuid, TerminalShellIntegrationState>,
     terminal_surface_revisions: HashMap<Uuid, usize>,
@@ -1333,6 +1345,7 @@ impl Default for SessionRegistry {
             connection_attempts: HashMap::new(),
             terminal_surfaces: HashMap::new(),
             current_working_directories: HashMap::new(),
+            live_current_working_directory_sessions: HashSet::new(),
             zmodem_transfers: HashMap::new(),
             terminal_shell_integration: HashMap::new(),
             terminal_surface_revisions: HashMap::new(),
@@ -1410,11 +1423,13 @@ fn apply_runtime_event(
             update_enhanced_session_state(registry, session_id, state);
         }
         SessionRuntimeEvent::CurrentDirectoryChanged(path) => {
+            let mut registry = registry.lock().expect("lock session registry");
             registry
-                .lock()
-                .expect("lock session registry")
                 .current_working_directories
                 .insert(session_id, path);
+            registry
+                .live_current_working_directory_sessions
+                .insert(session_id);
         }
         SessionRuntimeEvent::ZmodemStateChanged(state) => {
             let mut registry = registry.lock().expect("lock session registry");

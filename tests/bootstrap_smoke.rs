@@ -16469,6 +16469,90 @@ fn terminal_file_drop_probes_cwd_before_sftp_fallback_when_rz_is_missing() {
 }
 
 #[test]
+fn terminal_file_drop_reprobes_cwd_when_previous_cwd_only_came_from_probe() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    sftp_state.set_remote_rz_available(false);
+    sftp_state.set_remote_cwd("/srv/app");
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(DelayedCwdRecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("terminal-drop-upload-reprobe-cwd");
+    let first_upload_path = temp_root.join("release.env");
+    let second_upload_path = temp_root.join("deploy.env");
+    fs::create_dir_all(temp_root.as_path()).expect("create terminal drop temp root");
+    fs::write(&first_upload_path, b"PORT=22\n").expect("write first terminal drop source");
+    fs::write(&second_upload_path, b"PORT=443\n").expect("write second terminal drop source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "terminal"
+            && !app.get_active_workspace_session_id().is_empty()
+    });
+
+    app.set_workspace_terminal_external_drop_paths(ModelRc::new(VecModel::from(vec![
+        SharedString::from(first_upload_path.to_string_lossy().to_string()),
+    ])));
+    app.invoke_workspace_terminal_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        !sftp_state
+            .upload_file_calls
+            .lock()
+            .expect("lock terminal drop upload calls")
+            .is_empty()
+    });
+
+    assert_eq!(sftp_state.take_remote_cwd_probe_calls(), 1);
+    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(
+        sftp_state.take_upload_file_calls(),
+        vec![("/srv/app/release.env".to_string(), b"PORT=22\n".to_vec())]
+    );
+
+    sftp_state.set_remote_rz_available(true);
+    sftp_state.set_remote_cwd("/srv/app/releases");
+
+    app.set_workspace_terminal_external_drop_paths(ModelRc::new(VecModel::from(vec![
+        SharedString::from(second_upload_path.to_string_lossy().to_string()),
+    ])));
+    app.invoke_workspace_terminal_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        !sftp_state
+            .zmodem_exec_upload_calls
+            .lock()
+            .expect("lock zmodem exec upload calls")
+            .is_empty()
+    });
+
+    assert_eq!(
+        sftp_state.take_remote_cwd_probe_calls(),
+        1,
+        "probe-derived cwd cache should be refreshed on the next terminal drop"
+    );
+    assert_eq!(sftp_state.take_remote_command_exists_calls(), vec!["rz"]);
+    assert_eq!(
+        sftp_state.take_zmodem_exec_upload_calls(),
+        vec![(
+            "/srv/app/releases".to_string(),
+            vec![second_upload_path.to_string_lossy().to_string()]
+        )]
+    );
+}
+
+#[test]
 fn zmodem_modal_closes_when_runtime_only_updates_transfer_state() {
     let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 

@@ -1661,8 +1661,10 @@ fn terminal_current_working_directory_for_drop(
     manager: &SessionManager,
     session_id: Uuid,
 ) -> anyhow::Result<Option<String>> {
-    if let Some(cwd) = manager.current_working_directory(session_id) {
-        return Ok(Some(cwd));
+    if manager.has_live_current_working_directory_tracking(session_id) {
+        if let Some(cwd) = manager.current_working_directory(session_id) {
+            return Ok(Some(cwd));
+        }
     }
 
     tracing::info!(
@@ -1695,11 +1697,10 @@ fn terminal_current_working_directory_for_drop(
     Ok(Some(cwd))
 }
 
-fn schedule_terminal_zmodem_drop_from_paths(
+fn start_active_zmodem_receiver_for_drop(
     manager: &SessionManager,
     session_id: Uuid,
     local_paths: Vec<PathBuf>,
-    allow_interactive_fallback: bool,
 ) -> anyhow::Result<bool> {
     if !local_paths_are_zmodem_files(local_paths.as_slice()) {
         return Ok(false);
@@ -1718,8 +1719,21 @@ fn schedule_terminal_zmodem_drop_from_paths(
             return Ok(true);
         }
     }
+    Ok(false)
+}
 
-    let Some(remote_dir) = terminal_current_working_directory_for_drop(manager, session_id)? else {
+fn schedule_terminal_zmodem_drop_from_paths(
+    manager: &SessionManager,
+    session_id: Uuid,
+    local_paths: Vec<PathBuf>,
+    remote_dir: Option<String>,
+    allow_interactive_fallback: bool,
+) -> anyhow::Result<bool> {
+    if !local_paths_are_zmodem_files(local_paths.as_slice()) {
+        return Ok(false);
+    }
+
+    let Some(remote_dir) = remote_dir else {
         if !allow_interactive_fallback {
             anyhow::bail!(
                 "the active terminal has not reported its current working directory yet, and it is not safe to start interactive rz from the current terminal state"
@@ -1803,23 +1817,28 @@ fn schedule_terminal_external_drop_from_paths(
     let path_count = local_paths.len();
     std::thread::spawn(move || {
         let result = (|| -> anyhow::Result<()> {
+            if start_active_zmodem_receiver_for_drop(&manager, session_id, local_paths.clone())? {
+                return Ok(());
+            }
+
+            let remote_dir = terminal_current_working_directory_for_drop(&manager, session_id)?;
             if local_paths_are_zmodem_files(local_paths.as_slice())
                 && schedule_terminal_zmodem_drop_from_paths(
                     &manager,
                     session_id,
                     local_paths.clone(),
+                    remote_dir.clone(),
                     allow_interactive_zmodem,
                 )?
             {
                 return Ok(());
             }
 
-            let target_dir = terminal_current_working_directory_for_drop(&manager, session_id)?
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "the active terminal has not reported its current working directory yet, and rz is not available for ZMODEM upload"
-                    )
-                })?;
+            let target_dir = remote_dir.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "the active terminal has not reported its current working directory yet, and rz is not available for ZMODEM upload"
+                )
+            })?;
             schedule_terminal_cwd_upload_from_paths(
                 &manager,
                 session_id,
