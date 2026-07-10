@@ -1,3 +1,0 @@
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"This fix crosses runtime, modal, and native-window event boundaries; keep the contract at each boundary explicit."}
-{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"The drag-target fix should reuse one pointer-resolution path for both hover and drop instead of duplicating logic."}
-{"file":".trellis/tasks/07-04-fix-zmodem-drag-upload-regressions/research/industry-notes.md","reason":"External references justify gating download acceptance and using an app-side drag pointer fallback with the current backend."}

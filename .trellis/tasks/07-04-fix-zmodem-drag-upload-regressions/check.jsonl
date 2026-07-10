@@ -1,3 +1,0 @@
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Verify the runtime/UI/windowing boundary does not regress after the fix."}
-{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check that hover and drop both use the same resolved pointer path."}
-{"file":".trellis/tasks/07-04-fix-zmodem-drag-upload-regressions/research/industry-notes.md","reason":"Final behavior should still match the researched ZMODEM and drag-and-drop expectations."}
