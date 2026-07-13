@@ -27,7 +27,7 @@ const ZMODEM_EXEC_UPLOAD_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 const INTERACTIVE_ZMODEM_UPLOAD_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 const REMOTE_COMMAND_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const REMOTE_CWD_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
-const INTERACTIVE_RZ_UPLOAD_COMMAND: &[u8] = b" rz\r";
+const INTERACTIVE_RZ_UPLOAD_COMMAND: &[u8] = b" rz -q\r";
 const REMOTE_INTERACTIVE_SHELL_CWD_PROBE: &str = r#"if [ -d /proc ]; then
 __mica_term_probe_emit_cwd() {
     __mica_term_probe_pid="$1"
@@ -242,6 +242,7 @@ pub(super) async fn run_channel_pump(
                         pending_interactive_zmodem_upload =
                             Some(PendingInteractiveZmodemUpload::new(local_paths));
                         zmodem.note_local_input();
+                        zmodem.expect_automatic_rz_echo();
                         dirty_notifier.note_local_input(Instant::now());
                         if let Err(bytes) = handle
                             .data(channel.id(), INTERACTIVE_RZ_UPLOAD_COMMAND.to_vec())
@@ -259,13 +260,26 @@ pub(super) async fn run_channel_pump(
                             zmodem.surface_error(err.to_string());
                         }
                         emit_zmodem_state_changes(&mut zmodem, &event_tx);
-                        if !drive_zmodem(
+                        let Some(terminal_bytes) = drive_zmodem(
                             &handle,
                             channel.id(),
                             &event_tx,
                             &mut zmodem,
-                        ).await {
+                        ).await else {
                             break 'pump;
+                        };
+                        if !terminal_bytes.is_empty() {
+                            process_ready_remote_output(
+                                terminal_bytes.as_slice(),
+                                &terminal,
+                                &event_tx,
+                                &mut shell_integration,
+                                &mut dirty_notifier,
+                                &mut dirty_timer,
+                                &mut dirty_timer_interval,
+                                &mut working_set_trim_scheduler,
+                                &mut working_set_trim_timer,
+                            );
                         }
                     }
                     Some(RuntimeCommand::StartZmodemDownload {
@@ -276,25 +290,51 @@ pub(super) async fn run_channel_pump(
                             zmodem.surface_error(err.to_string());
                         }
                         emit_zmodem_state_changes(&mut zmodem, &event_tx);
-                        if !drive_zmodem(
+                        let Some(terminal_bytes) = drive_zmodem(
                             &handle,
                             channel.id(),
                             &event_tx,
                             &mut zmodem,
-                        ).await {
+                        ).await else {
                             break 'pump;
+                        };
+                        if !terminal_bytes.is_empty() {
+                            process_ready_remote_output(
+                                terminal_bytes.as_slice(),
+                                &terminal,
+                                &event_tx,
+                                &mut shell_integration,
+                                &mut dirty_notifier,
+                                &mut dirty_timer,
+                                &mut dirty_timer_interval,
+                                &mut working_set_trim_scheduler,
+                                &mut working_set_trim_timer,
+                            );
                         }
                     }
                     Some(RuntimeCommand::CancelZmodem) => {
                         let _ = zmodem.cancel();
                         emit_zmodem_state_changes(&mut zmodem, &event_tx);
-                        if !drive_zmodem(
+                        let Some(terminal_bytes) = drive_zmodem(
                             &handle,
                             channel.id(),
                             &event_tx,
                             &mut zmodem,
-                        ).await {
+                        ).await else {
                             break 'pump;
+                        };
+                        if !terminal_bytes.is_empty() {
+                            process_ready_remote_output(
+                                terminal_bytes.as_slice(),
+                                &terminal,
+                                &event_tx,
+                                &mut shell_integration,
+                                &mut dirty_notifier,
+                                &mut dirty_timer,
+                                &mut dirty_timer_interval,
+                                &mut working_set_trim_scheduler,
+                                &mut working_set_trim_timer,
+                            );
                         }
                     }
                     Some(RuntimeCommand::DismissZmodem) => {
@@ -334,16 +374,19 @@ pub(super) async fn run_channel_pump(
                     }
                     Some(RuntimeCommand::Disconnect) => {
                         if let Some(ready_bytes) = synchronized_output.finish() {
-                            let terminal_bytes = zmodem.intercept_remote_bytes(ready_bytes.as_slice());
+                            let mut terminal_bytes = zmodem.intercept_remote_bytes(ready_bytes.as_slice());
                             emit_zmodem_state_changes(&mut zmodem, &event_tx);
                             start_pending_interactive_zmodem_upload(
                                 &mut zmodem,
                                 &mut pending_interactive_zmodem_upload,
                                 &event_tx,
                             );
-                            if !drive_zmodem(&handle, channel.id(), &event_tx, &mut zmodem).await {
+                            let Some(released_terminal_bytes) =
+                                drive_zmodem(&handle, channel.id(), &event_tx, &mut zmodem).await
+                            else {
                                 break 'pump;
-                            }
+                            };
+                            terminal_bytes.extend(released_terminal_bytes);
                             if !terminal_bytes.is_empty() {
                                 process_ready_remote_output(
                                     terminal_bytes.as_slice(),
@@ -358,6 +401,7 @@ pub(super) async fn run_channel_pump(
                                 );
                             }
                         }
+                        zmodem.mark_transport_closed();
                         let trailing_terminal_bytes = zmodem.flush_terminal_bytes();
                         if !trailing_terminal_bytes.is_empty() {
                             process_ready_remote_output(
@@ -372,7 +416,6 @@ pub(super) async fn run_channel_pump(
                                 &mut working_set_trim_timer,
                             );
                         }
-                        zmodem.mark_transport_closed();
                         emit_zmodem_state_changes(&mut zmodem, &event_tx);
                         if dirty_notifier.take_pending() {
                             let _ = event_tx.send(SessionRuntimeEvent::SurfaceDirty);
@@ -403,16 +446,19 @@ pub(super) async fn run_channel_pump(
                             collect_ready_output_batch(message, &mut channel, &mut pending_channel_messages)
                                 .await;
                         for ready_bytes in synchronized_output.push_bytes(output_batch.raw_bytes.as_slice()) {
-                            let terminal_bytes = zmodem.intercept_remote_bytes(ready_bytes.as_slice());
+                            let mut terminal_bytes = zmodem.intercept_remote_bytes(ready_bytes.as_slice());
                             emit_zmodem_state_changes(&mut zmodem, &event_tx);
                             start_pending_interactive_zmodem_upload(
                                 &mut zmodem,
                                 &mut pending_interactive_zmodem_upload,
                                 &event_tx,
                             );
-                            if !drive_zmodem(&handle, channel.id(), &event_tx, &mut zmodem).await {
+                            let Some(released_terminal_bytes) =
+                                drive_zmodem(&handle, channel.id(), &event_tx, &mut zmodem).await
+                            else {
                                 break 'pump;
-                            }
+                            };
+                            terminal_bytes.extend(released_terminal_bytes);
                             if !terminal_bytes.is_empty() {
                                 process_ready_remote_output(
                                     terminal_bytes.as_slice(),
@@ -430,16 +476,19 @@ pub(super) async fn run_channel_pump(
                     }
                     Some(ChannelMsg::Close) | Some(ChannelMsg::Eof) | None => {
                         if let Some(ready_bytes) = synchronized_output.finish() {
-                            let terminal_bytes = zmodem.intercept_remote_bytes(ready_bytes.as_slice());
+                            let mut terminal_bytes = zmodem.intercept_remote_bytes(ready_bytes.as_slice());
                             emit_zmodem_state_changes(&mut zmodem, &event_tx);
                             start_pending_interactive_zmodem_upload(
                                 &mut zmodem,
                                 &mut pending_interactive_zmodem_upload,
                                 &event_tx,
                             );
-                            if !drive_zmodem(&handle, channel.id(), &event_tx, &mut zmodem).await {
+                            let Some(released_terminal_bytes) =
+                                drive_zmodem(&handle, channel.id(), &event_tx, &mut zmodem).await
+                            else {
                                 break 'pump;
-                            }
+                            };
+                            terminal_bytes.extend(released_terminal_bytes);
                             if !terminal_bytes.is_empty() {
                                 process_ready_remote_output(
                                     terminal_bytes.as_slice(),
@@ -454,6 +503,7 @@ pub(super) async fn run_channel_pump(
                                 );
                             }
                         }
+                        zmodem.mark_transport_closed();
                         let trailing_terminal_bytes = zmodem.flush_terminal_bytes();
                         if !trailing_terminal_bytes.is_empty() {
                             process_ready_remote_output(
@@ -468,7 +518,6 @@ pub(super) async fn run_channel_pump(
                                 &mut working_set_trim_timer,
                             );
                         }
-                        zmodem.mark_transport_closed();
                         emit_zmodem_state_changes(&mut zmodem, &event_tx);
                         if dirty_notifier.take_pending() {
                             let _ = event_tx.send(SessionRuntimeEvent::SurfaceDirty);
@@ -478,16 +527,19 @@ pub(super) async fn run_channel_pump(
                     }
                     Some(ChannelMsg::Failure) => {
                         if let Some(ready_bytes) = synchronized_output.finish() {
-                            let terminal_bytes = zmodem.intercept_remote_bytes(ready_bytes.as_slice());
+                            let mut terminal_bytes = zmodem.intercept_remote_bytes(ready_bytes.as_slice());
                             emit_zmodem_state_changes(&mut zmodem, &event_tx);
                             start_pending_interactive_zmodem_upload(
                                 &mut zmodem,
                                 &mut pending_interactive_zmodem_upload,
                                 &event_tx,
                             );
-                            if !drive_zmodem(&handle, channel.id(), &event_tx, &mut zmodem).await {
+                            let Some(released_terminal_bytes) =
+                                drive_zmodem(&handle, channel.id(), &event_tx, &mut zmodem).await
+                            else {
                                 break 'pump;
-                            }
+                            };
+                            terminal_bytes.extend(released_terminal_bytes);
                             if !terminal_bytes.is_empty() {
                                 process_ready_remote_output(
                                     terminal_bytes.as_slice(),
@@ -502,6 +554,7 @@ pub(super) async fn run_channel_pump(
                                 );
                             }
                         }
+                        zmodem.mark_transport_closed();
                         let trailing_terminal_bytes = zmodem.flush_terminal_bytes();
                         if !trailing_terminal_bytes.is_empty() {
                             process_ready_remote_output(
@@ -516,7 +569,6 @@ pub(super) async fn run_channel_pump(
                                 &mut working_set_trim_timer,
                             );
                         }
-                        zmodem.mark_transport_closed();
                         emit_zmodem_state_changes(&mut zmodem, &event_tx);
                         if dirty_notifier.take_pending() {
                             let _ = event_tx.send(SessionRuntimeEvent::SurfaceDirty);
@@ -556,6 +608,21 @@ pub(super) async fn run_channel_pump(
                             "remote rz did not emit a ZMODEM upload handshake after the interactive fallback command".into(),
                         ),
                     )));
+                    zmodem.cancel_automatic_rz_echo_expectation();
+                    let terminal_bytes = zmodem.flush_terminal_bytes();
+                    if !terminal_bytes.is_empty() {
+                        process_ready_remote_output(
+                            terminal_bytes.as_slice(),
+                            &terminal,
+                            &event_tx,
+                            &mut shell_integration,
+                            &mut dirty_notifier,
+                            &mut dirty_timer,
+                            &mut dirty_timer_interval,
+                            &mut working_set_trim_scheduler,
+                            &mut working_set_trim_timer,
+                        );
+                    }
                 }
             }
             () = async { if let Some(timer) = working_set_trim_timer.as_mut() { timer.await } }, if working_set_trim_timer.is_some() => {
@@ -716,11 +783,7 @@ async fn run_zmodem_exec_upload_inner(
         .channel_open_session()
         .await
         .context("failed to open SSH exec channel for ZMODEM upload")?;
-    let command = format!(
-        "{}; cd {} && rz",
-        remote_transfer_path_setup(),
-        shell_quote_posix(remote_dir.as_str())
-    );
+    let command = zmodem_exec_upload_command(remote_dir.as_str());
     channel
         .exec(true, command)
         .await
@@ -777,7 +840,10 @@ async fn run_zmodem_exec_upload_inner(
                     upload_started = true;
                     emit_zmodem_state_changes(&mut zmodem, &event_tx);
                 }
-                if !drive_zmodem(&handle, channel.id(), &event_tx, &mut zmodem).await {
+                if drive_zmodem(&handle, channel.id(), &event_tx, &mut zmodem)
+                    .await
+                    .is_none()
+                {
                     bail!("failed to write ZMODEM upload bytes to SSH exec channel");
                 }
             }
@@ -902,6 +968,14 @@ fn remote_command_probe_command(command_name: &str) -> String {
     )
 }
 
+fn zmodem_exec_upload_command(remote_dir: &str) -> String {
+    format!(
+        "{}; cd {} && rz -q",
+        remote_transfer_path_setup(),
+        shell_quote_posix(remote_dir)
+    )
+}
+
 fn shell_quote_posix(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
@@ -939,7 +1013,7 @@ async fn drive_zmodem(
     channel_id: russh::ChannelId,
     event_tx: &mpsc::UnboundedSender<SessionRuntimeEvent>,
     zmodem: &mut ZmodemController,
-) -> bool {
+) -> Option<Vec<u8>> {
     loop {
         emit_zmodem_state_changes(zmodem, event_tx);
         match zmodem.advance() {
@@ -950,14 +1024,14 @@ async fn drive_zmodem(
                         "failed to write {} zmodem bytes to SSH channel",
                         bytes.len()
                     )));
-                    return false;
+                    return None;
                 }
                 zmodem.note_wire_written(written);
             }
             ZmodemAdvanceOutcome::Continue => {}
             ZmodemAdvanceOutcome::Idle => {
                 emit_zmodem_state_changes(zmodem, event_tx);
-                return true;
+                return Some(zmodem.take_released_terminal_bytes());
             }
         }
     }
@@ -1298,11 +1372,18 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
-    fn interactive_rz_fallback_uses_minimal_history_friendly_command() {
-        assert_eq!(INTERACTIVE_RZ_UPLOAD_COMMAND, b" rz\r");
+    fn interactive_rz_fallback_uses_quiet_history_friendly_command() {
+        assert_eq!(INTERACTIVE_RZ_UPLOAD_COMMAND, b" rz -q\r");
         let command = String::from_utf8_lossy(INTERACTIVE_RZ_UPLOAD_COMMAND);
         assert!(!command.contains("command -v"));
         assert!(!command.contains("if "));
+    }
+
+    #[test]
+    fn exec_zmodem_upload_uses_quiet_rz() {
+        let command = zmodem_exec_upload_command("/srv/releases");
+
+        assert!(command.ends_with("cd '/srv/releases' && rz -q"));
     }
 
     #[test]

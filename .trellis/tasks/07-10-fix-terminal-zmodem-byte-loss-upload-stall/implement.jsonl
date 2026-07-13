@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Defines the SSH/ZMODEM byte-ownership, final-wire, drag-upload command, and regression-test contracts used by this implementation."}

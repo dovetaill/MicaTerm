@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Quality verification must check the lossless detector matrix, direction-aware completed-session tail, quiet automatic rz commands, and final-wire completion contract."}

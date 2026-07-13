@@ -71,9 +71,10 @@ Questions to answer:
 - `SftpTransferBackgroundMessage` carries UI intent flags `open_queue_drawer: bool` and `open_transfer_center: bool` so background terminal-drop SFTP fallback can ask the main thread to show transfer UI without mutating `ShellViewModel` off-thread.
 - `negotiated_terminal_environment()` must include cwd-only bash `PROMPT_COMMAND` tracking that emits OSC7 with `$PWD`; this is not the retired enhanced bootstrap and must not include `MICA_TERM_ENHANCED`.
 - `ZmodemController::intercept_remote_bytes()` must strip lrzsz's `rz\r` / `rz\n` download autostart text only when it is immediately followed by a detected `ZRQINIT` prefix.
-- `ZmodemController::intercept_remote_bytes()` must strip the history-friendly interactive upload fallback echo (`" rz -q\r"`, legacy `" rz\r"`, and CRLF variants) when immediately followed by a detected `ZRINIT` prefix.
-- ZMODEM prefix detection must not hide a single terminal `*` while waiting for a possible `**\x18B00` / `**\x18B01` frame. It may render the first star immediately, then send a local `\x08 \x08` repaint only if a later chunk confirms the protocol prefix.
+- `ZmodemController::expect_automatic_rz_echo()` arms one exact app-generated interactive upload echo. `intercept_remote_bytes()` may strip `" rz -q\r"` (plus CRLF and legacy in-flight variants) only while armed and only when a CRC-valid `ZRINIT` header immediately follows; identical unarmed manual text is terminal output.
+- `ZmodemController::intercept_remote_bytes()` must treat the six-byte `**\x18B00` / `**\x18B01` marker as tentative and validate the complete 18-byte ZHEX header with `zmodem2` before starting a session. Leading candidate stars may be rendered immediately, then repainted with `\x08 \x08` only after validation proves they belong to the protocol header.
 - `SenderTransfer` and `ReceiverTransfer` treat `SessionCompleted` as "completion event observed", not "all final wire bytes written"; they stay alive until the protocol emits no more `WriteWire`.
+- `ZmodemSession::take_pending_wire() -> Vec<u8>` transfers parser-unconsumed bytes before a completed session is dropped. `drive_zmodem() -> Option<Vec<u8>>` returns released terminal bytes to the ordinary SSH output path after final protocol wire has been written.
 - The vendored Windows winit `IDropTarget` must implement COM `QueryInterface` for `IUnknown` and `IDropTarget`; `unimplemented!()` at this boundary can prevent shell drag/drop from reaching Slint/winit.
 - The vendored Windows winit `IDropTargetVtbl` must match the Win32 COM ABI: `DragEnter`, `DragOver`, and `Drop` receive `POINTL pt` by value, not `*const POINTL`; `IDataObject` is passed as `IDataObject *`.
 
@@ -82,8 +83,10 @@ Questions to answer:
 - ZMODEM cancel is a wire contract: local state changes are not enough; remote `rz` / `sz` must receive an abort frame.
 - ZMODEM receiver `FileStarted` is not a one-shot UI event; the runtime must treat repeated metadata for the currently active file as idempotent and must not create/truncate the local target twice.
 - ZMODEM receiver `FileStarted` can also repeat after `FileCompleted` and before `SessionCompleted`; repeated metadata for the last completed file must be ignored so the UI does not show "file 1 of at least 2" for a one-file transfer.
-- ZMODEM session completion is a final-wire contract: `zmodem2::poll()` returns pending events before pending final wire (`ZFIN` / `OO`), so the runtime must not remove the session when it first observes `Event::SessionCompleted`.
-- ZMODEM post-session cleanup must absorb only known protocol tail bytes (`OO`, ZHEX frames ending in XON, CAN/backspace/XON noise, and lrzsz `rz` autostart residue). The next local input must clear this drain state so a new user-initiated `sz` / `rz` is not swallowed.
+- ZMODEM session completion is a final-wire contract: `zmodem2::poll()` returns pending events before pending final wire (`ZFIN` / `OO`), so both `finished = true` and the public `Completed` modal phase must wait for the following idle poll after all `WriteWire` actions were acknowledged.
+- Tentative detection is lossless: local input, paste, timeout, resize, failure, and transport close must never clear unseen ordinary bytes. A provisionally rendered prefix is emitted once; flush paths return only the unseen suffix.
+- Completed-session cleanup is direction-aware. Both directions consume only the unconsumed ZFIN `\r` plus `\n`/`\x8a` trailer; download then consumes exactly one remote `OO`, while upload expects no inbound `OO` because the local sender writes it. Any mismatch is released unchanged, and broad filtering by prefixes such as `OO`, `rz`, stars, ZHEX-looking text, or control bytes is forbidden.
+- Same-batch prompt bytes extracted from a completed session must be returned through `process_ready_remote_output()` immediately. Waiting for a later SSH batch can make a completed upload appear stalled indefinitely.
 - Completed downloads with exactly one local file should expose both `Open` and `Open Folder`; multi-file downloads should at least expose `Open Folder`.
 - ZMODEM download conflict handling must not silently map the default `Ask` policy to auto-rename; until a per-file ZMODEM conflict modal exists, `Ask` should reuse the requested filename and `AutoRename` must remain opt-in.
 - External file drops may emit `HoveredFileCancelled` after `DroppedFile`; once a drop flush is pending, cancellation must not clear queued paths.
@@ -120,6 +123,9 @@ Questions to answer:
 - `remote_command_exists(session_id, "rz") == false` + known terminal cwd -> fall back to SFTP upload into that cwd.
 - Dedicated exec-channel `rz` handshake not observed before timeout -> show a failed ZMODEM upload state; do not write recovery commands into the interactive shell.
 - Interactive fallback command sent + `ZRINIT` handshake not observed before timeout -> show a failed ZMODEM upload state.
+- Partial or CRC-invalid ZHEX initialization header -> replay every non-protocol byte exactly once; do not create a session from the six-byte marker alone.
+- Completed upload tail is `\r\n` or `\r\x8a` followed by prompt bytes -> consume only the trailer and release the prompt immediately; a prompt beginning with `OO` remains intact.
+- Completed download tail is `\r\nOO` or `\r\x8aOO` followed by prompt bytes -> consume exactly that tail; an `O` mismatch such as `Ox-service#` is released unchanged after the proven trailer.
 - Remote cwd not readable through SFTP fallback -> reject terminal drop with user-visible feedback.
 - Slow `remote_command_exists`, cwd probe, or SFTP preflight during terminal drop -> the drop callback and the next UI projection tick must still return without waiting for the remote operation.
 - Cancel clicked during pending/running ZMODEM -> send abort wire, mark modal `Cancelled`, and allow the shell to continue.
@@ -128,6 +134,8 @@ Questions to answer:
 ### 5. Good/Base/Bad Cases
 
 - Good: `sz file` completes, modal shows `Done`, `Open Folder`, and `Open`; `Done` dismisses without sending anything to the terminal.
+- Good: ordinary `*`, `**`, `***`, `*.log`, `a*b`, quoted stars, escaped stars, and pasted star runs appear immediately and remain byte-for-byte intact when no CRC-valid ZMODEM header follows.
+- Good: final ZMODEM response and `root@host:~# ` arrive in one SSH batch; final wire is written, the modal becomes `Completed`, and the prompt is released in the same pump turn.
 - Base: drag a regular file over the terminal, overlay appears, drop probes `rz` through an exec channel, ZMODEM upload starts on a dedicated exec channel when `ZRINIT` is observed, and no text is written to the interactive terminal.
 - Base with bash prompt tracking: after connection, the negotiated `PROMPT_COMMAND` emits OSC7 cwd markers on each prompt, markers are stripped from visible terminal output, and terminal drops use the tracked cwd without any drag-time probe.
 - Base without shell markers: drag a regular file before any OSC7 cwd snapshot exists; if the runtime resolves the interactive shell cwd through a dedicated exec probe, start exec-channel `rz` in that directory.
@@ -147,6 +155,8 @@ Questions to answer:
 - Bad: making terminal drag-hover overlay depend on `rz` auto-injection eligibility; hover should only communicate that an active terminal can accept a drop, while the drop scheduler decides between ZMODEM and SFTP fallback.
 - Bad: hand-writing the Windows `IDropTargetVtbl` with `pt: *const POINTL`; the Win32 header uses `POINTL pt` by value, and treating coordinates as a pointer can stop file drops before Slint receives `HoveredFile`.
 - Bad: using `send_session_text_input("if command -v rz ...")` for drag upload. This pollutes scrollback/history and leaves confusing prompt output after completion.
+- Bad: clearing tentative detector bytes on local input or transport failure; the remote shell can receive the command while its echo silently disappears.
+- Bad: deleting output because it starts with `OO`, `rz`, stars, control bytes, or a ZHEX-looking sequence without direction and completed-state proof.
 
 ### 6. Tests Required
 
@@ -154,9 +164,12 @@ Questions to answer:
 - Unit test: receiver waits for destination directory before consuming a queued file offer.
 - Unit test: receiver ignores duplicate `FileStarted` for the active file and keeps `files_started` at one.
 - Unit test: receiver ignores duplicate `FileStarted` after `FileCompleted` for the same wire filename and size.
-- Unit test: sender and receiver do not become `finished` immediately on `SessionCompleted`; final wire drain must happen first.
+- Unit test: sender and receiver do not become `finished` or publish `Completed` immediately on `SessionCompleted`; final wire drain and the following idle poll must happen first.
 - Unit test: lrzsz `rz\r` before `ZRQINIT` is stripped from terminal output while preserving earlier prompt text.
-- Unit test: post-session drain strips `OO` / ZHEX tail bytes and then releases plain prompt text.
+- Unit test: every partial marker length, false continuation, local-input interleaving, and transport-close flush reproduces ordinary bytes exactly once.
+- Unit test: valid `ZRQINIT` and `ZRINIT` headers are detected only after all 18 CRC-checked ZHEX bytes, across every split; invalid CRC is replayed.
+- Unit test: completed upload consumes only the ZFIN trailer; completed download additionally consumes exactly `OO`; prompts beginning with `O`, `OO`, `rz`, stars, or control-like bytes are preserved.
+- Unit test: same-chunk completed-session pending wire is extracted before session drop and returned by `drive_zmodem()` without waiting for another SSH batch.
 - Unit test: overwrite conflict policy reuses the existing ZMODEM download path rather than producing an auto-renamed sibling.
 - Integration test: terminal file drop with `rz` available records a dedicated exec ZMODEM upload call, records `remote_command_exists("rz")`, and records no terminal text input.
 - Integration test: negotiated terminal environment includes cwd-only `PROMPT_COMMAND`, excludes `MICA_TERM_ENHANCED`, and still records zero bootstrap attempts for supported shells.
@@ -169,7 +182,7 @@ Questions to answer:
 - Integration test: terminal file drop with no projected terminal surface and no tracked/probed cwd records an interactive ZMODEM upload fallback, no terminal text probe snippet, no exec-channel `remote_command_exists("rz")` veto, no SFTP upload, and no `Transfer failed` feedback.
 - Unit test: interactive `rz` fallback command is exactly ` rz -q\r`, does not contain `command -v` or `if`, and uses quiet mode.
 - Unit test: remote command probe command includes the shared transfer PATH setup before `command -v`.
-- Unit test: ZMODEM prefix interception strips the echoed `" rz -q\r"` fallback command before `ZRINIT` and renders then rewinds a split ordinary `*` only when the following bytes confirm a ZMODEM prefix.
+- Unit test: explicitly armed ZMODEM prefix interception strips the echoed `" rz -q\r"` fallback command before a CRC-valid `ZRINIT` across every split; identical unarmed manual text remains visible.
 - Integration test: terminal file drop with `rz` missing records no terminal text input and falls back to SFTP into `/srv/app` or the active cwd fixture.
 - Integration test: terminal file drop with `rz` missing and a delayed `remote_command_exists` probe returns from `invoke_workspace_terminal_external_drop_requested()` quickly, and a subsequent `flush_runtime_projection()` also returns quickly while the background probe is still sleeping.
 - Integration test: terminal file drop with no tracked cwd and `rz` missing records one runtime cwd probe, no exec ZMODEM upload, and an SFTP upload into the probed cwd.
@@ -223,11 +236,12 @@ Event::SessionCompleted => {
 }
 
 Action::Idle if self.session_complete_pending => {
+    self.complete_session();
     self.finished = true;
 }
 ```
 
-Keep polling until final `WriteWire` actions are written and only finish after the protocol reaches idle.
+Keep polling until final `WriteWire` actions are written and only publish `Completed` after the protocol reaches idle. Before dropping the finished session, move `pending_wire` into the direction-aware tail parser and return any prompt bytes through the ordinary terminal-output path.
 
 #### Wrong
 

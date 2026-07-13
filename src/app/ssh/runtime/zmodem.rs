@@ -9,6 +9,8 @@ use zmodem2::{Action, Event, FileInfo, Position, Receiver, Sender};
 
 const ZRQINIT_PREFIX: &[u8] = b"**\x18B00";
 const ZRINIT_PREFIX: &[u8] = b"**\x18B01";
+const ZMODEM_ZHEX_HEADER_CORE_LEN: usize = 18;
+const TERMINAL_ERASE_CELL: &[u8] = b"\x08 \x08";
 const ZMODEM_ABORT_WIRE: &[u8] = b"**\x18B070000000067d4\r\n\x11";
 const ZMODEM_MAX_FILE_SIZE: u64 = u32::MAX as u64;
 
@@ -118,35 +120,109 @@ enum ReceiverPollEvent {
 }
 
 #[derive(Default)]
+struct TentativeTerminalBytes {
+    bytes: Vec<u8>,
+    visible_prefix_len: usize,
+}
+
+enum PostSessionTailStage {
+    Trailer,
+    OverAndOut,
+}
+
+struct PostSessionTail {
+    direction: ZmodemTransferDirection,
+    stage: PostSessionTailStage,
+    candidate: Vec<u8>,
+}
+
+enum PostSessionTailOutcome {
+    Pending,
+    Released(Vec<u8>),
+}
+
+impl PostSessionTail {
+    fn new(direction: ZmodemTransferDirection) -> Self {
+        Self {
+            direction,
+            stage: PostSessionTailStage::Trailer,
+            candidate: Vec::new(),
+        }
+    }
+
+    fn consume(&mut self, bytes: &[u8]) -> PostSessionTailOutcome {
+        let mut offset = 0;
+        while offset < bytes.len() {
+            self.candidate.push(bytes[offset]);
+            offset += 1;
+
+            let matches_expected = match self.stage {
+                PostSessionTailStage::Trailer => {
+                    matches!(self.candidate.as_slice(), [b'\r'] | [b'\r', b'\n' | 0x8a])
+                }
+                PostSessionTailStage::OverAndOut => {
+                    matches!(self.candidate.as_slice(), [b'O'] | [b'O', b'O'])
+                }
+            };
+            if !matches_expected {
+                self.candidate.extend_from_slice(&bytes[offset..]);
+                return PostSessionTailOutcome::Released(std::mem::take(&mut self.candidate));
+            }
+
+            let stage_complete = self.candidate.len() == 2;
+            if !stage_complete {
+                continue;
+            }
+            self.candidate.clear();
+            match self.stage {
+                PostSessionTailStage::Trailer
+                    if self.direction == ZmodemTransferDirection::Download =>
+                {
+                    self.stage = PostSessionTailStage::OverAndOut;
+                }
+                PostSessionTailStage::Trailer | PostSessionTailStage::OverAndOut => {
+                    return PostSessionTailOutcome::Released(bytes[offset..].to_vec());
+                }
+            }
+        }
+        PostSessionTailOutcome::Pending
+    }
+}
+
+#[derive(Default)]
 pub(super) struct ZmodemController {
-    sniff_buffer: Vec<u8>,
+    tentative: TentativeTerminalBytes,
     session: Option<ZmodemSession>,
     pending_control_wire: Option<Vec<u8>>,
-    post_session_drain: bool,
+    post_session_tail: Option<PostSessionTail>,
+    released_terminal_bytes: Vec<u8>,
+    automatic_rz_echo_expected: bool,
     modal_state: Option<ZmodemTransferState>,
     modal_dirty: bool,
 }
 
 impl ZmodemController {
     pub(super) fn intercept_remote_bytes(&mut self, bytes: &[u8]) -> Vec<u8> {
+        let mut released_terminal_bytes = std::mem::take(&mut self.released_terminal_bytes);
         if bytes.is_empty() {
-            return Vec::new();
+            return released_terminal_bytes;
         }
 
-        if self.session.is_none() && self.post_session_drain {
-            let mut combined = std::mem::take(&mut self.sniff_buffer);
-            combined.extend_from_slice(bytes);
-            match strip_post_session_zmodem_noise(combined.as_slice()) {
-                PostSessionDrain::Pending(pending) => {
-                    self.sniff_buffer = pending;
-                    return Vec::new();
+        if self.session.is_none()
+            && let Some(mut tail) = self.post_session_tail.take()
+        {
+            match tail.consume(bytes) {
+                PostSessionTailOutcome::Pending => {
+                    self.post_session_tail = Some(tail);
+                    return released_terminal_bytes;
                 }
-                PostSessionDrain::Plain(remaining) => {
-                    self.post_session_drain = false;
+                PostSessionTailOutcome::Released(remaining) => {
                     if remaining.is_empty() {
-                        return Vec::new();
+                        return released_terminal_bytes;
                     }
-                    return self.intercept_remote_bytes(remaining.as_slice());
+                    released_terminal_bytes
+                        .extend(self.intercept_remote_bytes(remaining.as_slice()));
+                    return released_terminal_bytes;
                 }
             }
         }
@@ -155,16 +231,90 @@ impl ZmodemController {
             if let Err(err) = session.submit_wire(bytes) {
                 self.fail_session(format!("ZMODEM protocol error: {err}"));
             }
-            return Vec::new();
+            released_terminal_bytes.extend(self.take_released_terminal_bytes());
+            return released_terminal_bytes;
         }
 
-        let mut combined = std::mem::take(&mut self.sniff_buffer);
-        combined.extend_from_slice(bytes);
+        self.tentative.bytes.extend_from_slice(bytes);
+        let mut terminal_bytes = released_terminal_bytes;
+        loop {
+            let Some((prefix_index, direction)) =
+                find_zmodem_prefix(self.tentative.bytes.as_slice())
+            else {
+                let marker_suffix_len =
+                    partial_marker_suffix_len(self.tentative.bytes.as_slice(), ZRQINIT_PREFIX).max(
+                        partial_marker_suffix_len(self.tentative.bytes.as_slice(), ZRINIT_PREFIX),
+                    );
+                let automatic_echo_suffix_len = if self.automatic_rz_echo_expected {
+                    automatic_rz_echo_candidate_suffix_len(self.tentative.bytes.as_slice())
+                } else {
+                    0
+                };
+                let keep_suffix_len = marker_suffix_len.max(automatic_echo_suffix_len);
+                let emit_len = self.tentative.bytes.len().saturating_sub(keep_suffix_len);
+                self.release_tentative_prefix(emit_len, &mut terminal_bytes);
+                self.present_tentative_stars(&mut terminal_bytes);
+                return terminal_bytes;
+            };
 
-        if let Some((prefix_index, direction)) = find_zmodem_prefix(combined.as_slice()) {
-            let terminal_bytes =
-                strip_lrzsz_autostart_invocation(&combined[..prefix_index]).to_vec();
-            let protocol_bytes = combined[prefix_index..].to_vec();
+            if self.tentative.bytes.len() < prefix_index.saturating_add(ZMODEM_ZHEX_HEADER_CORE_LEN)
+            {
+                let candidate_start = if direction == ZmodemTransferDirection::Upload
+                    && self.automatic_rz_echo_expected
+                {
+                    automatic_rz_echo_start(&self.tentative.bytes[..prefix_index])
+                        .unwrap_or(prefix_index)
+                } else {
+                    prefix_index
+                };
+                self.release_tentative_prefix(candidate_start, &mut terminal_bytes);
+                self.present_tentative_stars(&mut terminal_bytes);
+                return terminal_bytes;
+            }
+
+            let header_end = prefix_index + ZMODEM_ZHEX_HEADER_CORE_LEN;
+            if !validate_initial_header_with_zmodem2(
+                &self.tentative.bytes[prefix_index..header_end],
+                direction,
+            ) {
+                if direction == ZmodemTransferDirection::Upload
+                    && self.automatic_rz_echo_expected
+                    && automatic_rz_echo_start(&self.tentative.bytes[..prefix_index]).is_some()
+                {
+                    self.automatic_rz_echo_expected = false;
+                }
+                self.release_tentative_prefix(prefix_index + 1, &mut terminal_bytes);
+                continue;
+            }
+
+            let visible_header_bytes = self
+                .tentative
+                .visible_prefix_len
+                .saturating_sub(prefix_index)
+                .min(ZMODEM_ZHEX_HEADER_CORE_LEN);
+            let raw_prefix = &self.tentative.bytes[..prefix_index];
+            let ordinary_prefix = match direction {
+                ZmodemTransferDirection::Download => {
+                    strip_lrzsz_download_autostart_invocation(raw_prefix)
+                }
+                ZmodemTransferDirection::Upload if self.automatic_rz_echo_expected => {
+                    strip_automatic_rz_echo(raw_prefix)
+                }
+                ZmodemTransferDirection::Upload => raw_prefix,
+            };
+            self.automatic_rz_echo_expected = false;
+            let ordinary_prefix_len = ordinary_prefix.len();
+            if ordinary_prefix_len > self.tentative.visible_prefix_len {
+                terminal_bytes.extend_from_slice(
+                    &self.tentative.bytes[self.tentative.visible_prefix_len..ordinary_prefix_len],
+                );
+            }
+            for _ in 0..visible_header_bytes {
+                terminal_bytes.extend_from_slice(TERMINAL_ERASE_CELL);
+            }
+
+            let protocol_bytes = self.tentative.bytes[prefix_index..].to_vec();
+            self.tentative = TentativeTerminalBytes::default();
             self.session = Some(match direction {
                 ZmodemTransferDirection::Upload => ZmodemSession::new_sender(),
                 ZmodemTransferDirection::Download => ZmodemSession::new_receiver(),
@@ -194,28 +344,33 @@ impl ZmodemController {
             }
             return terminal_bytes;
         }
-
-        let keep_suffix_len = partial_marker_suffix_len(combined.as_slice(), ZRQINIT_PREFIX).max(
-            partial_marker_suffix_len(combined.as_slice(), ZRINIT_PREFIX),
-        );
-        let emit_len = combined.len().saturating_sub(keep_suffix_len);
-        let terminal_bytes = combined[..emit_len].to_vec();
-        self.sniff_buffer = combined[emit_len..].to_vec();
-        terminal_bytes
     }
 
     pub(super) fn note_local_input(&mut self) {
-        self.post_session_drain = false;
-        if self.session.is_none() {
-            self.sniff_buffer.clear();
-        }
+        self.automatic_rz_echo_expected = false;
+    }
+
+    pub(super) fn expect_automatic_rz_echo(&mut self) {
+        self.automatic_rz_echo_expected = true;
+    }
+
+    pub(super) fn cancel_automatic_rz_echo_expectation(&mut self) {
+        self.automatic_rz_echo_expected = false;
     }
 
     pub(super) fn flush_terminal_bytes(&mut self) -> Vec<u8> {
         if self.session.is_some() {
-            return Vec::new();
+            return self.take_released_terminal_bytes();
         }
-        std::mem::take(&mut self.sniff_buffer)
+        let mut terminal_bytes = self.take_released_terminal_bytes();
+        terminal_bytes
+            .extend_from_slice(&self.tentative.bytes[self.tentative.visible_prefix_len..]);
+        self.tentative = TentativeTerminalBytes::default();
+        terminal_bytes
+    }
+
+    pub(super) fn take_released_terminal_bytes(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.released_terminal_bytes)
     }
 
     pub(super) fn start_upload(&mut self, local_paths: Vec<PathBuf>) -> Result<()> {
@@ -245,8 +400,8 @@ impl ZmodemController {
         let direction = session.direction();
         session.cancel();
         self.pending_control_wire = Some(ZMODEM_ABORT_WIRE.to_vec());
-        self.post_session_drain = true;
-        self.sniff_buffer.clear();
+        self.post_session_tail = None;
+        self.automatic_rz_echo_expected = false;
         self.set_modal_state(session.state().cloned());
         tracing::info!(
             target: "app.zmodem",
@@ -306,9 +461,16 @@ impl ZmodemController {
 
         self.set_modal_state(session.state().cloned());
         if session.is_finished() {
-            self.session = None;
-            self.post_session_drain = true;
-            self.sniff_buffer.clear();
+            let direction = session.direction();
+            let completed = session
+                .state()
+                .is_some_and(|state| state.phase == ZmodemTransferPhase::Completed);
+            let pending_wire = session.take_pending_wire();
+            if completed {
+                self.begin_post_session_tail(direction, pending_wire);
+            } else {
+                self.route_unconsumed_terminal_bytes(pending_wire);
+            }
         } else {
             self.session = Some(session);
         }
@@ -323,19 +485,20 @@ impl ZmodemController {
     }
 
     pub(super) fn mark_transport_closed(&mut self) {
-        self.sniff_buffer.clear();
-        if self.session.is_some() {
-            self.fail_session("The SSH channel closed before the ZMODEM transfer finished.");
-        } else if self.modal_state.as_ref().is_some_and(|state| {
-            matches!(
-                state.phase,
-                ZmodemTransferPhase::AwaitingUploadSelection
-                    | ZmodemTransferPhase::AwaitingDownloadDirectory
-                    | ZmodemTransferPhase::Running
-            )
-        }) {
+        self.automatic_rz_echo_expected = false;
+        let transfer_was_active = self.session.is_some()
+            || self.modal_state.as_ref().is_some_and(|state| {
+                matches!(
+                    state.phase,
+                    ZmodemTransferPhase::AwaitingUploadSelection
+                        | ZmodemTransferPhase::AwaitingDownloadDirectory
+                        | ZmodemTransferPhase::Running
+                )
+            });
+        if transfer_was_active {
             self.fail_session("The SSH channel closed before the ZMODEM transfer finished.");
         }
+        self.post_session_tail = None;
     }
 
     fn fail_session(&mut self, error_text: impl Into<String>) {
@@ -353,13 +516,11 @@ impl ZmodemController {
             };
             state.error_text = error_text;
             self.session = None;
-            self.post_session_drain = true;
-            self.sniff_buffer.clear();
+            self.post_session_tail = None;
             self.set_modal_state(Some(state));
         } else {
             self.session = None;
-            self.post_session_drain = true;
-            self.sniff_buffer.clear();
+            self.post_session_tail = None;
         }
     }
 
@@ -368,6 +529,56 @@ impl ZmodemController {
             self.modal_state = state;
             self.modal_dirty = true;
         }
+    }
+
+    fn release_tentative_prefix(&mut self, len: usize, terminal_bytes: &mut Vec<u8>) {
+        let len = len.min(self.tentative.bytes.len());
+        let already_visible = self.tentative.visible_prefix_len.min(len);
+        terminal_bytes.extend_from_slice(&self.tentative.bytes[already_visible..len]);
+        self.tentative.bytes.drain(..len);
+        self.tentative.visible_prefix_len = self.tentative.visible_prefix_len.saturating_sub(len);
+    }
+
+    fn present_tentative_stars(&mut self, terminal_bytes: &mut Vec<u8>) {
+        let star_count = self
+            .tentative
+            .bytes
+            .iter()
+            .take_while(|byte| **byte == b'*')
+            .count();
+        if star_count <= self.tentative.visible_prefix_len {
+            return;
+        }
+        terminal_bytes.extend_from_slice(
+            &self.tentative.bytes[self.tentative.visible_prefix_len..star_count],
+        );
+        self.tentative.visible_prefix_len = star_count;
+    }
+
+    fn begin_post_session_tail(
+        &mut self,
+        direction: ZmodemTransferDirection,
+        pending_wire: Vec<u8>,
+    ) {
+        let mut tail = PostSessionTail::new(direction);
+        match tail.consume(pending_wire.as_slice()) {
+            PostSessionTailOutcome::Pending => {
+                self.post_session_tail = Some(tail);
+            }
+            PostSessionTailOutcome::Released(remaining) => {
+                self.post_session_tail = None;
+                self.route_unconsumed_terminal_bytes(remaining);
+            }
+        }
+    }
+
+    fn route_unconsumed_terminal_bytes(&mut self, bytes: Vec<u8>) {
+        if bytes.is_empty() {
+            return;
+        }
+        let mut released = std::mem::take(&mut self.released_terminal_bytes);
+        released.extend(self.intercept_remote_bytes(bytes.as_slice()));
+        self.released_terminal_bytes = released;
     }
 }
 
@@ -431,6 +642,13 @@ impl ZmodemSession {
         match self {
             Self::Sender(sender) => sender.finished,
             Self::Receiver(receiver) => receiver.finished,
+        }
+    }
+
+    fn take_pending_wire(&mut self) -> Vec<u8> {
+        match self {
+            Self::Sender(sender) => sender.take_pending_wire(),
+            Self::Receiver(receiver) => receiver.take_pending_wire(),
         }
     }
 }
@@ -506,6 +724,10 @@ impl SenderTransfer {
         buffer_protocol_wire(&mut self.pending_wire, bytes, |chunk| {
             protocol.submit_wire(chunk).map_err(Into::into)
         })
+    }
+
+    fn take_pending_wire(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.pending_wire)
     }
 
     fn cancel(&mut self) {
@@ -602,6 +824,7 @@ impl SenderTransfer {
             SenderPollAction::Idle => {
                 if self.session_complete_pending {
                     self.session_complete_pending = false;
+                    self.complete_session();
                     self.finished = true;
                 }
                 Ok(ZmodemAdvanceOutcome::Idle)
@@ -625,29 +848,6 @@ impl SenderTransfer {
             }
             SenderPollEvent::SessionCompleted => {
                 self.session_complete_pending = true;
-                let mut state = self.state.clone().unwrap_or_else(|| {
-                    ZmodemTransferState::new(
-                        ZmodemTransferDirection::Upload,
-                        ZmodemTransferPhase::Completed,
-                        "ZMODEM Upload",
-                        "Upload complete",
-                        "All selected files were transferred.",
-                        "",
-                    )
-                });
-                state.phase = ZmodemTransferPhase::Completed;
-                state.headline = "Upload complete".into();
-                state.status_text =
-                    format!("Transferred {} file(s) with ZMODEM.", self.files.len());
-                state.detail_text =
-                    "The remote shell can continue using the received files.".into();
-                state.error_text.clear();
-                state.current_file_name.clear();
-                state.files_completed = self.files.len();
-                state.files_total = Some(self.files.len());
-                state.bytes_transferred = self.total_bytes;
-                state.bytes_total = Some(self.total_bytes);
-                self.state = Some(state);
             }
             SenderPollEvent::Aborted => {
                 self.finished = true;
@@ -664,6 +864,30 @@ impl SenderTransfer {
             SenderPollEvent::FileStarted | SenderPollEvent::Other => {}
         }
         Ok(())
+    }
+
+    fn complete_session(&mut self) {
+        let mut state = self.state.clone().unwrap_or_else(|| {
+            ZmodemTransferState::new(
+                ZmodemTransferDirection::Upload,
+                ZmodemTransferPhase::Completed,
+                "ZMODEM Upload",
+                "Upload complete",
+                "All selected files were transferred.",
+                "",
+            )
+        });
+        state.phase = ZmodemTransferPhase::Completed;
+        state.headline = "Upload complete".into();
+        state.status_text = format!("Transferred {} file(s) with ZMODEM.", self.files.len());
+        state.detail_text = "The remote shell can continue using the received files.".into();
+        state.error_text.clear();
+        state.current_file_name.clear();
+        state.files_completed = self.files.len();
+        state.files_total = Some(self.files.len());
+        state.bytes_transferred = self.total_bytes;
+        state.bytes_total = Some(self.total_bytes);
+        self.state = Some(state);
     }
 
     fn start_current_file(&mut self) -> Result<()> {
@@ -820,6 +1044,10 @@ impl ReceiverTransfer {
         })
     }
 
+    fn take_pending_wire(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.pending_wire)
+    }
+
     fn cancel(&mut self) {
         self.cancel_requested = true;
         self.deferred_event = None;
@@ -932,6 +1160,7 @@ impl ReceiverTransfer {
             ReceiverPollAction::Idle => {
                 if self.session_complete_pending {
                     self.session_complete_pending = false;
+                    self.complete_session();
                     self.finished = true;
                 }
                 Ok(ZmodemAdvanceOutcome::Idle)
@@ -1026,45 +1255,6 @@ impl ReceiverTransfer {
             ReceiverPollEvent::SessionCompleted => {
                 self.cancel_requested = false;
                 self.session_complete_pending = true;
-                let mut state = self.state.clone().unwrap_or_else(|| {
-                    ZmodemTransferState::new(
-                        ZmodemTransferDirection::Download,
-                        ZmodemTransferPhase::Completed,
-                        "ZMODEM Download",
-                        "Download complete",
-                        "All remote files were received.",
-                        "",
-                    )
-                });
-                state.phase = ZmodemTransferPhase::Completed;
-                state.headline = "Download complete".into();
-                state.status_text =
-                    format!("Received {} file(s) with ZMODEM.", self.files_completed);
-                state.detail_text =
-                    "The downloaded files are available in the folder you selected.".into();
-                state.error_text.clear();
-                state.current_file_name.clear();
-                state.files_completed = self.files_completed;
-                state.files_total = Some(self.files_completed);
-                state.bytes_transferred = self.bytes_transferred;
-                state.bytes_total = (self.bytes_total > 0).then_some(self.bytes_total);
-                state.local_file_path = if self.completed_local_paths.len() == 1 {
-                    self.completed_local_paths.first().cloned()
-                } else {
-                    None
-                };
-                state.local_reveal_path = self
-                    .completed_local_paths
-                    .first()
-                    .cloned()
-                    .or_else(|| self.target_dir.clone());
-                self.state = Some(state);
-                tracing::info!(
-                    target: "app.zmodem",
-                    files_completed = self.files_completed,
-                    bytes_transferred = self.bytes_transferred,
-                    "zmodem download completed"
-                );
             }
             ReceiverPollEvent::Aborted => {
                 self.cancel_requested = false;
@@ -1082,6 +1272,46 @@ impl ReceiverTransfer {
             ReceiverPollEvent::Other => {}
         }
         Ok(())
+    }
+
+    fn complete_session(&mut self) {
+        let mut state = self.state.clone().unwrap_or_else(|| {
+            ZmodemTransferState::new(
+                ZmodemTransferDirection::Download,
+                ZmodemTransferPhase::Completed,
+                "ZMODEM Download",
+                "Download complete",
+                "All remote files were received.",
+                "",
+            )
+        });
+        state.phase = ZmodemTransferPhase::Completed;
+        state.headline = "Download complete".into();
+        state.status_text = format!("Received {} file(s) with ZMODEM.", self.files_completed);
+        state.detail_text = "The downloaded files are available in the folder you selected.".into();
+        state.error_text.clear();
+        state.current_file_name.clear();
+        state.files_completed = self.files_completed;
+        state.files_total = Some(self.files_completed);
+        state.bytes_transferred = self.bytes_transferred;
+        state.bytes_total = (self.bytes_total > 0).then_some(self.bytes_total);
+        state.local_file_path = if self.completed_local_paths.len() == 1 {
+            self.completed_local_paths.first().cloned()
+        } else {
+            None
+        };
+        state.local_reveal_path = self
+            .completed_local_paths
+            .first()
+            .cloned()
+            .or_else(|| self.target_dir.clone());
+        self.state = Some(state);
+        tracing::info!(
+            target: "app.zmodem",
+            files_completed = self.files_completed,
+            bytes_transferred = self.bytes_transferred,
+            "zmodem download completed after final wire drain"
+        );
     }
 
     fn sync_running_state(&mut self, status_text: &str) {
@@ -1198,20 +1428,8 @@ fn resolve_receiver_target_path(
     }
 }
 
-enum PostSessionDrain {
-    Pending(Vec<u8>),
-    Plain(Vec<u8>),
-}
-
-fn strip_lrzsz_autostart_invocation(bytes: &[u8]) -> &[u8] {
-    for marker in [
-        b" rz\r\n".as_slice(),
-        b" rz\r".as_slice(),
-        b" rz\n".as_slice(),
-        b"rz\r\n".as_slice(),
-        b"rz\r".as_slice(),
-        b"rz\n".as_slice(),
-    ] {
+fn strip_lrzsz_download_autostart_invocation(bytes: &[u8]) -> &[u8] {
+    for marker in [b"rz\r\n".as_slice(), b"rz\r".as_slice(), b"rz\n".as_slice()] {
         if let Some(stripped) = bytes.strip_suffix(marker) {
             return stripped;
         }
@@ -1219,69 +1437,43 @@ fn strip_lrzsz_autostart_invocation(bytes: &[u8]) -> &[u8] {
     bytes
 }
 
-fn strip_post_session_zmodem_noise(bytes: &[u8]) -> PostSessionDrain {
-    let mut offset = 0;
-    loop {
-        let remaining = &bytes[offset..];
-        if remaining.is_empty() {
-            return PostSessionDrain::Pending(Vec::new());
-        }
+fn strip_automatic_rz_echo(bytes: &[u8]) -> &[u8] {
+    automatic_rz_echo_start(bytes)
+        .map(|start| &bytes[..start])
+        .unwrap_or(bytes)
+}
 
-        if let Some(marker_len) = [
-            b" rz\r\n".as_slice(),
-            b" rz\r".as_slice(),
-            b" rz\n".as_slice(),
-            b"rz\r\n".as_slice(),
-            b"rz\r".as_slice(),
-            b"rz\n".as_slice(),
-        ]
+fn automatic_rz_echo_start(bytes: &[u8]) -> Option<usize> {
+    automatic_rz_echo_markers()
         .iter()
-        .find_map(|marker| remaining.starts_with(marker).then_some(marker.len()))
-        {
-            offset += marker_len;
-            continue;
-        }
-        if is_prefix_of_any(
-            remaining,
-            &[b" rz\r\n", b" rz\r", b" rz\n", b"rz\r\n", b"rz\r", b"rz\n"],
-        ) {
-            return PostSessionDrain::Pending(remaining.to_vec());
-        }
-
-        if remaining.starts_with(b"OO") {
-            offset += 2;
-            continue;
-        }
-        if remaining == b"O" {
-            return PostSessionDrain::Pending(remaining.to_vec());
-        }
-
-        if remaining.starts_with(b"**\x18B") {
-            if let Some(xon_index) = remaining.iter().position(|byte| *byte == 0x11) {
-                offset += xon_index + 1;
-                continue;
-            }
-            return PostSessionDrain::Pending(remaining.to_vec());
-        }
-        if is_prefix_of(remaining, b"**\x18B") {
-            return PostSessionDrain::Pending(remaining.to_vec());
-        }
-
-        if matches!(remaining[0], 0x18 | 0x08 | 0x11) {
-            offset += 1;
-            continue;
-        }
-
-        return PostSessionDrain::Plain(remaining.to_vec());
-    }
+        .find_map(|marker| bytes.strip_suffix(*marker).map(|prefix| prefix.len()))
 }
 
-fn is_prefix_of_any(bytes: &[u8], markers: &[&[u8]]) -> bool {
-    markers.iter().any(|marker| is_prefix_of(bytes, marker))
+fn automatic_rz_echo_candidate_suffix_len(bytes: &[u8]) -> usize {
+    (1..=bytes.len())
+        .rev()
+        .find(|suffix_len| {
+            let suffix = &bytes[bytes.len() - suffix_len..];
+            automatic_rz_echo_markers().iter().any(|marker| {
+                marker.starts_with(suffix)
+                    || suffix.strip_prefix(*marker).is_some_and(|after_echo| {
+                        after_echo.len() < ZRINIT_PREFIX.len()
+                            && ZRINIT_PREFIX.starts_with(after_echo)
+                    })
+            })
+        })
+        .unwrap_or(0)
 }
 
-fn is_prefix_of(bytes: &[u8], marker: &[u8]) -> bool {
-    bytes.len() < marker.len() && marker.starts_with(bytes)
+fn automatic_rz_echo_markers() -> [&'static [u8]; 6] {
+    [
+        b" rz -q\r\n",
+        b" rz -q\r",
+        b" rz -q\n",
+        b" rz\r\n",
+        b" rz\r",
+        b" rz\n",
+    ]
 }
 
 fn sanitize_zmodem_file_name(raw_name: &[u8]) -> String {
@@ -1306,6 +1498,39 @@ fn find_zmodem_prefix(bytes: &[u8]) -> Option<(usize, ZmodemTransferDirection)> 
         (Some(left), None) => Some(left),
         (None, Some(right)) => Some(right),
         (None, None) => None,
+    }
+}
+
+fn validate_initial_header_with_zmodem2(header: &[u8], direction: ZmodemTransferDirection) -> bool {
+    if header.len() != ZMODEM_ZHEX_HEADER_CORE_LEN {
+        return false;
+    }
+
+    match direction {
+        ZmodemTransferDirection::Upload => {
+            let Ok(mut sender) = Sender::new() else {
+                return false;
+            };
+            while let Action::WriteWire(bytes) = sender.poll() {
+                let written = bytes.len();
+                sender.wire_written(written);
+            }
+            sender
+                .submit_wire(header)
+                .is_ok_and(|consumed| consumed == header.len())
+        }
+        ZmodemTransferDirection::Download => {
+            let Ok(mut receiver) = Receiver::new() else {
+                return false;
+            };
+            while let Action::WriteWire(bytes) = receiver.poll() {
+                let written = bytes.len();
+                receiver.wire_written(written);
+            }
+            receiver
+                .submit_wire(header)
+                .is_ok_and(|consumed| consumed == header.len())
+        }
     }
 }
 
@@ -1386,6 +1611,27 @@ mod tests {
         123
     }
 
+    fn initial_header(direction: ZmodemTransferDirection) -> Vec<u8> {
+        let wire = match direction {
+            ZmodemTransferDirection::Upload => {
+                let mut receiver = Receiver::new().expect("create receiver");
+                match receiver.poll() {
+                    Action::WriteWire(bytes) => bytes.to_vec(),
+                    other => panic!("unexpected receiver initialization action: {other:?}"),
+                }
+            }
+            ZmodemTransferDirection::Download => {
+                let mut sender = Sender::new().expect("create sender");
+                match sender.poll() {
+                    Action::WriteWire(bytes) => bytes.to_vec(),
+                    other => panic!("unexpected sender initialization action: {other:?}"),
+                }
+            }
+        };
+        assert!(wire.len() >= 18, "initial ZHEX header was too short");
+        wire[..18].to_vec()
+    }
+
     #[test]
     fn finds_both_known_zmodem_prefixes() {
         assert_eq!(
@@ -1403,8 +1649,146 @@ mod tests {
         let mut controller = ZmodemController::default();
 
         let first = controller.intercept_remote_bytes(b"plain**\x18");
-        assert_eq!(first, b"plain".to_vec());
-        assert_eq!(controller.flush_terminal_bytes(), b"**\x18".to_vec());
+        assert_eq!(first, b"plain**".to_vec());
+        assert_eq!(controller.flush_terminal_bytes(), b"\x18".to_vec());
+    }
+
+    #[test]
+    fn ordinary_star_candidates_are_visible_without_waiting_for_enter() {
+        for input in [
+            b"*".as_slice(),
+            b"**",
+            b"***",
+            b"*.log",
+            b"a*b",
+            b"'*'",
+            b"\\*",
+            b"paste:**",
+        ] {
+            let mut controller = ZmodemController::default();
+
+            assert_eq!(
+                controller.intercept_remote_bytes(input),
+                input,
+                "ordinary star bytes were not visible immediately for {input:?}"
+            );
+            assert!(controller.flush_terminal_bytes().is_empty());
+        }
+    }
+
+    #[test]
+    fn local_input_never_discards_tentative_remote_bytes() {
+        let input = b"**\x18B0";
+        let mut controller = ZmodemController::default();
+        let mut terminal_bytes = controller.intercept_remote_bytes(input);
+
+        controller.note_local_input();
+        terminal_bytes.extend(controller.flush_terminal_bytes());
+
+        assert_eq!(terminal_bytes, input);
+    }
+
+    #[test]
+    fn partial_and_false_initial_markers_replay_exactly_once() {
+        for marker in [ZRQINIT_PREFIX, ZRINIT_PREFIX] {
+            for prefix_len in 1..=marker.len() {
+                let mut input = marker[..prefix_len].to_vec();
+                input.push(b'x');
+                let mut controller = ZmodemController::default();
+                let mut terminal_bytes = controller.intercept_remote_bytes(&input[..prefix_len]);
+
+                controller.note_local_input();
+                terminal_bytes.extend(controller.intercept_remote_bytes(&input[prefix_len..]));
+                terminal_bytes.extend(controller.flush_terminal_bytes());
+
+                assert_eq!(
+                    terminal_bytes, input,
+                    "false marker changed at prefix length {prefix_len} for {marker:?}"
+                );
+                assert!(controller.session.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn transport_close_flushes_unseen_tentative_remote_bytes() {
+        let input = b"**\x18B0";
+        let mut controller = ZmodemController::default();
+        let mut terminal_bytes = controller.intercept_remote_bytes(input);
+
+        controller.mark_transport_closed();
+        terminal_bytes.extend(controller.flush_terminal_bytes());
+
+        assert_eq!(terminal_bytes, input);
+    }
+
+    #[test]
+    fn split_valid_initial_headers_require_complete_crc() {
+        for direction in [
+            ZmodemTransferDirection::Upload,
+            ZmodemTransferDirection::Download,
+        ] {
+            let header = initial_header(direction);
+            for split in 0..header.len() {
+                let mut controller = ZmodemController::default();
+
+                let mut terminal_bytes = controller.intercept_remote_bytes(&header[..split]);
+                assert!(
+                    controller.session.is_none(),
+                    "{direction:?} session started before the complete header at split {split}"
+                );
+
+                terminal_bytes.extend(controller.intercept_remote_bytes(&header[split..]));
+                assert!(
+                    controller.session.is_some(),
+                    "{direction:?} session was not detected at split {split}"
+                );
+                let provisional_stars = split.min(2);
+                let mut expected_terminal_bytes = vec![b'*'; provisional_stars];
+                for _ in 0..provisional_stars {
+                    expected_terminal_bytes.extend_from_slice(TERMINAL_ERASE_CELL);
+                }
+                assert_eq!(terminal_bytes, expected_terminal_bytes);
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_initial_header_replays_every_byte() {
+        for direction in [
+            ZmodemTransferDirection::Upload,
+            ZmodemTransferDirection::Download,
+        ] {
+            let mut header = initial_header(direction);
+            let crc_nibble = header.last_mut().expect("header crc nibble");
+            *crc_nibble = if *crc_nibble == b'0' { b'1' } else { b'0' };
+
+            let mut controller = ZmodemController::default();
+            let split = header.len() / 2;
+            let mut terminal_bytes = controller.intercept_remote_bytes(&header[..split]);
+            controller.note_local_input();
+            terminal_bytes.extend(controller.intercept_remote_bytes(&header[split..]));
+            terminal_bytes.extend(controller.flush_terminal_bytes());
+
+            assert_eq!(terminal_bytes, header);
+            assert!(controller.session.is_none());
+        }
+    }
+
+    #[test]
+    fn ordinary_star_before_later_valid_header_is_not_erased() {
+        let header = initial_header(ZmodemTransferDirection::Upload);
+        let mut controller = ZmodemController::default();
+
+        let first = controller.intercept_remote_bytes(b"***");
+        let second = controller.intercept_remote_bytes(&header[2..]);
+
+        let mut expected_second = Vec::new();
+        expected_second.extend_from_slice(TERMINAL_ERASE_CELL);
+        expected_second.extend_from_slice(TERMINAL_ERASE_CELL);
+        assert_eq!(first, b"***");
+        assert_eq!(second, expected_second);
+        assert!(controller.session.is_some());
     }
 
     #[test]
@@ -1437,8 +1821,10 @@ mod tests {
     #[test]
     fn strips_lrzsz_autostart_invocation_before_download_prefix() {
         let mut controller = ZmodemController::default();
+        let mut remote_bytes = b"prompt\nrz\r".to_vec();
+        remote_bytes.extend(initial_header(ZmodemTransferDirection::Download));
 
-        let terminal_bytes = controller.intercept_remote_bytes(b"prompt\nrz\r**\x18B00");
+        let terminal_bytes = controller.intercept_remote_bytes(remote_bytes.as_slice());
 
         assert_eq!(terminal_bytes, b"prompt\n".to_vec());
         let state = controller
@@ -1450,55 +1836,136 @@ mod tests {
     }
 
     #[test]
-    fn strips_history_friendly_interactive_rz_invocation_before_upload_prefix() {
+    fn automatic_quiet_rz_echo_requires_explicit_ownership() {
+        let mut remote_bytes = b"prompt\n rz -q\r".to_vec();
+        remote_bytes.extend(initial_header(ZmodemTransferDirection::Upload));
+        for split in 0..remote_bytes.len() {
+            let mut controller = ZmodemController::default();
+            controller.expect_automatic_rz_echo();
+            let mut terminal_bytes = controller.intercept_remote_bytes(&remote_bytes[..split]);
+            terminal_bytes.extend(controller.intercept_remote_bytes(&remote_bytes[split..]));
+
+            assert_eq!(terminal_bytes, b"prompt\n".to_vec(), "split {split}");
+            let state = controller
+                .take_modal_state_change()
+                .expect("zmodem state changed")
+                .expect("upload state");
+            assert_eq!(state.direction, ZmodemTransferDirection::Upload);
+            assert_eq!(state.phase, ZmodemTransferPhase::AwaitingUploadSelection);
+        }
+
         let mut controller = ZmodemController::default();
+        let mut manual_remote_bytes = b"prompt\n rz\r".to_vec();
+        manual_remote_bytes.extend(initial_header(ZmodemTransferDirection::Upload));
 
-        let terminal_bytes = controller.intercept_remote_bytes(b"prompt\n rz\r**\x18B01");
-
-        assert_eq!(terminal_bytes, b"prompt\n".to_vec());
-        let state = controller
-            .take_modal_state_change()
-            .expect("zmodem state changed")
-            .expect("upload state");
-        assert_eq!(state.direction, ZmodemTransferDirection::Upload);
-        assert_eq!(state.phase, ZmodemTransferPhase::AwaitingUploadSelection);
+        assert_eq!(
+            controller.intercept_remote_bytes(manual_remote_bytes.as_slice()),
+            b"prompt\n rz\r".to_vec()
+        );
     }
 
     #[test]
-    fn post_session_drain_swallows_zmodem_tail_before_prompt() {
-        match strip_post_session_zmodem_noise(b"OOroot@host:~# ") {
-            PostSessionDrain::Plain(bytes) => assert_eq!(bytes, b"root@host:~# "),
-            PostSessionDrain::Pending(bytes) => panic!("unexpected pending bytes: {bytes:?}"),
+    fn post_session_tail_consumes_only_direction_expected_bytes() {
+        let mut upload = PostSessionTail::new(ZmodemTransferDirection::Upload);
+        match upload.consume(b"\r\nroot@host:~# ") {
+            PostSessionTailOutcome::Released(bytes) => assert_eq!(bytes, b"root@host:~# "),
+            PostSessionTailOutcome::Pending => panic!("upload tail remained pending"),
         }
 
-        match strip_post_session_zmodem_noise(b" rz\rOOroot@host:~# ") {
-            PostSessionDrain::Plain(bytes) => assert_eq!(bytes, b"root@host:~# "),
-            PostSessionDrain::Pending(bytes) => panic!("unexpected pending bytes: {bytes:?}"),
+        let mut upload = PostSessionTail::new(ZmodemTransferDirection::Upload);
+        match upload.consume(b"OO-service# ") {
+            PostSessionTailOutcome::Released(bytes) => assert_eq!(bytes, b"OO-service# "),
+            PostSessionTailOutcome::Pending => panic!("mismatched upload tail remained pending"),
         }
 
-        match strip_post_session_zmodem_noise(b"**\x18B0800000000022d\r\n\x11root@host:~# ") {
-            PostSessionDrain::Plain(bytes) => assert_eq!(bytes, b"root@host:~# "),
-            PostSessionDrain::Pending(bytes) => panic!("unexpected pending bytes: {bytes:?}"),
+        let mut download = PostSessionTail::new(ZmodemTransferDirection::Download);
+        assert!(matches!(
+            download.consume(b"\r\nO"),
+            PostSessionTailOutcome::Pending
+        ));
+        match download.consume(b"Oroot@host:~# ") {
+            PostSessionTailOutcome::Released(bytes) => assert_eq!(bytes, b"root@host:~# "),
+            PostSessionTailOutcome::Pending => panic!("download tail remained pending"),
         }
 
-        match strip_post_session_zmodem_noise(b"**\x18") {
-            PostSessionDrain::Pending(bytes) => assert_eq!(bytes, b"**\x18"),
-            PostSessionDrain::Plain(bytes) => panic!("unexpected plain bytes: {bytes:?}"),
+        let mut download = PostSessionTail::new(ZmodemTransferDirection::Download);
+        match download.consume(b"\r\nOx-service# ") {
+            PostSessionTailOutcome::Released(bytes) => assert_eq!(bytes, b"Ox-service# "),
+            PostSessionTailOutcome::Pending => panic!("mismatched download tail remained pending"),
         }
     }
 
     #[test]
-    fn controller_post_session_drain_releases_plain_prompt() {
+    fn controller_post_session_tail_releases_plain_prompt() {
         let mut controller = ZmodemController {
-            post_session_drain: true,
+            post_session_tail: Some(PostSessionTail::new(ZmodemTransferDirection::Download)),
             ..ZmodemController::default()
         };
 
-        assert!(controller.intercept_remote_bytes(b"OO").is_empty());
+        assert!(controller.intercept_remote_bytes(b"\r\nO").is_empty());
         assert_eq!(
-            controller.intercept_remote_bytes(b"root@host:~# "),
+            controller.intercept_remote_bytes(b"Oroot@host:~# "),
             b"root@host:~# ".to_vec()
         );
+    }
+
+    #[test]
+    fn post_session_upload_prompt_starting_with_oo_is_preserved() {
+        let mut controller = ZmodemController {
+            post_session_tail: Some(PostSessionTail::new(ZmodemTransferDirection::Upload)),
+            ..ZmodemController::default()
+        };
+
+        assert_eq!(
+            controller.intercept_remote_bytes(b"OO-service# "),
+            b"OO-service# ".to_vec()
+        );
+    }
+
+    #[test]
+    fn completed_sender_releases_same_chunk_prompt() {
+        for prompt in [
+            b"root@host:~# ".as_slice(),
+            b"OO-service# ",
+            b"rz-admin# ",
+            b"* prompt",
+        ] {
+            let mut sender = SenderTransfer::new();
+            sender.finished = true;
+            sender.state.as_mut().expect("sender state").phase = ZmodemTransferPhase::Completed;
+            sender.pending_wire.extend_from_slice(b"\r\n");
+            sender.pending_wire.extend_from_slice(prompt);
+            let mut controller = ZmodemController {
+                session: Some(ZmodemSession::Sender(sender)),
+                ..ZmodemController::default()
+            };
+
+            assert_eq!(controller.advance(), ZmodemAdvanceOutcome::Idle);
+            assert_eq!(controller.take_released_terminal_bytes(), prompt);
+        }
+    }
+
+    #[test]
+    fn completed_receiver_consumes_only_expected_oo_then_releases_prompt() {
+        for prompt in [
+            b"root@host:~# ".as_slice(),
+            b"OO-service# ",
+            b"rz-admin# ",
+            b"* prompt",
+        ] {
+            let mut receiver = ReceiverTransfer::new();
+            receiver.finished = true;
+            receiver.state.as_mut().expect("receiver state").phase = ZmodemTransferPhase::Completed;
+            receiver.pending_wire.extend_from_slice(b"\r\nOO");
+            receiver.pending_wire.extend_from_slice(prompt);
+            let mut controller = ZmodemController {
+                session: Some(ZmodemSession::Receiver(receiver)),
+                ..ZmodemController::default()
+            };
+
+            assert_eq!(controller.advance(), ZmodemAdvanceOutcome::Idle);
+            assert_eq!(controller.take_released_terminal_bytes(), prompt);
+        }
     }
 
     #[test]
@@ -1512,11 +1979,20 @@ mod tests {
 
         assert!(!transfer.finished);
         assert!(transfer.session_complete_pending);
+        assert_ne!(
+            transfer.state.as_ref().expect("sender state").phase,
+            ZmodemTransferPhase::Completed,
+            "upload completion must wait until final wire bytes are drained"
+        );
         assert_eq!(
             transfer.advance().expect("finish after idle"),
             ZmodemAdvanceOutcome::Idle
         );
         assert!(transfer.finished);
+        assert_eq!(
+            transfer.state.as_ref().expect("sender state").phase,
+            ZmodemTransferPhase::Completed
+        );
     }
 
     #[test]
@@ -1534,11 +2010,20 @@ mod tests {
 
         assert!(!transfer.finished);
         assert!(transfer.session_complete_pending);
+        assert_ne!(
+            transfer.state.as_ref().expect("receiver state").phase,
+            ZmodemTransferPhase::Completed,
+            "download completion must wait until final wire bytes are drained"
+        );
         assert_eq!(
             transfer.advance().expect("finish after idle"),
             ZmodemAdvanceOutcome::Idle
         );
         assert!(transfer.finished);
+        assert_eq!(
+            transfer.state.as_ref().expect("receiver state").phase,
+            ZmodemTransferPhase::Completed
+        );
     }
 
     #[test]
@@ -1700,8 +2185,13 @@ mod tests {
     #[test]
     fn controller_cancel_queues_abort_wire_and_finishes_locally() {
         let mut controller = ZmodemController::default();
+        let header = initial_header(ZmodemTransferDirection::Download);
 
-        assert!(controller.intercept_remote_bytes(ZRQINIT_PREFIX).is_empty());
+        assert!(
+            controller
+                .intercept_remote_bytes(header.as_slice())
+                .is_empty()
+        );
         controller.cancel().expect("cancel zmodem controller");
 
         let state = controller
