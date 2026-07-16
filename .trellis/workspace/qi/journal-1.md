@@ -37,3 +37,37 @@ Made ZMODEM detection lossless with complete-header validation, preserved same-b
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: Stabilize terminal drag upload routing
+
+**Date**: 2026-07-16
+**Task**: Stabilize terminal drag upload routing
+**Branch**: `master`
+
+### Summary
+
+Fixed SSH exec probe EOF/exit-status ordering, added explicit incomplete-probe classification and routing diagnostics, and covered live russh plus remote A/B/B/C upload routing regressions.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b9a43a9` | (see git log) |
+| `ed857a2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
