@@ -50,11 +50,12 @@ Questions to answer:
 
 (To be filled by the team)
 
-## Scenario: ZMODEM and External Drop Transfer Boundaries
+## Scenario: ZMODEM, SSH Exec Probes, and External Drop Transfer Boundaries
 
 ### 1. Scope / Trigger
 
 - Trigger: terminal transfers cross protocol runtime, SSH channel IO, Slint modal state, OS drag/drop, and SFTP upload scheduling.
+- Trigger: short-lived cwd and command probes cross russh channel-message ordering and terminal-drop routing; valid SSH EOF, exit-status, and close messages may arrive separately.
 - Applies when modifying `src/app/ssh/runtime/zmodem.rs`, `src/app/ssh/runtime/pump.rs`, `src/app/bootstrap/windowing.rs`, `src/app/bootstrap/sftp.rs`, `ui/components/zmodem-transfer-modal.slint`, or `vendor/winit/src/platform_impl/windows/drop_handler.rs`.
 
 ### 2. Signatures
@@ -65,6 +66,9 @@ Questions to answer:
 - `SessionRuntimeControl::resolve_current_working_directory(&self) -> Result<Option<String>>` is the non-interactive runtime escape hatch for terminal drops when no OSC7/shell-integration cwd snapshot exists.
 - `SessionManager::resolve_current_working_directory(session_id) -> Result<Option<String>>` delegates to the active runtime and caches a successful cwd in `current_working_directories`.
 - `SessionManager::remote_command_exists(session_id, "rz") -> Result<bool>` probes lrzsz through a dedicated SSH exec channel with the same transfer PATH setup used by exec-channel upload; it must not call `send_session_text_input`.
+- `RemoteExecOutput::push_message(&mut self, ChannelMsg, &'static str) -> Result<bool>` is the single transition owner for short-lived exec-probe stdout, EOF, exit status, request acceptance, and close; `true` means enough channel facts exist to finish collection.
+- `require_remote_exec_exit_status(Option<u32>, &'static str) -> Result<u32>` converts a closed/incomplete exec result with no exit status into an error instead of command absence.
+- `remote_command_exists(handle, command_name) -> Result<bool>` maps exit status `0` to `true`, a confirmed non-zero status to `false`, and missing status to `Err`.
 - `SessionManager::start_zmodem_upload_to_remote_dir(session_id, local_paths, remote_dir) -> Result<()>` starts drag-triggered ZMODEM uploads through a dedicated SSH exec channel running `<transfer PATH setup>; cd <quoted remote_dir> && rz -q`.
 - `SessionManager::start_interactive_zmodem_upload(session_id, local_paths) -> Result<()>` starts the active-PTY fallback for drag-triggered ZMODEM upload when the active terminal cwd cannot be resolved and the terminal mode allows interaction.
 - `SessionRegistry::runtime_controls` stores `Arc<Mutex<Box<dyn SessionRuntimeControl>>>`; callers must clone the shared control while holding the registry lock, release the registry lock, then invoke runtime methods under the per-control mutex.
@@ -97,6 +101,10 @@ Questions to answer:
 - Drag-triggered automatic ZMODEM upload must not inject command-probe snippets such as `if command -v rz ...` into the interactive terminal. Those snippets are echoed, can enter shell history, and confuse users after upload completion.
 - Drag-triggered automatic ZMODEM upload may use a dedicated SSH exec channel for `rz -q` because exec requests do not touch the interactive PTY scrollback or shell history. The remote working directory must be shell-quoted before `cd`; `-q` suppresses lrzsz's non-protocol `rz waiting to receive.` stderr banner.
 - Drag-triggered `rz` detection must account for non-interactive exec PATH differences by exporting a transfer PATH containing `$HOME/.local/bin`, `$HOME/bin`, `/usr/local/bin`, `/usr/bin`, and standard sbin/bin directories before `command -v rz` and before exec-channel `rz`.
+- Short-lived SSH exec collectors must treat `ChannelMsg::Eof`, `ChannelMsg::ExitStatus`, and `ChannelMsg::Close` as independent facts. EOF ends remote stdout but does not close the channel; a valid exit status can arrive after EOF.
+- Exec-probe collection may finish on `Close`, stream end, or once both EOF and exit status are known. If exit status arrives before EOF, keep collecting so late stdout is not discarded; if EOF arrives first, keep collecting so the status is not discarded.
+- A missing exec-probe exit status is incomplete transport metadata, not proof that `rz` is absent. Surface it as an error so terminal-drop routing can log `rz_probe_error`; reserve `Ok(false)` and `rz_missing` for a confirmed non-zero command probe.
+- Do not add retries or per-session capability caches to conceal an incorrect exec collector. Fix message ownership at `remote_exec_output`; retries add latency and caches leave cwd probes broken or stale.
 - When the interactive cwd cannot be resolved for ordinary file drops and the terminal mode allows interaction, drag-triggered automatic ZMODEM upload must fall back to the active PTY by sending only the minimal history-friendly command ` rz -q\r`. Do not let an exec-channel `command -v rz` false result veto this fallback: exec channels can see a different PATH or restricted shell behavior than the active PTY. This is the only allowed interactive auto-start command; its echo must be stripped from visible terminal output when the `ZRINIT` handshake follows.
 - Interactive `rz` fallback must publish a ZMODEM upload failure state if `ZRINIT` is not observed within the handshake timeout, so a genuinely missing remote `rz` does not silently stall the UI.
 - Application cursor-key mode alone must not disable drag-triggered `rz` fallback. Alternate screen and mouse-grabbed states can block interactive `rz`; application cursor-key mode is too broad and can be set on ordinary prompts.
@@ -121,6 +129,10 @@ Questions to answer:
 - Missing active terminal surface snapshot + runtime cwd probe returns none -> start interactive `rz` fallback; do not surface a cwd preflight error and do not enqueue an SFTP transfer task.
 - Missing terminal cwd + runtime cwd probe returns none or times out + terminal mode explicitly blocks interaction -> reject terminal drop with user-visible feedback and an `app.drop` warning because SFTP fallback has no target directory and PTY `rz` is unsafe.
 - `remote_command_exists(session_id, "rz") == false` + known terminal cwd -> fall back to SFTP upload into that cwd.
+- Exec probe receives `ExitStatus(0) -> EOF -> Close` -> retain status 0 and finish at EOF without waiting for close.
+- Exec probe receives `Data -> EOF -> ExitStatus(0) -> Close` -> retain all stdout, wait past EOF, retain status 0, and finish without the three-second timeout.
+- Exec probe receives `ExitStatus(nonzero) -> Close` -> classify the command as confirmed unavailable; do not turn it into an incomplete-probe error.
+- Exec probe receives `EOF -> Close` without exit status -> return an incomplete-probe error; terminal-drop routing may use its existing safe fallback but must log the probe-error reason.
 - Dedicated exec-channel `rz` handshake not observed before timeout -> show a failed ZMODEM upload state; do not write recovery commands into the interactive shell.
 - Interactive fallback command sent + `ZRINIT` handshake not observed before timeout -> show a failed ZMODEM upload state.
 - Partial or CRC-invalid ZHEX initialization header -> replay every non-protocol byte exactly once; do not create a session from the six-byte marker alone.
@@ -146,6 +158,9 @@ Questions to answer:
 - Fallback: drag a regular file when `rz` is unavailable, the exec probe returns false, and SFTP uploads into the active terminal cwd.
 - Fallback without shell markers: when the cwd snapshot is missing and `rz` is unavailable, resolve cwd first, cache it, then SFTP uploads into that resolved cwd.
 - Base after probe-only cwd cache: if a prior drop probed `/home/user` but no live cwd marker has arrived, a later drop must re-probe and use the new result such as `/srv/app/releases` instead of uploading to the stale login directory.
+- Good: an SSH server sends stdout, EOF, exit status 0, and close in that order; cwd and `rz` probes retain the successful status and choose the same route they would choose if status arrived before EOF.
+- Base: one SSH session uploads the same local file after remote cwd changes A -> B -> B -> C; with stable `rz` availability, all four drops use dedicated ZMODEM and target A, B, B, and C respectively.
+- Bad: breaking the exec-probe loop on `ChannelMsg::Eof`, returning `exit_status == None`, and comparing it with `Some(0)`; this turns valid SSH message timing into random SFTP/Transfer Center fallback.
 - Base with application cursor mode: if the terminal is not in alternate screen and is not mouse-grabbed, application cursor-key mode alone must still allow `rz` fallback rather than forcing SFTP or an exec-channel availability veto.
 - Base with stale shell markers: if shell integration says input is not active or a command is running, but the terminal is not in alternate screen and is not mouse-grabbed, allow interactive `rz` fallback; shell marker state is advisory and can be stale when environment-based integration is rejected.
 - Bad: creating a failed SFTP transfer-center task when no target cwd was determined; this is a preflight failure, not a file-transfer failure.
@@ -182,11 +197,14 @@ Questions to answer:
 - Integration test: terminal file drop with no projected terminal surface and no tracked/probed cwd records an interactive ZMODEM upload fallback, no terminal text probe snippet, no exec-channel `remote_command_exists("rz")` veto, no SFTP upload, and no `Transfer failed` feedback.
 - Unit test: interactive `rz` fallback command is exactly ` rz -q\r`, does not contain `command -v` or `if`, and uses quiet mode.
 - Unit test: remote command probe command includes the shared transfer PATH setup before `command -v`.
+- Unit test: short-lived exec accumulation covers status-before-EOF, EOF-before-status, data plus EOF-before-status, status plus close without EOF, and close with no status. Assert stdout/status preservation, completion only at the defined terminal condition, and an error for missing status.
+- Live runtime test: an in-process russh server sends data, EOF, exit status 0, then close; `SshSessionRuntime::remote_command_exists("rz")` must return `true` rather than `false` or timing out.
 - Unit test: explicitly armed ZMODEM prefix interception strips the echoed `" rz -q\r"` fallback command before a CRC-valid `ZRINIT` across every split; identical unarmed manual text remains visible.
 - Integration test: terminal file drop with `rz` missing records no terminal text input and falls back to SFTP into `/srv/app` or the active cwd fixture.
 - Integration test: terminal file drop with `rz` missing and a delayed `remote_command_exists` probe returns from `invoke_workspace_terminal_external_drop_requested()` quickly, and a subsequent `flush_runtime_projection()` also returns quickly while the background probe is still sleeping.
 - Integration test: terminal file drop with no tracked cwd and `rz` missing records one runtime cwd probe, no exec ZMODEM upload, and an SFTP upload into the probed cwd.
 - Integration test: terminal file drop after a previous probe-derived cwd cache records a fresh runtime cwd probe when no live cwd tracking has arrived, then uses the refreshed cwd for exec-channel `rz`.
+- Integration test: four consecutive single-file drops in one session after remote cwd changes A -> B -> B -> C, with stable `rz` availability, record four cwd probes, four `rz` probes, dedicated ZMODEM targets A/B/B/C, no interactive upload, and no SFTP upload.
 - Integration test: terminal file drop with no tracked/probed cwd and an exec-channel `rz` false result still records interactive ZMODEM upload fallback because the probe is not authoritative for the active PTY.
 - Unit/runtime test: interactive `rz` fallback publishes a failed ZMODEM upload state when no `ZRINIT` handshake appears before the timeout.
 - Integration test: completed download modal exposes `Done`, `Open Folder`, and `Open` when a local completed file exists.
@@ -194,6 +212,49 @@ Questions to answer:
 - Integration/source test: Windows drop handler source must use `pt: POINTL`, must not use `pt: *const POINTL`, and must call `ReleaseStgMedium`.
 
 ### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+while let Some(message) = channel.wait().await {
+    match message {
+        ChannelMsg::ExitStatus { exit_status } => status = Some(exit_status),
+        ChannelMsg::Eof | ChannelMsg::Close => break,
+        _ => {}
+    }
+}
+Ok(status == Some(0))
+```
+
+EOF does not close an SSH channel. If the server sends `EOF` before
+`ExitStatus(0)`, this code loses the successful status and reports that the
+remote command is missing.
+
+#### Correct
+
+```rust
+match message {
+    ChannelMsg::ExitStatus { exit_status } => {
+        output.exit_status = Some(exit_status);
+        complete = output.saw_eof;
+    }
+    ChannelMsg::Eof => {
+        output.saw_eof = true;
+        complete = output.exit_status.is_some();
+    }
+    ChannelMsg::Close => complete = true,
+    _ => {}
+}
+
+let status = output
+    .exit_status
+    .ok_or_else(|| anyhow!("remote command probe closed without an exit status"))?;
+Ok(status == 0)
+```
+
+Collect EOF and exit status independently, finish once both are known or the
+channel actually closes, and distinguish incomplete metadata from a confirmed
+non-zero command result.
 
 #### Wrong
 

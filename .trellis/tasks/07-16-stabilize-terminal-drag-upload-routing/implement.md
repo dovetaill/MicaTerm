@@ -33,7 +33,7 @@
 - Consumes: russh `ChannelMsg` values returned by `Channel::wait()`.
 - Produces: `RemoteExecOutput::push_message(&mut self, ChannelMsg, &'static str) -> anyhow::Result<bool>` where `true` means collection can finish, and `require_remote_exec_exit_status(Option<u32>, &'static str) -> anyhow::Result<u32>`.
 
-- [ ] **Step 1: Add failing pure message-order tests**
+- [x] **Step 1: Add failing pure message-order tests**
 
 Add the accumulator test helper and five tests to `pump.rs`'s existing `tests` module:
 
@@ -108,7 +108,7 @@ fn remote_exec_output_reports_missing_exit_status_as_incomplete() {
 }
 ```
 
-- [ ] **Step 2: Make the in-process SSH server emit the real failing order**
+- [x] **Step 2: Make the in-process SSH server emit the real failing order**
 
 In `InteractiveTestServer::exec_request`, insert exit status 0 between EOF and close:
 
@@ -183,7 +183,7 @@ fn ssh_runtime_accepts_exec_exit_status_sent_after_eof() {
 }
 ```
 
-- [ ] **Step 3: Run the regressions and verify they fail for the expected reason**
+- [x] **Step 3: Run the regressions and verify they fail for the expected reason**
 
 Run:
 
@@ -196,7 +196,7 @@ Expected before implementation: the unit target fails to compile because the
 accumulator API does not exist, and the live test returns `false` because the
 current collector breaks at EOF before reading exit status 0.
 
-- [ ] **Step 4: Implement the minimal accumulator**
+- [x] **Step 4: Implement the minimal accumulator**
 
 Extend `RemoteExecOutput` and move the existing loop match into its pure helper:
 
@@ -265,7 +265,7 @@ Ok(output)
 This must finish immediately on `EOF + ExitStatus`, regardless of which arrives
 first, and still finish on `Close` when EOF is omitted.
 
-- [ ] **Step 5: Run the runtime regressions again**
+- [x] **Step 5: Run the runtime regressions again**
 
 Run:
 
@@ -277,7 +277,7 @@ cargo test -q ssh_runtime_accepts_exec_exit_status_sent_after_eof --test ssh_ses
 Expected: all named tests pass without waiting for the three-second probe
 timeout.
 
-- [ ] **Step 6: Review checkpoint**
+- [x] **Step 6: Review checkpoint**
 
 Inspect:
 
@@ -298,7 +298,7 @@ exec loop and interactive terminal pump remain unchanged.
 - Consumes: `RemoteExecOutput.exit_status: Option<u32>`.
 - Produces: successful status `0`, confirmed non-zero status, or an anyhow error containing `without an exit status`.
 
-- [ ] **Step 1: Classify command-probe status without collapsing `None` into false**
+- [x] **Step 1: Classify command-probe status without collapsing `None` into false**
 
 After the existing timeout, log the optional status and require it before the
 boolean mapping:
@@ -316,7 +316,7 @@ Ok(status == 0)
 
 Keep `Some(nonzero)` as `Ok(false)`; only `None` becomes an error.
 
-- [ ] **Step 2: Apply the same incomplete-result rule to cwd probing**
+- [x] **Step 2: Apply the same incomplete-result rule to cwd probing**
 
 Before parsing stdout, log only status and byte count, then require status:
 
@@ -337,7 +337,7 @@ if status != 0 {
 Do not log `output.stdout`. Preserve the current absolute-path parsing and
 `Ok(None)` for a confirmed non-zero status or missing absolute cwd line.
 
-- [ ] **Step 3: Run probe and command-construction unit tests**
+- [x] **Step 3: Run probe and command-construction unit tests**
 
 Run:
 
@@ -359,7 +359,7 @@ Expected: all pass; command quoting, PATH setup, and `rz -q` remain unchanged.
 - Consumes: `SessionManager::resolve_current_working_directory`, `SessionManager::remote_command_exists`, and the existing terminal-drop background scheduler.
 - Produces: four dedicated ZMODEM calls targeting `/srv/a`, `/srv/b`, `/srv/b`, and `/srv/c`, plus structured route diagnostics.
 
-- [ ] **Step 1: Add the remote A/B/B/C routing contract**
+- [x] **Step 1: Add the remote A/B/B/C routing contract**
 
 Add `terminal_file_drop_keeps_exec_rz_across_remote_cwd_changes` using
 `DelayedCwdRecordingSftpLauncher`, one local `release.env`, and stable
@@ -412,7 +412,7 @@ assert!(sftp_state.take_interactive_zmodem_upload_calls().is_empty());
 assert!(sftp_state.take_upload_file_calls().is_empty());
 ```
 
-- [ ] **Step 2: Run the routing contract before diagnostics**
+- [x] **Step 2: Run the routing contract before diagnostics**
 
 Run:
 
@@ -424,7 +424,7 @@ Expected: pass on the deterministic fake runtime. This is a route/target
 contract; Task 1's unit and live russh tests are the regressions that fail on the
 original defect.
 
-- [ ] **Step 3: Add structured cwd and method decisions**
+- [x] **Step 3: Add structured cwd and method decisions**
 
 Add fields to the existing `app.drop` events without logging new payload data:
 
@@ -444,7 +444,7 @@ existing generic `method` field may remain for compatibility, but every terminal
 drop branch must expose the specific `upload_method` or the cwd decision that
 precedes it.
 
-- [ ] **Step 4: Run all focused terminal-drop branches**
+- [x] **Step 4: Run all focused terminal-drop branches**
 
 Run:
 
@@ -456,7 +456,7 @@ Expected: the new A/B/B/C test and existing dedicated ZMODEM, confirmed-missing
 `rz`, cwd-probe-error, cwd-unavailable interactive, and fresh-cwd-probe tests all
 pass.
 
-- [ ] **Step 5: Review checkpoint**
+- [x] **Step 5: Review checkpoint**
 
 Inspect:
 
@@ -480,7 +480,7 @@ diagnostics and the repeated remote-cwd regression were added.
 - Consumes: Tasks 1-3 and PRD requirements R1-R6.
 - Produces: a verified SSH EOF/exit-status contract and final acceptance mapping.
 
-- [ ] **Step 1: Run focused and owning test targets**
+- [x] **Step 1: Run focused and owning test targets**
 
 Run:
 
@@ -496,7 +496,7 @@ cargo test -q --test bootstrap_smoke
 Expected: all pass. The live russh regression must complete normally rather than
 passing only after the three-second timeout.
 
-- [ ] **Step 2: Run formatting, build, and lint checks**
+- [x] **Step 2: Run formatting, build, and lint checks**
 
 Run:
 
@@ -511,7 +511,7 @@ Expected: formatting, check, and whitespace validation pass. Compare clippy
 output with the repository baseline and introduce no new warning in changed
 code; record any pre-existing repository warnings rather than hiding them.
 
-- [ ] **Step 3: Audit the exact semantic boundary**
+- [x] **Step 3: Audit the exact semantic boundary**
 
 Run:
 
@@ -523,7 +523,7 @@ Expected: the short-lived exec probe collector no longer terminates on EOF
 alone. Other interactive-terminal or ZMODEM loops may retain protocol-specific
 EOF handling and must not be mechanically rewritten.
 
-- [ ] **Step 4: Capture the prevention contract**
+- [x] **Step 4: Capture the prevention contract**
 
 Load `trellis-update-spec` and add this focused rule to
 `.trellis/spec/backend/quality-guidelines.md` without rewriting unrelated
@@ -539,7 +539,7 @@ sections:
   EOF-before-status test.
 ```
 
-- [ ] **Step 5: Run the Trellis quality gate and map acceptance**
+- [x] **Step 5: Run the Trellis quality gate and map acceptance**
 
 Load `trellis-check`, run its required spec/code/test checks, then map:
 
@@ -554,7 +554,29 @@ AC7 -> full commands from Tasks 4.1 and 4.2
 
 Expected: no unexplained failure and no unrelated source change.
 
-- [ ] **Step 6: Prepare the implementation commit for user confirmation**
+Verification evidence recorded on 2026-07-16:
+
+```text
+cargo test -q remote_exec_output_ --lib                         5 passed
+cargo test -q ssh_runtime_accepts_exec_exit_status_sent_after_eof
+  --test ssh_session_manager_spec                               1 passed
+cargo test -q terminal_file_drop_ --test bootstrap_smoke       13 passed
+cargo test -q --lib                                            169 passed
+cargo test -q --test ssh_session_manager_spec                  45 passed
+cargo test -q --test bootstrap_smoke                           288 passed
+cargo test -q --test ssh_terminal_interaction_spec             30 passed
+cargo fmt --all -- --check                                     passed
+cargo check -q                                                 passed
+git diff --check                                                passed
+```
+
+`cargo clippy --all-targets --message-format short` reaches the repository's
+pre-existing `clippy::never_loop` hard error in `pump.rs` outside this task's
+changed hunks. Re-running the entire command with only
+`-A clippy::never_loop` completes successfully and reports no warning in the
+new accumulator, probe-classification, logging, or regression-test lines.
+
+- [x] **Step 6: Prepare the implementation commit for user confirmation**
 
 Follow Trellis Phase 3.4: show one coherent commit proposal containing the
 runtime fix, routing diagnostics, tests, spec update, and task artifacts. Commit

@@ -1184,6 +1184,7 @@ impl server::Handler for InteractiveTestServer {
             format!("{}\n", self.shell_integration_behavior.shell_path).into_bytes(),
         )?;
         session.eof(channel)?;
+        session.exit_status_request(channel, 0)?;
         session.close(channel)?;
         Ok(())
     }
@@ -2259,6 +2260,60 @@ fn session_manager_marks_connected_only_after_runtime_connected_event() {
     });
     let _ = fs::remove_file(private_key_path);
     let _ = fs::remove_file(known_hosts_path);
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+}
+
+#[test]
+fn ssh_runtime_accepts_exec_exit_status_sent_after_eof() {
+    let _env_lock = lock_known_hosts_env();
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let (server_task, addr, private_key_path, server_public_key, _server_state) =
+        runtime.block_on(async { spawn_publickey_shell_server(Duration::from_millis(10)).await });
+    let known_hosts_path = temp_known_hosts_path("exec-eof-before-status");
+    let known_hosts = KnownHostsService::new(&known_hosts_path);
+    known_hosts
+        .accept_unknown(
+            addr.ip().to_string().as_str(),
+            addr.port(),
+            &server_public_key,
+        )
+        .expect("trust test server host key");
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let (event_tx, _event_rx) = mpsc::unbounded_channel();
+    let runtime_handle = runtime.block_on(async {
+        SshSessionRuntime::connect(
+            sample_publickey_profile(
+                "asset-exec-eof-before-status",
+                addr.ip().to_string(),
+                addr.port(),
+                private_key_path.display().to_string(),
+            ),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            event_tx,
+        )
+        .await
+        .expect("connect ssh runtime")
+    });
+
+    assert!(
+        runtime_handle
+            .remote_command_exists("rz".into())
+            .expect("probe remote rz with EOF before exit status")
+    );
+
+    runtime_handle.disconnect().expect("disconnect runtime");
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        server_task.await.expect("join test ssh server");
+    });
+    let _ = fs::remove_file(&private_key_path);
+    let _ = fs::remove_file(&known_hosts_path);
     unsafe {
         std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
     }

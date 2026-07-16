@@ -703,7 +703,14 @@ pub(super) async fn remote_command_exists(
     )
     .await
     .context("remote command probe timed out")??;
-    Ok(status == Some(0))
+    tracing::debug!(
+        target: "app.ssh",
+        command_name = command_name.as_str(),
+        exit_status = ?status,
+        "remote command probe completed"
+    );
+    let status = require_remote_exec_exit_status(status, "remote command probe")?;
+    Ok(status == 0)
 }
 
 pub(super) async fn resolve_remote_current_working_directory(
@@ -720,7 +727,14 @@ pub(super) async fn resolve_remote_current_working_directory(
     .await
     .context("remote cwd probe timed out")??;
 
-    if output.exit_status != Some(0) {
+    tracing::debug!(
+        target: "app.ssh",
+        exit_status = ?output.exit_status,
+        stdout_bytes = output.stdout.len(),
+        "remote cwd probe completed"
+    );
+    let status = require_remote_exec_exit_status(output.exit_status, "remote cwd probe")?;
+    if status != 0 {
         return Ok(None);
     }
 
@@ -899,9 +913,50 @@ async fn remote_exec_exit_status(
         .exit_status)
 }
 
+#[derive(Debug, Default)]
 struct RemoteExecOutput {
     exit_status: Option<u32>,
     stdout: Vec<u8>,
+    saw_eof: bool,
+    exec_accepted: bool,
+}
+
+impl RemoteExecOutput {
+    fn push_message(&mut self, message: ChannelMsg, request_label: &'static str) -> Result<bool> {
+        match message {
+            ChannelMsg::Success => self.exec_accepted = true,
+            ChannelMsg::Failure if !self.exec_accepted => {
+                bail!("remote SSH server rejected the {request_label} request");
+            }
+            ChannelMsg::Data { data } => {
+                self.stdout.extend_from_slice(data.as_ref());
+            }
+            ChannelMsg::ExitStatus {
+                exit_status: status,
+            } => {
+                self.exit_status = Some(status);
+                return Ok(self.saw_eof);
+            }
+            ChannelMsg::ExitSignal { .. } => {
+                self.exit_status = Some(255);
+                return Ok(true);
+            }
+            ChannelMsg::Eof => {
+                self.saw_eof = true;
+                return Ok(self.exit_status.is_some());
+            }
+            ChannelMsg::Close => return Ok(true),
+            _ => {}
+        }
+        Ok(false)
+    }
+}
+
+fn require_remote_exec_exit_status(
+    exit_status: Option<u32>,
+    request_label: &'static str,
+) -> Result<u32> {
+    exit_status.ok_or_else(|| anyhow!("{request_label} closed without an exit status"))
 }
 
 async fn remote_exec_output(
@@ -918,35 +973,13 @@ async fn remote_exec_output(
         .await
         .with_context(|| format!("failed to request {request_label}"))?;
 
-    let mut exec_accepted = false;
-    let mut exit_status = None;
-    let mut stdout = Vec::new();
+    let mut output = RemoteExecOutput::default();
     while let Some(message) = channel.wait().await {
-        match message {
-            ChannelMsg::Success => exec_accepted = true,
-            ChannelMsg::Failure if !exec_accepted => {
-                bail!("remote SSH server rejected the {request_label} request");
-            }
-            ChannelMsg::Data { data } => {
-                stdout.extend_from_slice(data.as_ref());
-            }
-            ChannelMsg::ExitStatus {
-                exit_status: status,
-            } => exit_status = Some(status),
-            ChannelMsg::ExitSignal { .. } => {
-                return Ok(RemoteExecOutput {
-                    exit_status: Some(255),
-                    stdout,
-                });
-            }
-            ChannelMsg::Close | ChannelMsg::Eof => break,
-            _ => {}
+        if output.push_message(message, request_label)? {
+            break;
         }
     }
-    Ok(RemoteExecOutput {
-        exit_status,
-        stdout,
-    })
+    Ok(output)
 }
 
 fn is_safe_remote_command_name(command_name: &str) -> bool {
@@ -1371,6 +1404,21 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
+    fn collect_remote_exec_test_messages(
+        messages: impl IntoIterator<Item = ChannelMsg>,
+    ) -> RemoteExecOutput {
+        let mut output = RemoteExecOutput::default();
+        for message in messages {
+            if output
+                .push_message(message, "test remote exec")
+                .expect("collect test remote exec message")
+            {
+                break;
+            }
+        }
+        output
+    }
+
     #[test]
     fn interactive_rz_fallback_uses_quiet_history_friendly_command() {
         assert_eq!(INTERACTIVE_RZ_UPLOAD_COMMAND, b" rz -q\r");
@@ -1533,6 +1581,65 @@ mod tests {
         assert!(command.contains("${HOME:+:$HOME/.local/bin:$HOME/bin}"));
         assert!(command.contains("/usr/local/bin"));
         assert!(command.contains("command -v \"$__mica_term_probe_command\""));
+    }
+
+    #[test]
+    fn remote_exec_output_completes_when_eof_follows_exit_status() {
+        let output = collect_remote_exec_test_messages([
+            ChannelMsg::ExitStatus { exit_status: 0 },
+            ChannelMsg::Eof,
+            ChannelMsg::Close,
+        ]);
+
+        assert_eq!(output.exit_status, Some(0));
+        assert!(output.saw_eof);
+    }
+
+    #[test]
+    fn remote_exec_output_waits_for_exit_status_after_eof() {
+        let output = collect_remote_exec_test_messages([
+            ChannelMsg::Eof,
+            ChannelMsg::ExitStatus { exit_status: 0 },
+            ChannelMsg::Close,
+        ]);
+
+        assert_eq!(output.exit_status, Some(0));
+        assert!(output.saw_eof);
+    }
+
+    #[test]
+    fn remote_exec_output_preserves_data_before_eof_and_late_status() {
+        let output = collect_remote_exec_test_messages([
+            ChannelMsg::Data {
+                data: b"/srv/b\n".as_slice().into(),
+            },
+            ChannelMsg::Eof,
+            ChannelMsg::ExitStatus { exit_status: 0 },
+            ChannelMsg::Close,
+        ]);
+
+        assert_eq!(output.stdout, b"/srv/b\n");
+        assert_eq!(output.exit_status, Some(0));
+    }
+
+    #[test]
+    fn remote_exec_output_accepts_close_without_eof() {
+        let output = collect_remote_exec_test_messages([
+            ChannelMsg::ExitStatus { exit_status: 0 },
+            ChannelMsg::Close,
+        ]);
+
+        assert_eq!(output.exit_status, Some(0));
+        assert!(!output.saw_eof);
+    }
+
+    #[test]
+    fn remote_exec_output_reports_missing_exit_status_as_incomplete() {
+        let output = collect_remote_exec_test_messages([ChannelMsg::Eof, ChannelMsg::Close]);
+        let error = require_remote_exec_exit_status(output.exit_status, "test remote exec")
+            .expect_err("missing exit status must be incomplete");
+
+        assert!(error.to_string().contains("without an exit status"));
     }
 
     #[test]

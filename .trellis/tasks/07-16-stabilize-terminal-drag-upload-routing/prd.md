@@ -56,20 +56,20 @@ Transfer Center because SSH exec messages arrived in a different valid order.
 
 ## Acceptance Criteria
 
-- [ ] AC1: Tests accept `ExitStatus(0) -> EOF -> Close`,
+- [x] AC1: Tests accept `ExitStatus(0) -> EOF -> Close`,
   `EOF -> ExitStatus(0) -> Close`, and
   `Data -> EOF -> ExitStatus(0) -> Close` without losing status or stdout.
-- [ ] AC2: A live russh test server that sends EOF before exit status still
+- [x] AC2: A live russh test server that sends EOF before exit status still
   produces `Ok(true)` for a successful `remote_command_exists` probe, while a
   genuinely missing exit status is surfaced as an incomplete probe/error rather
   than `Ok(false)`.
-- [ ] AC3: Four consecutive single-file drops after remote cwd changes
+- [x] AC3: Four consecutive single-file drops after remote cwd changes
   A -> B -> B -> C all select dedicated ZMODEM when `rz` remains available.
-- [ ] AC4: The four dedicated ZMODEM commands target A, B, B, and C in order.
-- [ ] AC5: A confirmed non-zero `rz` probe still selects SFTP/Transfer Center.
-- [ ] AC6: Existing cwd-unavailable interactive fallback behavior remains
+- [x] AC4: The four dedicated ZMODEM commands target A, B, B, and C in order.
+- [x] AC5: A confirmed non-zero `rz` probe still selects SFTP/Transfer Center.
+- [x] AC6: Existing cwd-unavailable interactive fallback behavior remains
   covered and unchanged.
-- [ ] AC7: Focused Rust unit/integration tests, formatting, and the applicable
+- [x] AC7: Focused Rust unit/integration tests, formatting, and the applicable
   project checks pass.
 
 ## Out Of Scope

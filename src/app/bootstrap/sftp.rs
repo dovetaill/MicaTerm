@@ -1663,6 +1663,14 @@ fn terminal_current_working_directory_for_drop(
 ) -> anyhow::Result<Option<String>> {
     if manager.has_live_current_working_directory_tracking(session_id) {
         if let Some(cwd) = manager.current_working_directory(session_id) {
+            tracing::info!(
+                target: "app.drop",
+                target = "terminal",
+                session_id = %session_id,
+                remote_dir = cwd.as_str(),
+                cwd_source = "live_tracking",
+                "terminal external drop selected live tracked cwd"
+            );
             return Ok(Some(cwd));
         }
     }
@@ -1671,16 +1679,29 @@ fn terminal_current_working_directory_for_drop(
         target: "app.drop",
         target = "terminal",
         session_id = %session_id,
+        cwd_source = "unavailable",
         "terminal external drop has no tracked cwd; probing remote shell cwd"
     );
     let cwd = match manager.resolve_current_working_directory(session_id) {
         Ok(Some(cwd)) => cwd,
-        Ok(None) => return Ok(None),
+        Ok(None) => {
+            tracing::info!(
+                target: "app.drop",
+                target = "terminal",
+                session_id = %session_id,
+                cwd_source = "unavailable",
+                fallback_reason = "cwd_unavailable",
+                "terminal external drop remote cwd probe returned no directory"
+            );
+            return Ok(None);
+        }
         Err(err) => {
             tracing::warn!(
                 target: "app.drop",
                 target = "terminal",
                 session_id = %session_id,
+                cwd_source = "unavailable",
+                fallback_reason = "cwd_probe_error",
                 error = %err,
                 "terminal external drop remote cwd probe failed"
             );
@@ -1692,6 +1713,7 @@ fn terminal_current_working_directory_for_drop(
         target = "terminal",
         session_id = %session_id,
         remote_dir = cwd.as_str(),
+        cwd_source = "exec_probe",
         "terminal external drop resolved cwd via remote probe"
     );
     Ok(Some(cwd))
@@ -1711,6 +1733,7 @@ fn start_active_zmodem_receiver_for_drop(
                 target: "app.drop",
                 target = "terminal",
                 method = "zmodem",
+                upload_method = "zmodem_active",
                 session_id = %session_id,
                 path_count = local_paths.len(),
                 "terminal external drop reusing active rz receiver"
@@ -1743,6 +1766,8 @@ fn schedule_terminal_zmodem_drop_from_paths(
             target: "app.drop",
             target = "terminal",
             method = "zmodem",
+            upload_method = "zmodem_interactive",
+            fallback_reason = "cwd_unavailable",
             session_id = %session_id,
             path_count = local_paths.len(),
             "terminal external drop starting interactive rz fallback because cwd is unavailable"
@@ -1751,19 +1776,21 @@ fn schedule_terminal_zmodem_drop_from_paths(
         return Ok(true);
     };
 
-    let rz_available = match manager.remote_command_exists(session_id, "rz") {
-        Ok(available) => available,
+    let (rz_available, rz_probe_failed) = match manager.remote_command_exists(session_id, "rz") {
+        Ok(available) => (available, false),
         Err(err) => {
             tracing::warn!(
                 target: "app.drop",
                 target = "terminal",
                 method = "zmodem",
+                upload_method = "sftp",
+                fallback_reason = "rz_probe_error",
                 session_id = %session_id,
                 remote_dir = remote_dir.as_str(),
                 error = %err,
                 "terminal external drop remote rz probe failed; falling back to sftp"
             );
-            false
+            (false, true)
         }
     };
     tracing::info!(
@@ -1777,11 +1804,19 @@ fn schedule_terminal_zmodem_drop_from_paths(
         "terminal external drop probed remote rz"
     );
     if !rz_available {
+        let fallback_reason = if rz_probe_failed {
+            "rz_probe_error"
+        } else {
+            "rz_missing"
+        };
         tracing::info!(
             target: "app.drop",
             target = "terminal",
             method = "sftp",
+            upload_method = "sftp",
+            fallback_reason,
             session_id = %session_id,
+            remote_dir = remote_dir.as_str(),
             path_count = local_paths.len(),
             "terminal external drop did not find remote rz; falling back to sftp"
         );
@@ -1792,6 +1827,7 @@ fn schedule_terminal_zmodem_drop_from_paths(
         target: "app.drop",
         target = "terminal",
         method = "zmodem",
+        upload_method = "zmodem_exec",
         session_id = %session_id,
         remote_dir = remote_dir.as_str(),
         path_count = local_paths.len(),

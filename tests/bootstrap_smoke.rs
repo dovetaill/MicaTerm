@@ -16553,6 +16553,76 @@ fn terminal_file_drop_reprobes_cwd_when_previous_cwd_only_came_from_probe() {
 }
 
 #[test]
+fn terminal_file_drop_keeps_exec_rz_across_remote_cwd_changes() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    sftp_state.set_remote_rz_available(true);
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(DelayedCwdRecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("terminal-drop-upload-remote-cwd-sequence");
+    let upload_path = temp_root.join("release.env");
+    fs::create_dir_all(temp_root.as_path()).expect("create terminal drop temp root");
+    fs::write(&upload_path, b"PORT=22\n").expect("write terminal drop source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "terminal"
+            && !app.get_active_workspace_session_id().is_empty()
+    });
+
+    for (index, remote_dir) in ["/srv/a", "/srv/b", "/srv/b", "/srv/c"]
+        .into_iter()
+        .enumerate()
+    {
+        sftp_state.set_remote_cwd(remote_dir);
+        app.set_workspace_terminal_external_drop_paths(ModelRc::new(VecModel::from(vec![
+            SharedString::from(upload_path.to_string_lossy().to_string()),
+        ])));
+        app.invoke_workspace_terminal_external_drop_requested();
+
+        wait_for_condition(Duration::from_secs(2), || {
+            flush_runtime_projection();
+            sftp_state
+                .zmodem_exec_upload_calls
+                .lock()
+                .expect("lock zmodem exec upload calls")
+                .len()
+                == index + 1
+        });
+    }
+
+    assert_eq!(sftp_state.take_remote_cwd_probe_calls(), 4);
+    assert_eq!(
+        sftp_state.take_remote_command_exists_calls(),
+        vec!["rz", "rz", "rz", "rz"]
+    );
+    assert_eq!(
+        sftp_state.take_zmodem_exec_upload_calls(),
+        ["/srv/a", "/srv/b", "/srv/b", "/srv/c"]
+            .into_iter()
+            .map(|remote_dir| {
+                (
+                    remote_dir.to_string(),
+                    vec![upload_path.to_string_lossy().to_string()],
+                )
+            })
+            .collect::<Vec<_>>()
+    );
+    assert!(sftp_state.take_interactive_zmodem_upload_calls().is_empty());
+    assert!(sftp_state.take_upload_file_calls().is_empty());
+}
+
+#[test]
 fn zmodem_modal_closes_when_runtime_only_updates_transfer_state() {
     let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
