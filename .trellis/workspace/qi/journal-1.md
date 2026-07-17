@@ -71,3 +71,36 @@ Fixed SSH exec probe EOF/exit-status ordering, added explicit incomplete-probe c
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Fix dedicated exec ZMODEM modal lifecycle
+
+**Date**: 2026-07-17
+**Task**: Fix dedicated exec ZMODEM modal lifecycle
+**Branch**: `master`
+
+### Summary
+
+Made terminal-state dismissal manager-owned and revision-safe, routed running Cancel to the generation-scoped dedicated exec upload, added exact abort-wire/live russh regressions, and synchronized ZMODEM ownership specs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fd7fb4c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
