@@ -2375,6 +2375,9 @@ impl SessionRuntimeLauncher for RecordingSftpLauncher {
 #[derive(Clone, Default)]
 struct ZmodemModalState {
     event_tx: Arc<Mutex<Option<mpsc::UnboundedSender<SessionRuntimeEvent>>>>,
+    cancel_calls: Arc<AtomicUsize>,
+    dismiss_calls: Arc<Mutex<Vec<ZmodemTransferState>>>,
+    dismiss_error: Arc<Mutex<Option<String>>>,
 }
 
 impl ZmodemModalState {
@@ -2386,6 +2389,24 @@ impl ZmodemModalState {
         if let Some(event_tx) = self.event_tx.lock().expect("lock zmodem event tx").as_ref() {
             let _ = event_tx.send(SessionRuntimeEvent::ZmodemStateChanged(state));
         }
+    }
+
+    fn dismiss_call_count(&self) -> usize {
+        self.dismiss_calls
+            .lock()
+            .expect("lock zmodem dismiss calls")
+            .len()
+    }
+
+    fn cancel_call_count(&self) -> usize {
+        self.cancel_calls.load(Ordering::SeqCst)
+    }
+
+    fn set_dismiss_error(&self, error: Option<&str>) {
+        *self
+            .dismiss_error
+            .lock()
+            .expect("lock zmodem dismiss error") = error.map(str::to_string);
     }
 }
 
@@ -2425,12 +2446,25 @@ impl SessionRuntimeControl for ZmodemModalRuntimeControl {
     }
 
     fn cancel_zmodem_transfer(&self) -> Result<()> {
-        self.state.emit_transfer_state(None);
+        self.state.cancel_calls.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
-    fn dismiss_zmodem_transfer(&self) -> Result<()> {
-        self.state.emit_transfer_state(None);
+    fn dismiss_zmodem_transfer(&self, expected_state: ZmodemTransferState) -> Result<()> {
+        self.state
+            .dismiss_calls
+            .lock()
+            .expect("lock zmodem dismiss calls")
+            .push(expected_state);
+        if let Some(error) = self
+            .state
+            .dismiss_error
+            .lock()
+            .expect("lock zmodem dismiss error")
+            .clone()
+        {
+            return Err(anyhow!(error));
+        }
         Ok(())
     }
 
@@ -16623,15 +16657,16 @@ fn terminal_file_drop_keeps_exec_rz_across_remote_cwd_changes() {
 }
 
 #[test]
-fn zmodem_modal_closes_when_runtime_only_updates_transfer_state() {
+fn zmodem_modal_cancel_routes_to_runtime_without_dismiss() {
     let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
     let app = AppWindow::new().unwrap();
+    let zmodem_state = ZmodemModalState::default();
     bind_with_launcher(
         &app,
         None,
         Arc::new(ZmodemModalLauncher {
-            state: ZmodemModalState::default(),
+            state: zmodem_state.clone(),
         }),
     );
 
@@ -16653,12 +16688,14 @@ fn zmodem_modal_closes_when_runtime_only_updates_transfer_state() {
     app.invoke_zmodem_transfer_modal_secondary_action_requested();
     wait_for_condition(Duration::from_secs(2), || {
         flush_runtime_projection();
-        !app.get_zmodem_transfer_modal_open()
+        zmodem_state.cancel_call_count() == 1
     });
+    assert!(app.get_zmodem_transfer_modal_open());
+    assert_eq!(zmodem_state.dismiss_call_count(), 0);
 }
 
 #[test]
-fn zmodem_completed_download_modal_exposes_done_open_folder_and_open() {
+fn zmodem_completed_and_terminal_modal_actions_close_without_runtime_clear_event() {
     let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
 
     let app = AppWindow::new().unwrap();
@@ -16725,6 +16762,83 @@ fn zmodem_completed_download_modal_exposes_done_open_folder_and_open() {
         flush_runtime_projection();
         !app.get_zmodem_transfer_modal_open()
     });
+    for _ in 0..3 {
+        flush_runtime_projection();
+        assert!(!app.get_zmodem_transfer_modal_open());
+    }
+    assert_eq!(zmodem_state.dismiss_call_count(), 1);
+
+    for (phase, headline) in [
+        (ZmodemTransferPhase::Completed, "Upload complete"),
+        (ZmodemTransferPhase::Failed, "Upload failed"),
+        (ZmodemTransferPhase::Cancelled, "Upload cancelled"),
+    ] {
+        zmodem_state.set_dismiss_error(
+            (phase == ZmodemTransferPhase::Failed).then_some("runtime cleanup unavailable"),
+        );
+        zmodem_state.emit_transfer_state(Some(sample_terminal_zmodem_state(phase)));
+        wait_for_zmodem_headline(&app, headline);
+        app.invoke_zmodem_transfer_modal_close_requested();
+        assert_zmodem_modal_stays_closed(&app);
+    }
+    zmodem_state.set_dismiss_error(None);
+
+    assert_eq!(zmodem_state.dismiss_call_count(), 4);
+}
+
+fn sample_terminal_zmodem_state(phase: ZmodemTransferPhase) -> ZmodemTransferState {
+    let headline = match phase {
+        ZmodemTransferPhase::Completed => "Upload complete",
+        ZmodemTransferPhase::Failed => "Upload failed",
+        ZmodemTransferPhase::Cancelled => "Upload cancelled",
+        _ => "Upload in progress",
+    };
+    ZmodemTransferState {
+        direction: ZmodemTransferDirection::Upload,
+        phase,
+        title: "ZMODEM Upload".into(),
+        headline: headline.into(),
+        status_text: "Transfer lifecycle fixture".into(),
+        detail_text: String::new(),
+        error_text: String::new(),
+        current_file_name: "release.bin".into(),
+        files_completed: usize::from(phase == ZmodemTransferPhase::Completed),
+        files_total: Some(1),
+        bytes_transferred: 3,
+        bytes_total: Some(3),
+        local_file_path: None,
+        local_reveal_path: None,
+    }
+}
+
+fn wait_for_zmodem_headline(app: &AppWindow, headline: &str) {
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_zmodem_transfer_modal_headline().as_str() == headline
+    });
+}
+
+fn assert_zmodem_modal_stays_closed(app: &AppWindow) {
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        !app.get_zmodem_transfer_modal_open()
+    });
+    for _ in 0..3 {
+        flush_runtime_projection();
+        assert!(!app.get_zmodem_transfer_modal_open());
+    }
+}
+
+#[test]
+fn zmodem_modal_escape_routes_to_close_contract() {
+    let app_window_source = fs::read_to_string("ui/app-window.slint").expect("read app window");
+
+    assert!(app_window_source.contains(
+        "escape-requested => {\n            root.zmodem-transfer-modal-close-requested();"
+    ));
+    assert!(app_window_source.contains(
+        "close-action-requested => {\n                root.zmodem-transfer-modal-close-requested();"
+    ));
 }
 
 #[test]

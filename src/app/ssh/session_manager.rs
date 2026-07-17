@@ -179,7 +179,7 @@ pub trait SessionRuntimeControl: Send {
     fn cancel_zmodem_transfer(&self) -> Result<()> {
         Err(anyhow!("session runtime does not support zmodem transfers"))
     }
-    fn dismiss_zmodem_transfer(&self) -> Result<()> {
+    fn dismiss_zmodem_transfer(&self, _expected_state: ZmodemTransferState) -> Result<()> {
         Err(anyhow!("session runtime does not support zmodem transfers"))
     }
     fn selection_text_from_buffer_rows(
@@ -456,7 +456,7 @@ impl SessionManager {
             .expect("lock session registry")
             .zmodem_transfers
             .get(&session_id)
-            .cloned()
+            .map(|projected| projected.state.clone())
     }
 
     pub fn remember_enhancement_fallback(&self, profile: &ConnectionProfile, shell: &str) {
@@ -945,10 +945,78 @@ impl SessionManager {
     }
 
     pub fn dismiss_zmodem_transfer(&self, session_id: Uuid) -> Result<()> {
-        self.runtime_control_for_session(session_id)?
+        let snapshot = {
+            let registry = self.registry.lock().expect("lock session registry");
+            registry
+                .zmodem_transfers
+                .get(&session_id)
+                .cloned()
+                .map(|projected| {
+                    let runtime_control = registry.runtime_controls.get(&session_id).cloned();
+                    (projected, runtime_control)
+                })
+        };
+        let Some((projected, runtime_control)) = snapshot else {
+            tracing::debug!(
+                target: "app.zmodem",
+                session_id = %session_id,
+                lifecycle_command = "dismiss",
+                owner = "projection",
+                outcome = "ignored",
+                "ignored zmodem modal dismissal without projected state"
+            );
+            return Ok(());
+        };
+        if !zmodem_phase_is_dismissible(projected.state.phase) {
+            tracing::debug!(
+                target: "app.zmodem",
+                session_id = %session_id,
+                lifecycle_command = "dismiss",
+                owner = "projection",
+                outcome = "ignored",
+                phase = ?projected.state.phase,
+                "ignored zmodem modal dismissal for active transfer"
+            );
+            return Err(anyhow!(
+                "cannot dismiss active zmodem transfer in phase {:?}",
+                projected.state.phase
+            ));
+        }
+
+        if let Some(runtime_control) = runtime_control {
+            let cleanup_result = runtime_control
+                .lock()
+                .expect("lock session runtime control for zmodem dismiss")
+                .dismiss_zmodem_transfer(projected.state.clone());
+            if let Err(error) = cleanup_result {
+                tracing::warn!(
+                    target: "app.zmodem",
+                    session_id = %session_id,
+                    lifecycle_command = "dismiss",
+                    owner = "interactive",
+                    outcome = "failed",
+                    phase = ?projected.state.phase,
+                    error = %error,
+                    "zmodem runtime cleanup failed; clearing terminal projection"
+                );
+            }
+        }
+
+        let removed = self
+            .registry
             .lock()
-            .expect("lock session runtime control for zmodem dismiss")
-            .dismiss_zmodem_transfer()
+            .expect("lock session registry")
+            .remove_zmodem_projection_if_revision(session_id, projected.revision);
+        tracing::info!(
+            target: "app.zmodem",
+            session_id = %session_id,
+            lifecycle_command = "dismiss",
+            owner = "projection",
+            outcome = if removed { "cleared" } else { "stale" },
+            phase = ?projected.state.phase,
+            "processed zmodem modal dismissal"
+        );
+        Ok(())
     }
 
     pub fn selection_text_from_buffer_rows(
@@ -1312,6 +1380,12 @@ fn session_title_slot(title: &str, base_title: &str) -> Option<usize> {
     suffix.parse::<usize>().ok().filter(|slot| *slot >= 2)
 }
 
+#[derive(Clone)]
+struct ProjectedZmodemTransfer {
+    revision: u64,
+    state: ZmodemTransferState,
+}
+
 struct SessionRegistry {
     sessions: HashMap<Uuid, SessionHandle>,
     asset_sessions: HashMap<String, Uuid>,
@@ -1322,7 +1396,8 @@ struct SessionRegistry {
     terminal_surfaces: HashMap<Uuid, TerminalSurfaceState>,
     current_working_directories: HashMap<Uuid, String>,
     live_current_working_directory_sessions: HashSet<Uuid>,
-    zmodem_transfers: HashMap<Uuid, ZmodemTransferState>,
+    zmodem_transfers: HashMap<Uuid, ProjectedZmodemTransfer>,
+    next_zmodem_transfer_revision: u64,
     terminal_shell_integration: HashMap<Uuid, TerminalShellIntegrationState>,
     terminal_surface_revisions: HashMap<Uuid, usize>,
     runtime_controls: HashMap<Uuid, SharedSessionRuntimeControl>,
@@ -1347,6 +1422,7 @@ impl Default for SessionRegistry {
             current_working_directories: HashMap::new(),
             live_current_working_directory_sessions: HashSet::new(),
             zmodem_transfers: HashMap::new(),
+            next_zmodem_transfer_revision: 0,
             terminal_shell_integration: HashMap::new(),
             terminal_surface_revisions: HashMap::new(),
             runtime_controls: HashMap::new(),
@@ -1357,6 +1433,34 @@ impl Default for SessionRegistry {
             theme_mode: ThemeMode::Dark,
             theme_variant: ThemeVariant::PremiumDefault,
         }
+    }
+}
+
+impl SessionRegistry {
+    fn project_zmodem_state(&mut self, session_id: Uuid, state: ZmodemTransferState) -> u64 {
+        self.next_zmodem_transfer_revision = self
+            .next_zmodem_transfer_revision
+            .checked_add(1)
+            .expect("zmodem projection revision overflow");
+        let revision = self.next_zmodem_transfer_revision;
+        self.zmodem_transfers
+            .insert(session_id, ProjectedZmodemTransfer { revision, state });
+        revision
+    }
+
+    fn remove_zmodem_projection_if_revision(
+        &mut self,
+        session_id: Uuid,
+        expected_revision: u64,
+    ) -> bool {
+        let matches = self
+            .zmodem_transfers
+            .get(&session_id)
+            .is_some_and(|projected| projected.revision == expected_revision);
+        if matches {
+            self.zmodem_transfers.remove(&session_id);
+        }
+        matches
     }
 }
 
@@ -1434,7 +1538,7 @@ fn apply_runtime_event(
         SessionRuntimeEvent::ZmodemStateChanged(state) => {
             let mut registry = registry.lock().expect("lock session registry");
             if let Some(state) = state {
-                registry.zmodem_transfers.insert(session_id, state);
+                registry.project_zmodem_state(session_id, state);
             } else {
                 registry.zmodem_transfers.remove(&session_id);
             }
@@ -1455,6 +1559,15 @@ fn apply_runtime_event(
             mark_runtime_surface_dirty(registry, session_id);
         }
     }
+}
+
+fn zmodem_phase_is_dismissible(phase: crate::app::ssh::runtime::ZmodemTransferPhase) -> bool {
+    matches!(
+        phase,
+        crate::app::ssh::runtime::ZmodemTransferPhase::Completed
+            | crate::app::ssh::runtime::ZmodemTransferPhase::Failed
+            | crate::app::ssh::runtime::ZmodemTransferPhase::Cancelled
+    )
 }
 
 fn update_session(
@@ -1952,9 +2065,71 @@ mod tests {
         SessionRegistry, SessionRuntimeControl, SessionRuntimeEvent, SessionState,
         apply_runtime_event, coalesce_surface_backlog, coalesce_surface_dirty_backlog,
         refresh_runtime_surface, terminal_surface_signature_for_registry, terminal_surface_stale,
-        update_terminal_surface,
+        update_terminal_surface, zmodem_phase_is_dismissible,
     };
-    use crate::app::ssh::runtime::{TerminalKeyEvent, TerminalMouseInput, TerminalSurfaceState};
+    use crate::app::ssh::runtime::{
+        TerminalKeyEvent, TerminalMouseInput, TerminalSurfaceState, ZmodemTransferDirection,
+        ZmodemTransferPhase, ZmodemTransferState,
+    };
+
+    fn sample_projected_zmodem_state(phase: ZmodemTransferPhase) -> ZmodemTransferState {
+        ZmodemTransferState {
+            direction: ZmodemTransferDirection::Upload,
+            phase,
+            title: "ZMODEM Upload".into(),
+            headline: "Lifecycle test".into(),
+            status_text: "Transfer lifecycle fixture".into(),
+            detail_text: String::new(),
+            error_text: String::new(),
+            current_file_name: "release.bin".into(),
+            files_completed: 0,
+            files_total: Some(1),
+            bytes_transferred: 0,
+            bytes_total: Some(3),
+            local_file_path: None,
+            local_reveal_path: None,
+        }
+    }
+
+    #[test]
+    fn zmodem_projection_revision_prevents_stale_dismissal() {
+        let session_id = Uuid::new_v4();
+        let mut registry = SessionRegistry::default();
+        let completed = sample_projected_zmodem_state(ZmodemTransferPhase::Completed);
+        let running = sample_projected_zmodem_state(ZmodemTransferPhase::Running);
+
+        let old_revision = registry.project_zmodem_state(session_id, completed);
+        let new_revision = registry.project_zmodem_state(session_id, running.clone());
+
+        assert!(!registry.remove_zmodem_projection_if_revision(session_id, old_revision));
+        assert_eq!(
+            registry
+                .zmodem_transfers
+                .get(&session_id)
+                .map(|projected| &projected.state),
+            Some(&running)
+        );
+        assert!(registry.remove_zmodem_projection_if_revision(session_id, new_revision));
+        assert!(!registry.remove_zmodem_projection_if_revision(session_id, new_revision));
+    }
+
+    #[test]
+    fn zmodem_dismissible_phase_contract_rejects_live_work() {
+        for phase in [
+            ZmodemTransferPhase::AwaitingUploadSelection,
+            ZmodemTransferPhase::AwaitingDownloadDirectory,
+            ZmodemTransferPhase::Running,
+        ] {
+            assert!(!zmodem_phase_is_dismissible(phase));
+        }
+        for phase in [
+            ZmodemTransferPhase::Completed,
+            ZmodemTransferPhase::Failed,
+            ZmodemTransferPhase::Cancelled,
+        ] {
+            assert!(zmodem_phase_is_dismissible(phase));
+        }
+    }
 
     #[test]
     fn coalesces_consecutive_surface_updates_but_preserves_following_control_events() {

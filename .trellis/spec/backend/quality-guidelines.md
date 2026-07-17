@@ -56,7 +56,7 @@ Questions to answer:
 
 - Trigger: terminal transfers cross protocol runtime, SSH channel IO, Slint modal state, OS drag/drop, and SFTP upload scheduling.
 - Trigger: short-lived cwd and command probes cross russh channel-message ordering and terminal-drop routing; valid SSH EOF, exit-status, and close messages may arrive separately.
-- Applies when modifying `src/app/ssh/runtime/zmodem.rs`, `src/app/ssh/runtime/pump.rs`, `src/app/bootstrap/windowing.rs`, `src/app/bootstrap/sftp.rs`, `ui/components/zmodem-transfer-modal.slint`, or `vendor/winit/src/platform_impl/windows/drop_handler.rs`.
+- Applies when modifying `src/app/ssh/runtime.rs`, `src/app/ssh/runtime/zmodem.rs`, `src/app/ssh/runtime/pump.rs`, `src/app/ssh/session_manager.rs`, `src/app/bootstrap.rs`, `src/app/bootstrap/windowing.rs`, `src/app/bootstrap/sftp.rs`, `ui/components/zmodem-transfer-modal.slint`, or `vendor/winit/src/platform_impl/windows/drop_handler.rs`.
 
 ### 2. Signatures
 
@@ -71,6 +71,9 @@ Questions to answer:
 - `remote_command_exists(handle, command_name) -> Result<bool>` maps exit status `0` to `true`, a confirmed non-zero status to `false`, and missing status to `Err`.
 - `SessionManager::start_zmodem_upload_to_remote_dir(session_id, local_paths, remote_dir) -> Result<()>` starts drag-triggered ZMODEM uploads through a dedicated SSH exec channel running `<transfer PATH setup>; cd <quoted remote_dir> && rz -q`.
 - `SessionManager::start_interactive_zmodem_upload(session_id, local_paths) -> Result<()>` starts the active-PTY fallback for drag-triggered ZMODEM upload when the active terminal cwd cannot be resolved and the terminal mode allows interaction.
+- `SessionRuntimeControl::dismiss_zmodem_transfer(&self, expected_state: ZmodemTransferState) -> Result<()>` performs identity-safe cleanup of a matching inactive runtime controller; it is not the source of truth for removing the visible terminal-state modal.
+- `SessionManager::dismiss_zmodem_transfer(session_id) -> Result<()>` snapshots the private projected revision, releases the registry lock, requests best-effort runtime cleanup, then removes only the same revision for Completed, Failed, or Cancelled.
+- A dedicated exec upload registers one `ExecZmodemTransferContext` containing its monotonic generation, `UnboundedReceiver<ExecZmodemCommand>`, and weak cleanup registration. `SshSessionRuntime::cancel_zmodem_transfer()` routes `ExecZmodemCommand::Cancel` to that context before falling back to `RuntimeCommand::CancelZmodem` for interactive PTY ownership.
 - `SessionRegistry::runtime_controls` stores `Arc<Mutex<Box<dyn SessionRuntimeControl>>>`; callers must clone the shared control while holding the registry lock, release the registry lock, then invoke runtime methods under the per-control mutex.
 - `SftpTransferBackgroundMessage` carries UI intent flags `open_queue_drawer: bool` and `open_transfer_center: bool` so background terminal-drop SFTP fallback can ask the main thread to show transfer UI without mutating `ShellViewModel` off-thread.
 - `negotiated_terminal_environment()` must include cwd-only bash `PROMPT_COMMAND` tracking that emits OSC7 with `$PWD`; this is not the retired enhanced bootstrap and must not include `MICA_TERM_ENHANCED`.
@@ -85,6 +88,11 @@ Questions to answer:
 ### 3. Contracts
 
 - ZMODEM cancel is a wire contract: local state changes are not enough; remote `rz` / `sz` must receive an abort frame.
+- ZMODEM modal state is a projection ownership contract. `SessionManager` owns visible terminal-state dismissal; a completed dedicated exec task must not remain alive waiting for Done, X, or Escape.
+- Dismiss and Cancel are distinct. AwaitingUploadSelection, AwaitingDownloadDirectory, and Running use Cancel and remain visible until a terminal outcome arrives. Completed, Failed, and Cancelled use Dismiss.
+- Runtime dismiss cleanup must match the expected controller state and consume its local dirty `None` without publishing an unconditional delayed `ZmodemStateChanged(None)`, which could erase a newer transfer projection.
+- Dedicated exec lifecycle cleanup is generation-conditional. A task guard, failed send, or stale command may clear only the generation it captured; runtime drop closes the sender so the exec task settles its channel without resurrecting a modal.
+- Dedicated exec upload loops must select between SSH channel messages and lifecycle commands before and after ZRINIT. Cancel queues/writes the shared `ZMODEM_ABORT_WIRE` when possible, publishes Cancelled, and sends EOF/Close on the exec channel; it must not be sent only to the interactive pump's controller.
 - ZMODEM receiver `FileStarted` is not a one-shot UI event; the runtime must treat repeated metadata for the currently active file as idempotent and must not create/truncate the local target twice.
 - ZMODEM receiver `FileStarted` can also repeat after `FileCompleted` and before `SessionCompleted`; repeated metadata for the last completed file must be ignored so the UI does not show "file 1 of at least 2" for a one-file transfer.
 - ZMODEM session completion is a final-wire contract: `zmodem2::poll()` returns pending events before pending final wire (`ZFIN` / `OO`), so both `finished = true` and the public `Completed` modal phase must wait for the following idle poll after all `WriteWire` actions were acknowledged.
@@ -141,11 +149,20 @@ Questions to answer:
 - Remote cwd not readable through SFTP fallback -> reject terminal drop with user-visible feedback.
 - Slow `remote_command_exists`, cwd probe, or SFTP preflight during terminal drop -> the drop callback and the next UI projection tick must still return without waiting for the remote operation.
 - Cancel clicked during pending/running ZMODEM -> send abort wire, mark modal `Cancelled`, and allow the shell to continue.
+- Dismiss with no projected ZMODEM state -> return success as an idempotent no-op.
+- Dismiss during AwaitingUploadSelection, AwaitingDownloadDirectory, or Running -> return an error and retain the projection; use Cancel instead.
+- Dismiss Completed, Failed, or Cancelled + runtime cleanup is unavailable/fails/no-ops -> remove the snapshotted projection revision and log cleanup failure without reopening the modal.
+- Dismiss terminal revision N + revision N+1 arrives before removal -> preserve N+1 and log the dismissal as stale.
+- Dedicated exec Cancel before ZRINIT -> send the abort wire when the channel permits it, publish Cancelled before the handshake timeout, then EOF/Close the exec channel.
+- Dedicated exec Cancel while Running -> route to the registered generation, publish Cancelled, write the exact abort wire, and EOF/Close that exec channel without requiring the interactive controller.
+- Exec cancel sender is closed -> compare-and-clear only its generation, then fall back to interactive PTY Cancel.
 - Completed local file missing -> hide or disable `Open`; keep `Open Folder` only when reveal target still exists.
 
 ### 5. Good/Base/Bad Cases
 
 - Good: `sz file` completes, modal shows `Done`, `Open Folder`, and `Open`; `Done` dismisses without sending anything to the terminal.
+- Good: dedicated exec upload completes, then Done, title-bar X, or Escape removes the manager projection permanently even though the completed task no longer owns a controller command receiver.
+- Good: a large dedicated exec upload is cancelled while Running; the remote sees the exact abort wire and exec EOF/Close, the modal shows Cancelled, and the interactive terminal remains owned by its main pump.
 - Good: ordinary `*`, `**`, `***`, `*.log`, `a*b`, quoted stars, escaped stars, and pasted star runs appear immediately and remain byte-for-byte intact when no CRC-valid ZMODEM header follows.
 - Good: final ZMODEM response and `root@host:~# ` arrive in one SSH batch; final wire is written, the modal becomes `Completed`, and the prompt is released in the same pump turn.
 - Base: drag a regular file over the terminal, overlay appears, drop probes `rz` through an exec channel, ZMODEM upload starts on a dedicated exec channel when `ZRINIT` is observed, and no text is written to the interactive terminal.
@@ -165,6 +182,8 @@ Questions to answer:
 - Base with stale shell markers: if shell integration says input is not active or a command is running, but the terminal is not in alternate screen and is not mouse-grabbed, allow interactive `rz` fallback; shell marker state is advisory and can be stale when environment-based integration is rejected.
 - Bad: creating a failed SFTP transfer-center task when no target cwd was determined; this is a preflight failure, not a file-transfer failure.
 - Bad: calling `zmodem2::Sender::abort()` or `Receiver::abort()` only and assuming the remote process exits; those APIs only create local events.
+- Bad: sending dedicated exec Done/Cancel only as `RuntimeCommand::DismissZmodem` / `CancelZmodem` to the main terminal pump; that pump owns a different controller and cannot close or abort the exec transfer.
+- Bad: making a bootstrap fake emit `ZmodemStateChanged(None)` from Dismiss and treating the resulting green test as proof that a completed dedicated exec modal can close.
 - Bad: creating a new destination file every time `Event::FileStarted` is observed; remote retries or queued metadata can repeat the event for the same active file.
 - Bad: clearing `external_drop_paths` on every `HoveredFileCancelled`; Windows can emit cancel after drop.
 - Bad: making terminal drag-hover overlay depend on `rz` auto-injection eligibility; hover should only communicate that an active terminal can accept a drop, while the drop scheduler decides between ZMODEM and SFTP fallback.
@@ -208,6 +227,12 @@ Questions to answer:
 - Integration test: terminal file drop with no tracked/probed cwd and an exec-channel `rz` false result still records interactive ZMODEM upload fallback because the probe is not authoritative for the active PTY.
 - Unit/runtime test: interactive `rz` fallback publishes a failed ZMODEM upload state when no `ZRINIT` handshake appears before the timeout.
 - Integration test: completed download modal exposes `Done`, `Open Folder`, and `Open` when a local completed file exists.
+- Unit test: projected revision N cannot remove a newer revision N+1, and repeated removal of N is an idempotent no-op.
+- Unit test: exec Cancel reaches the active generation; a closed sender and stale task guard cannot clear a newer generation; overlapping live registrations are rejected.
+- Integration test: Done, X, Failed, and Cancelled terminal modal states close and stay closed across repeated projection flushes when the fake runtime Dismiss returns success without emitting `ZmodemStateChanged(None)`.
+- Integration/source test: Escape and title-bar close both route to `zmodem-transfer-modal-close-requested`.
+- Live runtime test: an in-process russh server emits ZRINIT, observes the exact ZMODEM abort wire plus EOF/Close after Running Cancel, and the runtime emits Cancelled rather than Failed.
+- Live runtime test: Cancel before ZRINIT emits Cancelled and settles the exec channel before the four-second handshake timeout.
 - Integration/source test: Windows drop handler source must not contain `unimplemented!()` in `QueryInterface` and must expose `IID_IDROPTARGET` / `E_NOINTERFACE` handling.
 - Integration/source test: Windows drop handler source must use `pt: POINTL`, must not use `pt: *const POINTL`, and must call `ReleaseStgMedium`.
 
@@ -363,3 +388,51 @@ runtime_control
 
 Keep the global registry lock scoped to handle lookup only. Serialize calls for
 the individual session with the per-runtime-control mutex.
+
+#### Wrong
+
+```rust
+pub fn dismiss_zmodem_transfer(&self, session_id: Uuid) -> Result<()> {
+    self.runtime_control_for_session(session_id)?
+        .lock()
+        .expect("lock runtime")
+        .dismiss_zmodem_transfer()
+}
+```
+
+This assumes the main terminal pump owns every visible modal. A dedicated exec
+task has a different controller and has already exited after completion, so no
+`None` event is emitted and periodic projection reopens the modal.
+
+#### Correct
+
+```rust
+let (projected, runtime_control) = {
+    let registry = self.registry.lock().expect("lock registry");
+    let projected = registry
+        .zmodem_transfers
+        .get(&session_id)
+        .cloned()
+        .ok_or_else(|| anyhow!("no projected zmodem transfer"))?;
+    let runtime_control = registry.runtime_controls.get(&session_id).cloned();
+    (projected, runtime_control)
+};
+if !zmodem_phase_is_dismissible(projected.state.phase) {
+    return Err(anyhow!("active zmodem transfers must be cancelled"));
+}
+if let Some(runtime_control) = runtime_control {
+    let _ = runtime_control
+        .lock()
+        .expect("lock runtime")
+        .dismiss_zmodem_transfer(projected.state.clone());
+}
+self.registry
+    .lock()
+    .expect("lock registry")
+    .remove_zmodem_projection_if_revision(session_id, projected.revision);
+```
+
+The manager owns terminal projection removal, releases the registry lock during
+runtime cleanup, and removes only the captured revision. The runtime command is
+best-effort internal cleanup and must not publish a delayed unconditional
+`ZmodemStateChanged(None)`.

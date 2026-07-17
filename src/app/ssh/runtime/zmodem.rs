@@ -11,7 +11,7 @@ const ZRQINIT_PREFIX: &[u8] = b"**\x18B00";
 const ZRINIT_PREFIX: &[u8] = b"**\x18B01";
 const ZMODEM_ZHEX_HEADER_CORE_LEN: usize = 18;
 const TERMINAL_ERASE_CELL: &[u8] = b"\x08 \x08";
-const ZMODEM_ABORT_WIRE: &[u8] = b"**\x18B070000000067d4\r\n\x11";
+pub(super) const ZMODEM_ABORT_WIRE: &[u8] = b"**\x18B070000000067d4\r\n\x11";
 const ZMODEM_MAX_FILE_SIZE: u64 = u32::MAX as u64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -420,6 +420,13 @@ impl ZmodemController {
         }
         self.set_modal_state(None);
         true
+    }
+
+    pub(super) fn dismiss_if_matches(&mut self, expected: &ZmodemTransferState) -> bool {
+        if self.current_state() != Some(expected) {
+            return false;
+        }
+        self.dismiss()
     }
 
     pub(super) fn current_state(&self) -> Option<&ZmodemTransferState> {
@@ -2206,5 +2213,22 @@ mod tests {
         );
         assert_eq!(controller.advance(), ZmodemAdvanceOutcome::Idle);
         assert!(controller.dismiss());
+    }
+
+    #[test]
+    fn controller_dismiss_if_matches_never_clears_different_state() {
+        let mut controller = ZmodemController::default();
+        let header = initial_header(ZmodemTransferDirection::Download);
+        assert!(
+            controller
+                .intercept_remote_bytes(header.as_slice())
+                .is_empty()
+        );
+        let actual = controller.current_state().expect("current state").clone();
+        let mut different = actual.clone();
+        different.headline = "Different transfer".into();
+
+        assert!(!controller.dismiss_if_matches(&different));
+        assert_eq!(controller.current_state(), Some(&actual));
     }
 }

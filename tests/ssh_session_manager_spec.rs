@@ -23,7 +23,7 @@ use mica_term::app::ssh::profile::{
 use mica_term::app::ssh::runtime::{
     SessionRuntimeEvent, SshSessionRuntime, TerminalKeyEvent, TerminalMouseButton,
     TerminalMouseEventKind, TerminalMouseInput, TerminalSession, TerminalSurfaceState,
-    UnknownHostKeyError, negotiated_terminal_environment,
+    UnknownHostKeyError, ZmodemTransferPhase, negotiated_terminal_environment,
 };
 use mica_term::app::ssh::session_manager::{
     EnhancedSessionState, OpenSessionMode, SessionManager, SessionRuntimeControl,
@@ -42,10 +42,12 @@ use tokio::io::{
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use uuid::Uuid;
+use zmodem2::{Action, Receiver};
 
 static KNOWN_HOSTS_ENV_LOCK: Mutex<()> = Mutex::new(());
 const BOOTSTRAP_ACK_ACCEPTED: &str = "__MICA_TERM_BOOTSTRAP_OK__";
 const BOOTSTRAP_ACK_REJECTED: &str = "__MICA_TERM_BOOTSTRAP_REJECT__";
+const TEST_ZMODEM_ABORT_WIRE: &[u8] = b"**\x18B070000000067d4\r\n\x11";
 
 fn lock_known_hosts_env() -> std::sync::MutexGuard<'static, ()> {
     KNOWN_HOSTS_ENV_LOCK
@@ -1031,7 +1033,16 @@ struct InteractiveTestServer {
     shell_ready_delay: Duration,
     direct_tcpip_behavior: DirectTcpipBehavior,
     shell_integration_behavior: ShellIntegrationServerBehavior,
+    zmodem_exec_behavior: ZmodemExecServerBehavior,
     state: InteractiveServerState,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+enum ZmodemExecServerBehavior {
+    #[default]
+    ProbeOnly,
+    EmitZrinit,
+    WithholdZrinit,
 }
 
 #[derive(Clone)]
@@ -1064,12 +1075,53 @@ struct InteractiveServerState {
     direct_tcpip_requests: Arc<Mutex<Vec<(String, u16)>>>,
     exec_requests: Arc<Mutex<Vec<String>>>,
     shell_inputs: Arc<Mutex<Vec<String>>>,
+    channel_inputs: Arc<Mutex<Vec<(ChannelId, Vec<u8>)>>>,
+    channel_eofs: Arc<Mutex<Vec<ChannelId>>>,
+    channel_closes: Arc<Mutex<Vec<ChannelId>>>,
     bootstrap_attempts: Arc<AtomicUsize>,
 }
 
 impl InteractiveServerState {
     fn bootstrap_attempts(&self) -> usize {
         self.bootstrap_attempts.load(Ordering::SeqCst)
+    }
+
+    fn received_wire_contains(&self, expected: &[u8]) -> bool {
+        self.channel_inputs
+            .lock()
+            .expect("lock channel inputs")
+            .iter()
+            .any(|(_, bytes)| {
+                bytes
+                    .windows(expected.len())
+                    .any(|window| window == expected)
+            })
+    }
+
+    fn abort_channel_is_settled(&self, abort_wire: &[u8]) -> bool {
+        let abort_channel = self
+            .channel_inputs
+            .lock()
+            .expect("lock channel inputs")
+            .iter()
+            .find(|(_, bytes)| {
+                bytes
+                    .windows(abort_wire.len())
+                    .any(|window| window == abort_wire)
+            })
+            .map(|(channel, _)| *channel);
+        let Some(abort_channel) = abort_channel else {
+            return false;
+        };
+        self.channel_eofs
+            .lock()
+            .expect("lock channel eofs")
+            .contains(&abort_channel)
+            && self
+                .channel_closes
+                .lock()
+                .expect("lock channel closes")
+                .contains(&abort_channel)
     }
 }
 
@@ -1173,12 +1225,36 @@ impl server::Handler for InteractiveTestServer {
         data: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
+        let command = String::from_utf8_lossy(data).into_owned();
         self.state
             .exec_requests
             .lock()
             .expect("lock exec requests")
-            .push(String::from_utf8_lossy(data).into_owned());
+            .push(command.clone());
         let _ = session.channel_success(channel);
+        if command.ends_with("&& rz -q") {
+            match self.zmodem_exec_behavior {
+                ZmodemExecServerBehavior::EmitZrinit => {
+                    let mut receiver = Receiver::new().expect("create test zmodem receiver");
+                    let zrinit = match receiver.poll() {
+                        Action::WriteWire(bytes) => bytes[..18].to_vec(),
+                        other => panic!("unexpected receiver initialization action: {other:?}"),
+                    };
+                    session.data(channel, zrinit)?;
+                }
+                ZmodemExecServerBehavior::WithholdZrinit => {}
+                ZmodemExecServerBehavior::ProbeOnly => {
+                    session.data(
+                        channel,
+                        format!("{}\n", self.shell_integration_behavior.shell_path).into_bytes(),
+                    )?;
+                    session.eof(channel)?;
+                    session.exit_status_request(channel, 0)?;
+                    session.close(channel)?;
+                }
+            }
+            return Ok(());
+        }
         session.data(
             channel,
             format!("{}\n", self.shell_integration_behavior.shell_path).into_bytes(),
@@ -1195,6 +1271,11 @@ impl server::Handler for InteractiveTestServer {
         data: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
+        self.state
+            .channel_inputs
+            .lock()
+            .expect("lock channel inputs")
+            .push((channel, data.to_vec()));
         let text = String::from_utf8_lossy(data).into_owned();
         self.state
             .shell_inputs
@@ -1211,6 +1292,32 @@ impl server::Handler for InteractiveTestServer {
             session.data(channel, format!("{ack}\n").into_bytes())?;
         }
 
+        Ok(())
+    }
+
+    async fn channel_eof(
+        &mut self,
+        channel: ChannelId,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        self.state
+            .channel_eofs
+            .lock()
+            .expect("lock channel eofs")
+            .push(channel);
+        Ok(())
+    }
+
+    async fn channel_close(
+        &mut self,
+        channel: ChannelId,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        self.state
+            .channel_closes
+            .lock()
+            .expect("lock channel closes")
+            .push(channel);
         Ok(())
     }
 
@@ -1302,6 +1409,28 @@ async fn spawn_publickey_server_with_auth_key(
     russh::keys::PublicKey,
     InteractiveServerState,
 ) {
+    spawn_publickey_server_with_auth_key_and_zmodem(
+        auth_key,
+        shell_ready_delay,
+        direct_tcpip_behavior,
+        shell_integration_behavior,
+        ZmodemExecServerBehavior::ProbeOnly,
+    )
+    .await
+}
+
+async fn spawn_publickey_server_with_auth_key_and_zmodem(
+    auth_key: russh::keys::PublicKey,
+    shell_ready_delay: Duration,
+    direct_tcpip_behavior: DirectTcpipBehavior,
+    shell_integration_behavior: ShellIntegrationServerBehavior,
+    zmodem_exec_behavior: ZmodemExecServerBehavior,
+) -> (
+    tokio::task::JoinHandle<()>,
+    std::net::SocketAddr,
+    russh::keys::PublicKey,
+    InteractiveServerState,
+) {
     let mut config = server::Config::default();
     config.auth_rejection_time = Duration::from_millis(5);
     config.inactivity_timeout = Some(Duration::from_secs(30));
@@ -1321,6 +1450,7 @@ async fn spawn_publickey_server_with_auth_key(
         shell_ready_delay,
         direct_tcpip_behavior,
         shell_integration_behavior,
+        zmodem_exec_behavior,
         state: state.clone(),
     };
 
@@ -1332,6 +1462,27 @@ async fn spawn_publickey_server_with_auth_key(
     });
 
     (join, addr, server_public, state)
+}
+
+async fn spawn_publickey_shell_server_with_zmodem(
+    zmodem_exec_behavior: ZmodemExecServerBehavior,
+) -> (
+    tokio::task::JoinHandle<()>,
+    std::net::SocketAddr,
+    std::path::PathBuf,
+    russh::keys::PublicKey,
+    InteractiveServerState,
+) {
+    let (client_public, private_key_path) = create_publickey_auth_material("zmodem-client");
+    let (join, addr, server_public, state) = spawn_publickey_server_with_auth_key_and_zmodem(
+        client_public,
+        Duration::from_millis(10),
+        DirectTcpipBehavior::default(),
+        ShellIntegrationServerBehavior::default(),
+        zmodem_exec_behavior,
+    )
+    .await;
+    (join, addr, private_key_path, server_public, state)
 }
 
 async fn spawn_publickey_shell_server(
@@ -2317,6 +2468,153 @@ fn ssh_runtime_accepts_exec_exit_status_sent_after_eof() {
     unsafe {
         std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
     }
+}
+
+fn wait_for_runtime_zmodem_phase(
+    runtime: &AppAsyncRuntime,
+    event_rx: &mut mpsc::UnboundedReceiver<SessionRuntimeEvent>,
+    expected_phase: ZmodemTransferPhase,
+    wait: Duration,
+) {
+    runtime.block_on(async {
+        tokio::time::timeout(wait, async {
+            loop {
+                match event_rx.recv().await {
+                    Some(SessionRuntimeEvent::ZmodemStateChanged(Some(state)))
+                        if state.phase == expected_phase =>
+                    {
+                        return;
+                    }
+                    Some(SessionRuntimeEvent::ZmodemStateChanged(Some(state)))
+                        if state.phase == ZmodemTransferPhase::Failed =>
+                    {
+                        panic!(
+                            "zmodem reached Failed while waiting for {expected_phase:?}: {}",
+                            state.error_text
+                        );
+                    }
+                    Some(_) => {}
+                    None => panic!("runtime event channel closed before {expected_phase:?}"),
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting for zmodem phase {expected_phase:?}"));
+    });
+}
+
+fn assert_runtime_cancels_exec_zmodem(
+    behavior: ZmodemExecServerBehavior,
+    wait_until_running: bool,
+) {
+    let _env_lock = lock_known_hosts_env();
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let (server_task, addr, private_key_path, server_public_key, server_state) =
+        runtime.block_on(async { spawn_publickey_shell_server_with_zmodem(behavior).await });
+    let known_hosts_path = temp_known_hosts_path("exec-zmodem-cancel");
+    KnownHostsService::new(&known_hosts_path)
+        .accept_unknown(
+            addr.ip().to_string().as_str(),
+            addr.port(),
+            &server_public_key,
+        )
+        .expect("trust zmodem test server host key");
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+    let upload_path = std::env::temp_dir().join(format!(
+        "mica-term-exec-zmodem-cancel-{}-{}.bin",
+        std::process::id(),
+        Uuid::new_v4()
+    ));
+    fs::write(&upload_path, b"dedicated exec zmodem cancellation")
+        .expect("write zmodem upload fixture");
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let runtime_handle = runtime.block_on(async {
+        SshSessionRuntime::connect(
+            sample_publickey_profile(
+                "asset-exec-zmodem-cancel",
+                addr.ip().to_string(),
+                addr.port(),
+                private_key_path.display().to_string(),
+            ),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            event_tx,
+        )
+        .await
+        .expect("connect zmodem test runtime")
+    });
+
+    runtime_handle
+        .start_zmodem_upload_to_remote_dir(vec![upload_path.clone()], "/root/1".into())
+        .expect("start dedicated exec zmodem upload");
+    if wait_until_running {
+        wait_for_runtime_zmodem_phase(
+            &runtime,
+            &mut event_rx,
+            ZmodemTransferPhase::Running,
+            Duration::from_secs(2),
+        );
+    }
+    runtime_handle
+        .cancel_zmodem_transfer()
+        .expect("cancel dedicated exec zmodem upload");
+    wait_for_runtime_zmodem_phase(
+        &runtime,
+        &mut event_rx,
+        ZmodemTransferPhase::Cancelled,
+        Duration::from_secs(2),
+    );
+
+    runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if server_state.received_wire_contains(TEST_ZMODEM_ABORT_WIRE)
+                    && server_state.abort_channel_is_settled(TEST_ZMODEM_ABORT_WIRE)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("wait for zmodem abort wire and channel settlement");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    });
+    while let Ok(event) = event_rx.try_recv() {
+        assert!(
+            !matches!(
+                event,
+                SessionRuntimeEvent::ZmodemStateChanged(Some(state))
+                    if state.phase == ZmodemTransferPhase::Failed
+            ),
+            "cancelled exec zmodem upload must not be overwritten with Failed"
+        );
+    }
+
+    runtime_handle.disconnect().expect("disconnect runtime");
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        server_task.await.expect("join zmodem test server");
+    });
+    let _ = fs::remove_file(&upload_path);
+    let _ = fs::remove_file(&private_key_path);
+    let _ = fs::remove_file(&known_hosts_path);
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+}
+
+#[test]
+fn ssh_runtime_cancels_dedicated_exec_zmodem_with_abort_wire() {
+    assert_runtime_cancels_exec_zmodem(ZmodemExecServerBehavior::EmitZrinit, true);
+}
+
+#[test]
+fn ssh_runtime_cancels_dedicated_exec_zmodem_before_handshake_timeout() {
+    assert_runtime_cancels_exec_zmodem(ZmodemExecServerBehavior::WithholdZrinit, false);
 }
 
 #[test]

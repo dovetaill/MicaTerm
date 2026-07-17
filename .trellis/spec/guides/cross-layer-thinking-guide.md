@@ -100,6 +100,21 @@ create one owner for:
 
 Rendering code may format fields, but it must not redefine the payload contract.
 
+### Mistake 5: A Test Double Completes The Lifecycle For The Owner
+
+**Bad**: A fake runtime receives Dismiss or Cancel and directly emits the final
+clear/completion event, even though the test is meant to prove that production
+runtime routing reaches the actor that owns the state or transport.
+
+**Good**: The fake records the lifecycle command and reproduces only behavior
+the corresponding production owner can perform. Add a real integration test
+when ownership depends on an async task, channel, or protocol wire.
+
+**Rule**: For command -> event -> projection flows, identify which actor must
+produce the terminal event. A test double must not synthesize that event unless
+it represents that same owner; otherwise the test can pass while production
+commands target a different actor.
+
 ---
 
 ## Checklist for Cross-Layer Features
@@ -120,6 +135,8 @@ After implementation:
       casting payload fields locally
 - [ ] Checked that derived state points back to the source event identifier
       (`seq`, `id`, `version`) instead of inventing a second cursor
+- [ ] Verified test doubles do not manufacture terminal lifecycle events that
+      the production command owner cannot emit
 
 ---
 

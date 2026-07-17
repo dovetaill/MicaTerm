@@ -16,11 +16,11 @@ use crate::app::ssh::shell_integration::runtime_shell_events;
 use super::auth::RuntimeClientHandler;
 use super::terminal::{TerminalSession, apply_remote_output, snapshot_terminal_surface};
 use super::transport::TransportChainGuard;
-use super::zmodem::{ZmodemAdvanceOutcome, ZmodemController};
+use super::zmodem::{ZMODEM_ABORT_WIRE, ZmodemAdvanceOutcome, ZmodemController};
 use super::{
-    FAST_SURFACE_DIRTY_NOTIFICATION_INTERVAL, INPUT_ACTIVE_SURFACE_DIRTY_WINDOW, RuntimeCommand,
-    SURFACE_DIRTY_NOTIFICATION_INTERVAL, SessionRuntimeEvent, WORKING_SET_TRIM_IDLE_INTERVAL,
-    WORKING_SET_TRIM_MIN_OUTPUT_BYTES,
+    ExecZmodemCommand, ExecZmodemTransferContext, FAST_SURFACE_DIRTY_NOTIFICATION_INTERVAL,
+    INPUT_ACTIVE_SURFACE_DIRTY_WINDOW, RuntimeCommand, SURFACE_DIRTY_NOTIFICATION_INTERVAL,
+    SessionRuntimeEvent, WORKING_SET_TRIM_IDLE_INTERVAL, WORKING_SET_TRIM_MIN_OUTPUT_BYTES,
 };
 
 const ZMODEM_EXEC_UPLOAD_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
@@ -337,9 +337,19 @@ pub(super) async fn run_channel_pump(
                             );
                         }
                     }
-                    Some(RuntimeCommand::DismissZmodem) => {
-                        zmodem.dismiss();
-                        emit_zmodem_state_changes(&mut zmodem, &event_tx);
+                    Some(RuntimeCommand::DismissZmodem { expected_state }) => {
+                        let dismissed = zmodem.dismiss_if_matches(expected_state.as_ref());
+                        if dismissed {
+                            let _ = zmodem.take_modal_state_change();
+                        }
+                        tracing::debug!(
+                            target: "app.zmodem",
+                            session_id = %session_id,
+                            lifecycle_command = "dismiss",
+                            owner = "interactive",
+                            outcome = if dismissed { "cleared" } else { "ignored" },
+                            "processed interactive zmodem controller cleanup"
+                        );
                     }
                     Some(RuntimeCommand::Resize {
                         rows,
@@ -755,35 +765,83 @@ pub(super) async fn run_zmodem_exec_upload(
     event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     local_paths: Vec<std::path::PathBuf>,
     remote_dir: String,
+    exec_transfer: ExecZmodemTransferContext,
 ) {
+    let ExecZmodemTransferContext {
+        generation,
+        command_rx: exec_command_rx,
+        registration,
+    } = exec_transfer;
     let path_count = local_paths.len();
     tracing::info!(
         target: "app.zmodem",
         session_id = %session_id,
+        transfer_generation = generation,
         remote_dir = remote_dir.as_str(),
         path_count,
         "starting zmodem upload over dedicated SSH exec channel"
     );
-    if let Err(err) = run_zmodem_exec_upload_inner(
+    let outcome = run_zmodem_exec_upload_inner(
         session_id,
         Arc::clone(&handle),
         event_tx.clone(),
         local_paths,
         remote_dir.clone(),
+        generation,
+        exec_command_rx,
     )
-    .await
-    {
-        tracing::warn!(
-            target: "app.zmodem",
-            session_id = %session_id,
-            remote_dir = remote_dir.as_str(),
-            error = %err,
-            "zmodem exec upload failed"
-        );
-        let _ = event_tx.send(SessionRuntimeEvent::ZmodemStateChanged(Some(
-            failed_zmodem_upload_state(err.to_string()),
-        )));
+    .await;
+    drop(registration);
+    match outcome {
+        Ok(ExecZmodemUploadOutcome::Completed) => {}
+        Ok(ExecZmodemUploadOutcome::Cancelled) => {
+            tracing::info!(
+                target: "app.zmodem",
+                session_id = %session_id,
+                transfer_generation = generation,
+                remote_dir = remote_dir.as_str(),
+                lifecycle_command = "cancel",
+                owner = "exec",
+                outcome = "cleared",
+                "cancelled zmodem exec upload"
+            );
+        }
+        Ok(ExecZmodemUploadOutcome::RuntimeClosed) => {
+            tracing::debug!(
+                target: "app.zmodem",
+                session_id = %session_id,
+                transfer_generation = generation,
+                remote_dir = remote_dir.as_str(),
+                outcome = "ignored",
+                "zmodem exec upload stopped with runtime lifecycle"
+            );
+        }
+        Err(err) => {
+            tracing::warn!(
+                target: "app.zmodem",
+                session_id = %session_id,
+                transfer_generation = generation,
+                remote_dir = remote_dir.as_str(),
+                error = %err,
+                "zmodem exec upload failed"
+            );
+            let _ = event_tx.send(SessionRuntimeEvent::ZmodemStateChanged(Some(
+                failed_zmodem_upload_state(err.to_string()),
+            )));
+        }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExecZmodemUploadOutcome {
+    Completed,
+    Cancelled,
+    RuntimeClosed,
+}
+
+enum ExecZmodemInput {
+    Channel(Option<ChannelMsg>),
+    Command(Option<ExecZmodemCommand>),
 }
 
 async fn run_zmodem_exec_upload_inner(
@@ -792,7 +850,9 @@ async fn run_zmodem_exec_upload_inner(
     event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     local_paths: Vec<std::path::PathBuf>,
     remote_dir: String,
-) -> Result<()> {
+    generation: u64,
+    mut exec_command_rx: mpsc::UnboundedReceiver<ExecZmodemCommand>,
+) -> Result<ExecZmodemUploadOutcome> {
     let mut channel = handle
         .channel_open_session()
         .await
@@ -811,8 +871,12 @@ async fn run_zmodem_exec_upload_inner(
     let handshake_started = Instant::now();
 
     loop {
-        let maybe_message = if upload_started {
-            channel.wait().await
+        let input = if upload_started {
+            tokio::select! {
+                biased;
+                command = exec_command_rx.recv() => ExecZmodemInput::Command(command),
+                message = channel.wait() => ExecZmodemInput::Channel(message),
+            }
         } else {
             let remaining = ZMODEM_EXEC_UPLOAD_HANDSHAKE_TIMEOUT
                 .checked_sub(handshake_started.elapsed())
@@ -820,13 +884,35 @@ async fn run_zmodem_exec_upload_inner(
             if remaining.is_zero() {
                 bail!("remote rz did not emit a ZMODEM upload handshake");
             }
-            timeout(remaining, channel.wait())
-                .await
-                .context("remote rz did not emit a ZMODEM upload handshake")?
+            tokio::select! {
+                biased;
+                command = exec_command_rx.recv() => ExecZmodemInput::Command(command),
+                result = timeout(remaining, channel.wait()) => {
+                    ExecZmodemInput::Channel(
+                        result.context("remote rz did not emit a ZMODEM upload handshake")?
+                    )
+                }
+            }
         };
 
-        let Some(message) = maybe_message else {
-            break;
+        let message = match input {
+            ExecZmodemInput::Command(Some(ExecZmodemCommand::Cancel)) => {
+                return cancel_zmodem_exec_upload(
+                    session_id,
+                    generation,
+                    &handle,
+                    &event_tx,
+                    &mut channel,
+                    &mut zmodem,
+                )
+                .await;
+            }
+            ExecZmodemInput::Command(None) => {
+                settle_zmodem_exec_channel(&mut channel).await;
+                return Ok(ExecZmodemUploadOutcome::RuntimeClosed);
+            }
+            ExecZmodemInput::Channel(Some(message)) => message,
+            ExecZmodemInput::Channel(None) => break,
         };
 
         match message {
@@ -897,11 +983,70 @@ async fn run_zmodem_exec_upload_inner(
     tracing::info!(
         target: "app.zmodem",
         session_id = %session_id,
+        transfer_generation = generation,
         files_completed = state.files_completed,
         bytes_transferred = state.bytes_transferred,
         "zmodem exec upload completed"
     );
-    Ok(())
+    Ok(ExecZmodemUploadOutcome::Completed)
+}
+
+async fn cancel_zmodem_exec_upload(
+    session_id: Uuid,
+    generation: u64,
+    handle: &Arc<client::Handle<RuntimeClientHandler>>,
+    event_tx: &mpsc::UnboundedSender<SessionRuntimeEvent>,
+    channel: &mut Channel<client::Msg>,
+    zmodem: &mut ZmodemController,
+) -> Result<ExecZmodemUploadOutcome> {
+    if let Some(state) = zmodem.current_state() {
+        match state.phase {
+            super::ZmodemTransferPhase::Completed => {
+                settle_zmodem_exec_channel(channel).await;
+                return Ok(ExecZmodemUploadOutcome::Completed);
+            }
+            super::ZmodemTransferPhase::Failed | super::ZmodemTransferPhase::Cancelled => {
+                settle_zmodem_exec_channel(channel).await;
+                return Ok(ExecZmodemUploadOutcome::Cancelled);
+            }
+            super::ZmodemTransferPhase::AwaitingUploadSelection
+            | super::ZmodemTransferPhase::AwaitingDownloadDirectory
+            | super::ZmodemTransferPhase::Running => {}
+        }
+        zmodem
+            .cancel()
+            .context("cancel dedicated exec zmodem upload")?;
+        emit_zmodem_state_changes(zmodem, event_tx);
+        if drive_zmodem(handle, channel.id(), event_tx, zmodem)
+            .await
+            .is_none()
+        {
+            bail!("failed to write ZMODEM abort bytes to SSH exec channel");
+        }
+    } else {
+        if let Err(bytes) = handle.data(channel.id(), ZMODEM_ABORT_WIRE.to_vec()).await {
+            tracing::warn!(
+                target: "app.zmodem",
+                session_id = %session_id,
+                transfer_generation = generation,
+                lifecycle_command = "cancel",
+                owner = "exec",
+                outcome = "failed",
+                unwritten_bytes = bytes.len(),
+                "failed to write pre-handshake zmodem abort wire"
+            );
+        }
+        let _ = event_tx.send(SessionRuntimeEvent::ZmodemStateChanged(Some(
+            cancelled_zmodem_upload_state(),
+        )));
+    }
+    settle_zmodem_exec_channel(channel).await;
+    Ok(ExecZmodemUploadOutcome::Cancelled)
+}
+
+async fn settle_zmodem_exec_channel(channel: &mut Channel<client::Msg>) {
+    let _ = channel.eof().await;
+    let _ = channel.close().await;
 }
 
 async fn remote_exec_exit_status(
@@ -1022,6 +1167,25 @@ fn failed_zmodem_upload_state(error_text: String) -> super::ZmodemTransferState 
         status_text: "The drag upload could not be completed with rz.".into(),
         detail_text: String::new(),
         error_text,
+        current_file_name: String::new(),
+        files_completed: 0,
+        files_total: None,
+        bytes_transferred: 0,
+        bytes_total: None,
+        local_file_path: None,
+        local_reveal_path: None,
+    }
+}
+
+fn cancelled_zmodem_upload_state() -> super::ZmodemTransferState {
+    super::ZmodemTransferState {
+        direction: super::ZmodemTransferDirection::Upload,
+        phase: super::ZmodemTransferPhase::Cancelled,
+        title: "ZMODEM Upload".into(),
+        headline: "Upload cancelled".into(),
+        status_text: "The transfer was cancelled before all files were sent.".into(),
+        detail_text: "The remote shell was told to abort the ZMODEM session.".into(),
+        error_text: String::new(),
         current_file_name: String::new(),
         files_completed: 0,
         files_total: None,

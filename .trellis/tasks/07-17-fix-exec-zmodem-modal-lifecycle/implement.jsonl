@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/index.md","reason":"Backend layer entry point and required implementation conventions."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Existing SSH, terminal drop, and ZMODEM runtime contracts."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Runtime command and best-effort cleanup error semantics."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Structured lifecycle diagnostics without sensitive payloads."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Command, runtime event, and UI projection ownership analysis."}

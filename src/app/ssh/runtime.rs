@@ -193,7 +193,120 @@ pub struct SshSessionRuntime {
     terminal: Arc<Mutex<TerminalSession>>,
     terminal_defaults: TerminalRuntimeDefaults,
     command_tx: mpsc::UnboundedSender<RuntimeCommand>,
+    exec_zmodem_transfer: Arc<Mutex<ExecZmodemTransferSlot>>,
     sftp_runtime: SftpRuntimeHandle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ExecZmodemCommand {
+    Cancel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExecZmodemCancelRoute {
+    Routed(u64),
+    NotActive,
+}
+
+struct ActiveExecZmodemTransfer {
+    generation: u64,
+    command_tx: mpsc::UnboundedSender<ExecZmodemCommand>,
+}
+
+#[derive(Default)]
+struct ExecZmodemTransferSlot {
+    next_generation: u64,
+    active: Option<ActiveExecZmodemTransfer>,
+}
+
+impl ExecZmodemTransferSlot {
+    fn register(&mut self, command_tx: mpsc::UnboundedSender<ExecZmodemCommand>) -> Result<u64> {
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|active| !active.command_tx.is_closed())
+        {
+            return Err(anyhow!("a dedicated exec zmodem upload is already active"));
+        }
+        self.active = None;
+        self.next_generation = self
+            .next_generation
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("exec zmodem generation overflow"))?;
+        let generation = self.next_generation;
+        self.active = Some(ActiveExecZmodemTransfer {
+            generation,
+            command_tx,
+        });
+        Ok(generation)
+    }
+
+    fn clear_if_generation(&mut self, expected_generation: u64) -> bool {
+        let matches = self
+            .active
+            .as_ref()
+            .is_some_and(|active| active.generation == expected_generation);
+        if matches {
+            self.active = None;
+        }
+        matches
+    }
+
+    #[cfg(test)]
+    fn active_generation(&self) -> Option<u64> {
+        self.active.as_ref().map(|active| active.generation)
+    }
+}
+
+pub(super) struct ExecZmodemTransferRegistration {
+    session_id: Uuid,
+    slot: std::sync::Weak<Mutex<ExecZmodemTransferSlot>>,
+    generation: u64,
+}
+
+pub(super) struct ExecZmodemTransferContext {
+    pub(super) generation: u64,
+    pub(super) command_rx: mpsc::UnboundedReceiver<ExecZmodemCommand>,
+    pub(super) registration: ExecZmodemTransferRegistration,
+}
+
+impl Drop for ExecZmodemTransferRegistration {
+    fn drop(&mut self) {
+        let Some(slot) = self.slot.upgrade() else {
+            return;
+        };
+        let cleared = slot
+            .lock()
+            .expect("lock exec zmodem slot for task cleanup")
+            .clear_if_generation(self.generation);
+        tracing::debug!(
+            target: "app.zmodem",
+            session_id = %self.session_id,
+            transfer_generation = self.generation,
+            owner = "exec",
+            outcome = if cleared { "cleared" } else { "stale" },
+            "released dedicated exec zmodem lifecycle registration"
+        );
+    }
+}
+
+fn route_exec_zmodem_cancel(slot: &Arc<Mutex<ExecZmodemTransferSlot>>) -> ExecZmodemCancelRoute {
+    let active = slot
+        .lock()
+        .expect("lock exec zmodem lifecycle slot")
+        .active
+        .as_ref()
+        .map(|active| (active.generation, active.command_tx.clone()));
+    let Some((generation, command_tx)) = active else {
+        return ExecZmodemCancelRoute::NotActive;
+    };
+    if command_tx.send(ExecZmodemCommand::Cancel).is_ok() {
+        return ExecZmodemCancelRoute::Routed(generation);
+    }
+    slot.lock()
+        .expect("lock stale exec zmodem lifecycle slot")
+        .clear_if_generation(generation);
+    ExecZmodemCancelRoute::NotActive
 }
 
 #[derive(Debug)]
@@ -213,7 +326,9 @@ enum RuntimeCommand {
         conflict_policy: ZmodemDownloadConflictPolicy,
     },
     CancelZmodem,
-    DismissZmodem,
+    DismissZmodem {
+        expected_state: Box<ZmodemTransferState>,
+    },
     Resize {
         rows: u32,
         cols: u32,
@@ -354,6 +469,7 @@ impl SshSessionRuntime {
             terminal: Arc::clone(&terminal),
             terminal_defaults,
             command_tx,
+            exec_zmodem_transfer: Arc::new(Mutex::new(ExecZmodemTransferSlot::default())),
             sftp_runtime,
         };
 
@@ -446,12 +562,29 @@ impl SshSessionRuntime {
         local_paths: Vec<PathBuf>,
         remote_dir: String,
     ) -> Result<()> {
+        let (exec_command_tx, exec_command_rx) = mpsc::unbounded_channel();
+        let generation = self
+            .exec_zmodem_transfer
+            .lock()
+            .map_err(|_| anyhow!("failed to lock exec zmodem lifecycle slot"))?
+            .register(exec_command_tx)?;
+        let registration = ExecZmodemTransferRegistration {
+            session_id: self.session_id,
+            slot: Arc::downgrade(&self.exec_zmodem_transfer),
+            generation,
+        };
+        let exec_transfer = ExecZmodemTransferContext {
+            generation,
+            command_rx: exec_command_rx,
+            registration,
+        };
         self.async_runtime.spawn(run_zmodem_exec_upload(
             self.session_id,
             Arc::clone(&self.handle),
             self.event_tx.clone(),
             local_paths,
             remote_dir,
+            exec_transfer,
         ));
         Ok(())
     }
@@ -470,14 +603,40 @@ impl SshSessionRuntime {
     }
 
     pub fn cancel_zmodem_transfer(&self) -> Result<()> {
-        self.command_tx
-            .send(RuntimeCommand::CancelZmodem)
-            .map_err(|_| anyhow!("ssh runtime zmodem cancel channel is closed"))
+        match route_exec_zmodem_cancel(&self.exec_zmodem_transfer) {
+            ExecZmodemCancelRoute::Routed(generation) => {
+                tracing::info!(
+                    target: "app.zmodem",
+                    session_id = %self.session_id,
+                    transfer_generation = generation,
+                    lifecycle_command = "cancel",
+                    owner = "exec",
+                    outcome = "routed",
+                    "routed zmodem cancellation"
+                );
+                Ok(())
+            }
+            ExecZmodemCancelRoute::NotActive => {
+                tracing::debug!(
+                    target: "app.zmodem",
+                    session_id = %self.session_id,
+                    lifecycle_command = "cancel",
+                    owner = "interactive",
+                    outcome = "routed",
+                    "routed zmodem cancellation"
+                );
+                self.command_tx
+                    .send(RuntimeCommand::CancelZmodem)
+                    .map_err(|_| anyhow!("ssh runtime zmodem cancel channel is closed"))
+            }
+        }
     }
 
-    pub fn dismiss_zmodem_transfer(&self) -> Result<()> {
+    pub fn dismiss_zmodem_transfer(&self, expected_state: ZmodemTransferState) -> Result<()> {
         self.command_tx
-            .send(RuntimeCommand::DismissZmodem)
+            .send(RuntimeCommand::DismissZmodem {
+                expected_state: Box::new(expected_state),
+            })
             .map_err(|_| anyhow!("ssh runtime zmodem dismiss channel is closed"))
     }
 
@@ -624,8 +783,8 @@ impl SessionRuntimeControl for SshSessionRuntime {
         SshSessionRuntime::cancel_zmodem_transfer(self)
     }
 
-    fn dismiss_zmodem_transfer(&self) -> Result<()> {
-        SshSessionRuntime::dismiss_zmodem_transfer(self)
+    fn dismiss_zmodem_transfer(&self, expected_state: ZmodemTransferState) -> Result<()> {
+        SshSessionRuntime::dismiss_zmodem_transfer(self, expected_state)
     }
 
     fn selection_text_from_buffer_rows(
@@ -767,5 +926,109 @@ mod tests {
         assert_eq!(defaults.viewport_cols(), 1);
         assert_eq!(defaults.viewport_pixel_width(), 8);
         assert_eq!(defaults.viewport_pixel_height(), 16);
+    }
+
+    #[test]
+    fn exec_zmodem_cancel_routes_to_active_generation() {
+        let slot = Arc::new(Mutex::new(ExecZmodemTransferSlot::default()));
+        let (command_tx, mut command_rx) = mpsc::unbounded_channel();
+        let generation = slot
+            .lock()
+            .expect("lock exec zmodem slot")
+            .register(command_tx)
+            .expect("register exec zmodem transfer");
+
+        assert_eq!(
+            route_exec_zmodem_cancel(&slot),
+            ExecZmodemCancelRoute::Routed(generation)
+        );
+        assert!(matches!(
+            command_rx.try_recv(),
+            Ok(ExecZmodemCommand::Cancel)
+        ));
+    }
+
+    #[test]
+    fn stale_exec_zmodem_registration_cannot_clear_newer_generation() {
+        let slot = Arc::new(Mutex::new(ExecZmodemTransferSlot::default()));
+        let (first_tx, first_rx) = mpsc::unbounded_channel();
+        let first = slot
+            .lock()
+            .expect("lock first exec zmodem slot")
+            .register(first_tx)
+            .expect("register first exec zmodem transfer");
+        drop(first_rx);
+        assert_eq!(
+            route_exec_zmodem_cancel(&slot),
+            ExecZmodemCancelRoute::NotActive
+        );
+
+        let (second_tx, _second_rx) = mpsc::unbounded_channel();
+        let second = slot
+            .lock()
+            .expect("lock second exec zmodem slot")
+            .register(second_tx)
+            .expect("register second exec zmodem transfer");
+        assert_ne!(first, second);
+        assert!(
+            !slot
+                .lock()
+                .expect("lock stale exec zmodem slot")
+                .clear_if_generation(first)
+        );
+        assert_eq!(
+            slot.lock()
+                .expect("lock current exec zmodem slot")
+                .active_generation(),
+            Some(second)
+        );
+    }
+
+    #[test]
+    fn exec_zmodem_slot_rejects_overlapping_live_registration() {
+        let mut slot = ExecZmodemTransferSlot::default();
+        let (first_tx, _first_rx) = mpsc::unbounded_channel();
+        slot.register(first_tx)
+            .expect("register first exec zmodem transfer");
+        let (second_tx, _second_rx) = mpsc::unbounded_channel();
+
+        assert!(slot.register(second_tx).is_err());
+    }
+
+    #[test]
+    fn stale_exec_zmodem_task_guard_cannot_clear_newer_generation() {
+        let session_id = Uuid::new_v4();
+        let slot = Arc::new(Mutex::new(ExecZmodemTransferSlot::default()));
+        let (first_tx, _first_rx) = mpsc::unbounded_channel();
+        let first = slot
+            .lock()
+            .expect("lock first exec zmodem slot")
+            .register(first_tx)
+            .expect("register first exec zmodem transfer");
+        let stale_registration = ExecZmodemTransferRegistration {
+            session_id,
+            slot: Arc::downgrade(&slot),
+            generation: first,
+        };
+        assert!(
+            slot.lock()
+                .expect("lock first exec zmodem cleanup")
+                .clear_if_generation(first)
+        );
+        let (second_tx, _second_rx) = mpsc::unbounded_channel();
+        let second = slot
+            .lock()
+            .expect("lock second exec zmodem slot")
+            .register(second_tx)
+            .expect("register second exec zmodem transfer");
+
+        drop(stale_registration);
+
+        assert_eq!(
+            slot.lock()
+                .expect("lock current exec zmodem slot")
+                .active_generation(),
+            Some(second)
+        );
     }
 }
