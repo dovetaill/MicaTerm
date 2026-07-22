@@ -10,8 +10,8 @@ use termwiz::input::{KeyCode, Modifiers as KeyModifiers};
 use uuid::Uuid;
 
 use crate::app::terminal_core::{
-    SelectionState, TerminalCoreAdapter, TerminalFrameSnapshot, ViewportState,
-    create_terminal_core_adapter,
+    SelectionState, TerminalCoreAdapter, TerminalFrameSnapshot, TerminalViewportMetrics,
+    ViewportState, create_terminal_core_adapter, create_terminal_core_adapter_with_viewport,
 };
 use crate::app::terminal_theme::preset_for_theme;
 use crate::theme::{ThemeMode, ThemeVariant};
@@ -21,9 +21,11 @@ use super::{
     TerminalRowState, TerminalSurfaceState,
 };
 
-pub(super) fn apply_remote_output(terminal: &Arc<Mutex<TerminalSession>>, bytes: &[u8]) {
+pub(super) fn apply_remote_output(terminal: &Arc<Mutex<TerminalSession>>, bytes: &[u8]) -> Vec<u8> {
     if let Ok(mut terminal) = terminal.lock() {
-        terminal.apply_remote_bytes(bytes);
+        terminal.apply_remote_bytes(bytes)
+    } else {
+        Vec::new()
     }
 }
 
@@ -55,9 +57,10 @@ pub fn cwd_tracking_prompt_command() -> &'static str {
     r#"printf '\033]7;file://%s%s\007' "${HOSTNAME:-remote}" "$PWD""#
 }
 
-pub fn negotiated_terminal_environment() -> [(&'static str, &'static str); 2] {
+pub fn negotiated_terminal_environment() -> [(&'static str, &'static str); 3] {
     [
         ("COLORTERM", "truecolor"),
+        ("TERM_PROGRAM", "mica-term"),
         ("PROMPT_COMMAND", cwd_tracking_prompt_command()),
     ]
 }
@@ -168,6 +171,7 @@ struct ReleasedTerminalCoreAdapter {
     seqno: usize,
     rows: u32,
     cols: u32,
+    viewport_metrics: TerminalViewportMetrics,
     default_fg_rgba: u32,
     default_bg_rgba: u32,
     row_bg_even_rgba: u32,
@@ -182,6 +186,7 @@ impl ReleasedTerminalCoreAdapter {
             seqno: snapshot.seqno,
             rows: snapshot.rows,
             cols: snapshot.cols,
+            viewport_metrics: snapshot.viewport_metrics,
             default_fg_rgba: snapshot.default_fg_rgba,
             default_bg_rgba: snapshot.default_bg_rgba,
             row_bg_even_rgba: snapshot.row_bg_even_rgba,
@@ -196,6 +201,7 @@ impl ReleasedTerminalCoreAdapter {
             seqno: self.seqno,
             rows: self.rows.max(1),
             cols: self.cols.max(1),
+            viewport_metrics: self.viewport_metrics,
             default_fg_rgba: self.default_fg_rgba,
             default_bg_rgba: self.default_bg_rgba,
             row_bg_even_rgba: self.row_bg_even_rgba,
@@ -208,6 +214,8 @@ impl ReleasedTerminalCoreAdapter {
             visible_rows: Vec::new(),
             visible_lines: Vec::new(),
             cells: Vec::new(),
+            image_resources: Vec::new(),
+            image_placements: Vec::new(),
             cursor: TerminalCursorState {
                 row: 0,
                 col: 0,
@@ -231,7 +239,9 @@ impl TerminalCoreAdapter for ReleasedTerminalCoreAdapter {
         self.seqno
     }
 
-    fn apply_remote_bytes(&mut self, _bytes: &[u8]) {}
+    fn apply_remote_bytes(&mut self, _bytes: &[u8]) -> Vec<u8> {
+        Vec::new()
+    }
 
     fn screen_text(&self) -> String {
         String::new()
@@ -252,6 +262,19 @@ impl TerminalCoreAdapter for ReleasedTerminalCoreAdapter {
     fn resize(&mut self, rows: usize, cols: usize) {
         self.rows = rows.max(1) as u32;
         self.cols = cols.max(1) as u32;
+        self.viewport_metrics = TerminalViewportMetrics::fallback(rows, cols);
+        self.seqno = self.seqno.saturating_add(1);
+    }
+
+    fn resize_with_viewport(
+        &mut self,
+        rows: usize,
+        cols: usize,
+        viewport: TerminalViewportMetrics,
+    ) {
+        self.rows = rows.max(1) as u32;
+        self.cols = cols.max(1) as u32;
+        self.viewport_metrics = viewport;
         self.seqno = self.seqno.saturating_add(1);
     }
 
@@ -295,6 +318,21 @@ impl TerminalSession {
         Self::with_core(create_terminal_core_adapter(rows, cols, scrollback_lines))
     }
 
+    pub fn new_with_scrollback_and_viewport(
+        rows: usize,
+        cols: usize,
+        scrollback_lines: usize,
+        viewport: TerminalViewportMetrics,
+    ) -> Self {
+        let scrollback_lines = scrollback_lines.max(1);
+        Self::with_core(create_terminal_core_adapter_with_viewport(
+            rows,
+            cols,
+            scrollback_lines,
+            viewport,
+        ))
+    }
+
     pub fn with_core(core: Box<dyn TerminalCoreAdapter>) -> Self {
         Self { core }
     }
@@ -308,8 +346,8 @@ impl TerminalSession {
         self.core.sequence_number()
     }
 
-    pub fn apply_remote_bytes(&mut self, bytes: &[u8]) {
-        self.core.apply_remote_bytes(bytes);
+    pub fn apply_remote_bytes(&mut self, bytes: &[u8]) -> Vec<u8> {
+        self.core.apply_remote_bytes(bytes)
     }
 
     pub fn screen_text(&self) -> String {
@@ -337,6 +375,15 @@ impl TerminalSession {
 
     pub fn resize(&mut self, rows: usize, cols: usize) {
         self.core.resize(rows, cols);
+    }
+
+    pub fn resize_with_viewport(
+        &mut self,
+        rows: usize,
+        cols: usize,
+        viewport: TerminalViewportMetrics,
+    ) {
+        self.core.resize_with_viewport(rows, cols, viewport);
     }
 
     pub fn surface_state(&self, session_id: Uuid) -> TerminalSurfaceState {

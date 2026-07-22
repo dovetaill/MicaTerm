@@ -96,6 +96,7 @@ use crate::app::ssh::session_manager::{
     SessionState,
 };
 use crate::app::terminal_atlas::TerminalAtlasSelection;
+use crate::app::terminal_core::TerminalViewportMetrics;
 use crate::app::terminal_model::TerminalModelFrame;
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_presenter::WindowsNativePresenter;
@@ -1668,8 +1669,10 @@ fn active_workspace_session_uuid(state: &ShellViewModel) -> Option<Uuid> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WorkspacePasteRequestOutcome {
     Ignored,
+    Failed,
     Prompted,
     Sent,
+    UploadScheduled,
 }
 
 struct WorkspaceScrollInput {
@@ -3061,12 +3064,22 @@ fn record_workspace_terminal_viewport_defaults(
     cols: i32,
 ) {
     let rect = workspace_native_terminal_rect(window);
-    bridge.terminal_defaults.set_viewport_size(
+    let dpi = workspace_terminal_viewport_dpi(window);
+    let viewport = if rect.width > 0 && rect.height > 0 {
+        TerminalViewportMetrics::new(rect.width as u32, rect.height as u32, dpi)
+    } else {
+        let previous = bridge.terminal_defaults.viewport_metrics();
+        TerminalViewportMetrics::new(previous.pixel_width, previous.pixel_height, dpi)
+    };
+    bridge.terminal_defaults.set_viewport_metrics(
         rows.max(1) as usize,
         cols.max(1) as usize,
-        rect.width.max(0) as u32,
-        rect.height.max(0) as u32,
+        viewport,
     );
+}
+
+fn workspace_terminal_viewport_dpi(window: &AppWindow) -> u32 {
+    (window_scale_factor(window) * 96.0).round().max(1.0) as u32
 }
 
 fn workspace_native_terminal_resize_target(
@@ -4765,11 +4778,14 @@ fn sync_workspace_terminal_runtime_defaults_with_defaults(
     let rows = (height / cell_height).floor().max(1.0) as usize;
     let cols = (width / cell_width).floor().max(1.0) as usize;
     let scale_factor = window_scale_factor(window);
-    terminal_defaults.set_viewport_size(
+    terminal_defaults.set_viewport_metrics(
         rows,
         cols,
-        (width * scale_factor).round().max(0.0) as u32,
-        (height * scale_factor).round().max(0.0) as u32,
+        TerminalViewportMetrics::new(
+            (width * scale_factor).round().max(1.0) as u32,
+            (height * scale_factor).round().max(1.0) as u32,
+            workspace_terminal_viewport_dpi(window),
+        ),
     );
 }
 
@@ -6635,6 +6651,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let (sftp_local_action_result_tx, sftp_local_action_result_rx) =
         std::sync::mpsc::channel::<sftp::SftpLocalActionBackgroundMessage>();
     let sftp_local_action_result_rx = Rc::new(RefCell::new(sftp_local_action_result_rx));
+    let (clipboard_image_upload_result_tx, clipboard_image_upload_result_rx) =
+        std::sync::mpsc::channel::<workspace_terminal::ClipboardImageUploadBackgroundMessage>();
+    let clipboard_image_upload_result_rx = Rc::new(RefCell::new(clipboard_image_upload_result_rx));
+    let clipboard_image_upload_gate = Arc::new(tokio::sync::Semaphore::new(1));
     let (ssh_modal_result_tx, ssh_modal_result_rx) =
         std::sync::mpsc::channel::<SshModalBackgroundMessage>();
     let ssh_modal_result_rx = Rc::new(RefCell::new(ssh_modal_result_rx));
@@ -6675,6 +6695,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let sftp_browser_result_tx_ref = sftp_browser_result_tx.clone();
         let sftp_transfer_result_rx_ref = Rc::clone(&sftp_transfer_result_rx);
         let sftp_local_action_result_rx_ref = Rc::clone(&sftp_local_action_result_rx);
+        let clipboard_image_upload_result_rx_ref = Rc::clone(&clipboard_image_upload_result_rx);
         let ssh_modal_result_rx_ref = Rc::clone(&ssh_modal_result_rx);
         let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
         let active_ssh_modal_test_request_id_ref = Rc::clone(&active_ssh_modal_test_request_id);
@@ -6695,6 +6716,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 return;
             };
             let mut state = state.borrow_mut();
+            let clipboard_image_upload_changed = {
+                let receiver = clipboard_image_upload_result_rx_ref.borrow();
+                workspace_terminal::drain_clipboard_image_upload_messages(
+                    &mut state, &manager, &receiver,
+                )
+            };
             let sftp_result_changed = {
                 let receiver = sftp_browser_result_rx_ref.borrow();
                 let mut controller = sftp_browser_controller_ref.borrow_mut();
@@ -6730,7 +6757,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &receiver,
                 )
             };
-            if sftp_transfer_changed || sftp_local_action_changed {
+            if clipboard_image_upload_changed || sftp_transfer_changed || sftp_local_action_changed
+            {
                 shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
                 sftp::sync_sftp_conflict_modal_state(&window, &state);
             }
@@ -9473,6 +9501,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let input_projection_refresh_timer_ref = Rc::clone(&input_projection_refresh_timer);
     let input_projection_refresh_gate_ref = Rc::clone(&input_projection_refresh_gate);
+    let clipboard_image_upload_result_tx_ref = clipboard_image_upload_result_tx.clone();
+    let clipboard_image_upload_gate_ref = Arc::clone(&clipboard_image_upload_gate);
+    let effects_ref = Rc::clone(&effects);
     window.on_workspace_session_paste_requested(move || {
         if let Some(window) = window_handle.upgrade()
             && window.get_workspace_paste_warning_modal_open()
@@ -9486,9 +9517,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
         let mut state = view_model_ref.borrow_mut();
         let outcome = workspace_terminal::forward_active_workspace_paste(
-            &state,
+            &mut state,
             session_bridge_ref.as_deref(),
             pending_workspace_paste_warning_ref.as_ref(),
+            &clipboard_image_upload_result_tx_ref,
+            &clipboard_image_upload_gate_ref,
         );
         if let Some(window) = window_handle.upgrade() {
             let pending = pending_workspace_paste_warning_ref.borrow();
@@ -9508,6 +9541,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     Rc::clone(&input_projection_refresh_timer_ref),
                     Rc::clone(&input_projection_refresh_gate_ref),
                 );
+            } else if matches!(outcome, WorkspacePasteRequestOutcome::Failed) {
+                shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
             }
         }
     });

@@ -1,6 +1,26 @@
 //! Bootstrap workspace terminal module.
 
 use super::*;
+use crate::app::clipboard::{
+    ClipboardImageSource, ClipboardPayload, encode_clipboard_image, select_clipboard_payload,
+    system_clipboard_image_source,
+};
+use crate::app::sftp::SftpRuntimeHandle;
+
+#[derive(Debug)]
+pub(super) struct ClipboardImageUploadBackgroundMessage {
+    session_id: Uuid,
+    binding_id: Uuid,
+    result: std::result::Result<UploadedClipboardImage, String>,
+}
+
+#[derive(Debug)]
+struct UploadedClipboardImage {
+    remote_path: String,
+    width: u32,
+    height: u32,
+    encoded_bytes: usize,
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WorkspaceTerminalLinkAffordance {
@@ -202,6 +222,17 @@ pub(super) fn snap_active_workspace_viewport_to_bottom_if_needed(
     let Some(session_id) = active_workspace_session_uuid(state) else {
         return;
     };
+    snap_workspace_session_viewport_to_bottom_if_needed(state, &bridge.manager, session_id);
+}
+
+fn snap_workspace_session_viewport_to_bottom_if_needed(
+    state: &ShellViewModel,
+    manager: &SessionManager,
+    session_id: Uuid,
+) {
+    if active_workspace_session_uuid(state) != Some(session_id) {
+        return;
+    }
     let needs_snap = state
         .active_workspace_terminal_surface()
         .is_some_and(|surface| !surface.viewport_at_bottom);
@@ -209,7 +240,7 @@ pub(super) fn snap_active_workspace_viewport_to_bottom_if_needed(
         return;
     }
 
-    if let Err(err) = bridge.manager.scroll_session_to_bottom(session_id) {
+    if let Err(err) = manager.scroll_session_to_bottom(session_id) {
         tracing::error!(
             target: "app.ssh",
             session_id = session_id.to_string(),
@@ -947,12 +978,19 @@ pub(super) fn forward_active_workspace_resize(
 
     let rows = rows.max(1) as u32;
     let cols = cols.max(1) as u32;
-    if let Err(err) = bridge.manager.resize_session(session_id, rows, cols) {
+    let viewport = bridge.terminal_defaults.viewport_metrics();
+    if let Err(err) = bridge
+        .manager
+        .resize_session_with_viewport(session_id, rows, cols, viewport)
+    {
         tracing::error!(
             target: "app.ssh",
             session_id = session_id.to_string(),
             rows,
             cols,
+            viewport_pixel_width = viewport.pixel_width,
+            viewport_pixel_height = viewport.pixel_height,
+            viewport_dpi = viewport.dpi,
             error = %err,
             "failed to forward workspace terminal resize"
         );
@@ -973,6 +1011,11 @@ pub(super) fn system_clipboard_text() -> Option<String> {
     })
     .ok()
     .flatten()
+}
+
+fn system_clipboard_payload() -> Result<Option<ClipboardPayload>> {
+    let image = system_clipboard_image_source()?;
+    Ok(select_clipboard_payload(image, system_clipboard_text))
 }
 
 pub(super) fn forward_active_workspace_copy_selection(
@@ -1100,9 +1143,11 @@ pub(super) fn forward_workspace_session_paste(
 }
 
 pub(super) fn forward_active_workspace_paste(
-    state: &ShellViewModel,
+    state: &mut ShellViewModel,
     bridge: Option<&ShellSessionBridge>,
     pending_warning: &RefCell<Option<PendingWorkspacePasteWarning>>,
+    image_upload_result_tx: &std::sync::mpsc::Sender<ClipboardImageUploadBackgroundMessage>,
+    image_upload_gate: &Arc<tokio::sync::Semaphore>,
 ) -> WorkspacePasteRequestOutcome {
     let Some(session_id) = active_workspace_session_uuid(state) else {
         tracing::warn!(
@@ -1111,13 +1156,58 @@ pub(super) fn forward_active_workspace_paste(
         );
         return WorkspacePasteRequestOutcome::Ignored;
     };
-    let Some(text) = system_clipboard_text() else {
-        tracing::warn!(
-            target: "app.ssh",
-            session_id = session_id.to_string(),
-            "ignored workspace paste request because clipboard text could not be read"
-        );
-        return WorkspacePasteRequestOutcome::Ignored;
+    let payload = match system_clipboard_payload() {
+        Ok(Some(payload)) => payload,
+        Ok(None) => {
+            tracing::warn!(
+                target: "app.ssh",
+                session_id = session_id.to_string(),
+                "ignored workspace paste request because clipboard text could not be read"
+            );
+            return WorkspacePasteRequestOutcome::Ignored;
+        }
+        Err(error) => {
+            tracing::warn!(
+                target: "app.ssh",
+                session_id = session_id.to_string(),
+                error = %error,
+                "failed to inspect the clipboard image payload"
+            );
+            show_clipboard_image_upload_error(state, error.to_string());
+            return WorkspacePasteRequestOutcome::Failed;
+        }
+    };
+
+    let text = match payload {
+        ClipboardPayload::Text(text) => text,
+        ClipboardPayload::Image(image) => {
+            let Some(bridge) = bridge else {
+                show_clipboard_image_upload_error(
+                    state,
+                    "the SSH session bridge is unavailable".to_string(),
+                );
+                return WorkspacePasteRequestOutcome::Failed;
+            };
+            let runtime_handle = bridge.manager.runtime_handle();
+            let (binding_id, sftp_runtime) = match bridge.manager.sftp_runtime_binding(session_id) {
+                Ok(binding) => binding,
+                Err(error) => {
+                    show_clipboard_image_upload_error(state, error.to_string());
+                    return WorkspacePasteRequestOutcome::Failed;
+                }
+            };
+            pending_warning.borrow_mut().take();
+            schedule_clipboard_image_upload(
+                runtime_handle,
+                session_id,
+                binding_id,
+                sftp_runtime,
+                image,
+                image_upload_result_tx.clone(),
+                Arc::clone(image_upload_gate),
+            );
+            return WorkspacePasteRequestOutcome::UploadScheduled;
+        }
     };
     let text = normalize_workspace_paste_text(&text);
 
@@ -1142,6 +1232,152 @@ pub(super) fn forward_active_workspace_paste(
     pending_warning.borrow_mut().take();
     forward_workspace_session_paste(state, bridge, session_id, &text);
     WorkspacePasteRequestOutcome::Sent
+}
+
+fn schedule_clipboard_image_upload(
+    runtime_handle: tokio::runtime::Handle,
+    session_id: Uuid,
+    binding_id: Uuid,
+    sftp_runtime: SftpRuntimeHandle,
+    image: ClipboardImageSource,
+    result_tx: std::sync::mpsc::Sender<ClipboardImageUploadBackgroundMessage>,
+    upload_gate: Arc<tokio::sync::Semaphore>,
+) {
+    runtime_handle.spawn(async move {
+        let _permit = match upload_gate.acquire_owned().await {
+            Ok(permit) => permit,
+            Err(error) => {
+                let _ = result_tx.send(ClipboardImageUploadBackgroundMessage {
+                    session_id,
+                    binding_id,
+                    result: Err(format!("clipboard image upload queue closed: {error}")),
+                });
+                return;
+            }
+        };
+        let encoded = match tokio::task::spawn_blocking(move || encode_clipboard_image(image)).await
+        {
+            Ok(Ok(encoded)) => encoded,
+            Ok(Err(error)) => {
+                let _ = result_tx.send(ClipboardImageUploadBackgroundMessage {
+                    session_id,
+                    binding_id,
+                    result: Err(error.to_string()),
+                });
+                return;
+            }
+            Err(error) => {
+                let _ = result_tx.send(ClipboardImageUploadBackgroundMessage {
+                    session_id,
+                    binding_id,
+                    result: Err(format!("clipboard image worker failed: {error}")),
+                });
+                return;
+            }
+        };
+
+        let width = encoded.width;
+        let height = encoded.height;
+        let encoded_bytes = encoded.png_bytes.len();
+        let result = sftp_runtime
+            .upload_clipboard_png(session_id, encoded.png_bytes)
+            .await
+            .map(|remote_path| UploadedClipboardImage {
+                remote_path,
+                width,
+                height,
+                encoded_bytes,
+            })
+            .map_err(|error| error.to_string());
+        let _ = result_tx.send(ClipboardImageUploadBackgroundMessage {
+            session_id,
+            binding_id,
+            result,
+        });
+    });
+}
+
+pub(super) fn drain_clipboard_image_upload_messages(
+    state: &mut ShellViewModel,
+    manager: &SessionManager,
+    result_rx: &std::sync::mpsc::Receiver<ClipboardImageUploadBackgroundMessage>,
+) -> bool {
+    let mut changed = false;
+    while let Ok(message) = result_rx.try_recv() {
+        match message.result {
+            Ok(uploaded) => {
+                let quoted_path = posix_shell_quote(uploaded.remote_path.as_str());
+                match manager.send_session_paste_if_sftp_binding_current(
+                    message.session_id,
+                    message.binding_id,
+                    quoted_path,
+                ) {
+                    Ok(true) => {
+                        snap_workspace_session_viewport_to_bottom_if_needed(
+                            state,
+                            manager,
+                            message.session_id,
+                        );
+                    }
+                    Ok(false) => {
+                        show_clipboard_image_upload_error(
+                            state,
+                            "the originating terminal connection changed or closed before the upload completed"
+                                .to_string(),
+                        );
+                        changed = true;
+                        continue;
+                    }
+                    Err(error) => {
+                        tracing::error!(
+                            target: "app.ssh",
+                            session_id = message.session_id.to_string(),
+                            binding_id = message.binding_id.to_string(),
+                            error = %error,
+                            "failed to paste the uploaded clipboard image path"
+                        );
+                        show_clipboard_image_upload_error(state, error.to_string());
+                        changed = true;
+                        continue;
+                    }
+                }
+                tracing::info!(
+                    target: "app.sftp",
+                    session_id = message.session_id.to_string(),
+                    binding_id = message.binding_id.to_string(),
+                    width = uploaded.width,
+                    height = uploaded.height,
+                    encoded_bytes = uploaded.encoded_bytes,
+                    "uploaded a clipboard image and pasted its remote path"
+                );
+            }
+            Err(error) => {
+                tracing::error!(
+                    target: "app.sftp",
+                    session_id = message.session_id.to_string(),
+                    error,
+                    "clipboard image upload failed"
+                );
+                show_clipboard_image_upload_error(state, error);
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+fn show_clipboard_image_upload_error(state: &mut ShellViewModel, error: String) {
+    if !state.transfer_center_open() {
+        state.toggle_transfer_center();
+    }
+    state.show_transfer_center_feedback("error", format!("Clipboard image upload failed: {error}"));
+}
+
+pub(super) fn posix_shell_quote(value: &str) -> String {
+    if value.is_empty() {
+        return "''".to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 pub(super) fn forward_active_workspace_scroll_ratio(
@@ -1278,7 +1514,7 @@ pub(super) fn parse_terminal_mouse_button(value: &str) -> Option<TerminalMouseBu
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_workspace_paste_text;
+    use super::{normalize_workspace_paste_text, posix_shell_quote};
 
     #[test]
     fn workspace_paste_normalizer_is_idempotent_and_strips_carriage_returns() {
@@ -1291,5 +1527,19 @@ mod tests {
         );
         assert!(!normalized.contains('\r'));
         assert_eq!(normalize_workspace_paste_text(&normalized), normalized);
+    }
+
+    #[test]
+    fn uploaded_remote_paths_are_posix_shell_quoted_without_a_newline() {
+        assert_eq!(
+            posix_shell_quote("/home/test/image.png"),
+            "'/home/test/image.png'"
+        );
+        assert_eq!(
+            posix_shell_quote("/home/test/it's ready.png"),
+            "'/home/test/it'\\''s ready.png'"
+        );
+        assert_eq!(posix_shell_quote(""), "''");
+        assert!(!posix_shell_quote("/tmp/image.png").contains('\n'));
     }
 }

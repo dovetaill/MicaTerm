@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::pin::Pin;
@@ -12,6 +13,7 @@ use mica_term::app::sftp::{
 use tokio::io::{
     AsyncRead, AsyncReadExt, AsyncSeek, AsyncSeekExt, AsyncWrite, AsyncWriteExt, ReadBuf,
 };
+use uuid::Uuid;
 
 struct MemoryFileHandle {
     cursor: Cursor<Vec<u8>>,
@@ -70,8 +72,11 @@ impl AsyncSeek for MemoryFileHandle {
 
 #[derive(Default)]
 struct RecordingBackend {
+    canonicalize_requests: Mutex<Vec<String>>,
+    clipboard_cache_entries: Mutex<HashMap<String, Vec<SftpDirectoryEntry>>>,
     read_dir_requests: Mutex<Vec<String>>,
     mkdir_requests: Mutex<Vec<String>>,
+    mkdir_with_permissions_requests: Mutex<Vec<(String, u32)>>,
     rename_requests: Mutex<Vec<(String, String)>>,
     exists_requests: Mutex<Vec<String>>,
     stat_requests: Mutex<Vec<String>>,
@@ -84,6 +89,19 @@ struct RecordingBackend {
 }
 
 impl SftpBackend for RecordingBackend {
+    fn canonicalize<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>> {
+        Box::pin(async move {
+            self.canonicalize_requests
+                .lock()
+                .expect("lock canonicalize requests")
+                .push(path.to_string());
+            Ok("/home/tester".to_string())
+        })
+    }
+
     fn read_dir<'a>(
         &'a self,
         path: &'a str,
@@ -93,6 +111,15 @@ impl SftpBackend for RecordingBackend {
                 .lock()
                 .expect("lock read_dir requests")
                 .push(path.to_string());
+            if let Some(entries) = self
+                .clipboard_cache_entries
+                .lock()
+                .expect("lock clipboard cache entries")
+                .get(path)
+                .cloned()
+            {
+                return Ok(entries);
+            }
             Ok(vec![SftpDirectoryEntry {
                 id: format!("{path}#app"),
                 name: "app".into(),
@@ -113,6 +140,20 @@ impl SftpBackend for RecordingBackend {
                 .lock()
                 .expect("lock mkdir requests")
                 .push(path.to_string());
+            Ok(())
+        })
+    }
+
+    fn mkdir_with_permissions<'a>(
+        &'a self,
+        path: &'a str,
+        permissions: u32,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move {
+            self.mkdir_with_permissions_requests
+                .lock()
+                .expect("lock mkdir-with-permissions requests")
+                .push((path.to_string(), permissions));
             Ok(())
         })
     }
@@ -223,6 +264,15 @@ impl SftpBackend for RecordingBackend {
                 .lock()
                 .expect("lock remove_file requests")
                 .push(remote_path.to_string());
+            let mut cache_entries = self
+                .clipboard_cache_entries
+                .lock()
+                .expect("lock clipboard cache entries");
+            for (directory, entries) in cache_entries.iter_mut() {
+                entries.retain(|entry| {
+                    format!("{}/{}", directory.trim_end_matches('/'), entry.name) != remote_path
+                });
+            }
             Ok(())
         })
     }
@@ -236,6 +286,10 @@ impl SftpBackend for RecordingBackend {
                 .lock()
                 .expect("lock remove_dir requests")
                 .push(remote_path.to_string());
+            self.clipboard_cache_entries
+                .lock()
+                .expect("lock clipboard cache entries")
+                .remove(remote_path);
             Ok(())
         })
     }
@@ -539,4 +593,213 @@ async fn runtime_loads_remote_metadata_without_downloading_file() {
             .expect("lock download requests")
             .is_empty()
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn clipboard_png_upload_uses_private_cache_and_exclusive_file_creation() {
+    let backend = Arc::new(RecordingBackend::default());
+    let session_id =
+        Uuid::parse_str("11111111-2222-4333-8444-555555555555").expect("parse session fixture");
+    let old_session_id =
+        Uuid::parse_str("22222222-3333-4444-8555-666666666666").expect("parse old session fixture");
+    let symlink_session_id = Uuid::parse_str("33333333-4444-4555-8666-777777777777")
+        .expect("parse symlink session fixture");
+    let current_stale_id =
+        Uuid::parse_str("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee").expect("parse stale file fixture");
+    let old_stale_id = Uuid::parse_str("cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa")
+        .expect("parse old stale file fixture");
+    let fresh_id =
+        Uuid::parse_str("bbbbbbbb-cccc-4ddd-8eee-ffffffffffff").expect("parse fresh file fixture");
+    let current_stale_name = format!("mica-clipboard-{current_stale_id}.png");
+    let old_stale_name = format!("mica-clipboard-{old_stale_id}.png");
+    let cache_root = "/home/tester/.cache/mica-term/clipboard".to_string();
+    let expected_dir = format!("{cache_root}/{session_id}");
+    let old_session_dir = format!("{cache_root}/{old_session_id}");
+    let symlink_session_dir = format!("{cache_root}/{symlink_session_id}");
+
+    {
+        let mut cache_entries = backend
+            .clipboard_cache_entries
+            .lock()
+            .expect("lock clipboard cache entries");
+        cache_entries.insert(
+            cache_root.clone(),
+            vec![
+                SftpDirectoryEntry {
+                    id: session_id.to_string(),
+                    name: session_id.to_string(),
+                    path: "/server-supplied/outside/current".into(),
+                    kind: SftpDirectoryEntryKind::Directory,
+                    modified_unix_seconds: Some(u64::MAX),
+                    size_bytes: None,
+                    permissions_label: None,
+                    owner_label: None,
+                    group_label: None,
+                },
+                SftpDirectoryEntry {
+                    id: old_session_id.to_string(),
+                    name: old_session_id.to_string(),
+                    path: "/server-supplied/outside/old".into(),
+                    kind: SftpDirectoryEntryKind::Directory,
+                    modified_unix_seconds: Some(1),
+                    size_bytes: None,
+                    permissions_label: None,
+                    owner_label: None,
+                    group_label: None,
+                },
+                SftpDirectoryEntry {
+                    id: "not-a-session".into(),
+                    name: "not-a-session".into(),
+                    path: "/server-supplied/outside/not-a-session".into(),
+                    kind: SftpDirectoryEntryKind::Directory,
+                    modified_unix_seconds: Some(1),
+                    size_bytes: None,
+                    permissions_label: None,
+                    owner_label: None,
+                    group_label: None,
+                },
+                SftpDirectoryEntry {
+                    id: symlink_session_id.to_string(),
+                    name: symlink_session_id.to_string(),
+                    path: "/server-supplied/outside/symlink".into(),
+                    kind: SftpDirectoryEntryKind::Symlink,
+                    modified_unix_seconds: Some(1),
+                    size_bytes: None,
+                    permissions_label: None,
+                    owner_label: None,
+                    group_label: None,
+                },
+            ],
+        );
+        cache_entries.insert(
+            expected_dir.clone(),
+            vec![
+                SftpDirectoryEntry {
+                    id: current_stale_name.clone(),
+                    name: current_stale_name.clone(),
+                    path: format!("/server-supplied/outside/{current_stale_name}"),
+                    kind: SftpDirectoryEntryKind::File,
+                    modified_unix_seconds: Some(1),
+                    size_bytes: None,
+                    permissions_label: None,
+                    owner_label: None,
+                    group_label: None,
+                },
+                SftpDirectoryEntry {
+                    id: "unrelated.png".into(),
+                    name: "unrelated.png".into(),
+                    path: "/server-supplied/outside/unrelated.png".into(),
+                    kind: SftpDirectoryEntryKind::File,
+                    modified_unix_seconds: Some(1),
+                    size_bytes: None,
+                    permissions_label: None,
+                    owner_label: None,
+                    group_label: None,
+                },
+                SftpDirectoryEntry {
+                    id: fresh_id.to_string(),
+                    name: format!("mica-clipboard-{fresh_id}.png"),
+                    path: format!("/server-supplied/outside/mica-clipboard-{fresh_id}.png"),
+                    kind: SftpDirectoryEntryKind::File,
+                    modified_unix_seconds: Some(u64::MAX),
+                    size_bytes: None,
+                    permissions_label: None,
+                    owner_label: None,
+                    group_label: None,
+                },
+            ],
+        );
+        cache_entries.insert(
+            old_session_dir.clone(),
+            vec![SftpDirectoryEntry {
+                id: old_stale_name.clone(),
+                name: old_stale_name.clone(),
+                path: format!("/server-supplied/outside/{old_stale_name}"),
+                kind: SftpDirectoryEntryKind::File,
+                modified_unix_seconds: Some(1),
+                size_bytes: None,
+                permissions_label: None,
+                owner_label: None,
+                group_label: None,
+            }],
+        );
+    }
+
+    let runtime = SftpRuntimeHandle::new(backend.clone());
+
+    let remote_path = runtime
+        .upload_clipboard_png(session_id, b"\x89PNG\r\n\x1a\nfixture".to_vec())
+        .await
+        .expect("upload clipboard PNG");
+
+    assert!(remote_path.starts_with(format!("{expected_dir}/mica-clipboard-").as_str()));
+    assert!(remote_path.ends_with(".png"));
+    let file_id = remote_path
+        .rsplit('/')
+        .next()
+        .and_then(|name| name.strip_prefix("mica-clipboard-"))
+        .and_then(|name| name.strip_suffix(".png"))
+        .and_then(|id| Uuid::parse_str(id).ok());
+    assert!(
+        file_id.is_some(),
+        "clipboard cache filename should contain a UUID"
+    );
+
+    assert_eq!(
+        backend
+            .canonicalize_requests
+            .lock()
+            .expect("lock canonicalize requests")
+            .as_slice(),
+        &[".".to_string()]
+    );
+    assert_eq!(
+        backend
+            .mkdir_with_permissions_requests
+            .lock()
+            .expect("lock mkdir-with-permissions requests")
+            .as_slice(),
+        &[
+            ("/home/tester/.cache".to_string(), 0o700),
+            ("/home/tester/.cache/mica-term".to_string(), 0o700),
+            ("/home/tester/.cache/mica-term/clipboard".to_string(), 0o700),
+            (expected_dir.clone(), 0o700),
+        ]
+    );
+    assert_eq!(
+        backend
+            .open_writer_requests
+            .lock()
+            .expect("lock open writer requests")
+            .as_slice(),
+        &[(remote_path, SftpWriteMode::CreateNew { permissions: 0o600 },)]
+    );
+    assert_eq!(
+        backend
+            .remove_file_requests
+            .lock()
+            .expect("lock remove file requests")
+            .as_slice(),
+        &[
+            format!("{expected_dir}/{current_stale_name}"),
+            format!("{old_session_dir}/{old_stale_name}"),
+        ],
+        "cleanup should rebuild current and old session paths and ignore server-supplied paths"
+    );
+    assert_eq!(
+        backend
+            .remove_dir_requests
+            .lock()
+            .expect("lock remove dir requests")
+            .as_slice(),
+        std::slice::from_ref(&old_session_dir),
+        "an old UUID directory may be removed only after its stale files are gone and it is confirmed empty"
+    );
+    let read_dir_requests = backend
+        .read_dir_requests
+        .lock()
+        .expect("lock read dir requests");
+    assert!(read_dir_requests.contains(&cache_root));
+    assert!(read_dir_requests.contains(&old_session_dir));
+    assert!(!read_dir_requests.contains(&symlink_session_dir));
 }

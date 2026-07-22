@@ -30,6 +30,7 @@ use mica_term::app::ssh::session_manager::{
     SessionRuntimeLauncher, SessionState,
 };
 use mica_term::app::ssh::shell_integration::runtime_shell_events;
+use mica_term::app::terminal_core::TerminalViewportMetrics;
 use mica_term::app::terminal_theme::preset_for_theme;
 use mica_term::theme::{ThemeMode, ThemeVariant};
 use russh::keys::PrivateKey;
@@ -135,6 +136,7 @@ struct InteractiveTrackingState {
     key_inputs: Arc<Mutex<Vec<TerminalKeyEvent>>>,
     paste_inputs: Arc<Mutex<Vec<String>>>,
     resizes: Arc<Mutex<Vec<(u32, u32)>>>,
+    viewport_resizes: Arc<Mutex<Vec<(u32, u32, TerminalViewportMetrics)>>>,
     mouse_inputs: Arc<Mutex<Vec<TerminalMouseInput>>>,
 }
 
@@ -210,11 +212,13 @@ struct NoopSftpBackend;
 #[derive(Clone)]
 struct SftpCapableLauncher {
     backend: Arc<dyn SftpBackend>,
+    pasted_text: Arc<Mutex<Vec<String>>>,
 }
 
 #[derive(Clone)]
 struct SftpCapableRuntimeControl {
     runtime: SftpRuntimeHandle,
+    pasted_text: Arc<Mutex<Vec<String>>>,
 }
 
 #[derive(Clone, Copy)]
@@ -750,6 +754,21 @@ impl SessionRuntimeControl for InteractiveTrackingRuntimeControl {
         Ok(())
     }
 
+    fn resize_with_viewport(
+        &self,
+        rows: u32,
+        cols: u32,
+        viewport: TerminalViewportMetrics,
+    ) -> Result<()> {
+        self.resize(rows, cols)?;
+        self.state
+            .viewport_resizes
+            .lock()
+            .expect("lock viewport resize events")
+            .push((rows, cols, viewport));
+        Ok(())
+    }
+
     fn send_mouse_input(&self, event: TerminalMouseInput) -> Result<()> {
         self.state
             .mouse_inputs
@@ -967,7 +986,17 @@ impl SftpBackend for NoopSftpBackend {
 
 impl SftpCapableLauncher {
     fn new(backend: Arc<dyn SftpBackend>) -> Self {
-        Self { backend }
+        Self {
+            backend,
+            pasted_text: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn with_paste_log(backend: Arc<dyn SftpBackend>, pasted_text: Arc<Mutex<Vec<String>>>) -> Self {
+        Self {
+            backend,
+            pasted_text,
+        }
     }
 }
 
@@ -981,10 +1010,12 @@ impl SessionRuntimeLauncher for SftpCapableLauncher {
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
         let backend = Arc::clone(&self.backend);
+        let pasted_text = Arc::clone(&self.pasted_text);
         Box::pin(async move {
             let _ = event_tx.send(SessionRuntimeEvent::Connected);
             Ok(Box::new(SftpCapableRuntimeControl {
                 runtime: SftpRuntimeHandle::new(backend),
+                pasted_text,
             }) as Box<dyn SessionRuntimeControl>)
         })
     }
@@ -1014,7 +1045,11 @@ impl SessionRuntimeControl for SftpCapableRuntimeControl {
         Ok(())
     }
 
-    fn send_paste(&self, _text: String) -> Result<()> {
+    fn send_paste(&self, text: String) -> Result<()> {
+        self.pasted_text
+            .lock()
+            .expect("lock sftp-capable paste log")
+            .push(text);
         Ok(())
     }
 
@@ -2307,6 +2342,80 @@ fn retry_session_replaces_sftp_binding_and_disconnect_marks_it_recoverable() {
 }
 
 #[test]
+fn clipboard_paste_rejects_a_replaced_sftp_binding_generation() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let pasted_text = Arc::new(Mutex::new(Vec::new()));
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(SftpCapableLauncher::with_paste_log(
+            Arc::new(NoopSftpBackend),
+            Arc::clone(&pasted_text),
+        )),
+    );
+
+    let handle = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open session");
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    });
+
+    let (first_binding_id, first_runtime) = manager
+        .sftp_runtime_binding(handle.session_id)
+        .expect("capture initial sftp binding");
+    assert_eq!(first_runtime.binding_id(), first_binding_id);
+
+    manager
+        .retry_session(handle.session_id)
+        .expect("retry session should succeed");
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    });
+
+    let (second_binding_id, second_runtime) = manager
+        .sftp_runtime_binding(handle.session_id)
+        .expect("capture replacement sftp binding");
+    assert_ne!(first_binding_id, second_binding_id);
+    assert_eq!(second_runtime.binding_id(), second_binding_id);
+    assert!(
+        !manager
+            .send_session_paste_if_sftp_binding_current(
+                handle.session_id,
+                first_binding_id,
+                "'/old/cache.png'".into(),
+            )
+            .expect("reject stale binding without a runtime error")
+    );
+    assert!(
+        pasted_text
+            .lock()
+            .expect("lock paste log after stale binding")
+            .is_empty(),
+        "a stale upload result must not reach either runtime generation"
+    );
+
+    assert!(
+        manager
+            .send_session_paste_if_sftp_binding_current(
+                handle.session_id,
+                second_binding_id,
+                "'/new/cache.png'".into(),
+            )
+            .expect("paste through current binding")
+    );
+    assert_eq!(
+        pasted_text
+            .lock()
+            .expect("lock paste log after current binding")
+            .as_slice(),
+        &["'/new/cache.png'".to_string()]
+    );
+}
+
+#[test]
 fn force_new_tab_creates_parallel_session_for_same_asset() {
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
     let manager = SessionManager::new_with_launcher(
@@ -2743,6 +2852,7 @@ fn ssh_runtime_negotiates_truecolor_environment_before_requesting_shell() {
         vec![
             "pty".to_string(),
             "env:COLORTERM".to_string(),
+            "env:TERM_PROGRAM".to_string(),
             "env:PROMPT_COMMAND".to_string(),
             "shell".to_string(),
         ]
@@ -3850,6 +3960,41 @@ fn session_manager_forwards_text_input_and_resize_to_runtime_control() {
 }
 
 #[test]
+fn session_manager_forwards_real_viewport_metrics_to_runtime_control() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let state = InteractiveTrackingState::default();
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(InteractiveTrackingLauncher::new(state.clone())),
+    );
+
+    let handle = manager
+        .open_session(
+            sample_profile("asset-viewport"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open session");
+
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    });
+
+    let viewport = TerminalViewportMetrics::new(1584, 1056, 144);
+    manager
+        .resize_session_with_viewport(handle.session_id, 48, 132, viewport)
+        .expect("forward viewport-aware terminal resize");
+
+    assert_eq!(
+        state
+            .viewport_resizes
+            .lock()
+            .expect("lock viewport resize events")
+            .as_slice(),
+        &[(48, 132, viewport)]
+    );
+}
+
+#[test]
 fn session_manager_forwards_structured_key_events_to_runtime() {
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
     let state = InteractiveTrackingState::default();
@@ -4002,10 +4147,16 @@ fn resize_before_runtime_ready_replays_latest_dimensions_when_control_attaches()
         .expect("open session");
 
     manager
-        .resize_session(handle.session_id, 36, 120)
+        .resize_session_with_viewport(
+            handle.session_id,
+            36,
+            120,
+            TerminalViewportMetrics::new(1200, 720, 120),
+        )
         .expect("queue initial resize before runtime ready");
+    let latest_viewport = TerminalViewportMetrics::new(1848, 1120, 168);
     manager
-        .resize_session(handle.session_id, 40, 132)
+        .resize_session_with_viewport(handle.session_id, 40, 132, latest_viewport)
         .expect("replace pending resize before runtime ready");
 
     runtime.block_on(async {
@@ -4015,6 +4166,14 @@ fn resize_before_runtime_ready_replays_latest_dimensions_when_control_attaches()
     assert_eq!(
         state.resizes.lock().expect("lock resize events").as_slice(),
         &[(40, 132)]
+    );
+    assert_eq!(
+        state
+            .viewport_resizes
+            .lock()
+            .expect("lock viewport resize events")
+            .as_slice(),
+        &[(40, 132, latest_viewport)]
     );
 }
 

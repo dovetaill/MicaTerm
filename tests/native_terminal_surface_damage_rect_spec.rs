@@ -1,4 +1,7 @@
 use mica_term::app::ssh::runtime::TerminalCursorShape;
+use mica_term::app::terminal_core::{
+    TERMINAL_IMAGE_UV_SCALE, TerminalImagePlacement, TerminalImageUvRect,
+};
 use mica_term::app::terminal_presenter::{
     NativeCursorFrameState, NativeCursorOverlay, NativeImePreviewOverlay, NativeRendererFrameStats,
     NativeSelectionFrameState, NativeSelectionOverlay, NativeSelectionRect, NativeTerminalFrame,
@@ -51,6 +54,9 @@ fn frame_with_cursor(frame_token: u64, cursor_col: Option<u32>) -> NativeTermina
             row_bg_odd_rgba: 0xff11_2233,
             grid_rows: 2,
             grid_cols: 6,
+            image_resources: vec![],
+            image_placements: vec![],
+            image_fingerprint: 0,
             background_runs: vec![],
             monochrome_glyph_draws: vec![],
             color_glyph_draws: vec![],
@@ -97,6 +103,30 @@ fn retained_frame(frame: NativeTerminalFrame) -> RetainedNativeTerminalSurfaceFr
     }
 }
 
+fn image_placement() -> TerminalImagePlacement {
+    TerminalImagePlacement {
+        resource_key: [5; 32],
+        row: 0,
+        col: 1,
+        row_span: 1,
+        col_span: 2,
+        uv: TerminalImageUvRect {
+            left: 0,
+            top: 0,
+            right: TERMINAL_IMAGE_UV_SCALE,
+            bottom: TERMINAL_IMAGE_UV_SCALE,
+        },
+        padding_left_px: 0,
+        padding_top_px: 0,
+        padding_right_px: 0,
+        padding_bottom_px: 0,
+        z_index: -1,
+        image_id: None,
+        placement_id: None,
+        protocol_order: 0,
+    }
+}
+
 fn frame_with_underline(
     frame_token: u64,
     underline_run: Option<NativeUnderlineRun>,
@@ -119,6 +149,9 @@ fn frame_with_underline(
             row_bg_odd_rgba: 0xff11_2233,
             grid_rows: 2,
             grid_cols: 6,
+            image_resources: vec![],
+            image_placements: vec![],
+            image_fingerprint: 0,
             background_runs: vec![],
             monochrome_glyph_draws: vec![],
             color_glyph_draws: vec![],
@@ -189,6 +222,9 @@ fn frame_with_selection(
             row_bg_odd_rgba: 0xff11_2233,
             grid_rows: 2,
             grid_cols: 6,
+            image_resources: vec![],
+            image_placements: vec![],
+            image_fingerprint: 0,
             background_runs: vec![],
             monochrome_glyph_draws: vec![],
             color_glyph_draws: vec![],
@@ -263,6 +299,9 @@ fn frame_with_ime_preview(
             row_bg_odd_rgba: 0xff11_2233,
             grid_rows: 2,
             grid_cols: 6,
+            image_resources: vec![],
+            image_placements: vec![],
+            image_fingerprint: 0,
             background_runs: vec![],
             monochrome_glyph_draws: vec![],
             color_glyph_draws: vec![],
@@ -326,6 +365,22 @@ fn overlay_only_damage_uses_union_of_previous_and_next_cursor_regions() {
         },
         "overlay-only damage should shrink to the union of the old and new cursor cells instead of repainting the entire terminal surface"
     );
+}
+
+#[test]
+fn image_placement_changes_force_native_surface_damage() {
+    let previous = retained_frame(frame_with_cursor(7, None));
+    let mut next_frame = frame_with_cursor(7, None);
+    next_frame.presentable_frame.image_placements = vec![image_placement()];
+    next_frame.presentable_frame.image_fingerprint = 42;
+    let next = retained_frame(next_frame);
+    let mut tracker = NativeFrameDamageTracker::default();
+
+    tracker.track_frame_damage(Some(&previous), Some(&next));
+    let damage = tracker.take_damage().expect("image damage");
+
+    assert_eq!(damage.kind, NativeSurfaceDamageKind::Full);
+    assert_eq!(damage.rect, next.rect);
 }
 
 #[test]

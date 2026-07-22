@@ -38,6 +38,15 @@ serde_json = "1"
 sha2 = "0.10.9"
 i-slint-backend-selector = "1.15.1"
 i-slint-backend-winit = { version = "1.15.1", default-features = false }
+image = { version = "0.25.9", default-features = false, features = [
+    "bmp",
+    "gif",
+    "ico",
+    "jpeg",
+    "png",
+    "tiff",
+    "webp",
+] }
 slint = { version = "1.15.1", default-features = false, features = [
     "std",
     "backend-winit-x11",
@@ -74,6 +83,7 @@ zstd = "0.13.3"
 zmodem2 = "0.7.1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
+clipboard-win = { version = "5.4.1", features = ["std"] }
 windows = { version = "0.58", features = [
     "Foundation_Numerics",
     "Win32_Foundation",
@@ -84,6 +94,7 @@ windows = { version = "0.58", features = [
     "Win32_Graphics_Imaging",
     "Win32_Graphics_Dxgi_Common",
     "Win32_System_Com",
+    "Win32_System_DataExchange",
     "Win32_System_LibraryLoader",
     "Win32_UI_HiDpi",
     "Win32_UI_Shell",
@@ -95,10 +106,12 @@ slint-build = "1.15.1"
 winresource = "0.1.19"
 
 [dev-dependencies]
+base64 = "0.22.1"
 filetime = "0.2"
 i-slint-backend-testing = "1.15.1"
 
 [patch.crates-io]
+tattoy-wezterm-term = { path = "vendor/tattoy-wezterm-term" }
 i-slint-backend-winit = { path = "vendor/i-slint-backend-winit" }
 i-slint-renderer-skia = { path = "vendor/i-slint-renderer-skia" }
 dirs-sys = { path = "vendor/dirs-sys" }

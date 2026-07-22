@@ -846,7 +846,7 @@ struct ObservingScrollbackLauncher {
 
 #[derive(Default)]
 struct ObservingViewportLauncherState {
-    launch_viewports: Vec<(usize, usize, u32, u32)>,
+    launch_viewports: Vec<(usize, usize, u32, u32, u32)>,
 }
 
 #[derive(Clone)]
@@ -1805,6 +1805,7 @@ impl SftpBackend for RecordingSftpBackend {
                     .get(&path)
                     .cloned()
                     .unwrap_or_default(),
+                SftpWriteMode::CreateNew { .. } => Vec::new(),
             };
             Ok(Box::pin(MemoryFileWriter::new(
                 path,
@@ -2068,6 +2069,7 @@ impl SftpBackend for DelayedRecordingSftpBackend {
                     .get(&path)
                     .cloned()
                     .unwrap_or_default(),
+                SftpWriteMode::CreateNew { .. } => Vec::new(),
             };
             Ok(Box::pin(MemoryFileWriter::new(
                 path,
@@ -3980,6 +3982,7 @@ impl SessionRuntimeLauncher for ObservingViewportLauncher {
                 terminal_defaults.viewport_cols(),
                 terminal_defaults.viewport_pixel_width(),
                 terminal_defaults.viewport_pixel_height(),
+                terminal_defaults.viewport_dpi(),
             );
             state
                 .lock()
@@ -10086,6 +10089,12 @@ fn workspace_terminal_launch_captures_live_viewport_defaults_before_runtime_conn
     let expected_cols = (app.get_layout_workspace_session_preferred_surface_width()
         / app.get_workspace_session_cell_width())
     .floor() as usize;
+    let scale_factor = app.window().scale_factor().max(1.0);
+    let expected_pixel_width =
+        (app.get_layout_workspace_session_preferred_surface_width() * scale_factor).round() as u32;
+    let expected_pixel_height =
+        (app.get_layout_workspace_session_preferred_surface_height() * scale_factor).round() as u32;
+    let expected_dpi = (scale_factor * 96.0).round() as u32;
 
     wait_for_condition(Duration::from_millis(250), || {
         launcher_state
@@ -10114,9 +10123,10 @@ fn workspace_terminal_launch_captures_live_viewport_defaults_before_runtime_conn
         expected_cols.max(1),
         "new SSH launches should snapshot the host-computed viewport cols instead of booting with a stale 80-col default"
     );
-    assert!(
-        viewport.2 > 0 && viewport.3 > 0,
-        "launch-time viewport defaults should carry non-zero pixel dimensions for the initial PTY request"
+    assert_eq!(
+        (viewport.2, viewport.3, viewport.4),
+        (expected_pixel_width, expected_pixel_height, expected_dpi),
+        "launch-time viewport defaults should carry the physical viewport dimensions and DPI used by the initial PTY and terminal core"
     );
 }
 
@@ -19946,4 +19956,33 @@ fn sftp_sort_and_column_width_callbacks_round_trip_runtime_window_state() {
     assert_eq!(app.get_sftp_panel_type_column_width(), 72.0);
     assert_eq!(app.get_sftp_panel_modified_column_width(), 132.0);
     assert_eq!(app.get_sftp_panel_size_column_width(), 72.0);
+}
+
+#[test]
+fn clipboard_image_uploads_share_a_pre_decode_single_permit_gate() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let workspace_terminal_source = fs::read_to_string("src/app/bootstrap/workspace_terminal.rs")
+        .expect("read workspace terminal bootstrap module");
+
+    assert!(
+        bootstrap_source.contains("Arc::new(tokio::sync::Semaphore::new(1))"),
+        "one bootstrap-scoped permit must serialize clipboard image encode and upload work"
+    );
+    let permit_index = workspace_terminal_source
+        .find("upload_gate.acquire_owned().await")
+        .expect("clipboard image upload waits for the shared permit");
+    let decode_index = workspace_terminal_source
+        .find("tokio::task::spawn_blocking")
+        .expect("clipboard image decode stays on the blocking pool");
+    let upload_index = workspace_terminal_source
+        .find(".upload_clipboard_png(session_id, encoded.png_bytes)")
+        .expect("clipboard image upload uses the captured SFTP runtime");
+    assert!(
+        permit_index < decode_index && decode_index < upload_index,
+        "the single permit must be acquired before decode and retained through upload"
+    );
+    assert!(
+        workspace_terminal_source.contains("send_session_paste_if_sftp_binding_current("),
+        "upload completion must use the binding-aware paste operation"
+    );
 }

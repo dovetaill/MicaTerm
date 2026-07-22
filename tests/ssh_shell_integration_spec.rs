@@ -47,7 +47,9 @@ fn bash_bootstrap_builder_prefers_standard_markers_and_gates_private_channel() {
 
 #[test]
 fn negotiated_prompt_command_emits_cwd_without_enhanced_bootstrap() {
-    let prompt_command = negotiated_terminal_environment()
+    let environment = negotiated_terminal_environment();
+    assert!(environment.contains(&("TERM_PROGRAM", "mica-term")));
+    let prompt_command = environment
         .into_iter()
         .find_map(|(name, value)| (name == "PROMPT_COMMAND").then_some(value))
         .expect("cwd PROMPT_COMMAND should be negotiated");

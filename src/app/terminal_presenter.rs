@@ -2,9 +2,14 @@
 
 use anyhow::Result;
 use slint::Image;
+use std::sync::Arc;
 
 #[cfg(feature = "terminal-native-renderer")]
+use std::collections::hash_map::DefaultHasher;
+#[cfg(feature = "terminal-native-renderer")]
 use std::collections::{HashMap, VecDeque};
+#[cfg(feature = "terminal-native-renderer")]
+use std::hash::{Hash, Hasher};
 #[cfg(feature = "terminal-native-renderer")]
 use std::time::Instant;
 
@@ -15,7 +20,9 @@ use crate::app::ssh::runtime::{SurfaceState, TerminalCursorShape};
 use crate::app::terminal_atlas::{
     TerminalAtlasCacheStats, TerminalAtlasRenderer, TerminalAtlasSelection,
 };
-use crate::app::terminal_core::TerminalFrameSnapshot;
+use crate::app::terminal_core::{
+    TerminalFrameSnapshot, TerminalImagePlacement, TerminalImageResource,
+};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_emoji::TerminalEmojiRenderer;
 use crate::app::terminal_font::DEFAULT_TERMINAL_FONT_SIZE_PX;
@@ -25,9 +32,9 @@ use crate::app::terminal_font::{
 };
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_layout::{TerminalTextShaper, TextShaper};
-#[cfg(feature = "terminal-native-renderer")]
-use crate::app::terminal_model::TerminalModelFrame;
 use crate::app::terminal_model::TerminalSelectionModel;
+#[cfg(feature = "terminal-native-renderer")]
+use crate::app::terminal_model::{TerminalModelFrame, terminal_image_frame_fingerprint};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::wgpu_renderer::{
     PreparedBackgroundRun, PreparedColorGlyphDraw, PreparedMonochromeGlyphDraw,
@@ -179,6 +186,9 @@ pub struct PresentableNativeFrame {
     pub row_bg_odd_rgba: u32,
     pub grid_rows: u32,
     pub grid_cols: u32,
+    pub image_resources: Vec<Arc<TerminalImageResource>>,
+    pub image_placements: Vec<TerminalImagePlacement>,
+    pub image_fingerprint: u64,
     pub background_runs: Vec<PreparedBackgroundRun>,
     pub monochrome_glyph_draws: Vec<PreparedMonochromeGlyphDraw>,
     pub color_glyph_draws: Vec<PreparedColorGlyphDraw>,
@@ -837,6 +847,10 @@ fn prepare_native_terminal_frame_with_diagnostics(
         fg_rgba: cursor.fg_rgba,
         bg_rgba: cursor.bg_rgba,
     };
+    let image_fingerprint = terminal_image_frame_fingerprint(
+        &frame_model.image_resources,
+        &frame_model.image_placements,
+    );
     let presentable_frame = PresentableNativeFrame {
         seqno: frame_model.seqno as u64,
         shaped_row_count: prepared.shaped_row_count,
@@ -855,6 +869,9 @@ fn prepare_native_terminal_frame_with_diagnostics(
         row_bg_odd_rgba: frame_model.palette.row_bg_odd_rgba,
         grid_rows: frame_model.grid_rows,
         grid_cols: frame_model.grid_cols,
+        image_resources: frame_model.image_resources.clone(),
+        image_placements: frame_model.image_placements.clone(),
+        image_fingerprint,
         background_runs: prepared.background_runs.clone(),
         monochrome_glyph_draws: prepared.monochrome_glyph_draws.clone(),
         color_glyph_draws: prepared.color_glyph_draws.clone(),
@@ -912,13 +929,21 @@ fn prepare_native_terminal_frame_with_diagnostics(
     };
     Ok((
         NativeTerminalFrame {
-            frame_token: prepared.frame_token,
+            frame_token: native_frame_token(prepared.frame_token, image_fingerprint),
             cell_width_px: prepared.cell_width_px,
             cell_height_px: prepared.cell_height_px,
             presentable_frame,
         },
         diagnostics,
     ))
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+fn native_frame_token(text_frame_token: u64, image_fingerprint: u64) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    text_frame_token.hash(&mut hasher);
+    image_fingerprint.hash(&mut hasher);
+    hasher.finish()
 }
 
 #[cfg(feature = "terminal-native-renderer")]
@@ -1037,6 +1062,12 @@ mod tests {
     use crate::app::terminal_font::{
         FontFallbackFace, GlyphRasterRequest, RasterizedGlyph, ShapedGlyphRun, TextShapingRequest,
     };
+
+    #[test]
+    fn native_frame_token_includes_terminal_image_fingerprint() {
+        assert_ne!(native_frame_token(7, 11), native_frame_token(7, 12));
+        assert_eq!(native_frame_token(7, 11), native_frame_token(7, 11));
+    }
 
     struct CountingFontSystem {
         inner: MockFontSystem,
@@ -1713,6 +1744,7 @@ fn model_frame_to_surface(model: &TerminalModelFrame) -> SurfaceState {
         seqno: model.seqno,
         rows: model.grid_rows,
         cols: model.grid_cols,
+        viewport_metrics: model.viewport_metrics,
         default_fg_rgba: model.palette.default_fg_rgba,
         default_bg_rgba: model.palette.default_bg_rgba,
         row_bg_even_rgba: model.palette.row_bg_even_rgba,
@@ -1748,6 +1780,8 @@ fn model_frame_to_surface(model: &TerminalModelFrame) -> SurfaceState {
                     })
             })
             .collect(),
+        image_resources: model.image_resources.clone(),
+        image_placements: model.image_placements.clone(),
         cursor: crate::app::ssh::runtime::TerminalCursorState {
             row: model.cursor.row,
             col: model.cursor.col,

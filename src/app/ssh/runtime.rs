@@ -49,6 +49,7 @@ use crate::app::ssh::credentials::{CredentialStore, SystemCredentialStore};
 use crate::app::ssh::profile::ConnectionProfile;
 use crate::app::ssh::session_manager::{EnhancedSessionState, SessionRuntimeControl};
 use crate::app::ssh::shell_integration::runtime_shell_events;
+use crate::app::terminal_core::TerminalViewportMetrics;
 use crate::theme::{ThemeMode, ThemeVariant};
 
 const DEFAULT_TERMINAL_ROWS: usize = 24;
@@ -67,16 +68,20 @@ const WORKING_SET_TRIM_MIN_OUTPUT_BYTES: usize = 1024 * 1024;
 pub struct TerminalRuntimeDefaults {
     scrollback_lines: Arc<AtomicUsize>,
     theme: Arc<Mutex<TerminalRuntimeThemeDefaults>>,
-    viewport_rows: Arc<AtomicUsize>,
-    viewport_cols: Arc<AtomicUsize>,
-    viewport_pixel_width: Arc<AtomicUsize>,
-    viewport_pixel_height: Arc<AtomicUsize>,
+    viewport: Arc<Mutex<TerminalRuntimeViewportDefaults>>,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct TerminalRuntimeThemeDefaults {
     mode: ThemeMode,
     variant: ThemeVariant,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TerminalRuntimeViewportDefaults {
+    rows: usize,
+    cols: usize,
+    metrics: TerminalViewportMetrics,
 }
 
 impl Default for TerminalRuntimeDefaults {
@@ -93,14 +98,14 @@ impl TerminalRuntimeDefaults {
                 mode: ThemeMode::Dark,
                 variant: ThemeVariant::PremiumDefault,
             })),
-            viewport_rows: Arc::new(AtomicUsize::new(DEFAULT_TERMINAL_ROWS)),
-            viewport_cols: Arc::new(AtomicUsize::new(DEFAULT_TERMINAL_COLS)),
-            viewport_pixel_width: Arc::new(AtomicUsize::new(
-                DEFAULT_TERMINAL_COLS * DEFAULT_TERMINAL_CELL_WIDTH_PX as usize,
-            )),
-            viewport_pixel_height: Arc::new(AtomicUsize::new(
-                DEFAULT_TERMINAL_ROWS * DEFAULT_TERMINAL_CELL_HEIGHT_PX as usize,
-            )),
+            viewport: Arc::new(Mutex::new(TerminalRuntimeViewportDefaults {
+                rows: DEFAULT_TERMINAL_ROWS,
+                cols: DEFAULT_TERMINAL_COLS,
+                metrics: TerminalViewportMetrics::fallback(
+                    DEFAULT_TERMINAL_ROWS,
+                    DEFAULT_TERMINAL_COLS,
+                ),
+            })),
         }
     }
 
@@ -131,19 +136,35 @@ impl TerminalRuntimeDefaults {
     }
 
     pub fn viewport_rows(&self) -> usize {
-        self.viewport_rows.load(Ordering::Relaxed).max(1)
+        self.viewport().0
     }
 
     pub fn viewport_cols(&self) -> usize {
-        self.viewport_cols.load(Ordering::Relaxed).max(1)
+        self.viewport().1
     }
 
     pub fn viewport_pixel_width(&self) -> u32 {
-        self.viewport_pixel_width.load(Ordering::Relaxed).max(1) as u32
+        self.viewport_metrics().pixel_width
     }
 
     pub fn viewport_pixel_height(&self) -> u32 {
-        self.viewport_pixel_height.load(Ordering::Relaxed).max(1) as u32
+        self.viewport_metrics().pixel_height
+    }
+
+    pub fn viewport_dpi(&self) -> u32 {
+        self.viewport_metrics().dpi
+    }
+
+    pub fn viewport_metrics(&self) -> TerminalViewportMetrics {
+        self.viewport().2
+    }
+
+    pub fn viewport(&self) -> (usize, usize, TerminalViewportMetrics) {
+        let viewport = *self
+            .viewport
+            .lock()
+            .expect("lock terminal runtime viewport defaults");
+        (viewport.rows, viewport.cols, viewport.metrics)
     }
 
     pub fn set_viewport_size(&self, rows: usize, cols: usize, pixel_width: u32, pixel_height: u32) {
@@ -159,13 +180,34 @@ impl TerminalRuntimeDefaults {
         } else {
             pixel_height
         };
+        let dpi = self.viewport_dpi();
+        self.set_viewport_metrics(
+            rows,
+            cols,
+            TerminalViewportMetrics::new(pixel_width, pixel_height, dpi),
+        );
+    }
 
-        self.viewport_rows.store(rows, Ordering::Relaxed);
-        self.viewport_cols.store(cols, Ordering::Relaxed);
-        self.viewport_pixel_width
-            .store(pixel_width as usize, Ordering::Relaxed);
-        self.viewport_pixel_height
-            .store(pixel_height as usize, Ordering::Relaxed);
+    pub fn set_viewport_metrics(
+        &self,
+        rows: usize,
+        cols: usize,
+        viewport: TerminalViewportMetrics,
+    ) {
+        let rows = rows.max(1);
+        let cols = cols.max(1);
+        *self
+            .viewport
+            .lock()
+            .expect("lock terminal runtime viewport defaults") = TerminalRuntimeViewportDefaults {
+            rows,
+            cols,
+            metrics: TerminalViewportMetrics::new(
+                viewport.pixel_width,
+                viewport.pixel_height,
+                viewport.dpi,
+            ),
+        };
     }
 }
 
@@ -332,8 +374,7 @@ enum RuntimeCommand {
     Resize {
         rows: u32,
         cols: u32,
-        pixel_width: u32,
-        pixel_height: u32,
+        viewport: TerminalViewportMetrics,
     },
     Disconnect,
 }
@@ -375,15 +416,6 @@ impl SshSessionRuntime {
             format!("Resolving connection profile for {}", profile.name),
             "Target",
         );
-        let mut terminal_session = TerminalSession::new_with_scrollback(
-            terminal_defaults.viewport_rows(),
-            terminal_defaults.viewport_cols(),
-            terminal_defaults.scrollback_lines(),
-        );
-        terminal_session.set_theme(
-            terminal_defaults.theme_mode(),
-            terminal_defaults.theme_variant(),
-        );
         let config = Arc::new(ssh_client_config());
         resolve_step.finish(format!("Resolved connection profile for {}", profile.name));
         let (transport_chain_guard, handle) = connect_target_handle_for_profile(
@@ -404,11 +436,17 @@ impl SshSessionRuntime {
             .channel_open_session()
             .await
             .context("failed to open SSH session channel")?;
-        let pty_rows = terminal_defaults.viewport_rows();
-        let pty_cols = terminal_defaults.viewport_cols();
-        let pty_pixel_width = terminal_defaults.viewport_pixel_width();
-        let pty_pixel_height = terminal_defaults.viewport_pixel_height();
-        terminal_session.resize(pty_rows, pty_cols);
+        let (pty_rows, pty_cols, pty_viewport) = terminal_defaults.viewport();
+        let mut terminal_session = TerminalSession::new_with_scrollback_and_viewport(
+            pty_rows,
+            pty_cols,
+            terminal_defaults.scrollback_lines(),
+            pty_viewport,
+        );
+        terminal_session.set_theme(
+            terminal_defaults.theme_mode(),
+            terminal_defaults.theme_variant(),
+        );
         let terminal = Arc::new(Mutex::new(terminal_session));
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         open_session_step.finish(format!("Opened SSH session channel for {}", profile.host));
@@ -424,8 +462,8 @@ impl SshSessionRuntime {
                 "xterm-256color",
                 pty_cols as u32,
                 pty_rows as u32,
-                pty_pixel_width,
-                pty_pixel_height,
+                pty_viewport.pixel_width,
+                pty_viewport.pixel_height,
                 &[],
             )
             .await
@@ -452,7 +490,16 @@ impl SshSessionRuntime {
         progress.set_headline(ConnectionHeadlineState::Connected);
         let _ = event_tx.send(SessionRuntimeEvent::Connected);
         if !pending_output.is_empty() {
-            apply_initial_remote_output(&terminal, &event_tx, &pending_output);
+            let terminal_replies =
+                apply_initial_remote_output(&terminal, &event_tx, &pending_output);
+            if !terminal_replies.is_empty()
+                && let Err(bytes) = handle.data(channel.id(), terminal_replies).await
+            {
+                return Err(anyhow!(
+                    "failed to write {} initial terminal response bytes to SSH channel",
+                    bytes.len()
+                ));
+            }
         }
 
         let handle = Arc::new(handle);
@@ -507,14 +554,20 @@ impl SshSessionRuntime {
     }
 
     pub fn resize(&self, rows: u32, cols: u32) -> Result<()> {
-        let pixel_width = self.terminal_defaults.viewport_pixel_width();
-        let pixel_height = self.terminal_defaults.viewport_pixel_height();
+        self.resize_with_viewport(rows, cols, self.terminal_defaults.viewport_metrics())
+    }
+
+    pub fn resize_with_viewport(
+        &self,
+        rows: u32,
+        cols: u32,
+        viewport: TerminalViewportMetrics,
+    ) -> Result<()> {
         self.command_tx
             .send(RuntimeCommand::Resize {
                 rows,
                 cols,
-                pixel_width,
-                pixel_height,
+                viewport,
             })
             .map_err(|_| anyhow!("ssh runtime resize channel is closed"))
     }
@@ -708,13 +761,15 @@ fn apply_initial_remote_output(
     terminal: &Arc<Mutex<TerminalSession>>,
     event_tx: &mpsc::UnboundedSender<SessionRuntimeEvent>,
     bytes: &[u8],
-) {
+) -> Vec<u8> {
     let parsed = runtime_shell_events(bytes);
     if let Some(cwd) = parsed.cwd {
         let _ = event_tx.send(SessionRuntimeEvent::CurrentDirectoryChanged(cwd));
     }
     if !parsed.sanitized_bytes.is_empty() {
-        apply_remote_output(terminal, &parsed.sanitized_bytes);
+        apply_remote_output(terminal, &parsed.sanitized_bytes)
+    } else {
+        Vec::new()
     }
 }
 
@@ -737,6 +792,15 @@ impl SessionRuntimeControl for SshSessionRuntime {
 
     fn resize(&self, rows: u32, cols: u32) -> Result<()> {
         SshSessionRuntime::resize(self, rows, cols)
+    }
+
+    fn resize_with_viewport(
+        &self,
+        rows: u32,
+        cols: u32,
+        viewport: TerminalViewportMetrics,
+    ) -> Result<()> {
+        SshSessionRuntime::resize_with_viewport(self, rows, cols, viewport)
     }
 
     fn send_mouse_input(&self, event: TerminalMouseInput) -> Result<()> {
@@ -914,18 +978,37 @@ mod tests {
             defaults.viewport_pixel_height(),
             (DEFAULT_TERMINAL_ROWS * 16) as u32
         );
+        assert_eq!(defaults.viewport_dpi(), 96);
 
-        defaults.set_viewport_size(48, 132, 1584, 1056);
+        let viewport = TerminalViewportMetrics::new(1584, 1056, 144);
+        defaults.set_viewport_metrics(48, 132, viewport);
         assert_eq!(defaults.viewport_rows(), 48);
         assert_eq!(defaults.viewport_cols(), 132);
         assert_eq!(defaults.viewport_pixel_width(), 1584);
         assert_eq!(defaults.viewport_pixel_height(), 1056);
+        assert_eq!(defaults.viewport_dpi(), 144);
+        assert_eq!(defaults.viewport(), (48, 132, viewport));
 
         defaults.set_viewport_size(0, 0, 0, 0);
         assert_eq!(defaults.viewport_rows(), 1);
         assert_eq!(defaults.viewport_cols(), 1);
         assert_eq!(defaults.viewport_pixel_width(), 8);
         assert_eq!(defaults.viewport_pixel_height(), 16);
+        assert_eq!(defaults.viewport_dpi(), 144);
+    }
+
+    #[test]
+    fn initial_remote_output_drains_terminal_protocol_replies() {
+        let terminal = Arc::new(Mutex::new(TerminalSession::new(4, 8)));
+        let (event_tx, _event_rx) = mpsc::unbounded_channel();
+
+        let replies = apply_initial_remote_output(
+            &terminal,
+            &event_tx,
+            b"\x1b_Ga=q,s=1,v=1,i=42;YWJjZA==\x1b\\",
+        );
+
+        assert_eq!(replies, b"\x1b_Gi=42;OK\x1b\\");
     }
 
     #[test]

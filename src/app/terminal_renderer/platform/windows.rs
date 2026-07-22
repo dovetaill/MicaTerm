@@ -12,9 +12,14 @@ use crate::app::font_diagnostics::terminal_chain_uses_unexpected_mix;
 #[cfg(target_os = "windows")]
 use crate::app::ssh::runtime::TerminalCursorShape;
 #[cfg(target_os = "windows")]
+use crate::app::terminal_core::TERMINAL_IMAGE_UV_SCALE;
+use crate::app::terminal_core::TerminalImageResource;
+#[cfg(target_os = "windows")]
 use crate::app::terminal_font::{
     DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY, DEFAULT_TERMINAL_FONT_FAMILY, FontFaceKey,
 };
+#[cfg(target_os = "windows")]
+use crate::app::terminal_model::{TerminalImageDrawRect, terminal_image_draw_rect};
 use crate::app::terminal_renderer::diagnostics::{
     NativeTerminalSurfaceGlyphBoundsTrace, NativeTerminalSurfaceWindowsTextDiagnostics,
 };
@@ -199,6 +204,19 @@ pub struct WindowsColorGlyphBitmapState {
     bitmap: Option<ID2D1Bitmap>,
 }
 
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[derive(Default)]
+pub struct WindowsTerminalImageBitmapState {
+    pub content_hash: [u8; 32],
+    pub width_px: u32,
+    pub height_px: u32,
+    pub rgba_bytes: usize,
+    generation: u64,
+    bgra: Vec<u8>,
+    #[cfg(target_os = "windows")]
+    bitmap: Option<ID2D1Bitmap>,
+}
+
 #[derive(Default)]
 pub struct WindowsNativeSurfaceState {
     pub attached: bool,
@@ -219,6 +237,7 @@ pub struct WindowsNativeSurfaceState {
     pub d2d_brushes: HashMap<u32, WindowsD2DBrushState>,
     pub monochrome_glyph_bitmaps: HashMap<u32, WindowsMonochromeGlyphBitmapState>,
     pub color_glyph_bitmaps: HashMap<u32, WindowsColorGlyphBitmapState>,
+    pub terminal_image_bitmaps: HashMap<[u8; 32], WindowsTerminalImageBitmapState>,
     pub monochrome_bitmap_cache_entries: usize,
     pub color_bitmap_cache_entries: usize,
     pub last_drawn_background_runs: usize,
@@ -468,6 +487,13 @@ impl WindowsNativeSurfaceState {
             }
         }
         for bitmap in self.color_glyph_bitmaps.values_mut() {
+            bitmap.generation = 0;
+            #[cfg(target_os = "windows")]
+            {
+                bitmap.bitmap = None;
+            }
+        }
+        for bitmap in self.terminal_image_bitmaps.values_mut() {
             bitmap.generation = 0;
             #[cfg(target_os = "windows")]
             {
@@ -931,6 +957,167 @@ impl WindowsNativeSurfaceState {
         Ok(())
     }
 
+    fn ensure_terminal_image_bitmap(&mut self, resource: &TerminalImageResource) {
+        let state = self
+            .terminal_image_bitmaps
+            .entry(resource.content_hash)
+            .or_insert_with(|| WindowsTerminalImageBitmapState {
+                content_hash: resource.content_hash,
+                width_px: resource.width,
+                height_px: resource.height,
+                rgba_bytes: resource.rgba.len(),
+                generation: 0,
+                bgra: premultiply_rgba_to_bgra(&resource.rgba),
+                #[cfg(target_os = "windows")]
+                bitmap: None,
+            });
+        if state.width_px != resource.width
+            || state.height_px != resource.height
+            || state.rgba_bytes != resource.rgba.len()
+        {
+            state.width_px = resource.width;
+            state.height_px = resource.height;
+            state.rgba_bytes = resource.rgba.len();
+            state.bgra = premultiply_rgba_to_bgra(&resource.rgba);
+            state.generation = 0;
+            #[cfg(target_os = "windows")]
+            {
+                state.bitmap = None;
+            }
+        }
+
+        #[cfg(target_os = "windows")]
+        if let Err(err) = self.try_ensure_terminal_image_bitmap(resource.content_hash) {
+            tracing::warn!(
+                target: "app.terminal",
+                error = %err,
+                content_hash = ?resource.content_hash,
+                "failed to create Direct2D terminal image bitmap"
+            );
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn try_ensure_terminal_image_bitmap(&mut self, content_hash: [u8; 32]) -> Result<()> {
+        let Some(render_target) = self.render_target() else {
+            return Ok(());
+        };
+        let generation = self.render_target_generation;
+        let needs_create = self
+            .terminal_image_bitmaps
+            .get(&content_hash)
+            .map(|bitmap| bitmap.generation != generation || bitmap.bitmap.is_none())
+            .unwrap_or(false);
+        if !needs_create {
+            return Ok(());
+        }
+
+        let bitmap = {
+            let Some(state) = self.terminal_image_bitmaps.get(&content_hash) else {
+                return Ok(());
+            };
+            let expected_bytes = usize::try_from(state.width_px)
+                .ok()
+                .and_then(|width| {
+                    usize::try_from(state.height_px)
+                        .ok()
+                        .and_then(|height| width.checked_mul(height))
+                })
+                .and_then(|pixels| pixels.checked_mul(4));
+            if state.width_px == 0
+                || state.height_px == 0
+                || expected_bytes != Some(state.bgra.len())
+            {
+                return Ok(());
+            }
+            let bitmap_properties = D2D1_BITMAP_PROPERTIES {
+                pixelFormat: D2D1_PIXEL_FORMAT {
+                    format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                    alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                },
+                dpiX: 96.0,
+                dpiY: 96.0,
+            };
+            let size = D2D_SIZE_U {
+                width: state.width_px,
+                height: state.height_px,
+            };
+            unsafe {
+                render_target.CreateBitmap(
+                    size,
+                    Some(state.bgra.as_ptr().cast()),
+                    state.width_px.saturating_mul(4),
+                    &bitmap_properties,
+                )
+            }?
+        };
+
+        if let Some(state) = self.terminal_image_bitmaps.get_mut(&content_hash) {
+            state.generation = generation;
+            state.bitmap = Some(bitmap);
+        }
+        Ok(())
+    }
+
+    fn draw_terminal_images(
+        &mut self,
+        frame: &RetainedNativeTerminalSurfaceFrame,
+        foreground_layer: bool,
+    ) {
+        #[cfg(not(target_os = "windows"))]
+        let _ = (frame, foreground_layer);
+
+        #[cfg(target_os = "windows")]
+        {
+            let Some(render_target) = self.render_target() else {
+                return;
+            };
+            let resources = frame
+                .frame
+                .presentable_frame
+                .image_resources
+                .iter()
+                .map(|resource| (resource.content_hash, resource.clone()))
+                .collect::<HashMap<_, _>>();
+            let mut placements = frame.frame.presentable_frame.image_placements.clone();
+            placements.sort_by_key(|placement| (placement.z_index, placement.protocol_order));
+            for placement in placements
+                .iter()
+                .filter(|placement| (placement.z_index >= 0) == foreground_layer)
+            {
+                let Some(resource) = resources.get(&placement.resource_key) else {
+                    continue;
+                };
+                let Some(draw_rect) = terminal_image_draw_rect(
+                    placement,
+                    frame.frame.presentable_frame.grid_rows,
+                    frame.frame.presentable_frame.grid_cols,
+                    frame.frame.cell_width_px,
+                    frame.frame.cell_height_px,
+                ) else {
+                    continue;
+                };
+                self.ensure_terminal_image_bitmap(resource);
+                let Some(bitmap) = self.terminal_image_bitmap_for(resource.content_hash) else {
+                    continue;
+                };
+                let Some(dest_rect) = terminal_image_dest_rect(frame.rect, draw_rect) else {
+                    continue;
+                };
+                let source_rect = terminal_image_source_rect(resource, draw_rect);
+                unsafe {
+                    render_target.DrawBitmap(
+                        &bitmap,
+                        Some(&dest_rect),
+                        1.0,
+                        D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                        Some(&source_rect),
+                    );
+                }
+            }
+        }
+    }
+
     fn draw_viewport_background(
         &mut self,
         frame: &RetainedNativeTerminalSurfaceFrame,
@@ -966,7 +1153,6 @@ impl WindowsNativeSurfaceState {
         #[cfg(not(target_os = "windows"))]
         {
             let _ = self.draw_viewport_background(frame);
-            return;
         }
 
         #[cfg(target_os = "windows")]
@@ -1576,6 +1762,16 @@ impl WindowsNativeSurfaceState {
             .and_then(|bitmap| bitmap.bitmap.clone())
     }
 
+    #[cfg(target_os = "windows")]
+    fn terminal_image_bitmap_for(&self, content_hash: [u8; 32]) -> Option<ID2D1Bitmap> {
+        self.terminal_image_bitmaps
+            .get(&content_hash)
+            .and_then(|bitmap| {
+                (bitmap.generation == self.render_target_generation).then_some(bitmap)
+            })
+            .and_then(|bitmap| bitmap.bitmap.clone())
+    }
+
     fn active_text_renderer_path(&self) -> Option<&'static str> {
         self.directwrite_text_renderer
             .as_ref()
@@ -2086,6 +2282,21 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
             .as_ref()
             .map(|retained_frame| retained_frame.frame.frame_token)
             .unwrap_or_default();
+        let retained_image_hashes = frame
+            .as_ref()
+            .map(|retained_frame| {
+                retained_frame
+                    .frame
+                    .presentable_frame
+                    .image_resources
+                    .iter()
+                    .map(|resource| resource.content_hash)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        self.state
+            .terminal_image_bitmaps
+            .retain(|content_hash, _| retained_image_hashes.contains(content_hash));
         self.state.retained_frame = frame.map(|mut retained_frame| {
             retained_frame.rect = self.state.rect;
             retained_frame
@@ -2134,10 +2345,12 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
 
         self.state.draw_background_runs(frame);
         self.state.draw_selection_overlay(frame);
+        self.state.draw_terminal_images(frame, false);
         self.state.draw_directwrite_text(frame);
         self.state.draw_monochrome_glyphs(frame);
         self.state.draw_color_glyphs(frame);
         self.state.draw_underline_overlay(frame);
+        self.state.draw_terminal_images(frame, true);
         self.state.draw_cursor_overlay(frame);
         self.state.draw_ime_preview_overlay(frame);
 
@@ -2202,6 +2415,7 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
         self.destroy_host_surface();
         self.state.clear_device_resources();
         self.state.d2d_brushes.clear();
+        self.state.terminal_image_bitmaps.clear();
         // Keep CPU-side glyph payload caches across detach so a later reattach can
         // recreate D2D bitmaps even when the renderer reuses prepared rows without
         // resending upload payloads on the next frame.
@@ -2298,10 +2512,14 @@ fn intersect_present_rect(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::{
         NativeTerminalSurfaceRect, WindowsCompositionSurfaceHost, WindowsNativeSurfaceBackend,
-        intersect_present_rect, surface_client_rect, translate_rect_to_surface_local,
+        WindowsNativeSurfaceState, intersect_present_rect, surface_client_rect,
+        translate_rect_to_surface_local,
     };
+    use crate::app::terminal_core::TerminalImageResource;
 
     #[test]
     fn offscreen_surface_client_rect_rebases_origin_to_zero() {
@@ -2407,6 +2625,27 @@ mod tests {
             "an unchanged host rect should not dirty the WIC render target every present, otherwise partial damage redraws recreate a blank bitmap and only repaint the clipped region"
         );
     }
+
+    #[test]
+    fn terminal_image_bitmap_cache_is_keyed_by_content_hash_and_premultiplies_alpha() {
+        let mut state = WindowsNativeSurfaceState::default();
+        let resource = TerminalImageResource {
+            content_hash: [9; 32],
+            width: 1,
+            height: 1,
+            rgba: Arc::<[u8]>::from([100, 50, 200, 128]),
+        };
+
+        state.ensure_terminal_image_bitmap(&resource);
+        state.ensure_terminal_image_bitmap(&resource);
+
+        let cached = state
+            .terminal_image_bitmaps
+            .get(&resource.content_hash)
+            .expect("content-hash image cache entry");
+        assert_eq!(state.terminal_image_bitmaps.len(), 1);
+        assert_eq!(cached.bgra, vec![100, 25, 50, 128]);
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -2497,6 +2736,40 @@ fn bitmap_source_rect(width_px: u32, height_px: u32) -> D2D_RECT_F {
         top: 0.0,
         right: width_px as f32,
         bottom: height_px as f32,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn terminal_image_dest_rect(
+    rect: NativeTerminalSurfaceRect,
+    draw_rect: TerminalImageDrawRect,
+) -> Option<D2D_RECT_F> {
+    if draw_rect.dest_width_px == 0 || draw_rect.dest_height_px == 0 {
+        return None;
+    }
+    let left = rect.x.saturating_add(draw_rect.dest_x_px as i32);
+    let top = rect.y.saturating_add(draw_rect.dest_y_px as i32);
+    let right = left.saturating_add(draw_rect.dest_width_px as i32);
+    let bottom = top.saturating_add(draw_rect.dest_height_px as i32);
+    (right > left && bottom > top).then_some(D2D_RECT_F {
+        left: left as f32,
+        top: top as f32,
+        right: right as f32,
+        bottom: bottom as f32,
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn terminal_image_source_rect(
+    resource: &TerminalImageResource,
+    draw_rect: TerminalImageDrawRect,
+) -> D2D_RECT_F {
+    let scale = TERMINAL_IMAGE_UV_SCALE as f32;
+    D2D_RECT_F {
+        left: draw_rect.uv.left as f32 / scale * resource.width as f32,
+        top: draw_rect.uv.top as f32 / scale * resource.height as f32,
+        right: draw_rect.uv.right as f32 / scale * resource.width as f32,
+        bottom: draw_rect.uv.bottom as f32 / scale * resource.height as f32,
     }
 }
 

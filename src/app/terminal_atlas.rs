@@ -14,6 +14,7 @@ use swash::scale::{Render, ScaleContext, Scaler, Source};
 use swash::zeno::{Format as SwashFormat, Vector as SwashVector};
 
 use crate::app::ssh::runtime::{TerminalCellState, TerminalSurfaceState};
+use crate::app::terminal_core::{TERMINAL_IMAGE_UV_SCALE, TerminalImageResource};
 use crate::app::terminal_emoji::{
     ClusterRenderKind as EmojiClusterRenderKind, EmojiRenderOutcome, TerminalEmojiRenderer,
     classify_cluster_render_kind,
@@ -21,6 +22,9 @@ use crate::app::terminal_emoji::{
 use crate::app::terminal_font::backend::{
     DEFAULT_TERMINAL_FONT_SIZE_PX, FontRenderProfile, map_glyph_coverage_to_alpha,
     terminal_cell_width_px,
+};
+use crate::app::terminal_model::{
+    TerminalImageDrawRect, terminal_image_draw_rect, terminal_image_frame_fingerprint,
 };
 use crate::app::terminal_renderer::custom_grid_glyphs::{
     classify_custom_grid_glyph, generate_custom_grid_mask,
@@ -152,6 +156,7 @@ pub struct TerminalAtlasRenderer {
     surface_width_px: u32,
     surface_height_px: u32,
     viewport_background_signature: Option<(u32, u32, u32)>,
+    image_fingerprint: Option<u64>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -261,6 +266,7 @@ impl TerminalAtlasRenderer {
             surface_width_px: 0,
             surface_height_px: 0,
             viewport_background_signature: None,
+            image_fingerprint: None,
         })
     }
 
@@ -287,6 +293,7 @@ impl TerminalAtlasRenderer {
         self.surface_width_px = 0;
         self.surface_height_px = 0;
         self.viewport_background_signature = None;
+        self.image_fingerprint = None;
     }
 
     pub fn set_raster_scale(&mut self, scale: f32) {
@@ -322,6 +329,10 @@ impl TerminalAtlasRenderer {
         let resized = self.surface_width_px != width_px || self.surface_height_px != height_px;
         let viewport_background_changed =
             resized || self.viewport_background_signature != Some(viewport_background_signature);
+        let image_fingerprint =
+            terminal_image_frame_fingerprint(&surface.image_resources, &surface.image_placements);
+        let force_image_recompose = !surface.image_placements.is_empty()
+            || self.image_fingerprint != Some(image_fingerprint);
 
         if resized {
             self.surface_width_px = width_px;
@@ -351,6 +362,7 @@ impl TerminalAtlasRenderer {
             }
         }
 
+        let mut row_render_data = Vec::with_capacity(surface.rows as usize);
         for row in 0..surface.rows {
             let row_selection = selection.and_then(|value| value.row_bounds(row, surface.cols));
             let row_selection_overlay_rgba = if row_selection.is_some() {
@@ -368,29 +380,56 @@ impl TerminalAtlasRenderer {
                 row_selection_overlay_rgba,
                 row_cells[row as usize].as_slice(),
             );
-            if resized || self.row_hashes[row as usize] != next_hash {
-                self.render_row(
-                    RowRenderRequest {
-                        row,
-                        default_fg_rgba: surface.default_fg_rgba,
-                        default_bg_rgba: surface.default_bg_rgba,
-                        viewport_bg_top_rgba: surface.row_bg_even_rgba,
-                        viewport_bg_bottom_rgba: surface.row_bg_odd_rgba,
-                        row_selection,
-                        selection_overlay_rgba: row_selection_overlay_rgba,
-                    },
-                    &row_cells[row as usize],
-                    &mut rendered_clusters,
-                );
-                self.row_hashes[row as usize] = next_hash;
-                rerendered_rows.push(row);
-            } else {
-                self.record_rendered_clusters_from_cache(
-                    &row_cells[row as usize],
+            row_render_data.push((
+                RowRenderRequest {
+                    row,
+                    default_fg_rgba: surface.default_fg_rgba,
+                    default_bg_rgba: surface.default_bg_rgba,
+                    viewport_bg_top_rgba: surface.row_bg_even_rgba,
+                    viewport_bg_bottom_rgba: surface.row_bg_odd_rgba,
+                    row_selection,
+                    selection_overlay_rgba: row_selection_overlay_rgba,
+                },
+                next_hash,
+                resized || force_image_recompose || self.row_hashes[row as usize] != next_hash,
+            ));
+        }
+
+        if force_image_recompose {
+            for (request, next_hash, _) in &row_render_data {
+                self.render_row_background(*request, &row_cells[request.row as usize]);
+                self.row_hashes[request.row as usize] = *next_hash;
+                rerendered_rows.push(request.row);
+            }
+            self.render_terminal_images(surface, |z_index| z_index < 0);
+            for (request, _, _) in &row_render_data {
+                self.render_row_foreground(
+                    *request,
+                    &row_cells[request.row as usize],
                     &mut rendered_clusters,
                 );
             }
+            self.render_terminal_images(surface, |z_index| z_index >= 0);
+        } else {
+            for (request, next_hash, dirty) in &row_render_data {
+                if *dirty {
+                    self.render_row_background(*request, &row_cells[request.row as usize]);
+                    self.render_row_foreground(
+                        *request,
+                        &row_cells[request.row as usize],
+                        &mut rendered_clusters,
+                    );
+                    self.row_hashes[request.row as usize] = *next_hash;
+                    rerendered_rows.push(request.row);
+                } else {
+                    self.record_rendered_clusters_from_cache(
+                        &row_cells[request.row as usize],
+                        &mut rendered_clusters,
+                    );
+                }
+            }
         }
+        self.image_fingerprint = Some(image_fingerprint);
 
         let mut buffer = SharedPixelBuffer::<Rgba8Pixel>::new(width_px, height_px);
         buffer
@@ -407,15 +446,8 @@ impl TerminalAtlasRenderer {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn render_row(
-        &mut self,
-        request: RowRenderRequest,
-        cells: &[&TerminalCellState],
-        rendered_clusters: &mut Vec<RenderedCluster>,
-    ) {
+    fn render_row_background(&mut self, request: RowRenderRequest, cells: &[&TerminalCellState]) {
         let row_y = request.row * self.raster_metrics.cell_height;
-        let default_fg = rgba8(request.default_fg_rgba);
         // Restore the dirty row from the shared viewport background layer before repainting
         // selection, explicit cell backgrounds, and glyphs on top.
         fill_viewport_background_span(
@@ -482,7 +514,40 @@ impl TerminalAtlasRenderer {
                     background,
                 );
             }
+        }
+    }
 
+    fn render_row_foreground(
+        &mut self,
+        request: RowRenderRequest,
+        cells: &[&TerminalCellState],
+        rendered_clusters: &mut Vec<RenderedCluster>,
+    ) {
+        let row_y = request.row * self.raster_metrics.cell_height;
+        let row_bg = viewport_gradient_color(
+            rgba8(request.viewport_bg_top_rgba),
+            rgba8(request.viewport_bg_bottom_rgba),
+            row_y + (self.raster_metrics.cell_height / 2),
+            self.surface_height_px,
+        );
+        let default_fg = rgba8(request.default_fg_rgba);
+        for cell in cells {
+            let cell_x = cell.col * self.raster_metrics.cell_width;
+            let span = cell.width.max(1);
+            let span_width_px = span * self.raster_metrics.cell_width;
+            let selected = request
+                .row_selection
+                .is_some_and(|value| selection_overlaps_cell(value, cell.col, span));
+            let cell_bg = if cell.bg_rgba == request.default_bg_rgba {
+                row_bg
+            } else {
+                rgba8(cell.bg_rgba)
+            };
+            let background = if selected {
+                composite_color(cell_bg, rgba8(request.selection_overlay_rgba))
+            } else {
+                cell_bg
+            };
             let foreground = if selected {
                 resolve_selected_foreground(rgba8(cell.fg_rgba), cell_bg, default_fg, background)
             } else {
@@ -532,6 +597,45 @@ impl TerminalAtlasRenderer {
                 row_y,
                 sprite,
                 foreground,
+            );
+        }
+    }
+
+    fn render_terminal_images(
+        &mut self,
+        surface: &TerminalSurfaceState,
+        matches_layer: impl Fn(i32) -> bool,
+    ) {
+        let resources = surface
+            .image_resources
+            .iter()
+            .map(|resource| (resource.content_hash, resource.as_ref()))
+            .collect::<HashMap<_, _>>();
+        let mut placements = surface
+            .image_placements
+            .iter()
+            .filter(|placement| matches_layer(placement.z_index))
+            .collect::<Vec<_>>();
+        placements.sort_by_key(|placement| (placement.z_index, placement.protocol_order));
+        for placement in placements {
+            let Some(resource) = resources.get(&placement.resource_key) else {
+                continue;
+            };
+            let Some(draw_rect) = terminal_image_draw_rect(
+                placement,
+                surface.rows,
+                surface.cols,
+                self.raster_metrics.cell_width,
+                self.raster_metrics.cell_height,
+            ) else {
+                continue;
+            };
+            blit_terminal_image(
+                &mut self.pixels,
+                self.surface_width_px,
+                self.surface_height_px,
+                resource,
+                draw_rect,
             );
         }
     }
@@ -1119,6 +1223,74 @@ fn blit_cached_sprite(
     }
 }
 
+fn blit_terminal_image(
+    pixels: &mut [Rgba8Pixel],
+    surface_width_px: u32,
+    surface_height_px: u32,
+    resource: &TerminalImageResource,
+    draw_rect: TerminalImageDrawRect,
+) {
+    let Some(expected_bytes) = usize::try_from(resource.width)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(resource.height)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        })
+        .and_then(|pixels| pixels.checked_mul(4))
+    else {
+        return;
+    };
+    if resource.width == 0
+        || resource.height == 0
+        || resource.rgba.len() < expected_bytes
+        || draw_rect.dest_width_px == 0
+        || draw_rect.dest_height_px == 0
+    {
+        return;
+    }
+
+    let uv_width = u64::from(draw_rect.uv.right.saturating_sub(draw_rect.uv.left));
+    let uv_height = u64::from(draw_rect.uv.bottom.saturating_sub(draw_rect.uv.top));
+    let uv_scale = u64::from(TERMINAL_IMAGE_UV_SCALE);
+    for dest_y in 0..draw_rect.dest_height_px {
+        let sample_v = u64::from(draw_rect.uv.top)
+            + uv_height * u64::from(dest_y.saturating_mul(2).saturating_add(1))
+                / u64::from(draw_rect.dest_height_px.saturating_mul(2));
+        let source_y = (sample_v * u64::from(resource.height) / uv_scale)
+            .min(u64::from(resource.height.saturating_sub(1))) as u32;
+        let target_y = draw_rect.dest_y_px.saturating_add(dest_y);
+        if target_y >= surface_height_px {
+            continue;
+        }
+        for dest_x in 0..draw_rect.dest_width_px {
+            let sample_u = u64::from(draw_rect.uv.left)
+                + uv_width * u64::from(dest_x.saturating_mul(2).saturating_add(1))
+                    / u64::from(draw_rect.dest_width_px.saturating_mul(2));
+            let source_x = (sample_u * u64::from(resource.width) / uv_scale)
+                .min(u64::from(resource.width.saturating_sub(1))) as u32;
+            let target_x = draw_rect.dest_x_px.saturating_add(dest_x);
+            if target_x >= surface_width_px {
+                continue;
+            }
+
+            let source_index =
+                (source_y as usize * resource.width as usize + source_x as usize) * 4;
+            let source = Rgba8Pixel {
+                r: resource.rgba[source_index],
+                g: resource.rgba[source_index + 1],
+                b: resource.rgba[source_index + 2],
+                a: resource.rgba[source_index + 3],
+            };
+            if source.a == 0 {
+                continue;
+            }
+            let target = &mut pixels[(target_y * surface_width_px + target_x) as usize];
+            blend(target, source, source.a);
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn blit_mono_alpha(
     pixels: &mut [Rgba8Pixel],
@@ -1164,7 +1336,62 @@ fn rgba_pixels_from_bytes(bytes: &[u8]) -> Vec<Rgba8Pixel> {
 
 #[cfg(test)]
 mod tests {
-    use super::compute_cluster_offset_x;
+    use std::sync::Arc;
+
+    use uuid::Uuid;
+
+    use super::{TerminalAtlasRenderer, compute_cluster_offset_x};
+    use crate::app::ssh::runtime::{SurfaceState, TerminalCellState};
+    use crate::app::terminal_core::{
+        TERMINAL_IMAGE_UV_SCALE, TerminalImagePlacement, TerminalImageResource, TerminalImageUvRect,
+    };
+
+    fn image_surface(z_index: i32, alpha: u8) -> SurfaceState {
+        let mut surface =
+            SurfaceState::from_visible_lines(Uuid::new_v4(), 1, 1, 1, vec!["M".to_string()]);
+        surface.default_fg_rgba = 0xffff_ffff;
+        surface.default_bg_rgba = 0xff00_0000;
+        surface.row_bg_even_rgba = 0xff00_0000;
+        surface.row_bg_odd_rgba = 0xff00_0000;
+        surface.cells = vec![TerminalCellState {
+            row: 0,
+            col: 0,
+            width: 1,
+            text: "M".to_string(),
+            bold: false,
+            underline: false,
+            fg_rgba: 0xffff_ffff,
+            bg_rgba: 0xff00_0000,
+        }];
+        surface.image_resources = vec![Arc::new(TerminalImageResource {
+            content_hash: [3; 32],
+            width: 1,
+            height: 1,
+            rgba: Arc::<[u8]>::from([255, 0, 0, alpha]),
+        })];
+        surface.image_placements = vec![TerminalImagePlacement {
+            resource_key: [3; 32],
+            row: 0,
+            col: 0,
+            row_span: 1,
+            col_span: 1,
+            uv: TerminalImageUvRect {
+                left: 0,
+                top: 0,
+                right: TERMINAL_IMAGE_UV_SCALE,
+                bottom: TERMINAL_IMAGE_UV_SCALE,
+            },
+            padding_left_px: 0,
+            padding_top_px: 0,
+            padding_right_px: 0,
+            padding_bottom_px: 0,
+            z_index,
+            image_id: None,
+            placement_id: None,
+            protocol_order: 0,
+        }];
+        surface
+    }
 
     #[test]
     fn ascii_cluster_offset_keeps_the_cluster_anchored_to_the_cell_origin() {
@@ -1193,6 +1420,54 @@ mod tests {
         assert_eq!(
             offset, 0.0,
             "single-cell mixed clusters should not be optically centered because the terminal grid, not glyph advance, owns horizontal placement"
+        );
+    }
+
+    #[test]
+    fn bitmap_images_alpha_composite_over_the_terminal_surface() {
+        let mut renderer = TerminalAtlasRenderer::new().expect("atlas renderer");
+        let mut surface = image_surface(0, 128);
+        surface.cells[0].text = " ".to_string();
+        let frame = renderer.render(&surface).expect("render image frame");
+        let pixels = frame.image.to_rgba8().expect("rgba image");
+
+        assert!(
+            pixels
+                .as_slice()
+                .iter()
+                .all(|pixel| { pixel.r == 128 && pixel.g == 0 && pixel.b == 0 && pixel.a == 255 })
+        );
+    }
+
+    #[test]
+    fn bitmap_image_z_index_controls_whether_text_is_visible() {
+        let mut renderer = TerminalAtlasRenderer::new().expect("atlas renderer");
+        let below = renderer
+            .render(&image_surface(-1, 255))
+            .expect("render below-text image")
+            .image
+            .to_rgba8()
+            .expect("rgba below image");
+        let above = renderer
+            .render(&image_surface(0, 255))
+            .expect("render above-text image")
+            .image
+            .to_rgba8()
+            .expect("rgba above image");
+
+        assert!(
+            below
+                .as_slice()
+                .iter()
+                .any(|pixel| pixel.r != 255 || pixel.g != 0 || pixel.b != 0),
+            "negative-z images should be composited before terminal glyphs"
+        );
+        assert!(
+            above
+                .as_slice()
+                .iter()
+                .all(|pixel| pixel.r == 255 && pixel.g == 0 && pixel.b == 0),
+            "non-negative-z images should be composited after terminal glyphs"
         );
     }
 }
