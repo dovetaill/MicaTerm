@@ -867,6 +867,9 @@ pub(super) fn bind_assets_keychain_callbacks(
     quick_launch_store: &Option<Rc<QuickLaunchPreferencesStore>>,
     vault_session: &Rc<RefCell<VaultSessionState>>,
     workspace_follow_tracker: &Rc<RefCell<WorkspaceFollowTracker>>,
+    clipboard_image_paste_controller: &Rc<
+        RefCell<super::workspace_terminal::WorkspaceClipboardImagePasteController>,
+    >,
     pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
     modal_drag_state: &Rc<RefCell<Option<ModalDragState>>>,
     vault_sync_service: &Rc<VaultSyncService>,
@@ -1319,6 +1322,7 @@ pub(super) fn bind_assets_keychain_callbacks(
     let private_key_importer_ref = Arc::clone(private_key_importer);
     let vault_session_ref = Rc::clone(vault_session);
     let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
+    let clipboard_image_paste_controller_ref = Rc::clone(clipboard_image_paste_controller);
     let vault_sync_service_ref = Rc::clone(vault_sync_service);
     let vault_auto_sync_timer_ref = Rc::clone(vault_auto_sync_timer);
     let run_vault_sync_ref = Rc::clone(run_vault_sync);
@@ -1672,6 +1676,7 @@ pub(super) fn bind_assets_keychain_callbacks(
                     &window,
                     &mut state,
                     session_bridge_ref.as_deref(),
+                    &mut clipboard_image_paste_controller_ref.borrow_mut(),
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                 );
                 save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
@@ -1705,6 +1710,7 @@ pub(super) fn bind_assets_keychain_callbacks(
     let asset_click_tracker_ref = Rc::clone(asset_click_tracker);
     let pending_double_click_activation_ref = Rc::clone(pending_double_click_activation);
     let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
+    let clipboard_image_paste_controller_ref = Rc::clone(clipboard_image_paste_controller);
     let quick_launch_store_ref = quick_launch_store.clone();
     window.on_asset_activated(move |item_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
@@ -1734,6 +1740,7 @@ pub(super) fn bind_assets_keychain_callbacks(
                     &window,
                     &mut state,
                     session_bridge_ref.as_deref(),
+                    &mut clipboard_image_paste_controller_ref.borrow_mut(),
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                 );
                 save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
@@ -1816,6 +1823,7 @@ pub(super) fn bind_assets_keychain_callbacks(
     let pending_host_key_approval_ref = Rc::clone(pending_host_key_approval);
     let credential_store_ref = Arc::clone(credential_store);
     let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
+    let clipboard_image_paste_controller_ref = Rc::clone(clipboard_image_paste_controller);
     let keychain_repo_ref = keychain_repo.clone();
     let vault_session_ref = Rc::clone(vault_session);
     let vault_sync_service_ref = Rc::clone(vault_sync_service);
@@ -1887,6 +1895,7 @@ pub(super) fn bind_assets_keychain_callbacks(
             &window,
             &mut state,
             session_bridge_ref.as_deref(),
+            &mut clipboard_image_paste_controller_ref.borrow_mut(),
             &mut workspace_follow_tracker_ref.borrow_mut(),
         );
         hydrate_edit_ssh_modal_secret_from_store(&mut state, credential_store_ref.as_ref());

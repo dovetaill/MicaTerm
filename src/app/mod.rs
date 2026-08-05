@@ -5,6 +5,7 @@ pub mod assets_catalog;
 pub mod async_runtime;
 pub mod bootstrap;
 pub(crate) mod clipboard;
+pub(crate) mod clipboard_image_paste;
 pub(crate) mod font_diagnostics;
 pub(crate) mod image_policy;
 pub mod keychain;

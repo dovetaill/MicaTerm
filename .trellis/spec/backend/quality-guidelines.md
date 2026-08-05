@@ -67,6 +67,12 @@ Questions to answer:
   result for context-menu Paste and `Ctrl+Shift+V`.
 - `select_clipboard_payload(image, text_reader) -> Option<ClipboardPayload>` must
   select an image first and leave `text_reader` lazy when an image exists.
+- `select_windows_clipboard_image_kind(png, bitmap, dib, dibv5, file_list)`
+  selects registered PNG first, then a bitmap-convertible Windows image, then
+  a file list. It is pure so format precedence is testable outside Windows.
+- `copy_windows_registered_png(format) -> Result<Vec<u8>>` checks the
+  `HGLOBAL` byte size before `GlobalLock` and copying. It never frees a
+  clipboard-owned handle.
 - `encode_clipboard_image(source) -> Result<EncodedClipboardImage>` performs the
   bounded decode and PNG encode on a blocking worker, not the UI event loop.
 - `SftpRuntimeHandle::upload_clipboard_png(session_id, data) -> Result<String>`
@@ -81,21 +87,28 @@ Questions to answer:
 
 ### 3. Contracts
 
-- Windows probes a clipboard bitmap first, then exactly one supported image file;
-  otherwise the existing Slint text clipboard path is unchanged. Other platforms
-  currently return no image source.
+- Windows selects a registered `PNG` payload first. When `CF_BITMAP`, `CF_DIB`,
+  or `CF_DIBV5` is available, it requests `CF_BITMAP` with
+  `GetClipboardData`; Windows may synthesize that bitmap from DIB/DIBV5. Only
+  then does it use exactly one supported image file. Other platforms currently
+  return no image source.
+- A registered PNG is copied only after its `HGLOBAL` size is non-zero and no
+  more than the 20 MiB encoded limit. It enters the same constrained decoder
+  and re-encoder as bitmap and file sources.
 - Image dimensions are limited to 25 million pixels, decoded allocation to 100
   MiB, and encoded PNG/upload payload to 20 MiB.
-- Decode and upload are asynchronous relative to the UI. One bootstrap-scoped
-  semaphore permit is acquired before `spawn_blocking` and retained through upload;
-  completion carries the originating session UUID, captured binding UUID, and
-  result metadata.
+- Decode and upload are asynchronous relative to the UI. Two bootstrap-scoped
+  preparation permits bound `spawn_blocking` work and are released before upload;
+  the clipboard-image controller then owns one ordered upload slot. Completion is
+  keyed by request UUID while the controller retains the originating session UUID,
+  captured binding UUID, and input epoch.
 - Remote storage is `<canonical-home>/.cache/mica-term/clipboard/<session-id>/`.
   Every created directory is mode 0700; each UUID PNG is exclusively created with
   mode 0600.
-- Success is POSIX-shell-quoted and sent with `send_session_paste` to the original
-  session. It is never redirected to the currently active session, never gains a
-  newline, and never passes through Markdown formatting.
+- An epoch-safe success is POSIX-shell-quoted and sent through the binding-aware
+  paste boundary to the original session. It is never redirected to the currently
+  active session, never gains a newline, and never passes through Markdown
+  formatting.
 - Clipboard bytes and decoded pixels are forbidden in logs. Logs may contain the
   session UUID, dimensions, encoded byte count, controlled remote-path metadata,
   and error text.
@@ -105,6 +118,10 @@ Questions to answer:
 - No active terminal session or unavailable SSH bridge -> reject without terminal
   input and show user-visible feedback when the image path has begun.
 - Bitmap plus text -> choose bitmap; do not read or paste the text fallback.
+- Registered PNG plus DIB/file/text -> choose PNG; malformed or oversized PNG
+  is an upload error, not a fallback to text.
+- DIB/DIBV5 without an advertised `CF_BITMAP` -> request synthesized
+  `CF_BITMAP`; failure is an upload error, not a silent ignored paste.
 - Zero/oversized dimensions, decoder allocation limit, invalid source, or PNG over
   20 MiB -> fail before SFTP and insert no path.
 - Non-absolute canonical home -> reject; do not build a relative cache path.
@@ -118,8 +135,11 @@ Questions to answer:
 
 ### 5. Good/Base/Bad Cases
 
-- Good: bitmap and text coexist; bitmap becomes a bounded PNG, uploads to a UUID
-  path, and only one quoted path is pasted into the originating session.
+- Good: a screenshot provides DIBV5 without a native bitmap; the client requests
+  a synthesized bitmap, bounds it before copying, then uploads one PNG and
+  pastes its quoted path only into the originating session.
+- Good: a registered PNG is size-capped before copying, uses the shared decoder,
+  and preserves the same SFTP/session-binding contract as a bitmap.
 - Base: text-only clipboard content follows the pre-existing newline normalization,
   multiline warning, editor, and send behavior.
 - Base: exactly one supported clipboard image file uses the same encoder, limits,
@@ -134,6 +154,12 @@ Questions to answer:
 - Unit test image precedence and assert the text-reader closure is not invoked.
 - Unit test bitmap and file sources produce PNG under the dimension/byte limits;
   reject oversized dimensions and output.
+- Unit test Windows source priority: registered PNG wins, DIB/DIBV5 select the
+  synthesized bitmap route, and file-list fallback is selected only without an
+  image format.
+- Unit test registered PNG size rejects zero and values over 20 MiB before the
+  Windows payload-copy boundary; test an encoded PNG source through the shared
+  bounded encoder.
 - Unit test POSIX quoting, including embedded single quotes, and assert no newline.
 - Runtime test canonical home resolution, 0700 hierarchy, UUID filename, exclusive
   0600 create, and returned absolute path.
@@ -143,8 +169,9 @@ Questions to answer:
   explicit directory and entry caps; never traverse symlink entries.
 - Session-manager regression test replaces an SFTP binding and asserts that the old
   binding cannot paste into the replacement runtime while the new binding can.
-- Source/contract test asserts the shared permit is acquired before blocking decode
-  and retained until the captured SFTP runtime finishes upload.
+- Source/contract test asserts two permits bound blocking preparation, each permit
+  is released before upload, and the controller serializes uploads without an
+  upload semaphore.
 - Integration/source tests keep existing text paste behavior and both Paste entry
   points on the same callback. Verify both Linux all-targets and Windows library
   compilation.
@@ -180,6 +207,38 @@ Capture ownership and the SFTP generation before background work. Upload through
 the captured handle, then paste only through the matching runtime generation; never
 retarget the result to another tab or a reconnected shell.
 
+#### Wrong: returning before a convertible DIB is requested
+
+```rust
+if !Bitmap.is_format_avail() && !FileList.is_format_avail() {
+    return Ok(None);
+}
+```
+
+`CF_DIB` and `CF_DIBV5` can be converted by Windows on a later
+`GetClipboardData(CF_BITMAP)` request, so this turns a real screenshot into a
+silent ignored paste.
+
+#### Correct: recognize DIB/DIBV5 before requesting the synthesized bitmap
+
+```rust
+let kind = select_windows_clipboard_image_kind(
+    png_available,
+    Bitmap.is_format_avail(),
+    dib_available,
+    dibv5_available,
+    FileList.is_format_avail(),
+);
+
+if matches!(kind, Some(WindowsClipboardImageKind::Bitmap)) {
+    validate_clipboard_bitmap_before_copy()?;
+    Bitmap.read_clipboard(&mut bitmap)?;
+}
+```
+
+This preserves Windows conversion while retaining the metadata preflight before
+the bitmap byte vector is allocated.
+
 ## Scenario: Static Terminal Images Across Kitty, iTerm2, and Sixel
 
 ### 1. Scope / Trigger
@@ -211,7 +270,10 @@ retarget the result to another tab or a reconnected shell.
 - Protocol v1 accepts static Sixel, iTerm2 `inline=1`, and Kitty direct or chunked
   in-band data. Kitty file, temporary-file, and shared-memory media and iTerm2
   `inline=0` are disabled for SSH sessions before any local path access.
-- Keep `TERM=xterm-256color`; advertise `TERM_PROGRAM=mica-term` separately.
+- Keep `TERM=xterm-256color`; request `TERM_PROGRAM=mica-term` separately as
+  best-effort SSH environment negotiation. A server may reject it, and the
+  client must not inject a shell command solely to force it. Protocol parsing
+  and rendering never gate on that variable.
 - Input is bounded before parser/decode growth: 20 MiB encoded per image, 25 million
   pixels, 100 MiB decoded per image, and 128 MiB retained resources per session.
 - Kitty chunk limits are aggregate across the complete transfer. Sixel raster
@@ -690,3 +752,88 @@ The manager owns terminal projection removal, releases the registry lock during
 runtime cleanup, and removes only the captured revision. The runtime command is
 best-effort internal cleanup and must not publish a delayed unconditional
 `ZmodemStateChanged(None)`.
+
+## Scenario: Clipboard Image Preview and Input-Epoch Completion
+
+### 1. Scope / Trigger
+
+- Trigger: a clipboard image request prepares local preview pixels, uploads through
+  a captured SFTP binding, and may complete after the user has changed terminal
+  input.
+- Applies when modifying `src/app/clipboard.rs`,
+  `src/app/clipboard_image_paste.rs`,
+  `src/app/bootstrap/workspace_terminal.rs`, `src/app/bootstrap.rs`, or the
+  clipboard preview Slint components.
+
+### 2. Signatures
+
+- `ClipboardImagePasteController<SftpRuntimeHandle>` owns request state, per-session
+  input epochs, FIFO scheduling, and UI projections on the Slint event thread.
+- `ClipboardImagePasteBackgroundMessage::{Prepared, Uploaded}` keys every worker
+  result by request UUID; workers never mutate UI state directly.
+- `ClipboardImagePathAction` carries the original request, session, binding, and raw
+  remote path into the binding-safe paste boundary.
+- `ClipboardImagePreviewItem` is application chrome. It is not terminal model,
+  parser, scrollback, PTY, or native-renderer state.
+
+### 3. Contracts
+
+- Every request retains request, session, and SFTP binding UUIDs plus the input
+  epoch captured before any background work starts.
+- Every attempted client write to a remote terminal advances that session's epoch:
+  non-empty text, recognized keys, accepted text paste, forwarded mouse input,
+  grabbed wheel input, automatic path insertion, and explicit `Paste path`.
+  Failed or uncertain writes still advance conservatively.
+- Local scrollback, selection, search, tab changes, resize, image registration,
+  dismiss, and `Copy path` do not advance the epoch.
+- Completion may auto-paste only when the original session still exists, the SFTP
+  binding is current, and the input epoch is unchanged. A changed epoch produces
+  explicit `Paste path` and `Copy path` actions. A changed binding produces a
+  connection error and never exposes `Paste path` against the replacement runtime.
+- The queue capacity is 8, preparation concurrency is 2, active upload count is 1,
+  thumbnail bounds are 320 x 180 RGBA pixels, and success feedback lasts 3.2
+  seconds. The shared 25-million-pixel, 100 MiB decoded, and 20 MiB encoded limits
+  remain in force.
+- Prepared requests preserve FIFO even when preparation results arrive out of
+  order. The first automatic insertion advances the epoch, so later requests that
+  captured the same epoch become stale instead of concatenating paths.
+- Closing a session releases queued PNGs, previews, paths, and runtime handles.
+  An already-running upload retains only a hidden request-ID tombstone until its
+  result arrives, preserving global single-upload serialization without consuming
+  queue capacity.
+- Clipboard preview status and pixels never enter PTY bytes or
+  `TerminalSurfaceState`. Remote Kitty, iTerm2, and Sixel parsing and rendering stay
+  independent from clipboard preview behavior.
+- Clipboard bytes, PNG payloads, decoded pixels, and thumbnails are forbidden in
+  logs. Request/session/binding UUIDs, dimensions, encoded byte count, lifecycle
+  state, controlled path metadata, and bounded error text are allowed.
+
+### 4. Validation & Error Matrix
+
+- Unchanged epoch and current binding -> POSIX-quote the path, send without a
+  newline, advance the epoch, and show bounded success feedback.
+- Changed epoch and current binding -> send no bytes and retain explicit path
+  actions on the originating session only.
+- Closed session or replaced binding -> send no bytes, remove unsafe recovery
+  actions, and show a connection error.
+- Preparation/upload/clipboard-copy failure -> keep bounded visible error state and
+  secondary Transfer Center feedback; never fall back to clipboard text after an
+  image was selected.
+- Ninth retained image -> reject immediately without decode or upload; clipboard
+  inspection must still preserve ordinary text paste when the clipboard is text.
+
+### 5. Tests Required
+
+- Unit test bounded landscape, portrait, and non-upscaled thumbnail output.
+- Unit test queue capacity, out-of-order preparation, failed-head unblocking,
+  exactly one active upload, same-epoch FIFO invalidation, dismissal, expiry, and
+  closed-session tombstones.
+- Unit test stale `Paste path` session matching and that `Copy path` does not change
+  the input epoch.
+- Session-manager regression test binding replacement and closed-session rejection.
+- Preserve ordinary text-paste, SFTP cache permission/cleanup, and static
+  Kitty/iTerm2/Sixel regression tests.
+- Verify Linux all-targets plus supported Windows MSVC and GNU target checks.
+- Manually test a Windows screenshot with unchanged input, changed/submitted input,
+  two rapid image pastes, tab switching, dismiss, reconnect, copied image file, and
+  text-only paste.

@@ -1,6 +1,7 @@
 // Workspace pane that owns the tab strip and content host width contract.
 
 import { ThemeTokens } from "../theme/tokens.slint";
+import { ClipboardImagePreviewItem } from "../components/clipboard-image-preview-overlay.slint";
 import { QuickLaunchCardRow } from "../welcome/quick-launch-types.slint";
 import { SftpPanelItem } from "./right-panel.slint";
 import { SftpWorkspaceHost } from "./sftp-workspace-host.slint";
@@ -61,6 +62,7 @@ export component WorkspacePane inherits Rectangle {
     in property <[ConnectionProgressDiagnosticRow]> workspace-session-connection-diagnostics: [];
     in property <[QuickLaunchCardRow]> welcome-quick-launch-recent-items: [];
     in property <image> workspace-session-surface-image;
+    in property <[ClipboardImagePreviewItem]> workspace-session-clipboard-image-preview-items: [];
     in property <int> workspace-session-native-frame-token: 0;
     in property <int> workspace-session-rows: 24;
     in property <int> workspace-session-cols: 80;
@@ -157,6 +159,9 @@ export component WorkspacePane inherits Rectangle {
     callback copy-selection-requested(int, int, int, int);
     callback select-all-requested();
     callback paste-requested();
+    callback clipboard-image-paste-path-requested(string);
+    callback clipboard-image-copy-path-requested(string);
+    callback clipboard-image-dismiss-requested(string);
     callback local-action-requested(string);
     callback scroll-requested(int, int, int, int, bool, bool, bool);
     callback scroll-thumb-drag-requested(float);
@@ -468,6 +473,7 @@ export component WorkspacePane inherits Rectangle {
                 connection-progress-diagnostics: root.workspace-session-connection-diagnostics;
                 welcome-quick-launch-recent-items: root.welcome-quick-launch-recent-items;
                 session-surface-image: root.workspace-session-surface-image;
+                clipboard-image-preview-items: root.workspace-session-clipboard-image-preview-items;
                 session-native-frame-token: root.workspace-session-native-frame-token;
                 session-rows: root.workspace-session-rows;
                 session-cols: root.workspace-session-cols;
@@ -556,6 +562,18 @@ export component WorkspacePane inherits Rectangle {
 
                 paste-requested() => {
                     root.paste-requested();
+                }
+
+                clipboard-image-paste-path-requested(request-id) => {
+                    root.clipboard-image-paste-path-requested(request-id);
+                }
+
+                clipboard-image-copy-path-requested(request-id) => {
+                    root.clipboard-image-copy-path-requested(request-id);
+                }
+
+                clipboard-image-dismiss-requested(request-id) => {
+                    root.clipboard-image-dismiss-requested(request-id);
                 }
 
                 local-action-requested(action-id) => {

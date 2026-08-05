@@ -19959,27 +19959,35 @@ fn sftp_sort_and_column_width_callbacks_round_trip_runtime_window_state() {
 }
 
 #[test]
-fn clipboard_image_uploads_share_a_pre_decode_single_permit_gate() {
+fn clipboard_image_preparation_and_upload_use_separate_bounded_stages() {
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
     let workspace_terminal_source = fs::read_to_string("src/app/bootstrap/workspace_terminal.rs")
         .expect("read workspace terminal bootstrap module");
 
     assert!(
-        bootstrap_source.contains("Arc::new(tokio::sync::Semaphore::new(1))"),
-        "one bootstrap-scoped permit must serialize clipboard image encode and upload work"
+        bootstrap_source.contains("Arc::new(tokio::sync::Semaphore::new(2))"),
+        "two bootstrap-scoped permits must bound clipboard image preparation"
     );
     let permit_index = workspace_terminal_source
-        .find("upload_gate.acquire_owned().await")
-        .expect("clipboard image upload waits for the shared permit");
+        .find("preparation_gate.acquire_owned().await")
+        .expect("clipboard image preparation waits for its bounded permit");
     let decode_index = workspace_terminal_source
         .find("tokio::task::spawn_blocking")
         .expect("clipboard image decode stays on the blocking pool");
+    let release_index = workspace_terminal_source
+        .find("drop(permit)")
+        .expect("clipboard image preparation releases its permit explicitly");
     let upload_index = workspace_terminal_source
-        .find(".upload_clipboard_png(session_id, encoded.png_bytes)")
+        .find(".upload_clipboard_png(job.session_id, job.png_bytes)")
         .expect("clipboard image upload uses the captured SFTP runtime");
     assert!(
-        permit_index < decode_index && decode_index < upload_index,
-        "the single permit must be acquired before decode and retained through upload"
+        permit_index < decode_index && decode_index < release_index && release_index < upload_index,
+        "preparation permits must be released before the separate upload stage"
+    );
+    assert!(
+        workspace_terminal_source.contains("controller.take_next_upload()")
+            && !workspace_terminal_source.contains("upload_gate.acquire_owned().await"),
+        "the controller must serialize uploads without holding a preparation permit"
     );
     assert!(
         workspace_terminal_source.contains("send_session_paste_if_sftp_binding_current("),
