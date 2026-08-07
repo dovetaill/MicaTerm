@@ -837,3 +837,33 @@ best-effort internal cleanup and must not publish a delayed unconditional
 - Manually test a Windows screenshot with unchanged input, changed/submitted input,
   two rapid image pastes, tab switching, dismiss, reconnect, copied image file, and
   text-only paste.
+
+## Scenario: Clipboard Upload Progress and Local Terminal-Grid Images
+
+### Contracts
+
+- Clipboard upload progress is keyed by request UUID. Accepted byte counts are
+  monotonic and bounded by the request total; every upload publishes an initial
+  zero sample and a mandatory final total sample. Percentage and monotonic-average
+  speed are derived from those samples, and successful feedback retains the final
+  measurements for its normal lifetime.
+- Local terminal-image ingress returns `Result<()>` and is isolated from remote
+  transport. It must not write PTY input, generate SSH reply bytes, start SFTP,
+  invoke a shell command, or call a remote helper.
+- Local image cells carry neither a remote image ID nor a placement ID. Retained
+  resources count against the per-session image budget through weak ownership so
+  scrollback eviction, clear, and session teardown can release them.
+- Async local placement captures the originating session and active-session
+  generation. After acquiring the session runtime lock, it must revalidate the
+  pending request, active session, generation, and alternate-screen/mouse-grab/
+  application-cursor guards immediately before mutating the terminal grid.
+
+### Tests Required
+
+- Cover chunk boundaries, throttled monotonic progress, mandatory final state,
+  stale-request rejection, final measurement retention, and failed uploads.
+- Cover zero-writer local ingress, protocol-delete isolation, cursor/scrollback
+  behavior, weak-budget release, sizing without upscale, locked TUI rejection,
+  A -> B -> A invalidation, and newer-request replacement.
+- Compile bitmap-only and native-presenter builds with both supported Slint
+  renderers, plus supported Windows GNU and MSVC targets.

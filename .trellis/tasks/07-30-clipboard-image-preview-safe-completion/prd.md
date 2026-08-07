@@ -35,9 +35,10 @@ behavior.
   epoch protection, stale path recovery, and session/binding cleanup. Its prior
   automated baseline passed Linux tests, Clippy, Windows GNU/MSVC checks, and
   native/bitmap renderer feature combinations.
-- The lower-right preview currently exposes preparing, queued, uploading,
-  success, stale, and error lifecycle states, but upload byte progress/speed and
-  explicit local grid display are not implemented yet.
+- The lower-right preview now exposes preparing, queued, uploading, success,
+  stale, and error lifecycle states with upload byte progress/speed. Explicit
+  local grid display is implemented through the dedicated shortcut and menu
+  action without changing ordinary Paste.
 
 ## Requirements
 
@@ -124,27 +125,27 @@ behavior.
       to the originating session cache with 0700 directory and 0600 file modes.
 - [x] An unchanged input context receives the existing POSIX-quoted path without
       an automatic newline.
-- [ ] Changed or submitted input receives no delayed path; the completed card
+- [x] Changed or submitted input receives no delayed path; the completed card
       exposes deliberate Paste path and Copy path recovery.
-- [ ] Preparing, queued, uploading, success, stale, and error states remain visible
+- [x] Preparing, queued, uploading, success, stale, and error states remain visible
       without entering the terminal byte stream.
-- [ ] Uploading cards show monotonic byte progress and speed, and successful cards
+- [x] Uploading cards show monotonic byte progress and speed, and successful cards
       retain final measurements for their compact feedback lifetime.
-- [ ] `Ctrl+Shift+I` and `Display Clipboard Image` render the same clipboard image
+- [x] `Ctrl+Shift+I` and `Display Clipboard Image` render the same clipboard image
       at the current cursor without upload or PTY input.
-- [ ] Local placement reserves rows, advances the cursor below the image, follows
+- [x] Local placement reserves rows, advances the cursor below the image, follows
       terminal scrolling, and is consumed by both native and bitmap renderers.
-- [ ] Local sizing preserves aspect ratio, does not upscale, and fits the current
+- [x] Local sizing preserves aspect ratio, does not upscale, and fits the current
       horizontal cell capacity and half-viewport height.
-- [ ] Interactive TUI state rejects local display with client feedback and leaves
+- [x] Interactive TUI state rejects local display with client feedback and leaves
       the terminal grid and PTY stream unchanged.
-- [ ] Local-image ingestion uses no Kitty ID, produces zero SSH reply bytes, and
+- [x] Local-image ingestion uses no Kitty ID, produces zero SSH reply bytes, and
       releases resources through scrollback eviction, clear, or session teardown.
-- [ ] Session switching and a newer inline request invalidate older prepared
+- [x] Session switching and a newer inline request invalidate older prepared
       results, including a switch-away-and-back sequence.
 - [x] The pre-extension baseline covers text paste, copied-image-file paste,
       session replacement, bounded preview cleanup, and remote Kitty/iTerm2/Sixel.
-- [ ] The completed extension passes focused controller/core/bootstrap/UI tests,
+- [x] The completed extension passes focused controller/core/bootstrap/UI tests,
       full Linux regressions, formatting, Clippy, diff checks, Windows GNU/MSVC
       checks, and native/bitmap renderer feature combinations.
 - [ ] Windows manual acceptance covers upload progress, explicit local display,
@@ -163,7 +164,10 @@ behavior.
 
 ## Implementation Status
 
-The bounded preview, safe async path completion, ordered upload, stale recovery,
-and prior regression baseline are implemented. Upload progress/speed and explicit
-local terminal-grid display are approved designs awaiting an implementation plan
-and code changes. Final Windows manual acceptance remains pending.
+Track A upload progress/speed and Track B explicit local terminal-grid display are
+implemented. Focused suites, the complete Linux regression gate, formatting,
+diff validation, non-strict Clippy with zero new warnings, all four renderer
+feature combinations, and Windows GNU/MSVC cross-checks pass. Strict
+`-D warnings` remains blocked by the repository's pre-existing warnings. Final
+Windows manual acceptance remains pending. The implementation work is committed
+as `9c074fc`; integration details are retained in `validation-and-handoff.md`.
