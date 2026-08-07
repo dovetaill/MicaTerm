@@ -6,6 +6,7 @@ use mica_term::app::ssh::runtime::{
 use mica_term::app::terminal_atlas::{
     ClusterSpriteKind, RenderedClusterSourceKind, TerminalAtlasRenderer, TerminalAtlasSelection,
 };
+use mica_term::app::terminal_core::TerminalViewportMetrics;
 use mica_term::app::terminal_emoji::{
     EmojiFontRasterizeRequest, EmojiFontResolution, EmojiRasterizerBackend, EmojiSprite,
     ResolvedEmojiFont, TerminalEmojiRenderer, TerminalEmojiResolver,
@@ -42,6 +43,7 @@ fn manual_surface(rows: u32, cols: u32, cells: Vec<TerminalCellState>) -> Termin
         seqno: 1,
         rows,
         cols,
+        viewport_metrics: TerminalViewportMetrics::fallback(rows as usize, cols as usize),
         default_fg_rgba: 0xffd8_dfe8,
         default_bg_rgba: 0xff0c_1014,
         row_bg_even_rgba: 0xff0c_1014,
@@ -52,6 +54,8 @@ fn manual_surface(rows: u32, cols: u32, cells: Vec<TerminalCellState>) -> Termin
         visible_rows,
         visible_lines,
         cells,
+        image_resources: Vec::new(),
+        image_placements: Vec::new(),
         cursor: TerminalCursorState {
             row: 0,
             col: 0,

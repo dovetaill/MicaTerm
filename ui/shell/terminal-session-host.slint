@@ -1,6 +1,7 @@
 // Workspace content host that switches between welcome, terminal, and error states.
 
 import { ThemeTokens } from "../theme/tokens.slint";
+import { ClipboardImagePreviewItem, ClipboardImagePreviewOverlay } from "../components/clipboard-image-preview-overlay.slint";
 import { QuickLaunchCardRow } from "../welcome/quick-launch-types.slint";
 import { WelcomeView } from "../welcome/welcome-view.slint";
 
@@ -23,9 +24,10 @@ component TerminalContextMenuRow inherits Rectangle {
     Text {
         x: 12px;
         y: 0px;
-        width: parent.width - 24px;
+        width: max(0px, parent.width - 24px);
         height: parent.height;
         text: root.label;
+        overflow: elide;
         color: ThemeTokens.text-primary;
         opacity: root.enabled ? 1.0 : 0.48;
         vertical-alignment: center;
@@ -320,6 +322,7 @@ export component TerminalSessionHost inherits Rectangle {
     in property <[ConnectionProgressDiagnosticRow]> connection-progress-diagnostics: [];
     in property <[QuickLaunchCardRow]> welcome-quick-launch-recent-items: [];
     in property <image> session-surface-image;
+    in property <[ClipboardImagePreviewItem]> clipboard-image-preview-items: [];
     in property <int> session-native-frame-token: 0;
     in property <int> session-rows: 24;
     in property <int> session-cols: 80;
@@ -382,6 +385,10 @@ export component TerminalSessionHost inherits Rectangle {
     callback copy-selection-requested(int, int, int, int);
     callback select-all-requested();
     callback paste-requested();
+    callback display-clipboard-image-requested();
+    callback clipboard-image-paste-path-requested(string);
+    callback clipboard-image-copy-path-requested(string);
+    callback clipboard-image-dismiss-requested(string);
     callback local-action-requested(string);
     callback scroll-requested(int, int, int, int, bool, bool, bool);
     callback scroll-thumb-drag-requested(float);
@@ -798,6 +805,10 @@ export component TerminalSessionHost inherits Rectangle {
         return text == "v" || text == "V" || text == "\u{16}";
     }
 
+    function is-display-clipboard-image-shortcut-key(text: string) -> bool {
+        return text == "i" || text == "I" || text == "\u{9}";
+    }
+
     function terminal-local-action-id(text: string) -> string {
         if text == "t" || text == "T" {
             return "new-tab";
@@ -929,11 +940,11 @@ export component TerminalSessionHost inherits Rectangle {
     }
 
     function terminal-menu-width() -> length {
-        return 168px;
+        return min(232px, max(0px, root.width - 24px));
     }
 
     function terminal-menu-height() -> length {
-        return 148px;
+        return 184px;
     }
 
     function search-match-summary() -> string {
@@ -1393,6 +1404,11 @@ export component TerminalSessionHost inherits Rectangle {
                 } else if (event.modifiers.control && event.modifiers.shift && !event.modifiers.alt
                     && root.is-paste-shortcut-key(event.text)) {
                     root.paste-requested();
+                    accept
+                } else if (event.modifiers.control && event.modifiers.shift && !event.modifiers.alt
+                    && root.is-display-clipboard-image-shortcut-key(event.text)) {
+                    root.close-context-menu();
+                    root.display-clipboard-image-requested();
                     accept
                 } else if (event.modifiers.control && event.modifiers.shift && !event.modifiers.alt
                     && root.terminal-local-action-id(event.text) != "") {
@@ -2082,6 +2098,44 @@ export component TerminalSessionHost inherits Rectangle {
                 }
             }
 
+            clipboard-image-preview := ClipboardImagePreviewOverlay {
+                x: root.terminal-surface-origin-x()
+                    + max(0px, root.snapped-terminal-content-width() - self.width - 14px);
+                y: root.terminal-surface-origin-y()
+                    + max(0px, root.snapped-terminal-content-height() - self.height - 14px);
+                width: min(
+                    320px,
+                    min(
+                        max(0px, root.snapped-terminal-content-width() - 12px),
+                        max(220px, root.snapped-terminal-content-width() - 28px),
+                    ),
+                );
+                height: min(
+                    root.snapped-terminal-content-height() * 0.6,
+                    max(0px, root.clipboard-image-preview-items.length * 142px),
+                );
+                visible: root.mode == "terminal"
+                    && root.clipboard-image-preview-items.length > 0
+                    && self.width > 0px
+                    && self.height > 0px;
+                items: root.clipboard-image-preview-items;
+
+                paste-path-requested(request-id) => {
+                    root.clipboard-image-paste-path-requested(request-id);
+                    terminal-input.focus();
+                }
+
+                copy-path-requested(request-id) => {
+                    root.clipboard-image-copy-path-requested(request-id);
+                    terminal-input.focus();
+                }
+
+                dismiss-requested(request-id) => {
+                    root.clipboard-image-dismiss-requested(request-id);
+                    terminal-input.focus();
+                }
+            }
+
             if root.context-menu-open : terminal-context-menu-dismiss-layer := TouchArea {
                 width: parent.width;
                 height: parent.height;
@@ -2132,6 +2186,17 @@ export component TerminalSessionHost inherits Rectangle {
                         invoked => {
                             root.close-context-menu();
                             root.paste-requested();
+                        }
+                    }
+
+                    display-clipboard-image-row := TerminalContextMenuRow {
+                        width: parent.width;
+                        label: "Display Clipboard Image";
+
+                        invoked => {
+                            root.close-context-menu();
+                            root.display-clipboard-image-requested();
+                            terminal-input.focus();
                         }
                     }
 

@@ -3,10 +3,15 @@
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use crate::app::ssh::runtime::{
     TerminalCellState, TerminalCursorShape, TerminalSelectionGestureMode,
     TerminalShellIntegrationState, TerminalSurfaceState,
+};
+use crate::app::terminal_core::{
+    TERMINAL_IMAGE_UV_SCALE, TerminalImagePlacement, TerminalImageResource, TerminalImageUvRect,
+    TerminalViewportMetrics,
 };
 use crate::app::terminal_semantic::SemanticSpan;
 use crate::theme::{AppThemeSpec, SearchMatchHighlightStrength, SemanticStyleRole};
@@ -18,6 +23,7 @@ pub struct TerminalModelFrame {
     pub seqno: usize,
     pub grid_rows: u32,
     pub grid_cols: u32,
+    pub viewport_metrics: TerminalViewportMetrics,
     pub rows: Vec<TerminalModelRow>,
     pub cursor: TerminalCursorModel,
     pub selection: Option<TerminalSelectionModel>,
@@ -31,7 +37,118 @@ pub struct TerminalModelFrame {
     pub bracketed_paste_enabled: bool,
     pub presentation_mode: TerminalPresentationMode,
     pub shell_integration: TerminalShellIntegrationState,
+    pub image_resources: Vec<Arc<TerminalImageResource>>,
+    pub image_placements: Vec<TerminalImagePlacement>,
     pub dirty_rows: Vec<u32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TerminalImageDrawRect {
+    pub dest_x_px: u32,
+    pub dest_y_px: u32,
+    pub dest_width_px: u32,
+    pub dest_height_px: u32,
+    pub uv: TerminalImageUvRect,
+}
+
+pub fn terminal_image_draw_rect(
+    placement: &TerminalImagePlacement,
+    grid_rows: u32,
+    grid_cols: u32,
+    cell_width_px: u32,
+    cell_height_px: u32,
+) -> Option<TerminalImageDrawRect> {
+    if placement.row_span == 0
+        || placement.col_span == 0
+        || grid_rows == 0
+        || grid_cols == 0
+        || cell_width_px == 0
+        || cell_height_px == 0
+    {
+        return None;
+    }
+
+    let viewport_right = u64::from(grid_cols).checked_mul(u64::from(cell_width_px))?;
+    let viewport_bottom = u64::from(grid_rows).checked_mul(u64::from(cell_height_px))?;
+    let left = u64::from(placement.col)
+        .checked_mul(u64::from(cell_width_px))?
+        .checked_add(u64::from(placement.padding_left_px))?;
+    let top = u64::from(placement.row)
+        .checked_mul(u64::from(cell_height_px))?
+        .checked_add(u64::from(placement.padding_top_px))?;
+    let right = u64::from(placement.col)
+        .checked_add(u64::from(placement.col_span))?
+        .checked_mul(u64::from(cell_width_px))?
+        .checked_sub(u64::from(placement.padding_right_px))?;
+    let bottom = u64::from(placement.row)
+        .checked_add(u64::from(placement.row_span))?
+        .checked_mul(u64::from(cell_height_px))?
+        .checked_sub(u64::from(placement.padding_bottom_px))?;
+    if right <= left || bottom <= top {
+        return None;
+    }
+
+    let clipped_left = left.min(viewport_right);
+    let clipped_top = top.min(viewport_bottom);
+    let clipped_right = right.min(viewport_right);
+    let clipped_bottom = bottom.min(viewport_bottom);
+    if clipped_right <= clipped_left || clipped_bottom <= clipped_top {
+        return None;
+    }
+
+    let uv_left = u64::from(placement.uv.left.min(TERMINAL_IMAGE_UV_SCALE));
+    let uv_top = u64::from(placement.uv.top.min(TERMINAL_IMAGE_UV_SCALE));
+    let uv_right = u64::from(placement.uv.right.min(TERMINAL_IMAGE_UV_SCALE));
+    let uv_bottom = u64::from(placement.uv.bottom.min(TERMINAL_IMAGE_UV_SCALE));
+    if uv_right <= uv_left || uv_bottom <= uv_top {
+        return None;
+    }
+
+    let full_width = right - left;
+    let full_height = bottom - top;
+    let uv_width = uv_right - uv_left;
+    let uv_height = uv_bottom - uv_top;
+    let proportional_offset = |range: u64, offset: u64, total: u64| -> u64 {
+        (u128::from(range) * u128::from(offset) / u128::from(total)) as u64
+    };
+    let clipped_uv_left = uv_left + proportional_offset(uv_width, clipped_left - left, full_width);
+    let clipped_uv_top = uv_top + proportional_offset(uv_height, clipped_top - top, full_height);
+    let clipped_uv_right =
+        uv_right - proportional_offset(uv_width, right - clipped_right, full_width);
+    let clipped_uv_bottom =
+        uv_bottom - proportional_offset(uv_height, bottom - clipped_bottom, full_height);
+    if clipped_uv_right <= clipped_uv_left || clipped_uv_bottom <= clipped_uv_top {
+        return None;
+    }
+
+    Some(TerminalImageDrawRect {
+        dest_x_px: u32::try_from(clipped_left).ok()?,
+        dest_y_px: u32::try_from(clipped_top).ok()?,
+        dest_width_px: u32::try_from(clipped_right - clipped_left).ok()?,
+        dest_height_px: u32::try_from(clipped_bottom - clipped_top).ok()?,
+        uv: TerminalImageUvRect {
+            left: u32::try_from(clipped_uv_left).ok()?,
+            top: u32::try_from(clipped_uv_top).ok()?,
+            right: u32::try_from(clipped_uv_right).ok()?,
+            bottom: u32::try_from(clipped_uv_bottom).ok()?,
+        },
+    })
+}
+
+pub fn terminal_image_frame_fingerprint(
+    resources: &[Arc<TerminalImageResource>],
+    placements: &[TerminalImagePlacement],
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    resources.len().hash(&mut hasher);
+    for resource in resources {
+        resource.content_hash.hash(&mut hasher);
+        resource.width.hash(&mut hasher);
+        resource.height.hash(&mut hasher);
+        resource.decoded_bytes().hash(&mut hasher);
+    }
+    placements.hash(&mut hasher);
+    hasher.finish()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -415,6 +532,11 @@ impl TerminalModelFrame {
                 row_hash,
             });
         }
+        apply_terminal_image_row_hashes(
+            &mut rows,
+            &surface.image_resources,
+            &surface.image_placements,
+        );
 
         let dirty_rows = rows
             .iter()
@@ -435,6 +557,7 @@ impl TerminalModelFrame {
             seqno: surface.seqno,
             grid_rows: surface.rows,
             grid_cols: surface.cols,
+            viewport_metrics: surface.viewport_metrics,
             rows,
             cursor: TerminalCursorModel {
                 row: surface.cursor.row,
@@ -456,6 +579,8 @@ impl TerminalModelFrame {
             bracketed_paste_enabled: surface.bracketed_paste_enabled,
             presentation_mode,
             shell_integration: surface.shell_integration,
+            image_resources: surface.image_resources.clone(),
+            image_placements: surface.image_placements.clone(),
             dirty_rows,
         }
     }
@@ -549,20 +674,27 @@ impl TerminalModelFrame {
     }
 
     fn recompute_row_hashes(&mut self, previous: Option<&TerminalModelFrame>) {
+        for row in &mut self.rows {
+            row.content_hash = hash_row_content(&row.text, row.wrapped, &row.cells);
+            row.row_hash = hash_row(
+                row.row_index,
+                &row.text,
+                row.wrapped,
+                &row.cells,
+                self.palette,
+                self.selection
+                    .and_then(|selection| selection.row_bounds(row.row_index, self.grid_cols)),
+            );
+        }
+        apply_terminal_image_row_hashes(
+            &mut self.rows,
+            &self.image_resources,
+            &self.image_placements,
+        );
         self.dirty_rows = self
             .rows
-            .iter_mut()
+            .iter()
             .filter_map(|row| {
-                row.content_hash = hash_row_content(&row.text, row.wrapped, &row.cells);
-                row.row_hash = hash_row(
-                    row.row_index,
-                    &row.text,
-                    row.wrapped,
-                    &row.cells,
-                    self.palette,
-                    self.selection
-                        .and_then(|selection| selection.row_bounds(row.row_index, self.grid_cols)),
-                );
                 let previous_hash = previous
                     .and_then(|frame| frame.rows.get(row.row_index as usize))
                     .map(|value| value.row_hash);
@@ -632,6 +764,47 @@ fn hash_row_content_into(
         cell.underline.hash(hasher);
         cell.fg_rgba.hash(hasher);
         cell.bg_rgba.hash(hasher);
+    }
+}
+
+fn apply_terminal_image_row_hashes(
+    rows: &mut [TerminalModelRow],
+    resources: &[Arc<TerminalImageResource>],
+    placements: &[TerminalImagePlacement],
+) {
+    if placements.is_empty() {
+        return;
+    }
+
+    let resources = resources
+        .iter()
+        .map(|resource| {
+            (
+                resource.content_hash,
+                (resource.width, resource.height, resource.decoded_bytes()),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    for row in rows {
+        let mut row_placements = placements.iter().filter(|placement| {
+            placement.row_span > 0
+                && row.row_index >= placement.row
+                && row.row_index < placement.row.saturating_add(placement.row_span)
+        });
+        let Some(first_placement) = row_placements.next() else {
+            continue;
+        };
+        let mut hasher = DefaultHasher::new();
+        row.row_hash.hash(&mut hasher);
+        first_placement.hash(&mut hasher);
+        resources
+            .get(&first_placement.resource_key)
+            .hash(&mut hasher);
+        for placement in row_placements {
+            placement.hash(&mut hasher);
+            resources.get(&placement.resource_key).hash(&mut hasher);
+        }
+        row.row_hash = hasher.finish();
     }
 }
 
@@ -715,4 +888,131 @@ fn blend_search_match_background(base_rgba: u32, overlay_rgb: u32, alpha: f32) -
         | (mix(base_red, overlay_red) << 16)
         | (mix(base_green, overlay_green) << 8)
         | mix(base_blue, overlay_blue)
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::*;
+
+    fn placement() -> TerminalImagePlacement {
+        TerminalImagePlacement {
+            resource_key: [7; 32],
+            row: 0,
+            col: 0,
+            row_span: 1,
+            col_span: 1,
+            uv: TerminalImageUvRect {
+                left: 0,
+                top: 0,
+                right: TERMINAL_IMAGE_UV_SCALE,
+                bottom: TERMINAL_IMAGE_UV_SCALE,
+            },
+            padding_left_px: 0,
+            padding_top_px: 0,
+            padding_right_px: 0,
+            padding_bottom_px: 0,
+            z_index: -1,
+            image_id: Some(4),
+            placement_id: Some(9),
+            protocol_order: 2,
+        }
+    }
+
+    #[test]
+    fn terminal_image_draw_rect_applies_cell_span_and_padding() {
+        let mut placement = placement();
+        placement.padding_left_px = 1;
+        placement.padding_top_px = 2;
+        placement.padding_right_px = 3;
+        placement.padding_bottom_px = 4;
+
+        assert_eq!(
+            terminal_image_draw_rect(&placement, 2, 2, 10, 20),
+            Some(TerminalImageDrawRect {
+                dest_x_px: 1,
+                dest_y_px: 2,
+                dest_width_px: 6,
+                dest_height_px: 14,
+                uv: placement.uv,
+            })
+        );
+    }
+
+    #[test]
+    fn terminal_image_draw_rect_clips_destination_and_uv_together() {
+        let mut placement = placement();
+        placement.row = 1;
+        placement.col = 1;
+        placement.row_span = 2;
+        placement.col_span = 2;
+        placement.padding_left_px = 2;
+        placement.padding_top_px = 3;
+        placement.padding_right_px = 4;
+        placement.padding_bottom_px = 5;
+
+        assert_eq!(
+            terminal_image_draw_rect(&placement, 2, 2, 10, 20),
+            Some(TerminalImageDrawRect {
+                dest_x_px: 12,
+                dest_y_px: 23,
+                dest_width_px: 8,
+                dest_height_px: 17,
+                uv: TerminalImageUvRect {
+                    left: 0,
+                    top: 0,
+                    right: 571_429,
+                    bottom: 531_250,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn terminal_image_frame_fingerprint_tracks_placement_layer_changes() {
+        let resource = Arc::new(TerminalImageResource {
+            content_hash: [7; 32],
+            width: 1,
+            height: 1,
+            rgba: Arc::<[u8]>::from([255, 0, 0, 128]),
+        });
+        let below_text = placement();
+        let mut above_text = below_text.clone();
+        above_text.z_index = 0;
+
+        assert_ne!(
+            terminal_image_frame_fingerprint(std::slice::from_ref(&resource), &[below_text]),
+            terminal_image_frame_fingerprint(std::slice::from_ref(&resource), &[above_text]),
+        );
+    }
+
+    #[test]
+    fn terminal_image_changes_dirty_only_intersected_model_rows() {
+        let mut surface = TerminalSurfaceState::from_visible_lines(
+            Uuid::new_v4(),
+            1,
+            3,
+            4,
+            vec![String::new(), String::new(), String::new()],
+        );
+        let baseline = TerminalModelFrame::from_surface(&surface, None);
+        let resource = Arc::new(TerminalImageResource {
+            content_hash: [7; 32],
+            width: 1,
+            height: 1,
+            rgba: Arc::<[u8]>::from([255, 0, 0, 255]),
+        });
+        let mut image = placement();
+        image.row = 1;
+        image.row_span = 2;
+        surface.image_resources = vec![resource];
+        surface.image_placements = vec![image];
+
+        let with_image = TerminalModelFrame::from_surface(&surface, Some(&baseline));
+        assert_eq!(with_image.dirty_rows, vec![1, 2]);
+
+        surface.image_resources.clear();
+        surface.image_placements.clear();
+        let without_image = TerminalModelFrame::from_surface(&surface, Some(&with_image));
+        assert_eq!(without_image.dirty_rows, vec![1, 2]);
+    }
 }

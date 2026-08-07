@@ -1,0 +1,354 @@
+import { ListView } from "std-widgets.slint";
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export struct ClipboardImagePreviewItem {
+    request_id: string,
+    thumbnail: image,
+    source_width: int,
+    source_height: int,
+    status: string,
+    detail: string,
+    paste_enabled: bool,
+    copy_enabled: bool,
+    collapsed: bool,
+    progress-value: float,
+    progress-text: string,
+    speed-text: string,
+}
+
+component ClipboardPreviewIconButton inherits Rectangle {
+    in property <image> icon-source;
+    in property <string> tooltip-text;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border-width: button-touch.has-hover ? 1px : 0px;
+    border-color: ThemeTokens.divider-subtle;
+    background: !root.enabled
+        ? transparent
+        : button-touch.pressed
+            ? ThemeTokens.control-pressed-surface
+            : button-touch.has-hover
+                ? ThemeTokens.control-hover-surface
+                : transparent;
+    accessible-role: AccessibleRole.button;
+    accessible-label: root.tooltip-text;
+    accessible-action-default => {
+        if root.enabled {
+            root.clicked();
+        }
+    }
+
+    Image {
+        x: 4px;
+        y: 4px;
+        width: 20px;
+        height: 20px;
+        source: root.icon-source;
+        image-fit: contain;
+        colorize: root.enabled ? ThemeTokens.text-secondary : ThemeTokens.text-muted;
+        opacity: root.enabled ? 1 : 0.45;
+    }
+
+    button-touch := TouchArea {
+        enabled: root.enabled;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    if button-touch.has-hover && root.tooltip-text != "" : tooltip := Rectangle {
+        x: parent.width - self.width;
+        y: parent.height + 4px;
+        width: max(72px, tooltip-label.preferred-width + 16px);
+        height: 26px;
+        z: 40;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: ThemeTokens.divider-strong;
+        background: ThemeTokens.panel-surface;
+
+        tooltip-label := Text {
+            x: 8px;
+            width: parent.width - 16px;
+            height: parent.height;
+            text: root.tooltip-text;
+            color: ThemeTokens.text-primary;
+            font-size: 10px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+}
+
+component ClipboardPreviewPasteButton inherits Rectangle {
+    in property <image> icon-source;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    width: 104px;
+    height: 30px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.enabled ? ThemeTokens.accent : ThemeTokens.divider-subtle;
+    background: !root.enabled
+        ? transparent
+        : paste-touch.pressed
+            ? ThemeTokens.control-pressed-surface
+            : paste-touch.has-hover
+                ? ThemeTokens.control-hover-surface
+                : ThemeTokens.control-active-surface;
+    accessible-role: AccessibleRole.button;
+    accessible-label: "Paste path";
+    accessible-action-default => {
+        if root.enabled {
+            root.clicked();
+        }
+    }
+
+    Image {
+        x: 9px;
+        y: 6px;
+        width: 18px;
+        height: 18px;
+        source: root.icon-source;
+        image-fit: contain;
+        colorize: root.enabled ? ThemeTokens.accent : ThemeTokens.text-muted;
+    }
+
+    Text {
+        x: 33px;
+        y: 0px;
+        width: parent.width - 41px;
+        height: parent.height;
+        text: "Paste path";
+        color: root.enabled ? ThemeTokens.text-primary : ThemeTokens.text-muted;
+        font-size: 11px;
+        font-weight: 600;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    paste-touch := TouchArea {
+        enabled: root.enabled;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component ClipboardImagePreviewOverlay inherits Rectangle {
+    in property <[ClipboardImagePreviewItem]> items: [];
+    callback paste-path-requested(string);
+    callback copy-path-requested(string);
+    callback dismiss-requested(string);
+
+    background: transparent;
+    clip: true;
+
+    private property <image> copy-icon: @image-url("../../assets/icons/fluent/copy-20-regular.svg");
+    private property <image> dismiss-icon: @image-url("../../assets/icons/fluent/dismiss-20-regular.svg");
+    private property <image> image-icon: @image-url("../../assets/icons/fluent/image-20-regular.svg");
+    private property <image> upload-icon: @image-url("../../assets/icons/fluent/arrow-upload-20-regular.svg");
+
+    TouchArea {}
+
+    preview-list := ListView {
+        width: parent.width;
+        height: parent.height;
+
+        for item in root.items : row := Rectangle {
+            private property <bool> pending: item.status == "preparing"
+                || item.status == "queued"
+                || item.status == "uploading";
+            private property <bool> stale: item.status == "stale";
+            private property <bool> failed: item.status == "error";
+            private property <bool> show-progress: item.status == "uploading"
+                || item.status == "success"
+                || item.status == "stale";
+            private property <string> title: item.status == "preparing"
+                ? "Preparing image"
+                : item.status == "queued"
+                    ? "Image queued"
+                    : item.status == "uploading"
+                        ? "Uploading image"
+                        : item.status == "stale"
+                            ? "Image path is ready"
+                            : item.status == "error"
+                                ? "Image paste failed"
+                                : "Image path pasted";
+            private property <brush> tone: row.failed
+                ? ThemeTokens.status-error-accent
+                : item.status == "success"
+                    ? ThemeTokens.status-success-accent
+                    : row.stale
+                        ? ThemeTokens.accent
+                        : ThemeTokens.status-busy-accent;
+            private property <length> preview-width: row.pending ? 112px : 88px;
+            private property <length> preview-height: row.pending ? 72px : 52px;
+            private property <length> detail-x: row.pending ? 134px : 112px;
+
+            height: item.collapsed ? 72px : row.stale ? 142px : row.failed ? 122px : 142px;
+            background: transparent;
+
+            card := Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height - 6px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: row.tone;
+                background: ThemeTokens.panel-surface;
+
+                Image {
+                    x: 12px;
+                    y: item.collapsed ? 11px : 10px;
+                    width: item.collapsed ? 20px : 22px;
+                    height: item.collapsed ? 20px : 22px;
+                    source: row.pending ? root.upload-icon : root.image-icon;
+                    image-fit: contain;
+                    colorize: row.tone;
+                }
+
+                Text {
+                    x: item.collapsed ? 42px : 42px;
+                    y: item.collapsed ? 3px : 8px;
+                    width: max(0px, parent.width - (item.copy_enabled ? 120px : 82px));
+                    height: item.collapsed ? 28px : 24px;
+                    text: row.title;
+                    color: ThemeTokens.text-primary;
+                    font-size: 12px;
+                    font-weight: 650;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                if item.copy_enabled : copy-button := ClipboardPreviewIconButton {
+                    x: parent.width - 68px;
+                    y: 7px;
+                    icon-source: root.copy-icon;
+                    tooltip-text: "Copy path";
+                    enabled: item.copy_enabled;
+
+                    clicked => {
+                        root.copy-path-requested(item.request_id);
+                    }
+                }
+
+                dismiss-button := ClipboardPreviewIconButton {
+                    x: parent.width - 36px;
+                    y: item.collapsed ? 7px : 7px;
+                    icon-source: root.dismiss-icon;
+                    tooltip-text: "Dismiss";
+
+                    clicked => {
+                        root.dismiss-requested(item.request_id);
+                    }
+                }
+
+                if !item.collapsed : thumbnail-shell := Rectangle {
+                    x: 12px;
+                    y: 40px;
+                    width: row.preview-width;
+                    height: row.preview-height;
+                    border-radius: 6px;
+                    border-width: 1px;
+                    border-color: ThemeTokens.divider-subtle;
+                    background: ThemeTokens.control-active-surface;
+                    clip: true;
+
+                    if item.thumbnail.width > 0 && item.thumbnail.height > 0 : Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: item.thumbnail;
+                        image-fit: contain;
+                    }
+
+                    if item.thumbnail.width <= 0 || item.thumbnail.height <= 0 : Image {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        width: 24px;
+                        height: 24px;
+                        source: row.pending ? root.upload-icon : root.image-icon;
+                        image-fit: contain;
+                        colorize: row.tone;
+                        opacity: 0.8;
+                    }
+                }
+
+                if !item.collapsed : Text {
+                    x: row.detail-x;
+                    y: 42px;
+                    width: max(0px, parent.width - row.detail-x - 12px);
+                    height: 18px;
+                    text: item.source_width > 0 && item.source_height > 0
+                        ? item.source_width + " x " + item.source_height
+                        : "Reading clipboard";
+                    color: ThemeTokens.text-secondary;
+                    font-size: 10px;
+                    overflow: elide;
+                }
+
+                if !item.collapsed : Text {
+                    x: row.detail-x;
+                    y: 62px;
+                    width: max(0px, parent.width - row.detail-x - 12px);
+                    height: row.stale ? 16px : 48px;
+                    text: item.detail;
+                    color: row.failed ? ThemeTokens.status-error-accent : ThemeTokens.text-secondary;
+                    font-size: 10px;
+                    wrap: word-wrap;
+                    overflow: elide;
+                }
+
+                if item.paste_enabled : paste-button := ClipboardPreviewPasteButton {
+                    x: row.detail-x;
+                    y: 82px;
+                    width: min(104px, max(0px, parent.width - row.detail-x - 12px));
+                    icon-source: root.image-icon;
+                    enabled: item.paste_enabled;
+
+                    clicked => {
+                        root.paste-path-requested(item.request_id);
+                    }
+                }
+
+                if row.show-progress : progress-track := Rectangle {
+                    x: item.collapsed ? 42px : row.detail-x;
+                    y: item.collapsed ? 34px : row.stale ? 114px : 112px;
+                    width: max(0px, parent.width - self.x - 12px);
+                    height: 5px;
+                    border-radius: 2px;
+                    background: ThemeTokens.divider-subtle;
+                    clip: true;
+
+                    Rectangle {
+                        width: parent.width * min(1.0, max(0.0, item.progress-value));
+                        height: parent.height;
+                        border-radius: 2px;
+                        background: row.tone;
+                    }
+                }
+
+                if row.show-progress : Text {
+                    x: item.collapsed ? 42px : row.detail-x;
+                    y: item.collapsed ? 43px : row.stale ? 122px : 120px;
+                    width: max(0px, parent.width - self.x - 12px);
+                    height: 14px;
+                    text: item.progress-text + " | " + item.speed-text;
+                    color: ThemeTokens.text-secondary;
+                    font-size: 9px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+        }
+    }
+}

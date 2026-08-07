@@ -1,8 +1,12 @@
 //! SSH runtime public terminal contracts.
 
+use std::sync::Arc;
+
 use uuid::Uuid;
 
-use crate::app::terminal_core::TerminalFrameSnapshot;
+use crate::app::terminal_core::{
+    TerminalFrameSnapshot, TerminalImagePlacement, TerminalImageResource, TerminalViewportMetrics,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalSurfaceState {
@@ -10,6 +14,7 @@ pub struct TerminalSurfaceState {
     pub seqno: usize,
     pub rows: u32,
     pub cols: u32,
+    pub viewport_metrics: TerminalViewportMetrics,
     pub default_fg_rgba: u32,
     pub default_bg_rgba: u32,
     pub row_bg_even_rgba: u32,
@@ -20,6 +25,8 @@ pub struct TerminalSurfaceState {
     pub visible_rows: Vec<TerminalRowState>,
     pub visible_lines: Vec<String>,
     pub cells: Vec<TerminalCellState>,
+    pub image_resources: Vec<Arc<TerminalImageResource>>,
+    pub image_placements: Vec<TerminalImagePlacement>,
     pub cursor: TerminalCursorState,
     pub alternate_screen_active: bool,
     pub mouse_grabbed: bool,
@@ -34,6 +41,7 @@ pub struct TerminalSurfaceSignature {
     pub seqno: usize,
     pub rows: u32,
     pub cols: u32,
+    pub viewport_metrics: TerminalViewportMetrics,
     pub default_fg_rgba: u32,
     pub default_bg_rgba: u32,
     pub row_bg_even_rgba: u32,
@@ -269,6 +277,7 @@ impl TerminalSurfaceState {
             seqno: frame.seqno,
             rows: frame.rows,
             cols: frame.cols,
+            viewport_metrics: frame.viewport_metrics,
             default_fg_rgba: frame.default_fg_rgba,
             default_bg_rgba: frame.default_bg_rgba,
             row_bg_even_rgba: frame.row_bg_even_rgba,
@@ -279,6 +288,8 @@ impl TerminalSurfaceState {
             visible_rows: frame.visible_rows,
             visible_lines: frame.visible_lines,
             cells: frame.cells,
+            image_resources: frame.image_resources,
+            image_placements: frame.image_placements,
             cursor: frame.cursor,
             alternate_screen_active: frame.alternate_screen_active,
             mouse_grabbed: frame.mouse_grabbed,
@@ -294,6 +305,7 @@ impl TerminalSurfaceState {
             seqno: self.seqno,
             rows: self.rows,
             cols: self.cols,
+            viewport_metrics: self.viewport_metrics,
             default_fg_rgba: self.default_fg_rgba,
             default_bg_rgba: self.default_bg_rgba,
             row_bg_even_rgba: self.row_bg_even_rgba,
@@ -327,6 +339,7 @@ impl TerminalSurfaceState {
             seqno,
             rows,
             cols,
+            viewport_metrics: TerminalViewportMetrics::fallback(rows as usize, cols as usize),
             default_fg_rgba: 0xff00_0000,
             default_bg_rgba: 0xffff_ffff,
             row_bg_even_rgba: 0xffff_ffff,
@@ -345,6 +358,8 @@ impl TerminalSurfaceState {
                 .collect(),
             visible_lines,
             cells: Vec::new(),
+            image_resources: Vec::new(),
+            image_placements: Vec::new(),
             cursor: TerminalCursorState {
                 row: 0,
                 col: 0,

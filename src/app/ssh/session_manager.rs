@@ -26,6 +26,7 @@ use crate::app::ssh::runtime::{
     TerminalSurfaceSignature, TerminalSurfaceState, UnknownHostKeyError,
     ZmodemDownloadConflictPolicy, ZmodemTransferState,
 };
+use crate::app::terminal_core::{LocalTerminalImage, TerminalViewportMetrics};
 use crate::theme::{ThemeMode, ThemeVariant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,6 +145,9 @@ pub trait SessionRuntimeControl: Send {
     fn send_key_input(&self, event: TerminalKeyEvent) -> Result<()>;
     fn send_mouse_input(&self, event: TerminalMouseInput) -> Result<()>;
     fn send_paste(&self, text: String) -> Result<()>;
+    fn apply_local_image(&self, _image: LocalTerminalImage) -> Result<TerminalSurfaceState> {
+        Err(anyhow!("session runtime does not support local images"))
+    }
     fn start_zmodem_upload(&self, _local_paths: Vec<PathBuf>) -> Result<()> {
         Err(anyhow!("session runtime does not support zmodem uploads"))
     }
@@ -192,6 +196,14 @@ pub trait SessionRuntimeControl: Send {
         Ok(None)
     }
     fn resize(&self, rows: u32, cols: u32) -> Result<()>;
+    fn resize_with_viewport(
+        &self,
+        rows: u32,
+        cols: u32,
+        _viewport: TerminalViewportMetrics,
+    ) -> Result<()> {
+        self.resize(rows, cols)
+    }
     fn terminal_surface(&self) -> Result<TerminalSurfaceState> {
         Err(anyhow!(
             "session runtime does not expose terminal surface snapshots"
@@ -416,6 +428,21 @@ impl SessionManager {
             .cloned()
     }
 
+    pub fn sftp_runtime_binding(&self, session_id: Uuid) -> Result<(Uuid, SftpRuntimeHandle)> {
+        let registry = self.registry.lock().expect("lock session registry");
+        if !registry.sessions.contains_key(&session_id) {
+            return Err(anyhow!("session `{session_id}` does not exist"));
+        }
+        let binding = registry
+            .sftp_bindings
+            .get(&session_id)
+            .ok_or_else(|| anyhow!("sftp binding is unavailable for session `{session_id}`"))?;
+        let runtime = binding
+            .runtime()
+            .ok_or_else(|| anyhow!("sftp runtime is unavailable for session `{session_id}`"))?;
+        Ok((binding.binding_id(), runtime))
+    }
+
     pub fn current_working_directory(&self, session_id: Uuid) -> Option<String> {
         self.registry
             .lock()
@@ -559,6 +586,15 @@ impl SessionManager {
     ) -> Result<u64> {
         self.runtime_handle
             .block_on(self.sftp_upload_file_async(session_id, remote_path, data))
+    }
+
+    pub async fn sftp_upload_clipboard_png_async(
+        &self,
+        session_id: Uuid,
+        data: Vec<u8>,
+    ) -> Result<String> {
+        let runtime = self.sftp_runtime(session_id)?;
+        runtime.upload_clipboard_png(session_id, data).await
     }
 
     pub async fn sftp_stat_async(
@@ -850,12 +886,29 @@ impl SessionManager {
     }
 
     pub fn resize_session(&self, session_id: Uuid, rows: u32, cols: u32) -> Result<()> {
+        self.resize_session_with_viewport(
+            session_id,
+            rows,
+            cols,
+            TerminalViewportMetrics::fallback(rows as usize, cols as usize),
+        )
+    }
+
+    pub fn resize_session_with_viewport(
+        &self,
+        session_id: Uuid,
+        rows: u32,
+        cols: u32,
+        viewport: TerminalViewportMetrics,
+    ) -> Result<()> {
         let runtime_control = {
             let mut registry = self.registry.lock().expect("lock session registry");
             if let Some(runtime_control) = registry.runtime_controls.get(&session_id).cloned() {
                 Some(runtime_control)
             } else if registry.sessions.contains_key(&session_id) {
-                registry.pending_resizes.insert(session_id, (rows, cols));
+                registry
+                    .pending_resizes
+                    .insert(session_id, (rows, cols, viewport));
                 return Ok(());
             } else {
                 None
@@ -865,7 +918,7 @@ impl SessionManager {
             return runtime_control
                 .lock()
                 .expect("lock session runtime control for resize")
-                .resize(rows, cols);
+                .resize_with_viewport(rows, cols, viewport);
         }
         Err(anyhow!("session runtime is not ready for `{session_id}`"))
     }
@@ -886,6 +939,51 @@ impl SessionManager {
             .lock()
             .expect("lock session runtime control for paste")
             .send_paste(text)
+    }
+
+    pub fn apply_session_local_image(
+        &self,
+        session_id: Uuid,
+        image: LocalTerminalImage,
+    ) -> Result<()> {
+        let surface = self
+            .runtime_control_for_session(session_id)?
+            .lock()
+            .expect("lock session runtime control for local image")
+            .apply_local_image(image)?;
+        update_terminal_surface(&self.registry, session_id, surface);
+        Ok(())
+    }
+
+    pub fn send_session_paste_if_sftp_binding_current(
+        &self,
+        session_id: Uuid,
+        binding_id: Uuid,
+        text: String,
+    ) -> Result<bool> {
+        let runtime_control = {
+            let registry = self.registry.lock().expect("lock session registry");
+            let binding_is_current = registry.sessions.contains_key(&session_id)
+                && registry
+                    .sftp_bindings
+                    .get(&session_id)
+                    .is_some_and(|binding| {
+                        binding.binding_id() == binding_id && binding.runtime().is_some()
+                    });
+            if !binding_is_current {
+                return Ok(false);
+            }
+            registry.runtime_controls.get(&session_id).cloned()
+        };
+
+        let Some(runtime_control) = runtime_control else {
+            return Ok(false);
+        };
+        runtime_control
+            .lock()
+            .expect("lock binding-matched session runtime control for paste")
+            .send_paste(text)?;
+        Ok(true)
     }
 
     pub fn start_zmodem_upload(&self, session_id: Uuid, local_paths: Vec<PathBuf>) -> Result<()> {
@@ -1404,7 +1502,7 @@ struct SessionRegistry {
     sftp_bindings: HashMap<Uuid, SftpSessionBinding>,
     disabled_enhancement_sessions: HashSet<Uuid>,
     pending_disconnects: HashSet<Uuid>,
-    pending_resizes: HashMap<Uuid, (u32, u32)>,
+    pending_resizes: HashMap<Uuid, (u32, u32, TerminalViewportMetrics)>,
     theme_mode: ThemeMode,
     theme_variant: ThemeVariant,
 }
@@ -1875,7 +1973,7 @@ fn attach_runtime_control(
         refresh_runtime_surface(registry, session_id);
     }
 
-    if let Some((rows, cols)) = pending_resize {
+    if let Some((rows, cols, viewport)) = pending_resize {
         let runtime_control = {
             let registry = registry.lock().expect("lock session registry");
             registry.runtime_controls.get(&session_id).cloned()
@@ -1884,7 +1982,7 @@ fn attach_runtime_control(
             let _ = runtime_control
                 .lock()
                 .expect("lock session runtime control for pending resize")
-                .resize(rows, cols);
+                .resize_with_viewport(rows, cols, viewport);
         }
     }
 }

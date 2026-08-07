@@ -344,21 +344,24 @@ fn bootstrap_and_ssh_runtime_sources_thread_live_terminal_viewport_defaults() {
     let pump_source = fs::read_to_string("src/app/ssh/runtime/pump.rs").expect("read ssh pump");
 
     assert!(
-        bootstrap_source.contains("terminal_defaults.set_viewport_size("),
-        "bootstrap should publish the live terminal viewport contract into TerminalRuntimeDefaults whenever the host computes a new rows/cols resize"
+        bootstrap_source.contains("terminal_defaults.set_viewport_metrics(")
+            && bootstrap_source.contains("workspace_terminal_viewport_dpi(window)"),
+        "bootstrap should publish physical viewport pixels and DPI into TerminalRuntimeDefaults whenever the host computes a new rows/cols resize"
     );
     assert!(
-        runtime_source.contains("terminal_defaults.viewport_rows()")
-            && runtime_source.contains("terminal_defaults.viewport_cols()")
-            && runtime_source.contains("terminal_defaults.viewport_pixel_width()")
-            && runtime_source.contains("terminal_defaults.viewport_pixel_height()"),
-        "SSH runtime should source its initial PTY request from the live viewport defaults instead of hard-coding 80x24"
+        runtime_source.contains("terminal_defaults.viewport()")
+            && runtime_source.contains("new_with_scrollback_and_viewport")
+            && runtime_source.contains("pty_viewport.pixel_width")
+            && runtime_source.contains("pty_viewport.pixel_height"),
+        "SSH runtime should initialize the terminal core and PTY request from one live viewport snapshot instead of hard-coding 80x24"
     );
     assert!(
-        runtime_source.contains("pixel_width")
-            && runtime_source.contains("pixel_height")
-            && pump_source.contains(".window_change(cols, rows, pixel_width, pixel_height)"),
-        "subsequent SSH window_change resizes should keep using the live viewport pixel contract instead of falling back to a synthetic 8x16 cell estimate"
+        runtime_source.contains("viewport: TerminalViewportMetrics")
+            && pump_source.contains("terminal.resize_with_viewport(")
+            && pump_source.contains(
+                ".window_change(cols, rows, viewport.pixel_width, viewport.pixel_height)",
+            ),
+        "subsequent terminal-core and SSH window_change resizes should use the same physical viewport and DPI contract instead of a synthetic 8x16 estimate"
     );
 }
 

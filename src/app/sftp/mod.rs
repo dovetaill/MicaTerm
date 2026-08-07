@@ -43,10 +43,11 @@ pub use queue::{
     TransferQueueSummary, TransferResumeMode, TransferTask, TransferTaskAction, TransferTaskState,
     download_part_path,
 };
+pub(crate) use runtime::remote_child_path;
 pub use runtime::{
-    BoxedSftpReader, BoxedSftpWriter, SftpAsyncReader, SftpAsyncWriter, SftpBackend,
-    SftpOperationFuture, SftpReaderFuture, SftpRemoteMetadata, SftpRuntimeHandle, SftpWriteMode,
-    SftpWriterFuture,
+    BoxedSftpReader, BoxedSftpWriter, CLIPBOARD_UPLOAD_CHUNK_BYTES, ClipboardUploadProgress,
+    SftpAsyncReader, SftpAsyncWriter, SftpBackend, SftpOperationFuture, SftpReaderFuture,
+    SftpRemoteMetadata, SftpRuntimeHandle, SftpWriteMode, SftpWriterFuture,
 };
 pub use session_binding::{
     SftpSessionBinding, collect_download_targets, delete_entries, execute_queued_transfers,

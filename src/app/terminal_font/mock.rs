@@ -4,11 +4,13 @@ use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
 use anyhow::{Result, anyhow};
 
 use crate::app::terminal_font::backend::{
-    FontFaceKey, FontMetrics, FontRenderProfile, FontRequest, FontSystem, GlyphRasterRequest,
-    LoadedFont, terminal_cell_width_px,
+    FontFaceKey, FontMetrics, FontRenderProfile, FontRequest, FontSystem, LoadedFont,
+    terminal_cell_width_px,
 };
 #[cfg(feature = "terminal-native-renderer")]
-use crate::app::terminal_font::backend::{RasterizedGlyph, ShapedGlyph, shape_text_with_rustybuzz};
+use crate::app::terminal_font::backend::{
+    GlyphRasterRequest, RasterizedGlyph, ShapedGlyph, shape_text_with_rustybuzz,
+};
 #[cfg(feature = "terminal-native-renderer")]
 use ab_glyph::{Glyph, GlyphId, point};
 

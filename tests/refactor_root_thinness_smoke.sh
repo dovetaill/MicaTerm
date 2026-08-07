@@ -92,7 +92,7 @@ grep -F 'pub(super) fn ssh_client_config() -> client::Config' "$RUNTIME_TRANSPOR
 }
 
 for moved_symbol in \
-  'pub fn negotiated_terminal_environment() -> [(&'\''static str, &'\''static str); 2]' \
+  'pub fn negotiated_terminal_environment() -> [(&'\''static str, &'\''static str); 3]' \
   'pub(super) async fn await_channel_success(' \
   'pub(super) async fn negotiate_terminal_environment('
 do
@@ -104,7 +104,7 @@ done
 
 for stale_symbol in \
   'fn ssh_client_config() -> client::Config' \
-  'pub fn negotiated_terminal_environment() -> [(&'\''static str, &'\''static str); 2]' \
+  'pub fn negotiated_terminal_environment() -> [(&'\''static str, &'\''static str); 3]' \
   'async fn await_channel_success(' \
   'async fn negotiate_terminal_environment('
 do

@@ -21,9 +21,9 @@ fn runtime_visible_projection_limits_iteration_to_visible_phys_range() {
         "    pub fn visible_rows(&self) -> Vec<TerminalRowState> {",
         "    pub fn visible_lines(&self) -> Vec<String> {",
     );
-    let visible_cells_block = block_between(
+    let visible_content_block = block_between(
         &adapter_source,
-        "    fn visible_cells(&self, palette: &ColorPalette) -> Vec<TerminalCellState> {",
+        "    fn visible_content(",
         "    fn cursor_state(&self, palette: &ColorPalette) -> TerminalCursorState {",
     );
 
@@ -36,12 +36,12 @@ fn runtime_visible_projection_limits_iteration_to_visible_phys_range() {
         "visible row projection should not walk the full scrollback when only the visible viewport needs to be projected"
     );
     assert!(
-        visible_cells_block.contains("lines_in_phys_range(visible_start..visible_end"),
-        "visible cell projection should iterate only the visible phys range so bitmap/native presenters do not rebuild from a full scrollback scan during scrollbar drags"
+        visible_content_block.contains("lines_in_phys_range(visible_start..visible_end"),
+        "visible cell and image projection should iterate only the visible phys range so bitmap/native presenters do not rebuild from a full scrollback scan during scrollbar drags"
     );
     assert!(
-        !visible_cells_block.contains("for_each_phys_line"),
-        "visible cell projection should not walk the full scrollback when projecting the current viewport"
+        !visible_content_block.contains("for_each_phys_line"),
+        "visible cell and image projection should not walk the full scrollback when projecting the current viewport"
     );
     assert!(
         adapter_source.contains(

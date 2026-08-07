@@ -639,6 +639,49 @@ fn winit_backend_maps_named_copy_and_paste_keys_into_terminal_shortcut_chars() {
 }
 
 #[test]
+fn display_clipboard_image_shortcut_and_menu_remain_distinct_from_paste() {
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+    let workspace_pane =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+
+    for source in [&terminal_host, &workspace_pane] {
+        assert!(
+            source.contains("callback display-clipboard-image-requested();")
+                && source.contains("root.display-clipboard-image-requested();"),
+            "terminal and workspace layers must declare and forward the inline image action"
+        );
+        assert!(
+            source.contains("callback paste-requested();")
+                && source.contains("root.paste-requested();"),
+            "standard Paste must remain a distinct callback"
+        );
+    }
+    assert!(
+        app_window.contains("callback workspace-session-display-clipboard-image-requested();")
+            && app_window.contains("root.workspace-session-display-clipboard-image-requested();")
+            && app_window.contains("callback workspace-session-paste-requested();"),
+        "AppWindow must expose separate local-display and standard Paste callbacks"
+    );
+    assert!(
+        terminal_host.contains("function is-display-clipboard-image-shortcut-key")
+            && terminal_host.contains("text == \"i\" || text == \"I\"")
+            && terminal_host.contains("root.display-clipboard-image-requested();"),
+        "Ctrl+Shift+I should be handled as an explicit local terminal command"
+    );
+    let paste_row = terminal_host.find("paste-row :=").expect("Paste menu row");
+    let display_row = terminal_host
+        .find("display-clipboard-image-row :=")
+        .expect("Display Clipboard Image menu row");
+    let select_all_row = terminal_host
+        .find("select-all-row :=")
+        .expect("Select All menu row");
+    assert!(paste_row < display_row && display_row < select_all_row);
+    assert!(terminal_host.contains("label: \"Display Clipboard Image\";"));
+}
+
+#[test]
 fn logging_runtime_source_omits_terminal_render_mode_metadata() {
     let logging_runtime =
         fs::read_to_string("src/app/logging/runtime.rs").expect("read logging runtime");

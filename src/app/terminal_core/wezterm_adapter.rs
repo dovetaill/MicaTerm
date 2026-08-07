@@ -1,22 +1,35 @@
 //! Wezterm-backed terminal core adapter.
 
-use std::io::{self, Write};
-use std::sync::{Arc, Mutex};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::{self, Cursor, Write};
+use std::sync::{Arc, Mutex, Weak};
 
 use anyhow::{Result, bail};
+use image::{ImageReader, Limits};
+use sha2::{Digest, Sha256};
 use termwiz::input::{KeyCode, KeyCodeEncodeModes, KeyboardEncoding, Modifiers as KeyModifiers};
 use uuid::Uuid;
 use wezterm_surface::{CursorShape, CursorVisibility};
 use wezterm_term::color::{ColorAttribute, ColorPalette, SrgbaTuple};
-use wezterm_term::{Intensity, Line, Terminal, TerminalConfiguration, TerminalSize, Underline};
+use wezterm_term::image::{ImageData, ImageDataType};
+use wezterm_term::{
+    ImageAttachParams, ImageAttachStyle, Intensity, Line, Terminal, TerminalConfiguration,
+    TerminalSize, Underline,
+};
 
+use crate::app::image_policy::{
+    MAX_BASE64_IMAGE_SEQUENCE_BYTES, MAX_DECODED_IMAGE_BYTES, MAX_ENCODED_IMAGE_BYTES,
+    MAX_IMAGE_PIXELS, MAX_SIXEL_SEQUENCE_BYTES, MAX_TERMINAL_IMAGE_RESOURCE_BYTES,
+};
 use crate::app::ssh::runtime::{
     TerminalCellState, TerminalCursorShape, TerminalCursorState, TerminalKeyEvent, TerminalKeyKind,
     TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput, TerminalRowState,
     TerminalSurfaceState,
 };
 use crate::app::terminal_core::{
-    SelectionState, TerminalCoreAdapter, TerminalFrameSnapshot, ViewportState,
+    LocalTerminalImage, SelectionState, TerminalCoreAdapter, TerminalFrameSnapshot,
+    TerminalImagePlacement, TerminalImageResource, TerminalImageUvRect, TerminalViewportMetrics,
+    ViewportState,
 };
 use crate::app::terminal_theme::{palette_for_theme, preset_for_theme};
 use crate::theme::{ThemeMode, ThemeVariant};
@@ -34,13 +47,84 @@ pub struct WeztermTerminalCoreAdapter {
     fallback_mouse_button: Option<TerminalMouseButton>,
     pending_remote_line_buffer: PendingRemoteLineBuffer,
     pending_paste_highlight_filter: Option<PendingPasteHighlightFilter>,
+    image_protocol_guard: RemoteImageProtocolGuard,
     keyboard_modes: TerminalKeyboardModes,
     mouse_modes: TerminalMouseModes,
     viewport_offset_lines: usize,
+    image_resource_cache: Mutex<ImageResourceProjectionCache>,
+    local_image_resource_budget: LocalImageResourceBudget,
+}
+
+struct LocalImageResourceLease {
+    resource: Weak<ImageData>,
+    decoded_bytes: usize,
+}
+
+#[derive(Default)]
+struct LocalImageResourceBudget {
+    leases: VecDeque<LocalImageResourceLease>,
+    retained_bytes: usize,
+}
+
+impl LocalImageResourceBudget {
+    fn ensure_can_admit(&mut self, decoded_bytes: usize) -> Result<()> {
+        self.prune_expired();
+        if decoded_bytes > MAX_TERMINAL_IMAGE_RESOURCE_BYTES
+            || self.retained_bytes.saturating_add(decoded_bytes) > MAX_TERMINAL_IMAGE_RESOURCE_BYTES
+        {
+            bail!(
+                "local terminal image resources exceed the {} MiB session limit",
+                MAX_TERMINAL_IMAGE_RESOURCE_BYTES / (1024 * 1024)
+            );
+        }
+        Ok(())
+    }
+
+    fn retain(&mut self, resource: &Arc<ImageData>, decoded_bytes: usize) {
+        self.retained_bytes = self.retained_bytes.saturating_add(decoded_bytes);
+        self.leases.push_back(LocalImageResourceLease {
+            resource: Arc::downgrade(resource),
+            decoded_bytes,
+        });
+    }
+
+    fn prune_expired(&mut self) {
+        self.leases.retain(|lease| {
+            if lease.resource.upgrade().is_some() {
+                true
+            } else {
+                self.retained_bytes = self.retained_bytes.saturating_sub(lease.decoded_bytes);
+                false
+            }
+        });
+    }
+}
+
+struct ValidatedLocalImage {
+    resource: Arc<ImageData>,
+    source_width: u32,
+    source_height: u32,
+    columns: u32,
+    rows: u32,
+    decoded_bytes: usize,
 }
 
 impl WeztermTerminalCoreAdapter {
     pub fn new(rows: usize, cols: usize, scrollback_lines: usize) -> Self {
+        Self::new_with_viewport(
+            rows,
+            cols,
+            scrollback_lines,
+            TerminalViewportMetrics::fallback(rows, cols),
+        )
+    }
+
+    pub fn new_with_viewport(
+        rows: usize,
+        cols: usize,
+        scrollback_lines: usize,
+        viewport: TerminalViewportMetrics,
+    ) -> Self {
         let writer = SharedWriteBuffer::default();
         let config = Arc::new(SessionTerminalConfig::new(
             ThemeMode::Dark,
@@ -49,11 +133,11 @@ impl WeztermTerminalCoreAdapter {
         ));
         let terminal = Terminal::new(
             TerminalSize {
-                rows,
-                cols,
-                pixel_width: cols * 8,
-                pixel_height: rows * 16,
-                dpi: 96,
+                rows: rows.max(1),
+                cols: cols.max(1),
+                pixel_width: viewport.pixel_width.max(cols.max(1) as u32) as usize,
+                pixel_height: viewport.pixel_height.max(rows.max(1) as u32) as usize,
+                dpi: viewport.dpi,
             },
             config.clone(),
             "MicaTerm",
@@ -68,9 +152,12 @@ impl WeztermTerminalCoreAdapter {
             fallback_mouse_button: None,
             pending_remote_line_buffer: PendingRemoteLineBuffer::default(),
             pending_paste_highlight_filter: None,
+            image_protocol_guard: RemoteImageProtocolGuard::default(),
             keyboard_modes: TerminalKeyboardModes::default(),
             mouse_modes: TerminalMouseModes::default(),
             viewport_offset_lines: 0,
+            image_resource_cache: Mutex::new(ImageResourceProjectionCache::default()),
+            local_image_resource_budget: LocalImageResourceBudget::default(),
         }
     }
 
@@ -78,7 +165,7 @@ impl WeztermTerminalCoreAdapter {
         self.terminal.current_seqno()
     }
 
-    pub fn apply_remote_bytes(&mut self, bytes: &[u8]) {
+    pub fn apply_remote_bytes(&mut self, bytes: &[u8]) -> Vec<u8> {
         let filtered = self.pending_remote_line_buffer.push_and_filter(bytes);
         let filtered = if let Some(filter) = self.pending_paste_highlight_filter.as_mut() {
             let filtered = filter.filter(filtered.as_slice());
@@ -89,12 +176,20 @@ impl WeztermTerminalCoreAdapter {
         } else {
             filtered
         };
-        self.keyboard_modes.observe(filtered.as_slice());
-        self.mouse_modes.observe(filtered.as_slice());
-        if !filtered.is_empty() {
+        let guarded = self.image_protocol_guard.push(filtered.as_slice());
+        if !guarded.is_empty() {
             let was_at_bottom = self.viewport_offset_lines == 0;
             let previous_total_rows = self.terminal.screen().scrollback_rows();
-            self.terminal.advance_bytes(filtered.as_slice());
+            for action in guarded {
+                match action {
+                    RemoteImageIngressAction::Forward(bytes) => {
+                        self.keyboard_modes.observe(bytes.as_slice());
+                        self.mouse_modes.observe(bytes.as_slice());
+                        self.terminal.advance_bytes(bytes.as_slice());
+                    }
+                    RemoteImageIngressAction::ResetParser => self.terminal.reset_parser(),
+                }
+            }
             if self.terminal.is_alt_screen_active() {
                 self.viewport_offset_lines = 0;
             } else if !was_at_bottom {
@@ -105,6 +200,48 @@ impl WeztermTerminalCoreAdapter {
             }
         }
         self.clamp_viewport_offset();
+        self.writer.take()
+    }
+
+    pub fn apply_local_image(&mut self, image: LocalTerminalImage) -> Result<()> {
+        let image = validate_local_image(image)?;
+        self.local_image_resource_budget
+            .ensure_can_admit(image.decoded_bytes)?;
+
+        let pending_writer_bytes = self.writer.take();
+        if !pending_writer_bytes.is_empty() {
+            bail!("terminal writer was not empty before local image placement");
+        }
+
+        let resource = image.resource;
+        self.terminal.assign_image_to_cells(ImageAttachParams {
+            image_width: image.source_width,
+            image_height: image.source_height,
+            source_width: None,
+            source_height: None,
+            source_origin_x: 0,
+            source_origin_y: 0,
+            cell_padding_left: 0,
+            cell_padding_top: 0,
+            z_index: 0,
+            columns: Some(image.columns as usize),
+            rows: Some(image.rows as usize),
+            image_id: None,
+            placement_id: None,
+            style: ImageAttachStyle::Kitty,
+            do_not_move_cursor: false,
+            data: Arc::clone(&resource),
+        })?;
+        self.terminal.advance_bytes(b"\r\n");
+        self.snap_viewport_to_bottom();
+        self.local_image_resource_budget
+            .retain(&resource, image.decoded_bytes);
+
+        let unexpected_writer_bytes = self.writer.take();
+        if !unexpected_writer_bytes.is_empty() {
+            bail!("local image placement unexpectedly generated terminal reply bytes");
+        }
+        Ok(())
     }
 
     pub fn screen_text(&self) -> String {
@@ -195,12 +332,38 @@ impl WeztermTerminalCoreAdapter {
     }
 
     pub fn resize(&mut self, rows: usize, cols: usize) {
+        let current = self.terminal.get_size();
+        let cell_width = current
+            .pixel_width
+            .checked_div(current.cols.max(1))
+            .unwrap_or(1);
+        let cell_height = current
+            .pixel_height
+            .checked_div(current.rows.max(1))
+            .unwrap_or(1);
+        self.resize_with_viewport(
+            rows,
+            cols,
+            TerminalViewportMetrics::new(
+                cols.max(1).saturating_mul(cell_width) as u32,
+                rows.max(1).saturating_mul(cell_height) as u32,
+                current.dpi,
+            ),
+        );
+    }
+
+    pub fn resize_with_viewport(
+        &mut self,
+        rows: usize,
+        cols: usize,
+        viewport: TerminalViewportMetrics,
+    ) {
         self.terminal.resize(TerminalSize {
             rows: rows.max(1),
             cols: cols.max(1),
-            pixel_width: cols.max(1) * 8,
-            pixel_height: rows.max(1) * 16,
-            dpi: 96,
+            pixel_width: viewport.pixel_width.max(cols.max(1) as u32) as usize,
+            pixel_height: viewport.pixel_height.max(rows.max(1) as u32) as usize,
+            dpi: viewport.dpi.max(1),
         });
         self.clamp_viewport_offset();
     }
@@ -211,7 +374,7 @@ impl WeztermTerminalCoreAdapter {
         let preset = preset_for_theme(self.config.theme_mode(), self.config.theme_variant());
         let visible_rows = self.visible_rows();
         let visible_lines = visible_lines_from_rows(&visible_rows);
-        let cells = self.visible_cells(&palette);
+        let (cells, image_resources, image_placements) = self.visible_content(&palette);
         let cursor = self.cursor_state(&palette);
         let viewport_bg_top_rgba = 0xff00_0000 | preset.viewport_bg_top;
         let viewport_bg_bottom_rgba = 0xff00_0000 | preset.viewport_bg_bottom;
@@ -220,6 +383,11 @@ impl WeztermTerminalCoreAdapter {
             seqno: self.sequence_number(),
             rows: size.rows as u32,
             cols: size.cols as u32,
+            viewport_metrics: TerminalViewportMetrics::new(
+                size.pixel_width as u32,
+                size.pixel_height as u32,
+                size.dpi,
+            ),
             default_fg_rgba: color_to_rgba_u32(palette.foreground),
             default_bg_rgba: color_to_rgba_u32(palette.background),
             row_bg_even_rgba: viewport_bg_top_rgba,
@@ -230,6 +398,8 @@ impl WeztermTerminalCoreAdapter {
             visible_lines,
             visible_rows,
             cells,
+            image_resources,
+            image_placements,
             cursor,
             alternate_screen_active: self.terminal.is_alt_screen_active(),
             mouse_grabbed: self.terminal.is_mouse_grabbed(),
@@ -370,10 +540,22 @@ impl WeztermTerminalCoreAdapter {
         Ok(encode_sgr_mouse_fallback(event, fallback_button))
     }
 
-    fn visible_cells(&self, palette: &ColorPalette) -> Vec<TerminalCellState> {
+    fn visible_content(
+        &self,
+        palette: &ColorPalette,
+    ) -> (
+        Vec<TerminalCellState>,
+        Vec<Arc<TerminalImageResource>>,
+        Vec<TerminalImagePlacement>,
+    ) {
         let size = self.terminal.get_size();
         let (visible_start, visible_end) = self.visible_phys_row_bounds();
         let mut cells = Vec::new();
+        let mut image_resources = Vec::new();
+        let mut image_placements = Vec::new();
+        let mut projected_resource_keys = HashSet::new();
+        let mut projected_resource_bytes = 0usize;
+        let mut protocol_order = 0u32;
         let lines = self
             .terminal
             .screen()
@@ -397,10 +579,67 @@ impl WeztermTerminalCoreAdapter {
                     fg_rgba,
                     bg_rgba,
                 });
+
+                for image in attrs.images().unwrap_or_default() {
+                    let Some(resource) = self
+                        .image_resource_cache
+                        .lock()
+                        .expect("lock terminal image resource cache")
+                        .get_or_insert(image.image_data())
+                    else {
+                        continue;
+                    };
+                    if projected_resource_keys.insert(resource.content_hash) {
+                        let next_bytes =
+                            projected_resource_bytes.saturating_add(resource.decoded_bytes());
+                        if next_bytes > MAX_TERMINAL_IMAGE_RESOURCE_BYTES {
+                            projected_resource_keys.remove(&resource.content_hash);
+                            continue;
+                        }
+                        projected_resource_bytes = next_bytes;
+                        image_resources.push(Arc::clone(&resource));
+                    } else if !projected_resource_keys.contains(&resource.content_hash) {
+                        continue;
+                    }
+
+                    let top_left = image.top_left();
+                    let bottom_right = image.bottom_right();
+                    let (padding_left, padding_top, padding_right, padding_bottom) =
+                        image.padding();
+                    image_placements.push(TerminalImagePlacement {
+                        resource_key: resource.content_hash,
+                        row,
+                        col: cell.cell_index() as u32,
+                        row_span: 1,
+                        col_span: cell.width().max(1) as u32,
+                        uv: TerminalImageUvRect::from_unit_f32(
+                            top_left.x.into_inner(),
+                            top_left.y.into_inner(),
+                            bottom_right.x.into_inner(),
+                            bottom_right.y.into_inner(),
+                        ),
+                        padding_left_px: padding_left,
+                        padding_top_px: padding_top,
+                        padding_right_px: padding_right,
+                        padding_bottom_px: padding_bottom,
+                        z_index: image.z_index(),
+                        image_id: image.image_id(),
+                        placement_id: image.placement_id(),
+                        protocol_order,
+                    });
+                    protocol_order = protocol_order.saturating_add(1);
+                }
             }
         }
 
-        cells
+        image_placements.sort_by_key(|placement| (placement.z_index, placement.protocol_order));
+        let mut seen_placements = HashSet::new();
+        image_placements.retain(|placement| {
+            let mut key = placement.clone();
+            key.protocol_order = 0;
+            seen_placements.insert(key)
+        });
+        (cells, image_resources, image_placements)
     }
 
     fn cursor_state(&self, palette: &ColorPalette) -> TerminalCursorState {
@@ -499,6 +738,492 @@ impl WeztermTerminalCoreAdapter {
         if self.viewport_offset_lines > 0 {
             self.scroll_viewport_to_bottom();
         }
+    }
+}
+
+fn validate_local_image(image: LocalTerminalImage) -> Result<ValidatedLocalImage> {
+    if image.source_width == 0 || image.source_height == 0 {
+        bail!("local terminal image dimensions must be non-zero");
+    }
+    if image.columns == 0 || image.rows == 0 {
+        bail!("local terminal image cell span must be non-zero");
+    }
+    if image.png_bytes.is_empty() || image.png_bytes.len() > MAX_ENCODED_IMAGE_BYTES {
+        bail!(
+            "local terminal image exceeds the {} MiB encoded limit",
+            MAX_ENCODED_IMAGE_BYTES / (1024 * 1024)
+        );
+    }
+
+    let pixels = u64::from(image.source_width)
+        .checked_mul(u64::from(image.source_height))
+        .ok_or_else(|| anyhow::anyhow!("local terminal image pixel count overflowed"))?;
+    if pixels > MAX_IMAGE_PIXELS {
+        bail!("local terminal image exceeds the pixel limit");
+    }
+    let decoded_bytes_u64 = pixels
+        .checked_mul(4)
+        .ok_or_else(|| anyhow::anyhow!("local terminal image decoded size overflowed"))?;
+    if decoded_bytes_u64 > MAX_DECODED_IMAGE_BYTES {
+        bail!("local terminal image exceeds the decoded byte limit");
+    }
+
+    let dimensions = ImageReader::new(Cursor::new(image.png_bytes.as_slice()))
+        .with_guessed_format()
+        .map_err(|error| anyhow::anyhow!("failed to detect local terminal image format: {error}"))?
+        .into_dimensions()
+        .map_err(|error| {
+            anyhow::anyhow!("failed to read local terminal image dimensions: {error}")
+        })?;
+    if dimensions != (image.source_width, image.source_height) {
+        bail!("local terminal image dimensions do not match the encoded payload");
+    }
+
+    let mut reader = ImageReader::new(Cursor::new(image.png_bytes.as_slice()))
+        .with_guessed_format()
+        .map_err(|error| {
+            anyhow::anyhow!("failed to detect local terminal image format: {error}")
+        })?;
+    let mut limits = Limits::default();
+    limits.max_alloc = Some(MAX_DECODED_IMAGE_BYTES);
+    reader.limits(limits);
+    let decoded = reader
+        .decode()
+        .map_err(|error| anyhow::anyhow!("failed to decode local terminal image: {error}"))?
+        .into_rgba8();
+    if decoded.dimensions() != dimensions || decoded.as_raw().len() as u64 != decoded_bytes_u64 {
+        bail!("local terminal image decoded payload is inconsistent");
+    }
+    let decoded_bytes = usize::try_from(decoded_bytes_u64)
+        .map_err(|_| anyhow::anyhow!("local terminal image decoded size overflowed"))?;
+    drop(decoded);
+
+    Ok(ValidatedLocalImage {
+        resource: Arc::new(ImageData::with_raw_data(image.png_bytes)),
+        source_width: image.source_width,
+        source_height: image.source_height,
+        columns: image.columns,
+        rows: image.rows,
+        decoded_bytes,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RemoteImageProtocol {
+    Iterm2,
+    Kitty,
+    Sixel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RemoteControlString {
+    Osc,
+    Apc,
+    Dcs,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum RemoteImageIngressState {
+    #[default]
+    Ground,
+    Escape,
+    OscPrefix {
+        matched: usize,
+        bytes_seen: usize,
+    },
+    ApcPrefix {
+        bytes_seen: usize,
+    },
+    DcsHeader {
+        bytes_seen: usize,
+        has_intermediate: bool,
+    },
+    Passthrough(RemoteControlString),
+    Image {
+        protocol: RemoteImageProtocol,
+        bytes_seen: usize,
+    },
+    Discarding {
+        protocol: RemoteImageProtocol,
+        saw_escape: bool,
+    },
+}
+
+enum RemoteImageIngressAction {
+    Forward(Vec<u8>),
+    ResetParser,
+}
+
+#[derive(Debug)]
+struct RemoteImageProtocolGuard {
+    state: RemoteImageIngressState,
+    max_base64_sequence_bytes: usize,
+    max_sixel_sequence_bytes: usize,
+    max_image_pixels: u64,
+    max_decoded_image_bytes: u64,
+    sixel_raster: SixelRasterGuard,
+}
+
+impl Default for RemoteImageProtocolGuard {
+    fn default() -> Self {
+        Self {
+            state: RemoteImageIngressState::Ground,
+            max_base64_sequence_bytes: MAX_BASE64_IMAGE_SEQUENCE_BYTES,
+            max_sixel_sequence_bytes: MAX_SIXEL_SEQUENCE_BYTES,
+            max_image_pixels: MAX_IMAGE_PIXELS,
+            max_decoded_image_bytes: MAX_DECODED_IMAGE_BYTES,
+            sixel_raster: SixelRasterGuard::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RemoteImageIngressDecision {
+    Forward,
+    Discard,
+    ResetParser,
+}
+
+#[derive(Debug, Default)]
+struct SixelRasterGuard {
+    active: bool,
+    param_index: usize,
+    params: [u64; 4],
+    overflowed: bool,
+}
+
+impl SixelRasterGuard {
+    fn observe(&mut self, byte: u8) {
+        if !self.active {
+            if byte == b'"' {
+                self.active = true;
+            }
+            return;
+        }
+
+        match byte {
+            b'0'..=b'9' if self.param_index < self.params.len() => {
+                let current = self.params[self.param_index];
+                let Some(next) = current
+                    .checked_mul(10)
+                    .and_then(|value| value.checked_add(u64::from(byte - b'0')))
+                else {
+                    self.overflowed = true;
+                    return;
+                };
+                self.params[self.param_index] = next;
+            }
+            b';' => self.param_index = self.param_index.saturating_add(1),
+            _ => {
+                self.reset();
+                if byte == b'"' {
+                    self.active = true;
+                }
+            }
+        }
+    }
+
+    fn exceeds_limits_when_finished_by(
+        &self,
+        byte: u8,
+        max_pixels: u64,
+        max_decoded_bytes: u64,
+    ) -> bool {
+        if !self.active || matches!(byte, b'0'..=b'9' | b';') || self.param_index < 3 {
+            return false;
+        }
+        let pixels = self.params[2].saturating_mul(self.params[3]);
+        self.overflowed || pixels > max_pixels || pixels.saturating_mul(4) > max_decoded_bytes
+    }
+
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
+impl RemoteImageProtocolGuard {
+    const ITERM2_PREFIX: &'static [u8] = b"1337;";
+
+    #[cfg(test)]
+    fn with_limits(max_base64_sequence_bytes: usize, max_sixel_sequence_bytes: usize) -> Self {
+        Self {
+            state: RemoteImageIngressState::Ground,
+            max_base64_sequence_bytes,
+            max_sixel_sequence_bytes,
+            max_image_pixels: MAX_IMAGE_PIXELS,
+            max_decoded_image_bytes: MAX_DECODED_IMAGE_BYTES,
+            sixel_raster: SixelRasterGuard::default(),
+        }
+    }
+
+    fn push(&mut self, incoming: &[u8]) -> Vec<RemoteImageIngressAction> {
+        let mut actions = Vec::new();
+        let mut forwarded = Vec::with_capacity(incoming.len());
+
+        for &byte in incoming {
+            match self.process_byte(byte) {
+                RemoteImageIngressDecision::Forward => forwarded.push(byte),
+                RemoteImageIngressDecision::Discard => {}
+                RemoteImageIngressDecision::ResetParser => {
+                    if !forwarded.is_empty() {
+                        actions.push(RemoteImageIngressAction::Forward(std::mem::take(
+                            &mut forwarded,
+                        )));
+                    }
+                    actions.push(RemoteImageIngressAction::ResetParser);
+                }
+            }
+        }
+
+        if !forwarded.is_empty() {
+            actions.push(RemoteImageIngressAction::Forward(forwarded));
+        }
+        actions
+    }
+
+    fn process_byte(&mut self, byte: u8) -> RemoteImageIngressDecision {
+        use RemoteImageIngressDecision::{Discard, Forward, ResetParser};
+        use RemoteImageIngressState as State;
+
+        let state = std::mem::take(&mut self.state);
+        let (next, decision) = match state {
+            State::Ground => (Self::ground_state_after(byte), Forward),
+            State::Escape => (Self::escape_state_after(byte), Forward),
+            State::OscPrefix {
+                matched,
+                bytes_seen,
+            } => {
+                let bytes_seen = bytes_seen.saturating_add(1);
+                if let Some(next) = Self::control_string_boundary(RemoteControlString::Osc, byte) {
+                    (next, Forward)
+                } else if Self::ITERM2_PREFIX.get(matched) == Some(&byte) {
+                    let matched = matched + 1;
+                    if matched == Self::ITERM2_PREFIX.len() {
+                        self.start_image(RemoteImageProtocol::Iterm2, bytes_seen)
+                    } else {
+                        (
+                            State::OscPrefix {
+                                matched,
+                                bytes_seen,
+                            },
+                            Forward,
+                        )
+                    }
+                } else {
+                    (State::Passthrough(RemoteControlString::Osc), Forward)
+                }
+            }
+            State::ApcPrefix { bytes_seen } => {
+                let bytes_seen = bytes_seen.saturating_add(1);
+                if let Some(next) = Self::control_string_boundary(RemoteControlString::Apc, byte) {
+                    (next, Forward)
+                } else if byte == b'G' {
+                    self.start_image(RemoteImageProtocol::Kitty, bytes_seen)
+                } else {
+                    (State::Passthrough(RemoteControlString::Apc), Forward)
+                }
+            }
+            State::DcsHeader {
+                bytes_seen,
+                has_intermediate,
+            } => {
+                let bytes_seen = bytes_seen.saturating_add(1);
+                if let Some(next) = Self::control_string_boundary(RemoteControlString::Dcs, byte) {
+                    (next, Forward)
+                } else if (0x40..=0x7e).contains(&byte) {
+                    if byte == b'q' && !has_intermediate {
+                        self.start_image(RemoteImageProtocol::Sixel, bytes_seen)
+                    } else {
+                        (State::Passthrough(RemoteControlString::Dcs), Forward)
+                    }
+                } else {
+                    (
+                        State::DcsHeader {
+                            bytes_seen,
+                            has_intermediate: has_intermediate || (0x20..=0x2f).contains(&byte),
+                        },
+                        Forward,
+                    )
+                }
+            }
+            State::Passthrough(kind) => (
+                Self::control_string_boundary(kind, byte).unwrap_or(State::Passthrough(kind)),
+                Forward,
+            ),
+            State::Image {
+                protocol,
+                bytes_seen,
+            } => {
+                let bytes_seen = bytes_seen.saturating_add(1);
+                let oversized_raster = protocol == RemoteImageProtocol::Sixel
+                    && self.sixel_raster.exceeds_limits_when_finished_by(
+                        byte,
+                        self.max_image_pixels,
+                        self.max_decoded_image_bytes,
+                    );
+                if bytes_seen > self.limit_for(protocol) || oversized_raster {
+                    self.sixel_raster.reset();
+                    let next = if Self::is_explicit_terminator(protocol, byte) {
+                        State::Ground
+                    } else {
+                        State::Discarding {
+                            protocol,
+                            saw_escape: byte == 0x1b,
+                        }
+                    };
+                    (next, ResetParser)
+                } else {
+                    let kind = match protocol {
+                        RemoteImageProtocol::Iterm2 => RemoteControlString::Osc,
+                        RemoteImageProtocol::Kitty => RemoteControlString::Apc,
+                        RemoteImageProtocol::Sixel => RemoteControlString::Dcs,
+                    };
+                    let next = Self::control_string_boundary(kind, byte).unwrap_or(State::Image {
+                        protocol,
+                        bytes_seen,
+                    });
+                    if protocol == RemoteImageProtocol::Sixel {
+                        self.sixel_raster.observe(byte);
+                        if !matches!(
+                            next,
+                            State::Image {
+                                protocol: RemoteImageProtocol::Sixel,
+                                ..
+                            }
+                        ) {
+                            self.sixel_raster.reset();
+                        }
+                    }
+                    (next, Forward)
+                }
+            }
+            State::Discarding {
+                protocol,
+                saw_escape,
+            } => {
+                if Self::is_explicit_terminator(protocol, byte) || (saw_escape && byte == b'\\') {
+                    (State::Ground, Discard)
+                } else {
+                    (
+                        State::Discarding {
+                            protocol,
+                            saw_escape: byte == 0x1b,
+                        },
+                        Discard,
+                    )
+                }
+            }
+        };
+        self.state = next;
+        decision
+    }
+
+    fn start_image(
+        &mut self,
+        protocol: RemoteImageProtocol,
+        bytes_seen: usize,
+    ) -> (RemoteImageIngressState, RemoteImageIngressDecision) {
+        if protocol == RemoteImageProtocol::Sixel {
+            self.sixel_raster.reset();
+        }
+        if bytes_seen > self.limit_for(protocol) {
+            (
+                RemoteImageIngressState::Discarding {
+                    protocol,
+                    saw_escape: false,
+                },
+                RemoteImageIngressDecision::ResetParser,
+            )
+        } else {
+            (
+                RemoteImageIngressState::Image {
+                    protocol,
+                    bytes_seen,
+                },
+                RemoteImageIngressDecision::Forward,
+            )
+        }
+    }
+
+    fn limit_for(&self, protocol: RemoteImageProtocol) -> usize {
+        match protocol {
+            RemoteImageProtocol::Iterm2 | RemoteImageProtocol::Kitty => {
+                self.max_base64_sequence_bytes
+            }
+            RemoteImageProtocol::Sixel => self.max_sixel_sequence_bytes,
+        }
+    }
+
+    fn ground_state_after(byte: u8) -> RemoteImageIngressState {
+        match byte {
+            0x1b => RemoteImageIngressState::Escape,
+            0x9d => RemoteImageIngressState::OscPrefix {
+                matched: 0,
+                bytes_seen: 1,
+            },
+            0x9f => RemoteImageIngressState::ApcPrefix { bytes_seen: 1 },
+            0x90 => RemoteImageIngressState::DcsHeader {
+                bytes_seen: 1,
+                has_intermediate: false,
+            },
+            _ => RemoteImageIngressState::Ground,
+        }
+    }
+
+    fn escape_state_after(byte: u8) -> RemoteImageIngressState {
+        match byte {
+            b']' => RemoteImageIngressState::OscPrefix {
+                matched: 0,
+                bytes_seen: 2,
+            },
+            b'_' => RemoteImageIngressState::ApcPrefix { bytes_seen: 2 },
+            b'P' => RemoteImageIngressState::DcsHeader {
+                bytes_seen: 2,
+                has_intermediate: false,
+            },
+            0x1b => RemoteImageIngressState::Escape,
+            0x9d => RemoteImageIngressState::OscPrefix {
+                matched: 0,
+                bytes_seen: 1,
+            },
+            0x9f => RemoteImageIngressState::ApcPrefix { bytes_seen: 1 },
+            0x90 => RemoteImageIngressState::DcsHeader {
+                bytes_seen: 1,
+                has_intermediate: false,
+            },
+            _ => RemoteImageIngressState::Ground,
+        }
+    }
+
+    fn control_string_boundary(
+        kind: RemoteControlString,
+        byte: u8,
+    ) -> Option<RemoteImageIngressState> {
+        if byte == 0x1b {
+            return Some(RemoteImageIngressState::Escape);
+        }
+        if matches!(byte, 0x18 | 0x1a | 0x9c) || (kind == RemoteControlString::Osc && byte == 0x07)
+        {
+            return Some(RemoteImageIngressState::Ground);
+        }
+        match byte {
+            0x9d => Some(RemoteImageIngressState::OscPrefix {
+                matched: 0,
+                bytes_seen: 1,
+            }),
+            0x9f => Some(RemoteImageIngressState::ApcPrefix { bytes_seen: 1 }),
+            0x90 => Some(RemoteImageIngressState::DcsHeader {
+                bytes_seen: 1,
+                has_intermediate: false,
+            }),
+            0x80..=0x9f => Some(RemoteImageIngressState::Ground),
+            _ => None,
+        }
+    }
+
+    fn is_explicit_terminator(protocol: RemoteImageProtocol, byte: u8) -> bool {
+        matches!(byte, 0x18 | 0x1a | 0x9c)
+            || (protocol == RemoteImageProtocol::Iterm2 && byte == 0x07)
     }
 }
 
@@ -855,6 +1580,38 @@ impl TerminalConfiguration for SessionTerminalConfig {
     fn color_palette(&self) -> ColorPalette {
         palette_for_theme(self.theme_mode(), self.theme_variant())
     }
+
+    fn enable_kitty_graphics(&self) -> bool {
+        true
+    }
+
+    fn allow_kitty_graphics_external_media(&self) -> bool {
+        false
+    }
+
+    fn allow_iterm2_file_downloads(&self) -> bool {
+        false
+    }
+
+    fn max_image_encoded_bytes(&self) -> usize {
+        crate::app::image_policy::MAX_ENCODED_IMAGE_BYTES
+    }
+
+    fn max_image_decoded_bytes(&self) -> usize {
+        crate::app::image_policy::MAX_DECODED_IMAGE_BYTES as usize
+    }
+
+    fn max_image_pixels(&self) -> u64 {
+        crate::app::image_policy::MAX_IMAGE_PIXELS
+    }
+
+    fn max_image_resource_bytes(&self) -> usize {
+        crate::app::image_policy::MAX_TERMINAL_IMAGE_RESOURCE_BYTES
+    }
+
+    fn kitty_graphics_max_resource_bytes(&self) -> usize {
+        crate::app::image_policy::MAX_TERMINAL_IMAGE_RESOURCE_BYTES
+    }
 }
 
 fn project_terminal_row(line: &Line, index: u32, cols: usize) -> TerminalRowState {
@@ -1048,6 +1805,133 @@ fn encode_sgr_mouse_fallback(event: TerminalMouseInput, button: TerminalMouseBut
     .into_bytes()
 }
 
+#[derive(Default)]
+struct ImageResourceProjectionCache {
+    source_to_content: HashMap<[u8; 32], [u8; 32]>,
+    resources: HashMap<[u8; 32], Arc<TerminalImageResource>>,
+    recency: VecDeque<[u8; 32]>,
+    retained_bytes: usize,
+}
+
+impl ImageResourceProjectionCache {
+    fn get_or_insert(&mut self, image: &Arc<ImageData>) -> Option<Arc<TerminalImageResource>> {
+        let source_hash = image.hash();
+        if let Some(content_hash) = self.source_to_content.get(&source_hash).copied()
+            && let Some(resource) = self.resources.get(&content_hash).cloned()
+        {
+            self.touch(content_hash);
+            return Some(resource);
+        }
+
+        let (width, height, rgba) = project_static_rgba(image)?;
+        let content_hash = terminal_image_content_hash(width, height, rgba.as_slice());
+        if let Some(resource) = self.resources.get(&content_hash).cloned() {
+            self.source_to_content.insert(source_hash, content_hash);
+            self.touch(content_hash);
+            return Some(resource);
+        }
+        if rgba.len() > MAX_TERMINAL_IMAGE_RESOURCE_BYTES {
+            return None;
+        }
+
+        while self.retained_bytes.saturating_add(rgba.len()) > MAX_TERMINAL_IMAGE_RESOURCE_BYTES {
+            let oldest = self.recency.pop_front()?;
+            if let Some(resource) = self.resources.remove(&oldest) {
+                self.retained_bytes = self.retained_bytes.saturating_sub(resource.decoded_bytes());
+                self.source_to_content
+                    .retain(|_, mapped_hash| *mapped_hash != oldest);
+            }
+        }
+
+        let resource = Arc::new(TerminalImageResource {
+            content_hash,
+            width,
+            height,
+            rgba: Arc::from(rgba),
+        });
+        self.retained_bytes = self.retained_bytes.saturating_add(resource.decoded_bytes());
+        self.source_to_content.insert(source_hash, content_hash);
+        self.resources.insert(content_hash, Arc::clone(&resource));
+        self.touch(content_hash);
+        Some(resource)
+    }
+
+    fn touch(&mut self, content_hash: [u8; 32]) {
+        self.recency.retain(|hash| *hash != content_hash);
+        self.recency.push_back(content_hash);
+    }
+}
+
+fn terminal_image_content_hash(width: u32, height: u32, rgba: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(width.to_le_bytes());
+    hasher.update(height.to_le_bytes());
+    hasher.update(rgba);
+    hasher.finalize().into()
+}
+
+fn project_static_rgba(image: &ImageData) -> Option<(u32, u32, Vec<u8>)> {
+    let data = image.data();
+    match &*data {
+        ImageDataType::Rgba8 {
+            data,
+            width,
+            height,
+            ..
+        } => {
+            validate_projected_rgba(*width, *height, data).then(|| (*width, *height, data.clone()))
+        }
+        ImageDataType::AnimRgba8 {
+            frames,
+            width,
+            height,
+            ..
+        } => frames.first().and_then(|frame| {
+            validate_projected_rgba(*width, *height, frame)
+                .then(|| (*width, *height, frame.clone()))
+        }),
+        ImageDataType::EncodedFile(bytes) => decode_projected_rgba(bytes),
+        ImageDataType::EncodedLease(lease) => lease
+            .get_data()
+            .ok()
+            .and_then(|bytes| decode_projected_rgba(bytes.as_slice())),
+    }
+}
+
+fn decode_projected_rgba(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
+    let reader = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
+    let (width, height) = reader.into_dimensions().ok()?;
+    if !valid_projected_dimensions(width, height) {
+        return None;
+    }
+
+    let mut reader = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
+    let mut limits = Limits::default();
+    limits.max_alloc = Some(MAX_DECODED_IMAGE_BYTES);
+    reader.limits(limits);
+    let rgba = reader.decode().ok()?.into_rgba8().into_vec();
+    validate_projected_rgba(width, height, &rgba).then_some((width, height, rgba))
+}
+
+fn valid_projected_dimensions(width: u32, height: u32) -> bool {
+    width > 0
+        && height > 0
+        && u64::from(width).saturating_mul(u64::from(height)) <= MAX_IMAGE_PIXELS
+}
+
+fn validate_projected_rgba(width: u32, height: u32, rgba: &[u8]) -> bool {
+    valid_projected_dimensions(width, height)
+        && u64::from(width)
+            .checked_mul(u64::from(height))
+            .and_then(|pixels| pixels.checked_mul(4))
+            .is_some_and(|expected| expected == rgba.len() as u64)
+        && rgba.len() as u64 <= MAX_DECODED_IMAGE_BYTES
+}
+
 #[derive(Clone, Debug, Default)]
 struct SharedWriteBuffer {
     inner: Arc<Mutex<Vec<u8>>>,
@@ -1077,8 +1961,12 @@ impl TerminalCoreAdapter for WeztermTerminalCoreAdapter {
         WeztermTerminalCoreAdapter::sequence_number(self)
     }
 
-    fn apply_remote_bytes(&mut self, bytes: &[u8]) {
-        WeztermTerminalCoreAdapter::apply_remote_bytes(self, bytes);
+    fn apply_remote_bytes(&mut self, bytes: &[u8]) -> Vec<u8> {
+        WeztermTerminalCoreAdapter::apply_remote_bytes(self, bytes)
+    }
+
+    fn apply_local_image(&mut self, image: LocalTerminalImage) -> Result<()> {
+        WeztermTerminalCoreAdapter::apply_local_image(self, image)
     }
 
     fn screen_text(&self) -> String {
@@ -1111,6 +1999,7 @@ impl TerminalCoreAdapter for WeztermTerminalCoreAdapter {
             seqno: surface.seqno,
             rows: surface.rows,
             cols: surface.cols,
+            viewport_metrics: surface.viewport_metrics,
             default_fg_rgba: surface.default_fg_rgba,
             default_bg_rgba: surface.default_bg_rgba,
             row_bg_even_rgba: surface.row_bg_even_rgba,
@@ -1123,6 +2012,8 @@ impl TerminalCoreAdapter for WeztermTerminalCoreAdapter {
             visible_rows: surface.visible_rows,
             visible_lines: surface.visible_lines,
             cells: surface.cells,
+            image_resources: surface.image_resources,
+            image_placements: surface.image_placements,
             cursor: surface.cursor,
             selection: SelectionState::default(),
             alternate_screen_active: surface.alternate_screen_active,
@@ -1134,6 +2025,15 @@ impl TerminalCoreAdapter for WeztermTerminalCoreAdapter {
 
     fn resize(&mut self, rows: usize, cols: usize) {
         WeztermTerminalCoreAdapter::resize(self, rows, cols);
+    }
+
+    fn resize_with_viewport(
+        &mut self,
+        rows: usize,
+        cols: usize,
+        viewport: TerminalViewportMetrics,
+    ) {
+        WeztermTerminalCoreAdapter::resize_with_viewport(self, rows, cols, viewport);
     }
 
     fn set_theme(&mut self, mode: ThemeMode, variant: ThemeVariant) {
@@ -1158,5 +2058,119 @@ impl TerminalCoreAdapter for WeztermTerminalCoreAdapter {
 
     fn encode_paste(&mut self, text: &str) -> Result<Vec<u8>> {
         WeztermTerminalCoreAdapter::encode_paste(self, text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expired_local_image_leases_release_session_budget() {
+        let resource = Arc::new(ImageData::with_data(ImageDataType::new_single_frame(
+            1,
+            1,
+            vec![0, 0, 0, 0xff],
+        )));
+        let mut budget = LocalImageResourceBudget::default();
+
+        budget
+            .ensure_can_admit(MAX_TERMINAL_IMAGE_RESOURCE_BYTES)
+            .expect("empty budget admits the limit");
+        budget.retain(&resource, MAX_TERMINAL_IMAGE_RESOURCE_BYTES);
+        assert!(budget.ensure_can_admit(1).is_err());
+
+        drop(resource);
+        budget
+            .ensure_can_admit(1)
+            .expect("expired weak lease releases budget");
+        assert_eq!(budget.retained_bytes, 0);
+        assert!(budget.leases.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod image_protocol_guard_tests {
+    use super::*;
+
+    fn feed_chunks(guard: &mut RemoteImageProtocolGuard, chunks: &[&[u8]]) -> (usize, Vec<u8>) {
+        let mut resets = 0;
+        let mut bytes_after_last_reset = Vec::new();
+        for chunk in chunks {
+            for action in guard.push(chunk) {
+                match action {
+                    RemoteImageIngressAction::Forward(bytes) => {
+                        bytes_after_last_reset.extend_from_slice(&bytes)
+                    }
+                    RemoteImageIngressAction::ResetParser => {
+                        resets += 1;
+                        bytes_after_last_reset.clear();
+                    }
+                }
+            }
+        }
+        (resets, bytes_after_last_reset)
+    }
+
+    #[test]
+    fn oversized_iterm_sequence_discards_tail_until_bel() {
+        let mut guard = RemoteImageProtocolGuard::with_limits(12, 12);
+        let (resets, forwarded) = feed_chunks(
+            &mut guard,
+            &[b"\x1b]13", b"37;AAAA", b"AAAAignored", b"\x07ok"],
+        );
+        assert_eq!(resets, 1);
+        assert_eq!(forwarded, b"ok");
+    }
+
+    #[test]
+    fn oversized_kitty_sequence_handles_split_string_terminator() {
+        let mut guard = RemoteImageProtocolGuard::with_limits(9, 12);
+        let (resets, forwarded) =
+            feed_chunks(&mut guard, &[b"\x1b_Ga=t;AAAA", b"ignored\x1b", b"\\ok"]);
+        assert_eq!(resets, 1);
+        assert_eq!(forwarded, b"ok");
+    }
+
+    #[test]
+    fn can_and_sub_cancel_discarded_image_sequences() {
+        for cancel in [0x18, 0x1a] {
+            let mut guard = RemoteImageProtocolGuard::with_limits(9, 12);
+            let mut cancelled = b"ignored".to_vec();
+            cancelled.push(cancel);
+            cancelled.extend_from_slice(b"ok");
+            let (resets, forwarded) = feed_chunks(&mut guard, &[b"\x1b_Ga=t;AAAA", &cancelled]);
+            assert_eq!(resets, 1);
+            assert_eq!(forwarded, b"ok");
+        }
+    }
+
+    #[test]
+    fn ordinary_dcs_with_an_intermediate_is_not_classified_as_sixel() {
+        let sequence = b"\x1bP1;2$qordinary-dcs\x1b\\ok";
+        let mut guard = RemoteImageProtocolGuard::with_limits(12, 12);
+        let (resets, forwarded) = feed_chunks(&mut guard, &[sequence]);
+        assert_eq!(resets, 0);
+        assert_eq!(forwarded, sequence);
+    }
+
+    #[test]
+    fn oversized_sixel_raster_is_rejected_before_its_trigger_byte() {
+        let mut guard = RemoteImageProtocolGuard::default();
+        let (resets, forwarded) = feed_chunks(
+            &mut guard,
+            &[b"\x1bPq\"1;1;5001;5000", b"@ignored\x1b", b"\\ok"],
+        );
+        assert_eq!(resets, 1);
+        assert_eq!(forwarded, b"ok");
+    }
+
+    #[test]
+    fn image_content_hash_includes_dimensions() {
+        let rgba = [0u8; 8];
+        assert_ne!(
+            terminal_image_content_hash(1, 2, &rgba),
+            terminal_image_content_hash(2, 1, &rgba)
+        );
     }
 }

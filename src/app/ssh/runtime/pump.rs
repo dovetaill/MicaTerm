@@ -268,18 +268,22 @@ pub(super) async fn run_channel_pump(
                         ).await else {
                             break 'pump;
                         };
-                        if !terminal_bytes.is_empty() {
-                            process_ready_remote_output(
-                                terminal_bytes.as_slice(),
-                                &terminal,
-                                &event_tx,
-                                &mut shell_integration,
-                                &mut dirty_notifier,
-                                &mut dirty_timer,
-                                &mut dirty_timer_interval,
-                                &mut working_set_trim_scheduler,
-                                &mut working_set_trim_timer,
-                            );
+                        if !process_ready_remote_output(
+                            terminal_bytes.as_slice(),
+                            &handle,
+                            channel.id(),
+                            &terminal,
+                            &event_tx,
+                            &mut shell_integration,
+                            &mut dirty_notifier,
+                            &mut dirty_timer,
+                            &mut dirty_timer_interval,
+                            &mut working_set_trim_scheduler,
+                            &mut working_set_trim_timer,
+                        )
+                        .await
+                        {
+                            break 'pump;
                         }
                     }
                     Some(RuntimeCommand::StartZmodemDownload {
@@ -298,18 +302,22 @@ pub(super) async fn run_channel_pump(
                         ).await else {
                             break 'pump;
                         };
-                        if !terminal_bytes.is_empty() {
-                            process_ready_remote_output(
-                                terminal_bytes.as_slice(),
-                                &terminal,
-                                &event_tx,
-                                &mut shell_integration,
-                                &mut dirty_notifier,
-                                &mut dirty_timer,
-                                &mut dirty_timer_interval,
-                                &mut working_set_trim_scheduler,
-                                &mut working_set_trim_timer,
-                            );
+                        if !process_ready_remote_output(
+                            terminal_bytes.as_slice(),
+                            &handle,
+                            channel.id(),
+                            &terminal,
+                            &event_tx,
+                            &mut shell_integration,
+                            &mut dirty_notifier,
+                            &mut dirty_timer,
+                            &mut dirty_timer_interval,
+                            &mut working_set_trim_scheduler,
+                            &mut working_set_trim_timer,
+                        )
+                        .await
+                        {
+                            break 'pump;
                         }
                     }
                     Some(RuntimeCommand::CancelZmodem) => {
@@ -323,18 +331,22 @@ pub(super) async fn run_channel_pump(
                         ).await else {
                             break 'pump;
                         };
-                        if !terminal_bytes.is_empty() {
-                            process_ready_remote_output(
-                                terminal_bytes.as_slice(),
-                                &terminal,
-                                &event_tx,
-                                &mut shell_integration,
-                                &mut dirty_notifier,
-                                &mut dirty_timer,
-                                &mut dirty_timer_interval,
-                                &mut working_set_trim_scheduler,
-                                &mut working_set_trim_timer,
-                            );
+                        if !process_ready_remote_output(
+                            terminal_bytes.as_slice(),
+                            &handle,
+                            channel.id(),
+                            &terminal,
+                            &event_tx,
+                            &mut shell_integration,
+                            &mut dirty_notifier,
+                            &mut dirty_timer,
+                            &mut dirty_timer_interval,
+                            &mut working_set_trim_scheduler,
+                            &mut working_set_trim_timer,
+                        )
+                        .await
+                        {
+                            break 'pump;
                         }
                     }
                     Some(RuntimeCommand::DismissZmodem { expected_state }) => {
@@ -354,11 +366,10 @@ pub(super) async fn run_channel_pump(
                     Some(RuntimeCommand::Resize {
                         rows,
                         cols,
-                        pixel_width,
-                        pixel_height,
+                        viewport,
                     }) => {
                         if let Ok(mut terminal) = terminal.lock() {
-                            terminal.resize(rows as usize, cols as usize);
+                            terminal.resize_with_viewport(rows as usize, cols as usize, viewport);
                         }
                         if let Some(surface) = snapshot_terminal_surface(&terminal, session_id) {
                             tracing::trace!(
@@ -373,7 +384,7 @@ pub(super) async fn run_channel_pump(
                             let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
                         }
                         if let Err(err) = channel
-                            .window_change(cols, rows, pixel_width, pixel_height)
+                            .window_change(cols, rows, viewport.pixel_width, viewport.pixel_height)
                             .await
                         {
                             let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
@@ -397,25 +408,10 @@ pub(super) async fn run_channel_pump(
                                 break 'pump;
                             };
                             terminal_bytes.extend(released_terminal_bytes);
-                            if !terminal_bytes.is_empty() {
-                                process_ready_remote_output(
-                                    terminal_bytes.as_slice(),
-                                    &terminal,
-                                    &event_tx,
-                                    &mut shell_integration,
-                                    &mut dirty_notifier,
-                                    &mut dirty_timer,
-                                    &mut dirty_timer_interval,
-                                    &mut working_set_trim_scheduler,
-                                    &mut working_set_trim_timer,
-                                );
-                            }
-                        }
-                        zmodem.mark_transport_closed();
-                        let trailing_terminal_bytes = zmodem.flush_terminal_bytes();
-                        if !trailing_terminal_bytes.is_empty() {
-                            process_ready_remote_output(
-                                trailing_terminal_bytes.as_slice(),
+                            if !process_ready_remote_output(
+                                terminal_bytes.as_slice(),
+                                &handle,
+                                channel.id(),
                                 &terminal,
                                 &event_tx,
                                 &mut shell_integration,
@@ -424,7 +420,30 @@ pub(super) async fn run_channel_pump(
                                 &mut dirty_timer_interval,
                                 &mut working_set_trim_scheduler,
                                 &mut working_set_trim_timer,
-                            );
+                            )
+                            .await
+                            {
+                                break 'pump;
+                            }
+                        }
+                        zmodem.mark_transport_closed();
+                        let trailing_terminal_bytes = zmodem.flush_terminal_bytes();
+                        if !process_ready_remote_output(
+                            trailing_terminal_bytes.as_slice(),
+                            &handle,
+                            channel.id(),
+                            &terminal,
+                            &event_tx,
+                            &mut shell_integration,
+                            &mut dirty_notifier,
+                            &mut dirty_timer,
+                            &mut dirty_timer_interval,
+                            &mut working_set_trim_scheduler,
+                            &mut working_set_trim_timer,
+                        )
+                        .await
+                        {
+                            break 'pump;
                         }
                         emit_zmodem_state_changes(&mut zmodem, &event_tx);
                         if dirty_notifier.take_pending() {
@@ -469,18 +488,22 @@ pub(super) async fn run_channel_pump(
                                 break 'pump;
                             };
                             terminal_bytes.extend(released_terminal_bytes);
-                            if !terminal_bytes.is_empty() {
-                                process_ready_remote_output(
-                                    terminal_bytes.as_slice(),
-                                    &terminal,
-                                    &event_tx,
-                                    &mut shell_integration,
-                                    &mut dirty_notifier,
-                                    &mut dirty_timer,
-                                    &mut dirty_timer_interval,
-                                    &mut working_set_trim_scheduler,
-                                    &mut working_set_trim_timer,
-                                );
+                            if !process_ready_remote_output(
+                                terminal_bytes.as_slice(),
+                                &handle,
+                                channel.id(),
+                                &terminal,
+                                &event_tx,
+                                &mut shell_integration,
+                                &mut dirty_notifier,
+                                &mut dirty_timer,
+                                &mut dirty_timer_interval,
+                                &mut working_set_trim_scheduler,
+                                &mut working_set_trim_timer,
+                            )
+                            .await
+                            {
+                                break 'pump;
                             }
                         }
                     }
@@ -499,25 +522,10 @@ pub(super) async fn run_channel_pump(
                                 break 'pump;
                             };
                             terminal_bytes.extend(released_terminal_bytes);
-                            if !terminal_bytes.is_empty() {
-                                process_ready_remote_output(
-                                    terminal_bytes.as_slice(),
-                                    &terminal,
-                                    &event_tx,
-                                    &mut shell_integration,
-                                    &mut dirty_notifier,
-                                    &mut dirty_timer,
-                                    &mut dirty_timer_interval,
-                                    &mut working_set_trim_scheduler,
-                                    &mut working_set_trim_timer,
-                                );
-                            }
-                        }
-                        zmodem.mark_transport_closed();
-                        let trailing_terminal_bytes = zmodem.flush_terminal_bytes();
-                        if !trailing_terminal_bytes.is_empty() {
-                            process_ready_remote_output(
-                                trailing_terminal_bytes.as_slice(),
+                            if !process_ready_remote_output(
+                                terminal_bytes.as_slice(),
+                                &handle,
+                                channel.id(),
                                 &terminal,
                                 &event_tx,
                                 &mut shell_integration,
@@ -526,7 +534,30 @@ pub(super) async fn run_channel_pump(
                                 &mut dirty_timer_interval,
                                 &mut working_set_trim_scheduler,
                                 &mut working_set_trim_timer,
-                            );
+                            )
+                            .await
+                            {
+                                break 'pump;
+                            }
+                        }
+                        zmodem.mark_transport_closed();
+                        let trailing_terminal_bytes = zmodem.flush_terminal_bytes();
+                        if !process_ready_remote_output(
+                            trailing_terminal_bytes.as_slice(),
+                            &handle,
+                            channel.id(),
+                            &terminal,
+                            &event_tx,
+                            &mut shell_integration,
+                            &mut dirty_notifier,
+                            &mut dirty_timer,
+                            &mut dirty_timer_interval,
+                            &mut working_set_trim_scheduler,
+                            &mut working_set_trim_timer,
+                        )
+                        .await
+                        {
+                            break 'pump;
                         }
                         emit_zmodem_state_changes(&mut zmodem, &event_tx);
                         if dirty_notifier.take_pending() {
@@ -550,25 +581,10 @@ pub(super) async fn run_channel_pump(
                                 break 'pump;
                             };
                             terminal_bytes.extend(released_terminal_bytes);
-                            if !terminal_bytes.is_empty() {
-                                process_ready_remote_output(
-                                    terminal_bytes.as_slice(),
-                                    &terminal,
-                                    &event_tx,
-                                    &mut shell_integration,
-                                    &mut dirty_notifier,
-                                    &mut dirty_timer,
-                                    &mut dirty_timer_interval,
-                                    &mut working_set_trim_scheduler,
-                                    &mut working_set_trim_timer,
-                                );
-                            }
-                        }
-                        zmodem.mark_transport_closed();
-                        let trailing_terminal_bytes = zmodem.flush_terminal_bytes();
-                        if !trailing_terminal_bytes.is_empty() {
-                            process_ready_remote_output(
-                                trailing_terminal_bytes.as_slice(),
+                            if !process_ready_remote_output(
+                                terminal_bytes.as_slice(),
+                                &handle,
+                                channel.id(),
                                 &terminal,
                                 &event_tx,
                                 &mut shell_integration,
@@ -577,7 +593,30 @@ pub(super) async fn run_channel_pump(
                                 &mut dirty_timer_interval,
                                 &mut working_set_trim_scheduler,
                                 &mut working_set_trim_timer,
-                            );
+                            )
+                            .await
+                            {
+                                break 'pump;
+                            }
+                        }
+                        zmodem.mark_transport_closed();
+                        let trailing_terminal_bytes = zmodem.flush_terminal_bytes();
+                        if !process_ready_remote_output(
+                            trailing_terminal_bytes.as_slice(),
+                            &handle,
+                            channel.id(),
+                            &terminal,
+                            &event_tx,
+                            &mut shell_integration,
+                            &mut dirty_notifier,
+                            &mut dirty_timer,
+                            &mut dirty_timer_interval,
+                            &mut working_set_trim_scheduler,
+                            &mut working_set_trim_timer,
+                        )
+                        .await
+                        {
+                            break 'pump;
                         }
                         emit_zmodem_state_changes(&mut zmodem, &event_tx);
                         if dirty_notifier.take_pending() {
@@ -620,18 +659,22 @@ pub(super) async fn run_channel_pump(
                     )));
                     zmodem.cancel_automatic_rz_echo_expectation();
                     let terminal_bytes = zmodem.flush_terminal_bytes();
-                    if !terminal_bytes.is_empty() {
-                        process_ready_remote_output(
-                            terminal_bytes.as_slice(),
-                            &terminal,
-                            &event_tx,
-                            &mut shell_integration,
-                            &mut dirty_notifier,
-                            &mut dirty_timer,
-                            &mut dirty_timer_interval,
-                            &mut working_set_trim_scheduler,
-                            &mut working_set_trim_timer,
-                        );
+                    if !process_ready_remote_output(
+                        terminal_bytes.as_slice(),
+                        &handle,
+                        channel.id(),
+                        &terminal,
+                        &event_tx,
+                        &mut shell_integration,
+                        &mut dirty_notifier,
+                        &mut dirty_timer,
+                        &mut dirty_timer_interval,
+                        &mut working_set_trim_scheduler,
+                        &mut working_set_trim_timer,
+                    )
+                    .await
+                    {
+                        break 'pump;
                     }
                 }
             }
@@ -1301,7 +1344,7 @@ impl SynchronizedOutputBatcher {
                 ready_batches.push(self.plain_buffer.drain(..sync_start).collect());
             }
             self.sync_active = true;
-            self.sync_buffer.extend(self.plain_buffer.drain(..));
+            self.sync_buffer.append(&mut self.plain_buffer);
             self.process_sync_buffer(ready_batches);
             if !self.sync_active {
                 continue;
@@ -1311,21 +1354,17 @@ impl SynchronizedOutputBatcher {
     }
 
     fn process_sync_buffer(&mut self, ready_batches: &mut Vec<Vec<u8>>) {
-        loop {
-            let Some(sync_end) = find_subsequence(self.sync_buffer.as_slice(), SYNC_OUTPUT_END)
-            else {
-                return;
-            };
-            let emit_len = sync_end + SYNC_OUTPUT_END.len();
-            ready_batches.push(self.sync_buffer.drain(..emit_len).collect());
-            self.sync_active = false;
-            if self.sync_buffer.is_empty() {
-                return;
-            }
-            self.plain_buffer.extend(self.sync_buffer.drain(..));
-            self.process_plain_buffer(ready_batches);
+        let Some(sync_end) = find_subsequence(self.sync_buffer.as_slice(), SYNC_OUTPUT_END) else {
+            return;
+        };
+        let emit_len = sync_end + SYNC_OUTPUT_END.len();
+        ready_batches.push(self.sync_buffer.drain(..emit_len).collect());
+        self.sync_active = false;
+        if self.sync_buffer.is_empty() {
             return;
         }
+        self.plain_buffer.append(&mut self.sync_buffer);
+        self.process_plain_buffer(ready_batches);
     }
 }
 
@@ -1383,8 +1422,10 @@ fn take_contiguous_output_messages(
     batch
 }
 
-fn process_ready_remote_output(
+async fn process_ready_remote_output(
     ready_bytes: &[u8],
+    handle: &Arc<client::Handle<RuntimeClientHandler>>,
+    channel_id: russh::ChannelId,
     terminal: &Arc<Mutex<TerminalSession>>,
     event_tx: &mpsc::UnboundedSender<SessionRuntimeEvent>,
     shell_integration: &mut super::TerminalShellIntegrationState,
@@ -1393,7 +1434,7 @@ fn process_ready_remote_output(
     dirty_timer_interval: &mut Option<std::time::Duration>,
     working_set_trim_scheduler: &mut WorkingSetTrimScheduler,
     working_set_trim_timer: &mut Option<std::pin::Pin<Box<Sleep>>>,
-) {
+) -> bool {
     let parsed = parse_output_chunks(*shell_integration, &[ready_bytes]);
 
     if let Some(cwd) = parsed.cwd.as_ref() {
@@ -1406,7 +1447,16 @@ fn process_ready_remote_output(
         ));
     }
     if !parsed.sanitized_bytes.is_empty() {
-        apply_remote_output(terminal, &parsed.sanitized_bytes);
+        let terminal_replies = apply_remote_output(terminal, &parsed.sanitized_bytes);
+        if !terminal_replies.is_empty()
+            && let Err(bytes) = handle.data(channel_id, terminal_replies).await
+        {
+            let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                "failed to write {} terminal response bytes to SSH channel",
+                bytes.len()
+            )));
+            return false;
+        }
         working_set_trim_scheduler.record_output(parsed.sanitized_bytes.len());
         *working_set_trim_timer = Some(Box::pin(sleep(WORKING_SET_TRIM_IDLE_INTERVAL)));
         let now = Instant::now();
@@ -1418,6 +1468,7 @@ fn process_ready_remote_output(
             *dirty_timer_interval = Some(preferred_interval);
         }
     }
+    true
 }
 
 fn parse_output_chunks(

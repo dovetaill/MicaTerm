@@ -5,13 +5,12 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use russh::client;
 use russh_sftp::client::SftpSession;
-use russh_sftp::protocol::FilePermissions;
-use russh_sftp::protocol::OpenFlags;
+use russh_sftp::protocol::{FileAttributes, FilePermissions, OpenFlags};
 use tokio::io::AsyncWriteExt;
 
 use crate::app::sftp::{
     BoxedSftpReader, BoxedSftpWriter, SftpBackend, SftpDirectoryEntry, SftpOperationFuture,
-    SftpReaderFuture, SftpRemoteMetadata, SftpWriteMode, SftpWriterFuture,
+    SftpReaderFuture, SftpRemoteMetadata, SftpWriteMode, SftpWriterFuture, remote_child_path,
 };
 
 use super::auth::RuntimeClientHandler;
@@ -38,6 +37,15 @@ impl RusshSftpBackend {
 }
 
 impl SftpBackend for RusshSftpBackend {
+    fn canonicalize<'a>(&'a self, path: &'a str) -> SftpOperationFuture<'a, String> {
+        Box::pin(async move {
+            let sftp = self.open_sftp_session().await?;
+            sftp.canonicalize(path)
+                .await
+                .with_context(|| format!("failed to canonicalize remote path `{path}`"))
+        })
+    }
+
     fn read_dir<'a>(&'a self, path: &'a str) -> SftpOperationFuture<'a, Vec<SftpDirectoryEntry>> {
         Box::pin(async move {
             let sftp = self.open_sftp_session().await?;
@@ -95,6 +103,28 @@ impl SftpBackend for RusshSftpBackend {
         })
     }
 
+    fn mkdir_with_permissions<'a>(
+        &'a self,
+        path: &'a str,
+        permissions: u32,
+    ) -> SftpOperationFuture<'a, ()> {
+        Box::pin(async move {
+            let sftp = self.open_sftp_session().await?;
+            sftp.create_dir(path)
+                .await
+                .with_context(|| format!("failed to create remote directory `{path}`"))?;
+            let mut attributes = FileAttributes::empty();
+            attributes.permissions = Some(permissions);
+            if let Err(error) = sftp.set_metadata(path, attributes).await {
+                let _ = sftp.remove_dir(path).await;
+                return Err(error).with_context(|| {
+                    format!("failed to set permissions on remote directory `{path}`")
+                });
+            }
+            Ok(())
+        })
+    }
+
     fn rename<'a>(&'a self, from: &'a str, to: &'a str) -> SftpOperationFuture<'a, ()> {
         Box::pin(async move {
             let sftp = self.open_sftp_session().await?;
@@ -142,18 +172,37 @@ impl SftpBackend for RusshSftpBackend {
     fn open_file_writer<'a>(&'a self, path: &'a str, mode: SftpWriteMode) -> SftpWriterFuture<'a> {
         Box::pin(async move {
             let sftp = self.open_sftp_session().await?;
-            let flags = match mode {
-                SftpWriteMode::CreateOrTruncate => {
-                    OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE
-                }
-                SftpWriteMode::CreateOrAppend => {
-                    OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::APPEND
+            let (flags, attributes, enforce_permissions) = match mode {
+                SftpWriteMode::CreateOrTruncate => (
+                    OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
+                    FileAttributes::empty(),
+                    false,
+                ),
+                SftpWriteMode::CreateOrAppend => (
+                    OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::APPEND,
+                    FileAttributes::empty(),
+                    false,
+                ),
+                SftpWriteMode::CreateNew { permissions } => {
+                    let mut attributes = FileAttributes::empty();
+                    attributes.permissions = Some(permissions);
+                    (
+                        OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE,
+                        attributes,
+                        true,
+                    )
                 }
             };
             let file = sftp
-                .open_with_flags(path, flags)
+                .open_with_flags_and_attributes(path, flags, attributes.clone())
                 .await
                 .with_context(|| format!("failed to open remote file `{path}` for writing"))?;
+            if enforce_permissions && let Err(error) = sftp.set_metadata(path, attributes).await {
+                drop(file);
+                let _ = sftp.remove_file(path).await;
+                return Err(error)
+                    .with_context(|| format!("failed to set permissions on remote file `{path}`"));
+            }
             Ok(Box::pin(file) as BoxedSftpWriter)
         })
     }
@@ -203,13 +252,5 @@ impl SftpBackend for RusshSftpBackend {
                 .with_context(|| format!("failed to remove remote directory `{remote_path}`"))?;
             Ok(())
         })
-    }
-}
-
-fn remote_child_path(parent: &str, name: &str) -> String {
-    if parent == "/" {
-        format!("/{}", name.trim_start_matches('/'))
-    } else {
-        format!("{}/{}", parent.trim_end_matches('/'), name)
     }
 }

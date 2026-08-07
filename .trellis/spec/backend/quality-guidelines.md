@@ -50,6 +50,322 @@ Questions to answer:
 
 (To be filled by the team)
 
+## Scenario: Windows Clipboard Image Paste Through Session-Bound SFTP
+
+### 1. Scope / Trigger
+
+- Trigger: a terminal Paste command can carry either text or an image and crosses
+  the OS clipboard, Slint bootstrap, blocking image decode, SSH session ownership,
+  SFTP permissions, and terminal input boundaries.
+- Applies when modifying `src/app/clipboard.rs`, `src/app/image_policy.rs`,
+  `src/app/bootstrap/workspace_terminal.rs`, `src/app/sftp/runtime.rs`, the SSH
+  SFTP backend, or the session-manager SFTP facade.
+
+### 2. Signatures
+
+- `ClipboardPayload::{Text(String), Image(ClipboardImageSource)}` is the shared
+  result for context-menu Paste and `Ctrl+Shift+V`.
+- `select_clipboard_payload(image, text_reader) -> Option<ClipboardPayload>` must
+  select an image first and leave `text_reader` lazy when an image exists.
+- `select_windows_clipboard_image_kind(png, bitmap, dib, dibv5, file_list)`
+  selects registered PNG first, then a bitmap-convertible Windows image, then
+  a file list. It is pure so format precedence is testable outside Windows.
+- `copy_windows_registered_png(format) -> Result<Vec<u8>>` checks the
+  `HGLOBAL` byte size before `GlobalLock` and copying. It never frees a
+  clipboard-owned handle.
+- `encode_clipboard_image(source) -> Result<EncodedClipboardImage>` performs the
+  bounded decode and PNG encode on a blocking worker, not the UI event loop.
+- `SftpRuntimeHandle::upload_clipboard_png(session_id, data) -> Result<String>`
+  returns one absolute remote cache path.
+- `SessionManager::sftp_runtime_binding(session_id) -> Result<(Uuid,
+  SftpRuntimeHandle)>` atomically captures the SFTP generation and runtime used by
+  the scheduled upload.
+- `SessionManager::send_session_paste_if_sftp_binding_current(session_id,
+  binding_id, text) -> Result<bool>` pastes only through the runtime generation
+  paired with the captured SFTP binding.
+- `SftpWriteMode::CreateNew { permissions }` is required for cache-file creation.
+
+### 3. Contracts
+
+- Windows selects a registered `PNG` payload first. When `CF_BITMAP`, `CF_DIB`,
+  or `CF_DIBV5` is available, it requests `CF_BITMAP` with
+  `GetClipboardData`; Windows may synthesize that bitmap from DIB/DIBV5. Only
+  then does it use exactly one supported image file. Other platforms currently
+  return no image source.
+- A registered PNG is copied only after its `HGLOBAL` size is non-zero and no
+  more than the 20 MiB encoded limit. It enters the same constrained decoder
+  and re-encoder as bitmap and file sources.
+- Image dimensions are limited to 25 million pixels, decoded allocation to 100
+  MiB, and encoded PNG/upload payload to 20 MiB.
+- Decode and upload are asynchronous relative to the UI. Two bootstrap-scoped
+  preparation permits bound `spawn_blocking` work and are released before upload;
+  the clipboard-image controller then owns one ordered upload slot. Completion is
+  keyed by request UUID while the controller retains the originating session UUID,
+  captured binding UUID, and input epoch.
+- Remote storage is `<canonical-home>/.cache/mica-term/clipboard/<session-id>/`.
+  Every created directory is mode 0700; each UUID PNG is exclusively created with
+  mode 0600.
+- An epoch-safe success is POSIX-shell-quoted and sent through the binding-aware
+  paste boundary to the original session. It is never redirected to the currently
+  active session, never gains a newline, and never passes through Markdown
+  formatting.
+- Clipboard bytes and decoded pixels are forbidden in logs. Logs may contain the
+  session UUID, dimensions, encoded byte count, controlled remote-path metadata,
+  and error text.
+
+### 4. Validation & Error Matrix
+
+- No active terminal session or unavailable SSH bridge -> reject without terminal
+  input and show user-visible feedback when the image path has begun.
+- Bitmap plus text -> choose bitmap; do not read or paste the text fallback.
+- Registered PNG plus DIB/file/text -> choose PNG; malformed or oversized PNG
+  is an upload error, not a fallback to text.
+- DIB/DIBV5 without an advertised `CF_BITMAP` -> request synthesized
+  `CF_BITMAP`; failure is an upload error, not a silent ignored paste.
+- Zero/oversized dimensions, decoder allocation limit, invalid source, or PNG over
+  20 MiB -> fail before SFTP and insert no path.
+- Non-absolute canonical home -> reject; do not build a relative cache path.
+- Directory permission setup or exclusive file creation fails -> reject and show
+  feedback; never fall back to truncating an existing file.
+- Write, flush, or shutdown fails -> best-effort delete the partial controlled path
+  and insert no path.
+- Originating session closes or reconnects before completion -> reject the stale
+  binding, keep the upload result out of the replacement runtime and all other
+  sessions, and show feedback.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a screenshot provides DIBV5 without a native bitmap; the client requests
+  a synthesized bitmap, bounds it before copying, then uploads one PNG and
+  pastes its quoted path only into the originating session.
+- Good: a registered PNG is size-capped before copying, uses the shared decoder,
+  and preserves the same SFTP/session-binding contract as a bitmap.
+- Base: text-only clipboard content follows the pre-existing newline normalization,
+  multiline warning, editor, and send behavior.
+- Base: exactly one supported clipboard image file uses the same encoder, limits,
+  cache, and completion route as a bitmap.
+- Bad: reading text eagerly and racing it with image detection, decoding on the UI
+  thread, using the active session at completion time, or logging the payload.
+- Bad: trusting a directory entry's server-provided `path` during cleanup or using
+  create/truncate for a generated cache filename.
+
+### 6. Tests Required
+
+- Unit test image precedence and assert the text-reader closure is not invoked.
+- Unit test bitmap and file sources produce PNG under the dimension/byte limits;
+  reject oversized dimensions and output.
+- Unit test Windows source priority: registered PNG wins, DIB/DIBV5 select the
+  synthesized bitmap route, and file-list fallback is selected only without an
+  image format.
+- Unit test registered PNG size rejects zero and values over 20 MiB before the
+  Windows payload-copy boundary; test an encoded PNG source through the shared
+  bounded encoder.
+- Unit test POSIX quoting, including embedded single quotes, and assert no newline.
+- Runtime test canonical home resolution, 0700 hierarchy, UUID filename, exclusive
+  0600 create, and returned absolute path.
+- Runtime test cleanup deletes only regular
+  `mica-clipboard-<valid-uuid>.png` entries older than seven days and reconstructs
+  paths from the controlled cache directory. Scan old UUID session directories with
+  explicit directory and entry caps; never traverse symlink entries.
+- Session-manager regression test replaces an SFTP binding and asserts that the old
+  binding cannot paste into the replacement runtime while the new binding can.
+- Source/contract test asserts two permits bound blocking preparation, each permit
+  is released before upload, and the controller serializes uploads without an
+  upload semaphore.
+- Integration/source tests keep existing text paste behavior and both Paste entry
+  points on the same callback. Verify both Linux all-targets and Windows library
+  compilation.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+let session_id = active_workspace_session_uuid(state)?;
+spawn_upload(image, move |path| {
+    manager.send_session_paste(active_workspace_session_uuid(state)?, path)
+});
+```
+
+This can paste a delayed result into whichever tab happens to be active later.
+
+#### Correct
+
+```rust
+let originating_session_id = active_workspace_session_uuid(state)?;
+let (binding_id, sftp_runtime) = manager.sftp_runtime_binding(originating_session_id)?;
+spawn_upload(sftp_runtime, image, move |path| {
+    manager.send_session_paste_if_sftp_binding_current(
+        originating_session_id,
+        binding_id,
+        posix_shell_quote(&path),
+    )
+});
+```
+
+Capture ownership and the SFTP generation before background work. Upload through
+the captured handle, then paste only through the matching runtime generation; never
+retarget the result to another tab or a reconnected shell.
+
+#### Wrong: returning before a convertible DIB is requested
+
+```rust
+if !Bitmap.is_format_avail() && !FileList.is_format_avail() {
+    return Ok(None);
+}
+```
+
+`CF_DIB` and `CF_DIBV5` can be converted by Windows on a later
+`GetClipboardData(CF_BITMAP)` request, so this turns a real screenshot into a
+silent ignored paste.
+
+#### Correct: recognize DIB/DIBV5 before requesting the synthesized bitmap
+
+```rust
+let kind = select_windows_clipboard_image_kind(
+    png_available,
+    Bitmap.is_format_avail(),
+    dib_available,
+    dibv5_available,
+    FileList.is_format_avail(),
+);
+
+if matches!(kind, Some(WindowsClipboardImageKind::Bitmap)) {
+    validate_clipboard_bitmap_before_copy()?;
+    Bitmap.read_clipboard(&mut bitmap)?;
+}
+```
+
+This preserves Windows conversion while retaining the metadata preflight before
+the bitmap byte vector is allocated.
+
+## Scenario: Static Terminal Images Across Kitty, iTerm2, and Sixel
+
+### 1. Scope / Trigger
+
+- Trigger: remote terminal output can carry image protocol bytes and crosses SSH
+  channel IO, escape parsing, bounded image decoding, terminal-grid projection,
+  viewport metrics, presenter damage, and native/bitmap composition.
+- Applies when modifying `src/app/terminal_core/`, `src/app/ssh/runtime.rs`,
+  `src/app/ssh/runtime/pump.rs`, `src/app/terminal_model.rs`,
+  `src/app/terminal_atlas.rs`, `src/app/terminal_presenter.rs`, the native renderer,
+  or the local `tattoy-wezterm-term` patch.
+
+### 2. Signatures
+
+- `TerminalCoreAdapter::apply_remote_bytes(&mut self, bytes: &[u8]) -> Vec<u8>`
+  applies remote output and synchronously returns terminal-generated protocol reply
+  bytes from that same parser turn.
+- `TerminalViewportMetrics { pixel_width, pixel_height, dpi }` is carried by
+  terminal defaults, resize commands, frame snapshots, and SSH PTY resize calls.
+- `TerminalImageResource { content_hash, width, height, rgba: Arc<[u8]> }` is the
+  immutable decoded resource contract shared by both rendering paths.
+- `TerminalImagePlacement` carries `resource_key`, grid anchor/span, normalized UV
+  bounds, pixel padding, z-index, image/placement IDs, and protocol order.
+- `SessionRuntimeControl::resize_with_viewport(rows, cols, viewport)` must resize
+  both the terminal core and the SSH PTY with the same live pixel dimensions.
+
+### 3. Contracts
+
+- Protocol v1 accepts static Sixel, iTerm2 `inline=1`, and Kitty direct or chunked
+  in-band data. Kitty file, temporary-file, and shared-memory media and iTerm2
+  `inline=0` are disabled for SSH sessions before any local path access.
+- Keep `TERM=xterm-256color`; request `TERM_PROGRAM=mica-term` separately as
+  best-effort SSH environment negotiation. A server may reject it, and the
+  client must not inject a shell command solely to force it. Protocol parsing
+  and rendering never gate on that variable.
+- Input is bounded before parser/decode growth: 20 MiB encoded per image, 25 million
+  pixels, 100 MiB decoded per image, and 128 MiB retained resources per session.
+- Kitty chunk limits are aggregate across the complete transfer. Sixel raster
+  declarations are checked before allocating the declared canvas.
+- Content hashes include width, height, and RGBA bytes. Repeated placements may
+  share one `Arc` resource; snapshots must not copy full pixel payloads per frame.
+- The terminal core owns protocol parsing and grid-relative image fragments. Both
+  renderers consume the same resource/placement projection and the same clipped
+  destination/UV calculation.
+- Negative z-index images render after row backgrounds but before glyphs;
+  non-negative images render after glyphs in `(z_index, protocol_order)` order.
+- Session detach drops the terminal resource store and native renderer cache. Frame
+  damage must change for both the old and new rows when placements move or vanish.
+
+### 4. Validation & Error Matrix
+
+- Unterminated OSC 1337, APC `_G`, or Sixel DCS exceeds its wire cap -> reset the
+  parser, discard only through the protocol's valid terminator, then resume ordinary
+  terminal output.
+- Kitty external media -> return a protocol error when verbosity requires it and do
+  not call file, temporary-file, or shared-memory loaders.
+- iTerm2 `inline=0` -> ignore as unsupported; never invoke a download handler or
+  create a local file.
+- Zero/oversized dimensions, decompression overrun, animation frame request, or
+  session resource budget overflow -> fail closed without a placement.
+- Kitty query or delete generates a reply -> write it to SSH immediately after
+  `apply_remote_bytes`; failure to write the response terminates the pump with a
+  runtime error instead of waiting for keyboard/mouse input.
+- Missing resource, fully clipped placement, invalid UV bounds, or zero drawable
+  span -> skip the draw without resizing the terminal grid.
+- Viewport host is temporarily hidden -> retain the last valid pixel size, update
+  DPI, and never replace live metrics with `cols * 8` / `rows * 16` estimates.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a Kitty query arrives in one SSH batch; the parser reply is flushed and
+  written on the same pump turn, before the next select/wait iteration.
+- Good: identical image content is placed twice with different placement IDs; one
+  decoded resource is retained and both cheap placements render.
+- Base: Sixel, iTerm2 inline, and Kitty direct/chunked fixtures project through the
+  same snapshot fields and look consistent in native and bitmap modes.
+- Base: resize or scroll changes the grid-relative placements and invalidates both
+  their former and current rows while the RGBA resource remains shared.
+- Bad: detecting image protocols after feeding an unbounded control string to the
+  parser, loading Kitty `t=f` paths, or accumulating every chunk independently up
+  to the per-image limit.
+- Bad: making the native renderer interpret WezTerm image cells directly while the
+  bitmap renderer uses another model; clipping, z-order, and damage will diverge.
+
+### 6. Tests Required
+
+- Protocol fixtures assert one static resource plus placements for Sixel, iTerm2
+  inline, Kitty direct, and Kitty chunked transfers.
+- Kitty tests assert query/delete reply bytes are returned from the same
+  `apply_remote_bytes` call and the SSH output path drains those bytes immediately.
+- Security tests assert external Kitty media cannot read a guarded local path and
+  iTerm2 download mode creates no resource or file.
+- Boundary tests stream oversized unterminated OSC/APC/DCS payloads across chunks,
+  assert no leaked payload text, then assert parsing recovers after BEL/ST/CAN/SUB.
+- Resource tests assert identical content shares an allocation and budget overflow
+  produces no resource/placement.
+- Model/renderer tests assert padding, coupled destination/UV clipping, alpha,
+  negative/non-negative z-order, row fingerprints, resize, and detach cache reset.
+- Cross-platform checks compile the non-Windows bitmap path and the Windows native
+  renderer; existing text, selection, cursor, scrollback, and input suites remain
+  green apart from explicitly documented baseline failures.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+terminal.apply_remote_bytes(remote_bytes);
+// A later key or mouse event happens to flush terminal query replies.
+```
+
+This can deadlock applications probing Kitty capabilities because the remote peer
+waits for a response before sending more output.
+
+#### Correct
+
+```rust
+let reply = terminal.apply_remote_bytes(remote_bytes);
+if !reply.is_empty() {
+    ssh_handle.data(channel_id, reply).await?;
+}
+```
+
+Treat terminal replies as part of consuming the remote batch. Flush the terminal
+writer before draining its shared buffer, then await the SSH write before the pump
+returns to its event loop.
+
 ## Scenario: ZMODEM, SSH Exec Probes, and External Drop Transfer Boundaries
 
 ### 1. Scope / Trigger
@@ -436,3 +752,118 @@ The manager owns terminal projection removal, releases the registry lock during
 runtime cleanup, and removes only the captured revision. The runtime command is
 best-effort internal cleanup and must not publish a delayed unconditional
 `ZmodemStateChanged(None)`.
+
+## Scenario: Clipboard Image Preview and Input-Epoch Completion
+
+### 1. Scope / Trigger
+
+- Trigger: a clipboard image request prepares local preview pixels, uploads through
+  a captured SFTP binding, and may complete after the user has changed terminal
+  input.
+- Applies when modifying `src/app/clipboard.rs`,
+  `src/app/clipboard_image_paste.rs`,
+  `src/app/bootstrap/workspace_terminal.rs`, `src/app/bootstrap.rs`, or the
+  clipboard preview Slint components.
+
+### 2. Signatures
+
+- `ClipboardImagePasteController<SftpRuntimeHandle>` owns request state, per-session
+  input epochs, FIFO scheduling, and UI projections on the Slint event thread.
+- `ClipboardImagePasteBackgroundMessage::{Prepared, Uploaded}` keys every worker
+  result by request UUID; workers never mutate UI state directly.
+- `ClipboardImagePathAction` carries the original request, session, binding, and raw
+  remote path into the binding-safe paste boundary.
+- `ClipboardImagePreviewItem` is application chrome. It is not terminal model,
+  parser, scrollback, PTY, or native-renderer state.
+
+### 3. Contracts
+
+- Every request retains request, session, and SFTP binding UUIDs plus the input
+  epoch captured before any background work starts.
+- Every attempted client write to a remote terminal advances that session's epoch:
+  non-empty text, recognized keys, accepted text paste, forwarded mouse input,
+  grabbed wheel input, automatic path insertion, and explicit `Paste path`.
+  Failed or uncertain writes still advance conservatively.
+- Local scrollback, selection, search, tab changes, resize, image registration,
+  dismiss, and `Copy path` do not advance the epoch.
+- Completion may auto-paste only when the original session still exists, the SFTP
+  binding is current, and the input epoch is unchanged. A changed epoch produces
+  explicit `Paste path` and `Copy path` actions. A changed binding produces a
+  connection error and never exposes `Paste path` against the replacement runtime.
+- The queue capacity is 8, preparation concurrency is 2, active upload count is 1,
+  thumbnail bounds are 320 x 180 RGBA pixels, and success feedback lasts 3.2
+  seconds. The shared 25-million-pixel, 100 MiB decoded, and 20 MiB encoded limits
+  remain in force.
+- Prepared requests preserve FIFO even when preparation results arrive out of
+  order. The first automatic insertion advances the epoch, so later requests that
+  captured the same epoch become stale instead of concatenating paths.
+- Closing a session releases queued PNGs, previews, paths, and runtime handles.
+  An already-running upload retains only a hidden request-ID tombstone until its
+  result arrives, preserving global single-upload serialization without consuming
+  queue capacity.
+- Clipboard preview status and pixels never enter PTY bytes or
+  `TerminalSurfaceState`. Remote Kitty, iTerm2, and Sixel parsing and rendering stay
+  independent from clipboard preview behavior.
+- Clipboard bytes, PNG payloads, decoded pixels, and thumbnails are forbidden in
+  logs. Request/session/binding UUIDs, dimensions, encoded byte count, lifecycle
+  state, controlled path metadata, and bounded error text are allowed.
+
+### 4. Validation & Error Matrix
+
+- Unchanged epoch and current binding -> POSIX-quote the path, send without a
+  newline, advance the epoch, and show bounded success feedback.
+- Changed epoch and current binding -> send no bytes and retain explicit path
+  actions on the originating session only.
+- Closed session or replaced binding -> send no bytes, remove unsafe recovery
+  actions, and show a connection error.
+- Preparation/upload/clipboard-copy failure -> keep bounded visible error state and
+  secondary Transfer Center feedback; never fall back to clipboard text after an
+  image was selected.
+- Ninth retained image -> reject immediately without decode or upload; clipboard
+  inspection must still preserve ordinary text paste when the clipboard is text.
+
+### 5. Tests Required
+
+- Unit test bounded landscape, portrait, and non-upscaled thumbnail output.
+- Unit test queue capacity, out-of-order preparation, failed-head unblocking,
+  exactly one active upload, same-epoch FIFO invalidation, dismissal, expiry, and
+  closed-session tombstones.
+- Unit test stale `Paste path` session matching and that `Copy path` does not change
+  the input epoch.
+- Session-manager regression test binding replacement and closed-session rejection.
+- Preserve ordinary text-paste, SFTP cache permission/cleanup, and static
+  Kitty/iTerm2/Sixel regression tests.
+- Verify Linux all-targets plus supported Windows MSVC and GNU target checks.
+- Manually test a Windows screenshot with unchanged input, changed/submitted input,
+  two rapid image pastes, tab switching, dismiss, reconnect, copied image file, and
+  text-only paste.
+
+## Scenario: Clipboard Upload Progress and Local Terminal-Grid Images
+
+### Contracts
+
+- Clipboard upload progress is keyed by request UUID. Accepted byte counts are
+  monotonic and bounded by the request total; every upload publishes an initial
+  zero sample and a mandatory final total sample. Percentage and monotonic-average
+  speed are derived from those samples, and successful feedback retains the final
+  measurements for its normal lifetime.
+- Local terminal-image ingress returns `Result<()>` and is isolated from remote
+  transport. It must not write PTY input, generate SSH reply bytes, start SFTP,
+  invoke a shell command, or call a remote helper.
+- Local image cells carry neither a remote image ID nor a placement ID. Retained
+  resources count against the per-session image budget through weak ownership so
+  scrollback eviction, clear, and session teardown can release them.
+- Async local placement captures the originating session and active-session
+  generation. After acquiring the session runtime lock, it must revalidate the
+  pending request, active session, generation, and alternate-screen/mouse-grab/
+  application-cursor guards immediately before mutating the terminal grid.
+
+### Tests Required
+
+- Cover chunk boundaries, throttled monotonic progress, mandatory final state,
+  stale-request rejection, final measurement retention, and failed uploads.
+- Cover zero-writer local ingress, protocol-delete isolation, cursor/scrollback
+  behavior, weak-budget release, sizing without upscale, locked TUI rejection,
+  A -> B -> A invalidation, and newer-request replacement.
+- Compile bitmap-only and native-presenter builds with both supported Slint
+  renderers, plus supported Windows GNU and MSVC targets.

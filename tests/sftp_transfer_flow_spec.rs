@@ -265,6 +265,7 @@ impl SftpBackend for MemoryBackend {
             let initial = match mode {
                 SftpWriteMode::CreateOrTruncate => Vec::new(),
                 SftpWriteMode::CreateOrAppend => self.file_bytes(remote_path).unwrap_or_default(),
+                SftpWriteMode::CreateNew { .. } => Vec::new(),
             };
             Ok(Box::pin(MemoryFileWriter::new(
                 remote_path.to_string(),

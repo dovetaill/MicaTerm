@@ -104,3 +104,37 @@ Made terminal-state dismissal manager-owned and revision-safe, routed running Ca
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: Implement image dual-channel support
+
+**Date**: 2026-07-22
+**Task**: Implement image dual-channel support
+**Branch**: `feat/image-dual-channel`
+
+### Summary
+
+Implemented Windows clipboard image upload and Kitty/iTerm2/Sixel static inline rendering with bounded resources, cross-layer tests, and protocol contracts.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bbadd4e` | (see git log) |
+| `677421d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

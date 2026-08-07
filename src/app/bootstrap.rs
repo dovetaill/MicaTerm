@@ -96,6 +96,7 @@ use crate::app::ssh::session_manager::{
     SessionState,
 };
 use crate::app::terminal_atlas::TerminalAtlasSelection;
+use crate::app::terminal_core::TerminalViewportMetrics;
 use crate::app::terminal_model::TerminalModelFrame;
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_presenter::WindowsNativePresenter;
@@ -500,6 +501,23 @@ where
     crate::app::url_open::install_open_url_handler_for_test(handler)
 }
 
+#[doc(hidden)]
+pub struct InlineClipboardImageSourceReaderGuard {
+    _inner: workspace_terminal::InlineClipboardImageSourceReaderGuard,
+}
+
+#[doc(hidden)]
+pub fn install_inline_clipboard_image_source_for_test<F>(
+    reader: F,
+) -> InlineClipboardImageSourceReaderGuard
+where
+    F: Fn() -> Result<Option<Vec<u8>>> + Send + Sync + 'static,
+{
+    InlineClipboardImageSourceReaderGuard {
+        _inner: workspace_terminal::install_inline_clipboard_image_source_for_test(reader),
+    }
+}
+
 pub trait PrivateKeyImporter: Send + Sync {
     fn import_private_key(&self) -> Result<Option<ImportedPrivateKey>>;
 }
@@ -745,6 +763,7 @@ fn apply_pending_snippet_activation(
     window: &AppWindow,
     state: &mut ShellViewModel,
     bridge: Option<&ShellSessionBridge>,
+    image_paste_controller: &mut workspace_terminal::WorkspaceClipboardImagePasteController,
     follow_tracker: &mut WorkspaceFollowTracker,
 ) {
     let Some((snippet_id, mode)) = state.take_pending_snippet_activation() else {
@@ -759,7 +778,13 @@ fn apply_pending_snippet_activation(
             let Some(session_id) = active_workspace_session_uuid(state) else {
                 return;
             };
-            workspace_terminal::forward_workspace_session_paste(state, bridge, session_id, &script);
+            workspace_terminal::forward_workspace_session_paste(
+                state,
+                bridge,
+                image_paste_controller,
+                session_id,
+                &script,
+            );
         }
         SnippetActivation::Run => {
             let runnable_script = if script.ends_with('\n') {
@@ -770,6 +795,7 @@ fn apply_pending_snippet_activation(
             workspace_terminal::forward_active_workspace_text_input(
                 state,
                 bridge,
+                image_paste_controller,
                 &runnable_script,
             );
         }
@@ -1668,8 +1694,10 @@ fn active_workspace_session_uuid(state: &ShellViewModel) -> Option<Uuid> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WorkspacePasteRequestOutcome {
     Ignored,
+    Failed,
     Prompted,
     Sent,
+    UploadScheduled,
 }
 
 struct WorkspaceScrollInput {
@@ -3061,12 +3089,22 @@ fn record_workspace_terminal_viewport_defaults(
     cols: i32,
 ) {
     let rect = workspace_native_terminal_rect(window);
-    bridge.terminal_defaults.set_viewport_size(
+    let dpi = workspace_terminal_viewport_dpi(window);
+    let viewport = if rect.width > 0 && rect.height > 0 {
+        TerminalViewportMetrics::new(rect.width as u32, rect.height as u32, dpi)
+    } else {
+        let previous = bridge.terminal_defaults.viewport_metrics();
+        TerminalViewportMetrics::new(previous.pixel_width, previous.pixel_height, dpi)
+    };
+    bridge.terminal_defaults.set_viewport_metrics(
         rows.max(1) as usize,
         cols.max(1) as usize,
-        rect.width.max(0) as u32,
-        rect.height.max(0) as u32,
+        viewport,
     );
+}
+
+fn workspace_terminal_viewport_dpi(window: &AppWindow) -> u32 {
+    (window_scale_factor(window) * 96.0).round().max(1.0) as u32
 }
 
 fn workspace_native_terminal_resize_target(
@@ -4765,11 +4803,14 @@ fn sync_workspace_terminal_runtime_defaults_with_defaults(
     let rows = (height / cell_height).floor().max(1.0) as usize;
     let cols = (width / cell_width).floor().max(1.0) as usize;
     let scale_factor = window_scale_factor(window);
-    terminal_defaults.set_viewport_size(
+    terminal_defaults.set_viewport_metrics(
         rows,
         cols,
-        (width * scale_factor).round().max(0.0) as u32,
-        (height * scale_factor).round().max(0.0) as u32,
+        TerminalViewportMetrics::new(
+            (width * scale_factor).round().max(1.0) as u32,
+            (height * scale_factor).round().max(1.0) as u32,
+            workspace_terminal_viewport_dpi(window),
+        ),
     );
 }
 
@@ -6635,6 +6676,21 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let (sftp_local_action_result_tx, sftp_local_action_result_rx) =
         std::sync::mpsc::channel::<sftp::SftpLocalActionBackgroundMessage>();
     let sftp_local_action_result_rx = Rc::new(RefCell::new(sftp_local_action_result_rx));
+    let (clipboard_image_paste_result_tx, clipboard_image_paste_result_rx) =
+        std::sync::mpsc::channel::<workspace_terminal::ClipboardImagePasteBackgroundMessage>();
+    let clipboard_image_paste_result_rx = Rc::new(RefCell::new(clipboard_image_paste_result_rx));
+    let clipboard_image_paste_controller = Rc::new(RefCell::new(
+        workspace_terminal::WorkspaceClipboardImagePasteController::default(),
+    ));
+    let (clipboard_inline_image_result_tx, clipboard_inline_image_result_rx) =
+        std::sync::mpsc::channel::<workspace_terminal::ClipboardInlineImageBackgroundMessage>();
+    let clipboard_inline_image_result_rx = Rc::new(RefCell::new(clipboard_inline_image_result_rx));
+    let clipboard_inline_image_controller = Rc::new(RefCell::new(
+        workspace_terminal::WorkspaceClipboardInlineImageController::default(),
+    ));
+    let clipboard_image_paste_projection_fingerprint =
+        Rc::new(RefCell::new(None::<(u64, Option<Uuid>)>));
+    let clipboard_image_preparation_gate = Arc::new(tokio::sync::Semaphore::new(2));
     let (ssh_modal_result_tx, ssh_modal_result_rx) =
         std::sync::mpsc::channel::<SshModalBackgroundMessage>();
     let ssh_modal_result_rx = Rc::new(RefCell::new(ssh_modal_result_rx));
@@ -6675,6 +6731,13 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let sftp_browser_result_tx_ref = sftp_browser_result_tx.clone();
         let sftp_transfer_result_rx_ref = Rc::clone(&sftp_transfer_result_rx);
         let sftp_local_action_result_rx_ref = Rc::clone(&sftp_local_action_result_rx);
+        let clipboard_image_paste_result_rx_ref = Rc::clone(&clipboard_image_paste_result_rx);
+        let clipboard_image_paste_result_tx_ref = clipboard_image_paste_result_tx.clone();
+        let clipboard_image_paste_controller_ref = Rc::clone(&clipboard_image_paste_controller);
+        let clipboard_inline_image_result_rx_ref = Rc::clone(&clipboard_inline_image_result_rx);
+        let clipboard_inline_image_controller_ref = Rc::clone(&clipboard_inline_image_controller);
+        let clipboard_image_paste_projection_fingerprint_ref =
+            Rc::clone(&clipboard_image_paste_projection_fingerprint);
         let ssh_modal_result_rx_ref = Rc::clone(&ssh_modal_result_rx);
         let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
         let active_ssh_modal_test_request_id_ref = Rc::clone(&active_ssh_modal_test_request_id);
@@ -6695,6 +6758,31 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 return;
             };
             let mut state = state.borrow_mut();
+            let clipboard_inline_image_changed = {
+                let receiver = clipboard_inline_image_result_rx_ref.borrow();
+                workspace_terminal::drain_clipboard_inline_image_messages(
+                    &mut state,
+                    &manager,
+                    &mut clipboard_inline_image_controller_ref.borrow_mut(),
+                    &receiver,
+                )
+            };
+            let clipboard_image_paste_changed = {
+                let receiver = clipboard_image_paste_result_rx_ref.borrow();
+                let mut controller = clipboard_image_paste_controller_ref.borrow_mut();
+                for session_id in controller.session_ids() {
+                    if manager.session(session_id).is_none() {
+                        controller.remove_session(session_id);
+                    }
+                }
+                workspace_terminal::drain_clipboard_image_paste_messages(
+                    &mut state,
+                    &manager,
+                    &mut controller,
+                    &receiver,
+                    &clipboard_image_paste_result_tx_ref,
+                )
+            };
             let sftp_result_changed = {
                 let receiver = sftp_browser_result_rx_ref.borrow();
                 let mut controller = sftp_browser_controller_ref.borrow_mut();
@@ -6730,7 +6818,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &receiver,
                 )
             };
-            if sftp_transfer_changed || sftp_local_action_changed {
+            if clipboard_inline_image_changed
+                || clipboard_image_paste_changed
+                || sftp_transfer_changed
+                || sftp_local_action_changed
+            {
                 shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
                 sftp::sync_sftp_conflict_modal_state(&window, &state);
             }
@@ -6753,6 +6845,15 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             if should_clear_pending_paste {
                 pending_workspace_paste_warning_ref.borrow_mut().take();
                 windowing::sync_workspace_paste_warning_modal_state(&window, None);
+            }
+            {
+                let controller = clipboard_image_paste_controller_ref.borrow();
+                workspace_terminal::sync_clipboard_image_paste_preview(
+                    &window,
+                    &controller,
+                    active_workspace_session_uuid(&state),
+                    &mut clipboard_image_paste_projection_fingerprint_ref.borrow_mut(),
+                );
             }
             if projection_delta.tabs_changed {
                 sync_workspace_tab_items(&window, &state);
@@ -7869,6 +7970,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         &quick_launch_store,
         &vault_session,
         &workspace_follow_tracker,
+        &clipboard_image_paste_controller,
         &pending_host_key_approval,
         &modal_drag_state,
         &vault_sync_service,
@@ -8198,6 +8300,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let session_bridge_ref = session_bridge.clone();
     let pending_workspace_paste_warning_ref = Rc::clone(&pending_workspace_paste_warning);
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let clipboard_image_paste_controller_ref = Rc::clone(&clipboard_image_paste_controller);
     window.on_workspace_paste_warning_confirm_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -8219,6 +8322,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         workspace_terminal::forward_workspace_session_paste(
             &state,
             session_bridge_ref.as_deref(),
+            &mut clipboard_image_paste_controller_ref.borrow_mut(),
             pending.session_id,
             &text,
         );
@@ -9092,6 +9196,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let input_projection_refresh_timer_ref = Rc::clone(&input_projection_refresh_timer);
     let input_projection_refresh_gate_ref = Rc::clone(&input_projection_refresh_gate);
+    let clipboard_image_paste_controller_ref = Rc::clone(&clipboard_image_paste_controller);
     window.on_workspace_session_text_input(move |text| {
         if let Some(window) = window_handle.upgrade()
             && window.get_workspace_paste_warning_modal_open()
@@ -9108,6 +9213,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         workspace_terminal::forward_active_workspace_text_input(
             &state,
             session_bridge_ref.as_deref(),
+            &mut clipboard_image_paste_controller_ref.borrow_mut(),
             text.as_str(),
         );
         if let Some(window) = window_handle.upgrade() {
@@ -9137,6 +9243,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let input_projection_refresh_timer_ref = Rc::clone(&input_projection_refresh_timer);
     let input_projection_refresh_gate_ref = Rc::clone(&input_projection_refresh_gate);
     let effects_ref = Rc::clone(&effects);
+    let clipboard_image_paste_controller_ref = Rc::clone(&clipboard_image_paste_controller);
     window.on_workspace_session_key_input(move |key, alt, ctrl, shift| {
         if let Some(window) = window_handle.upgrade()
             && window.get_workspace_paste_warning_modal_open()
@@ -9198,6 +9305,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         workspace_terminal::forward_active_workspace_key_input(
             &state,
             session_bridge_ref.as_deref(),
+            &mut clipboard_image_paste_controller_ref.borrow_mut(),
             key.as_str(),
             alt,
             ctrl,
@@ -9473,6 +9581,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let input_projection_refresh_timer_ref = Rc::clone(&input_projection_refresh_timer);
     let input_projection_refresh_gate_ref = Rc::clone(&input_projection_refresh_gate);
+    let clipboard_image_paste_result_tx_ref = clipboard_image_paste_result_tx.clone();
+    let clipboard_image_paste_controller_ref = Rc::clone(&clipboard_image_paste_controller);
+    let clipboard_image_paste_projection_fingerprint_ref =
+        Rc::clone(&clipboard_image_paste_projection_fingerprint);
+    let clipboard_image_preparation_gate_ref = Arc::clone(&clipboard_image_preparation_gate);
+    let effects_ref = Rc::clone(&effects);
     window.on_workspace_session_paste_requested(move || {
         if let Some(window) = window_handle.upgrade()
             && window.get_workspace_paste_warning_modal_open()
@@ -9486,13 +9600,25 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
         let mut state = view_model_ref.borrow_mut();
         let outcome = workspace_terminal::forward_active_workspace_paste(
-            &state,
+            &mut state,
             session_bridge_ref.as_deref(),
             pending_workspace_paste_warning_ref.as_ref(),
+            &mut clipboard_image_paste_controller_ref.borrow_mut(),
+            &clipboard_image_paste_result_tx_ref,
+            &clipboard_image_preparation_gate_ref,
         );
         if let Some(window) = window_handle.upgrade() {
             let pending = pending_workspace_paste_warning_ref.borrow();
             windowing::sync_workspace_paste_warning_modal_state(&window, pending.as_ref());
+            if matches!(outcome, WorkspacePasteRequestOutcome::UploadScheduled) {
+                let controller = clipboard_image_paste_controller_ref.borrow();
+                workspace_terminal::sync_clipboard_image_paste_preview(
+                    &window,
+                    &controller,
+                    active_workspace_session_uuid(&state),
+                    &mut clipboard_image_paste_projection_fingerprint_ref.borrow_mut(),
+                );
+            }
             if matches!(outcome, WorkspacePasteRequestOutcome::Sent) {
                 workspace_terminal::refresh_active_workspace_projection(
                     &window,
@@ -9508,8 +9634,153 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     Rc::clone(&input_projection_refresh_timer_ref),
                     Rc::clone(&input_projection_refresh_gate_ref),
                 );
+            } else if matches!(outcome, WorkspacePasteRequestOutcome::Failed) {
+                shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
             }
         }
+    });
+
+    let view_model_ref = Rc::clone(&view_model);
+    let session_bridge_ref = session_bridge.clone();
+    let window_handle = window.as_weak();
+    let clipboard_inline_image_result_tx_ref = clipboard_inline_image_result_tx.clone();
+    let clipboard_inline_image_controller_ref = Rc::clone(&clipboard_inline_image_controller);
+    let clipboard_image_preparation_gate_ref = Arc::clone(&clipboard_image_preparation_gate);
+    let effects_ref = Rc::clone(&effects);
+    window.on_workspace_session_display_clipboard_image_requested(move || {
+        let mut state = view_model_ref.borrow_mut();
+        workspace_terminal::forward_active_workspace_inline_clipboard_image(
+            &mut state,
+            session_bridge_ref.as_deref(),
+            &mut clipboard_inline_image_controller_ref.borrow_mut(),
+            &clipboard_inline_image_result_tx_ref,
+            &clipboard_image_preparation_gate_ref,
+        );
+        if let Some(window) = window_handle.upgrade() {
+            shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        }
+    });
+
+    let view_model_ref = Rc::clone(&view_model);
+    let session_bridge_ref = session_bridge.clone();
+    let window_handle = window.as_weak();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let input_projection_refresh_timer_ref = Rc::clone(&input_projection_refresh_timer);
+    let input_projection_refresh_gate_ref = Rc::clone(&input_projection_refresh_gate);
+    let clipboard_image_paste_controller_ref = Rc::clone(&clipboard_image_paste_controller);
+    let clipboard_image_paste_projection_fingerprint_ref =
+        Rc::clone(&clipboard_image_paste_projection_fingerprint);
+    let effects_ref = Rc::clone(&effects);
+    window.on_workspace_session_clipboard_image_paste_path_requested(move |request_id| {
+        let Ok(request_id) = Uuid::parse_str(request_id.as_str()) else {
+            tracing::warn!(
+                target: "app.clipboard",
+                request_id = request_id.as_str(),
+                "ignored malformed clipboard image paste request id"
+            );
+            return;
+        };
+        let mut state = view_model_ref.borrow_mut();
+        let changed = workspace_terminal::paste_stale_clipboard_image_path(
+            &mut state,
+            session_bridge_ref.as_deref(),
+            &mut clipboard_image_paste_controller_ref.borrow_mut(),
+            request_id,
+        );
+        if !changed {
+            return;
+        }
+        let Some(window) = window_handle.upgrade() else {
+            return;
+        };
+        workspace_terminal::refresh_active_workspace_projection(
+            &window,
+            &mut state,
+            session_bridge_ref.as_deref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
+        workspace_terminal::schedule_workspace_input_projection_refresh(
+            &window,
+            Rc::clone(&view_model_ref),
+            session_bridge_ref.clone(),
+            Rc::clone(&workspace_follow_tracker_ref),
+            Rc::clone(&input_projection_refresh_timer_ref),
+            Rc::clone(&input_projection_refresh_gate_ref),
+        );
+        let controller = clipboard_image_paste_controller_ref.borrow();
+        workspace_terminal::sync_clipboard_image_paste_preview(
+            &window,
+            &controller,
+            active_workspace_session_uuid(&state),
+            &mut clipboard_image_paste_projection_fingerprint_ref.borrow_mut(),
+        );
+        shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+    });
+
+    let state = Rc::clone(&view_model);
+    let window_handle = window.as_weak();
+    let clipboard_image_paste_controller_ref = Rc::clone(&clipboard_image_paste_controller);
+    let clipboard_image_paste_projection_fingerprint_ref =
+        Rc::clone(&clipboard_image_paste_projection_fingerprint);
+    window.on_workspace_session_clipboard_image_copy_path_requested(move |request_id| {
+        let Ok(request_id) = Uuid::parse_str(request_id.as_str()) else {
+            tracing::warn!(
+                target: "app.clipboard",
+                request_id = request_id.as_str(),
+                "ignored malformed clipboard image copy request id"
+            );
+            return;
+        };
+        if !workspace_terminal::copy_stale_clipboard_image_path(
+            &mut clipboard_image_paste_controller_ref.borrow_mut(),
+            request_id,
+        ) {
+            return;
+        }
+        let Some(window) = window_handle.upgrade() else {
+            return;
+        };
+        let state = state.borrow();
+        let controller = clipboard_image_paste_controller_ref.borrow();
+        workspace_terminal::sync_clipboard_image_paste_preview(
+            &window,
+            &controller,
+            active_workspace_session_uuid(&state),
+            &mut clipboard_image_paste_projection_fingerprint_ref.borrow_mut(),
+        );
+    });
+
+    let state = Rc::clone(&view_model);
+    let window_handle = window.as_weak();
+    let clipboard_image_paste_controller_ref = Rc::clone(&clipboard_image_paste_controller);
+    let clipboard_image_paste_projection_fingerprint_ref =
+        Rc::clone(&clipboard_image_paste_projection_fingerprint);
+    window.on_workspace_session_clipboard_image_dismiss_requested(move |request_id| {
+        let Ok(request_id) = Uuid::parse_str(request_id.as_str()) else {
+            tracing::warn!(
+                target: "app.clipboard",
+                request_id = request_id.as_str(),
+                "ignored malformed clipboard image dismiss request id"
+            );
+            return;
+        };
+        if !clipboard_image_paste_controller_ref
+            .borrow_mut()
+            .dismiss(request_id)
+        {
+            return;
+        }
+        let Some(window) = window_handle.upgrade() else {
+            return;
+        };
+        let state = state.borrow();
+        let controller = clipboard_image_paste_controller_ref.borrow();
+        workspace_terminal::sync_clipboard_image_paste_preview(
+            &window,
+            &controller,
+            active_workspace_session_uuid(&state),
+            &mut clipboard_image_paste_projection_fingerprint_ref.borrow_mut(),
+        );
     });
 
     let state = Rc::clone(&view_model);
@@ -9519,6 +9790,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let workspace_link_click_candidate =
         Rc::new(RefCell::new(None::<WorkspaceTerminalLinkClickCandidate>));
     let workspace_link_click_candidate_ref = Rc::clone(&workspace_link_click_candidate);
+    let clipboard_image_paste_controller_ref = Rc::clone(&clipboard_image_paste_controller);
     window.on_workspace_session_mouse_input(move |kind, button, row, col, shift, ctrl, alt| {
         let mut state = state.borrow_mut();
         let Some(kind) = workspace_terminal::parse_terminal_mouse_kind(kind.as_str()) else {
@@ -9582,6 +9854,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         workspace_terminal::forward_active_workspace_mouse_input(
             &state,
             session_bridge_ref.as_deref(),
+            &mut clipboard_image_paste_controller_ref.borrow_mut(),
             TerminalMouseInput {
                 kind,
                 button,
@@ -9608,6 +9881,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let scroll_projection_refresh_timer_ref = Rc::clone(&scroll_projection_refresh_timer);
     let scroll_projection_refresh_gate_ref = Rc::clone(&scroll_projection_refresh_gate);
+    let clipboard_image_paste_controller_ref = Rc::clone(&clipboard_image_paste_controller);
     window.on_workspace_session_scroll_requested(
         move |delta_lines, row, col, selection_col, shift, ctrl, alt| {
             let drag_active = {
@@ -9625,6 +9899,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 workspace_terminal::forward_active_workspace_scroll(
                     &state,
                     session_bridge_ref.as_deref(),
+                    &mut clipboard_image_paste_controller_ref.borrow_mut(),
                     WorkspaceScrollInput {
                         delta_lines,
                         row,

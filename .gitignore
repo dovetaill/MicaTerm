@@ -9,6 +9,11 @@ vendor/*
 !vendor/dirs-sys/**
 !vendor/gpu-allocator/
 !vendor/gpu-allocator/**
+!vendor/tattoy-wezterm-term/
+!vendor/tattoy-wezterm-term/**
+vendor/tattoy-wezterm-term/Cargo.lock
+vendor/tattoy-wezterm-term/.cargo-ok
+vendor/tattoy-wezterm-term/.cargo_vcs_info.json
 !vendor/i-slint-renderer-femtovg/
 !vendor/i-slint-renderer-femtovg/**
 !vendor/i-slint-renderer-skia/

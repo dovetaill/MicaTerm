@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 3
-- **Last Active**: 2026-07-17
+- **Total Sessions**: 4
+- **Last Active**: 2026-07-22
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~106 | Active |
+| `journal-1.md` | ~140 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 4 | 2026-07-22 | Implement image dual-channel support | `bbadd4e`, `677421d` | `feat/image-dual-channel` |
 | 3 | 2026-07-17 | Fix dedicated exec ZMODEM modal lifecycle | `fd7fb4c` | `master` |
 | 2 | 2026-07-16 | Stabilize terminal drag upload routing | `b9a43a9`, `ed857a2` | `master` |
 | 1 | 2026-07-13 | Fix ZMODEM terminal byte loss and upload finalization | `220f849` | `master` |
