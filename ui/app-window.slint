@@ -700,6 +700,7 @@ export component AppWindow inherits Window {
     callback workspace-session-copy-selection-requested(int, int, int, int);
     callback workspace-session-select-all-requested();
     callback workspace-session-paste-requested();
+    callback workspace-session-display-clipboard-image-requested();
     callback workspace-session-clipboard-image-paste-path-requested(string);
     callback workspace-session-clipboard-image-copy-path-requested(string);
     callback workspace-session-clipboard-image-dismiss-requested(string);
@@ -1513,6 +1514,10 @@ export component AppWindow inherits Window {
 
                         paste-requested() => {
                             root.workspace-session-paste-requested();
+                        }
+
+                        display-clipboard-image-requested() => {
+                            root.workspace-session-display-clipboard-image-requested();
                         }
 
                         clipboard-image-paste-path-requested(request-id) => {

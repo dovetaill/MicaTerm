@@ -835,6 +835,7 @@ pub struct ShellViewModel {
     hidden_workspace_terminal_session_ids: HashSet<String>,
     active_workspace_tab_id: Option<String>,
     active_workspace_session_id: Option<String>,
+    active_workspace_session_generation: u64,
     active_workspace_terminal_surface: Option<TerminalSurfaceState>,
     workspace_terminal_selection: Option<WorkspaceTerminalSelection>,
     workspace_terminal_selection_drag: Option<WorkspaceTerminalSelectionDrag>,
@@ -930,6 +931,7 @@ impl Default for ShellViewModel {
             hidden_workspace_terminal_session_ids: HashSet::new(),
             active_workspace_tab_id: None,
             active_workspace_session_id: None,
+            active_workspace_session_generation: 0,
             active_workspace_terminal_surface: None,
             workspace_terminal_selection: None,
             workspace_terminal_selection_drag: None,
@@ -1989,7 +1991,7 @@ impl ShellViewModel {
         }
 
         self.active_workspace_tab_id = active_tab_id.clone();
-        self.active_workspace_session_id = active_tab_id.as_deref().and_then(|active_id| {
+        let next_active_workspace_session_id = active_tab_id.as_deref().and_then(|active_id| {
             self.workspace_tabs
                 .iter()
                 .find(|tab| tab.tab_id == active_id)
@@ -2003,6 +2005,11 @@ impl ShellViewModel {
                     }
                 })
         });
+        if self.active_workspace_session_id != next_active_workspace_session_id {
+            self.active_workspace_session_generation =
+                self.active_workspace_session_generation.wrapping_add(1);
+        }
+        self.active_workspace_session_id = next_active_workspace_session_id;
         if self.active_workspace_terminal_surface().is_none() {
             self.active_workspace_terminal_surface = None;
         }

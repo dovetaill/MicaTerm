@@ -10,8 +10,9 @@ use termwiz::input::{KeyCode, Modifiers as KeyModifiers};
 use uuid::Uuid;
 
 use crate::app::terminal_core::{
-    SelectionState, TerminalCoreAdapter, TerminalFrameSnapshot, TerminalViewportMetrics,
-    ViewportState, create_terminal_core_adapter, create_terminal_core_adapter_with_viewport,
+    LocalTerminalImage, SelectionState, TerminalCoreAdapter, TerminalFrameSnapshot,
+    TerminalViewportMetrics, ViewportState, create_terminal_core_adapter,
+    create_terminal_core_adapter_with_viewport,
 };
 use crate::app::terminal_theme::preset_for_theme;
 use crate::theme::{ThemeMode, ThemeVariant};
@@ -348,6 +349,10 @@ impl TerminalSession {
 
     pub fn apply_remote_bytes(&mut self, bytes: &[u8]) -> Vec<u8> {
         self.core.apply_remote_bytes(bytes)
+    }
+
+    pub fn apply_local_image(&mut self, image: LocalTerminalImage) -> Result<()> {
+        self.core.apply_local_image(image)
     }
 
     pub fn screen_text(&self) -> String {

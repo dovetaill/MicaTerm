@@ -11,6 +11,9 @@ export struct ClipboardImagePreviewItem {
     paste_enabled: bool,
     copy_enabled: bool,
     collapsed: bool,
+    progress-value: float,
+    progress-text: string,
+    speed-text: string,
 }
 
 component ClipboardPreviewIconButton inherits Rectangle {
@@ -166,6 +169,9 @@ export component ClipboardImagePreviewOverlay inherits Rectangle {
                 || item.status == "uploading";
             private property <bool> stale: item.status == "stale";
             private property <bool> failed: item.status == "error";
+            private property <bool> show-progress: item.status == "uploading"
+                || item.status == "success"
+                || item.status == "stale";
             private property <string> title: item.status == "preparing"
                 ? "Preparing image"
                 : item.status == "queued"
@@ -188,7 +194,7 @@ export component ClipboardImagePreviewOverlay inherits Rectangle {
             private property <length> preview-height: row.pending ? 72px : 52px;
             private property <length> detail-x: row.pending ? 134px : 112px;
 
-            height: item.collapsed ? 48px : row.stale || row.failed ? 122px : 142px;
+            height: item.collapsed ? 72px : row.stale ? 142px : row.failed ? 122px : 142px;
             background: transparent;
 
             card := Rectangle {
@@ -213,9 +219,9 @@ export component ClipboardImagePreviewOverlay inherits Rectangle {
 
                 Text {
                     x: item.collapsed ? 42px : 42px;
-                    y: item.collapsed ? 0px : 8px;
+                    y: item.collapsed ? 3px : 8px;
                     width: max(0px, parent.width - (item.copy_enabled ? 120px : 82px));
-                    height: item.collapsed ? parent.height : 24px;
+                    height: item.collapsed ? 28px : 24px;
                     text: row.title;
                     color: ThemeTokens.text-primary;
                     font-size: 12px;
@@ -312,6 +318,35 @@ export component ClipboardImagePreviewOverlay inherits Rectangle {
                     clicked => {
                         root.paste-path-requested(item.request_id);
                     }
+                }
+
+                if row.show-progress : progress-track := Rectangle {
+                    x: item.collapsed ? 42px : row.detail-x;
+                    y: item.collapsed ? 34px : row.stale ? 114px : 112px;
+                    width: max(0px, parent.width - self.x - 12px);
+                    height: 5px;
+                    border-radius: 2px;
+                    background: ThemeTokens.divider-subtle;
+                    clip: true;
+
+                    Rectangle {
+                        width: parent.width * min(1.0, max(0.0, item.progress-value));
+                        height: parent.height;
+                        border-radius: 2px;
+                        background: row.tone;
+                    }
+                }
+
+                if row.show-progress : Text {
+                    x: item.collapsed ? 42px : row.detail-x;
+                    y: item.collapsed ? 43px : row.stale ? 122px : 120px;
+                    width: max(0px, parent.width - self.x - 12px);
+                    height: 14px;
+                    text: item.progress-text + " | " + item.speed-text;
+                    color: ThemeTokens.text-secondary;
+                    font-size: 9px;
+                    vertical-alignment: center;
+                    overflow: elide;
                 }
             }
         }

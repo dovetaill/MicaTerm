@@ -26,7 +26,7 @@ use crate::app::ssh::runtime::{
     TerminalSurfaceSignature, TerminalSurfaceState, UnknownHostKeyError,
     ZmodemDownloadConflictPolicy, ZmodemTransferState,
 };
-use crate::app::terminal_core::TerminalViewportMetrics;
+use crate::app::terminal_core::{LocalTerminalImage, TerminalViewportMetrics};
 use crate::theme::{ThemeMode, ThemeVariant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,6 +145,9 @@ pub trait SessionRuntimeControl: Send {
     fn send_key_input(&self, event: TerminalKeyEvent) -> Result<()>;
     fn send_mouse_input(&self, event: TerminalMouseInput) -> Result<()>;
     fn send_paste(&self, text: String) -> Result<()>;
+    fn apply_local_image(&self, _image: LocalTerminalImage) -> Result<TerminalSurfaceState> {
+        Err(anyhow!("session runtime does not support local images"))
+    }
     fn start_zmodem_upload(&self, _local_paths: Vec<PathBuf>) -> Result<()> {
         Err(anyhow!("session runtime does not support zmodem uploads"))
     }
@@ -936,6 +939,20 @@ impl SessionManager {
             .lock()
             .expect("lock session runtime control for paste")
             .send_paste(text)
+    }
+
+    pub fn apply_session_local_image(
+        &self,
+        session_id: Uuid,
+        image: LocalTerminalImage,
+    ) -> Result<()> {
+        let surface = self
+            .runtime_control_for_session(session_id)?
+            .lock()
+            .expect("lock session runtime control for local image")
+            .apply_local_image(image)?;
+        update_terminal_surface(&self.registry, session_id, surface);
+        Ok(())
     }
 
     pub fn send_session_paste_if_sftp_binding_current(

@@ -18,6 +18,7 @@ use mica_term::app::terminal_font::{
 use mica_term::app::terminal_layout::run_segmentation::RunCluster;
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_layout::{GlyphRun, PositionedGlyph, ShapedRow, TextStyleKey};
+#[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_presenter::{
     PresentedTerminalFrame, TerminalPresentationOptions, TerminalPresenter, WindowsNativePresenter,
 };
@@ -58,6 +59,7 @@ fn atlas_renderer_with_fake_color_emoji() -> Result<TerminalAtlasRenderer> {
     TerminalAtlasRenderer::with_emoji_renderer_for_tests(fake_color_emoji_renderer())
 }
 
+#[cfg(feature = "terminal-native-renderer")]
 fn present_native_frame(
     presenter: &mut WindowsNativePresenter,
     surface: &TerminalSurfaceState,
@@ -70,6 +72,7 @@ fn present_native_frame(
     }
 }
 
+#[cfg(feature = "terminal-native-renderer")]
 #[test]
 fn native_presenter_reloads_font_metrics_when_raster_scale_changes() -> Result<()> {
     let mut presenter = WindowsNativePresenter::new()?;
@@ -90,6 +93,7 @@ fn native_presenter_reloads_font_metrics_when_raster_scale_changes() -> Result<(
     Ok(())
 }
 
+#[cfg(feature = "terminal-native-renderer")]
 #[test]
 fn windows_native_presenter_keeps_a_more_readable_text_line_box() -> Result<()> {
     let native = WindowsNativePresenter::new()?;
@@ -411,6 +415,7 @@ impl EmojiRasterizerBackend for FakeAtlasEmojiBackend {
     }
 }
 
+#[cfg(feature = "terminal-native-renderer")]
 #[test]
 fn first_monochrome_native_frame_carries_upload_payload_then_reuses_cache() -> Result<()> {
     let surface = render_surface(4, 12, "A\r\n");
@@ -444,6 +449,7 @@ fn first_monochrome_native_frame_carries_upload_payload_then_reuses_cache() -> R
     Ok(())
 }
 
+#[cfg(feature = "terminal-native-renderer")]
 #[test]
 fn first_color_native_frame_carries_upload_payload_then_reuses_cache() -> Result<()> {
     let surface = render_surface(4, 12, "🦀\r\n");
@@ -475,6 +481,7 @@ fn first_color_native_frame_carries_upload_payload_then_reuses_cache() -> Result
     Ok(())
 }
 
+#[cfg(feature = "terminal-native-renderer")]
 #[test]
 fn monochrome_native_frame_draws_expose_stable_pixel_destinations() -> Result<()> {
     let surface = render_surface(
@@ -502,6 +509,7 @@ fn monochrome_native_frame_draws_expose_stable_pixel_destinations() -> Result<()
     Ok(())
 }
 
+#[cfg(feature = "terminal-native-renderer")]
 #[test]
 fn presentable_native_frame_threads_palette_contract_and_color_destinations() -> Result<()> {
     let surface = render_surface(

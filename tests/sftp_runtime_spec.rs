@@ -7,8 +7,9 @@ use std::task::{Context, Poll};
 
 use anyhow::{Result, anyhow};
 use mica_term::app::sftp::{
-    BoxedSftpReader, BoxedSftpWriter, SftpBackend, SftpDirectoryEntry, SftpDirectoryEntryKind,
-    SftpRemoteMetadata, SftpRuntimeHandle, SftpWriteMode,
+    BoxedSftpReader, BoxedSftpWriter, CLIPBOARD_UPLOAD_CHUNK_BYTES, SftpBackend,
+    SftpDirectoryEntry, SftpDirectoryEntryKind, SftpRemoteMetadata, SftpRuntimeHandle,
+    SftpWriteMode,
 };
 use tokio::io::{
     AsyncRead, AsyncReadExt, AsyncSeek, AsyncSeekExt, AsyncWrite, AsyncWriteExt, ReadBuf,
@@ -17,12 +18,30 @@ use uuid::Uuid;
 
 struct MemoryFileHandle {
     cursor: Cursor<Vec<u8>>,
+    successful_write_lengths: Option<Arc<Mutex<Vec<usize>>>>,
+    fail_on_write_call: Option<usize>,
+    write_calls: usize,
 }
 
 impl MemoryFileHandle {
     fn new(bytes: Vec<u8>) -> Self {
         Self {
             cursor: Cursor::new(bytes),
+            successful_write_lengths: None,
+            fail_on_write_call: None,
+            write_calls: 0,
+        }
+    }
+
+    fn recording_writer(
+        successful_write_lengths: Arc<Mutex<Vec<usize>>>,
+        fail_on_write_call: Option<usize>,
+    ) -> Self {
+        Self {
+            cursor: Cursor::new(Vec::new()),
+            successful_write_lengths: Some(successful_write_lengths),
+            fail_on_write_call,
+            write_calls: 0,
         }
     }
 }
@@ -46,7 +65,17 @@ impl AsyncWrite for MemoryFileHandle {
         _cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
+        self.write_calls += 1;
+        if self.fail_on_write_call == Some(self.write_calls) {
+            return Poll::Ready(Err(std::io::Error::other("injected write failure")));
+        }
         let written = Write::write(&mut self.cursor, buf)?;
+        if let Some(lengths) = self.successful_write_lengths.as_ref() {
+            lengths
+                .lock()
+                .expect("lock successful write lengths")
+                .push(written);
+        }
         Poll::Ready(Ok(written))
     }
 
@@ -86,6 +115,24 @@ struct RecordingBackend {
     download_requests: Mutex<Vec<String>>,
     remove_file_requests: Mutex<Vec<String>>,
     remove_dir_requests: Mutex<Vec<String>>,
+    successful_write_lengths: Arc<Mutex<Vec<usize>>>,
+    fail_on_write_call: Mutex<Option<usize>>,
+}
+
+impl RecordingBackend {
+    fn successful_write_lengths(&self) -> Vec<usize> {
+        self.successful_write_lengths
+            .lock()
+            .expect("lock successful write lengths")
+            .clone()
+    }
+
+    fn fail_on_write_call(&self, call: usize) {
+        *self
+            .fail_on_write_call
+            .lock()
+            .expect("lock failing write call") = Some(call);
+    }
 }
 
 impl SftpBackend for RecordingBackend {
@@ -224,7 +271,14 @@ impl SftpBackend for RecordingBackend {
                 .lock()
                 .expect("lock open writer requests")
                 .push((path.to_string(), mode));
-            Ok(Box::pin(MemoryFileHandle::new(Vec::new())) as BoxedSftpWriter)
+            let fail_on_write_call = *self
+                .fail_on_write_call
+                .lock()
+                .expect("lock failing write call");
+            Ok(Box::pin(MemoryFileHandle::recording_writer(
+                Arc::clone(&self.successful_write_lengths),
+                fail_on_write_call,
+            )) as BoxedSftpWriter)
         })
     }
 
@@ -592,6 +646,92 @@ async fn runtime_loads_remote_metadata_without_downloading_file() {
             .lock()
             .expect("lock download requests")
             .is_empty()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn clipboard_upload_reports_cumulative_chunk_progress() {
+    let backend = Arc::new(RecordingBackend::default());
+    let runtime = SftpRuntimeHandle::new(backend.clone());
+    let session_id = Uuid::new_v4();
+    let payload = vec![0x5a; CLIPBOARD_UPLOAD_CHUNK_BYTES * 2 + 17];
+    let mut progress = Vec::new();
+
+    runtime
+        .upload_clipboard_png_with_progress(session_id, payload.clone(), |value| {
+            progress.push(value);
+        })
+        .await
+        .expect("upload clipboard image");
+
+    assert_eq!(
+        progress.first().map(|value| value.bytes_transferred),
+        Some(0)
+    );
+    assert_eq!(
+        progress.last().map(|value| value.bytes_transferred),
+        Some(payload.len() as u64)
+    );
+    assert!(progress.windows(2).all(|pair| {
+        pair[0].bytes_transferred <= pair[1].bytes_transferred
+            && pair[0].bytes_total == pair[1].bytes_total
+    }));
+    assert!(
+        backend
+            .successful_write_lengths()
+            .iter()
+            .all(|length| *length <= CLIPBOARD_UPLOAD_CHUNK_BYTES)
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn clipboard_upload_removes_partial_file_after_chunk_failure() {
+    let backend = Arc::new(RecordingBackend::default());
+    backend.fail_on_write_call(2);
+    let runtime = SftpRuntimeHandle::new(backend.clone());
+    let payload = vec![0x5a; CLIPBOARD_UPLOAD_CHUNK_BYTES * 2 + 17];
+    let payload_len = payload.len() as u64;
+    let mut progress = Vec::new();
+
+    let error = runtime
+        .upload_clipboard_png_with_progress(Uuid::new_v4(), payload, |value| {
+            progress.push(value);
+        })
+        .await
+        .expect_err("second chunk should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("failed to write remote clipboard image")
+    );
+    assert_eq!(
+        backend.successful_write_lengths(),
+        vec![CLIPBOARD_UPLOAD_CHUNK_BYTES]
+    );
+    assert_eq!(
+        progress.first().map(|value| value.bytes_transferred),
+        Some(0)
+    );
+    assert!(
+        progress
+            .iter()
+            .all(|value| value.bytes_transferred < payload_len)
+    );
+
+    let opened_path = backend
+        .open_writer_requests
+        .lock()
+        .expect("lock open writer requests")[0]
+        .0
+        .clone();
+    assert_eq!(
+        backend
+            .remove_file_requests
+            .lock()
+            .expect("lock remove file requests")
+            .as_slice(),
+        &[opened_path]
     );
 }
 

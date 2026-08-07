@@ -32,9 +32,9 @@ use crate::app::terminal_font::{
 };
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_layout::{TerminalTextShaper, TextShaper};
-use crate::app::terminal_model::TerminalSelectionModel;
 #[cfg(feature = "terminal-native-renderer")]
-use crate::app::terminal_model::{TerminalModelFrame, terminal_image_frame_fingerprint};
+use crate::app::terminal_model::terminal_image_frame_fingerprint;
+use crate::app::terminal_model::{TerminalModelFrame, TerminalSelectionModel};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::wgpu_renderer::{
     PreparedBackgroundRun, PreparedColorGlyphDraw, PreparedMonochromeGlyphDraw,

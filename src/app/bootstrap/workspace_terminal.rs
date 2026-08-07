@@ -10,7 +10,13 @@ use crate::app::clipboard_image_paste::{
     ClipboardImageBindingContext, ClipboardImageCompletion, ClipboardImagePasteController,
     ClipboardImagePasteRegisterError, ClipboardImageUploadJob,
 };
+use crate::app::clipboard_inline_image::{
+    ClipboardInlineImageController, ClipboardInlineImageRequest, inline_image_cell_size,
+    surface_allows_inline_image,
+};
 use crate::app::sftp::SftpRuntimeHandle;
+use crate::app::terminal_core::LocalTerminalImage;
+use std::sync::{Mutex, OnceLock};
 
 pub(super) enum ClipboardImagePasteBackgroundMessage {
     Prepared {
@@ -21,10 +27,100 @@ pub(super) enum ClipboardImagePasteBackgroundMessage {
         request_id: Uuid,
         result: std::result::Result<String, String>,
     },
+    Progress {
+        request_id: Uuid,
+        bytes_transferred: u64,
+        bytes_total: u64,
+        elapsed: Duration,
+    },
+}
+
+pub(super) enum ClipboardInlineImageBackgroundMessage {
+    Prepared {
+        request: ClipboardInlineImageRequest,
+        result: std::result::Result<EncodedClipboardImage, String>,
+    },
+}
+
+#[derive(Debug, Default)]
+struct ClipboardProgressGate {
+    last_emitted_at: Option<Duration>,
+}
+
+impl ClipboardProgressGate {
+    fn should_emit(&mut self, elapsed: Duration, is_final: bool) -> bool {
+        const MIN_INTERVAL: Duration = Duration::from_millis(100);
+
+        let should_emit = is_final
+            || self.last_emitted_at.is_none_or(|last_emitted_at| {
+                elapsed.saturating_sub(last_emitted_at) >= MIN_INTERVAL
+            });
+        if should_emit {
+            self.last_emitted_at = Some(elapsed);
+        }
+        should_emit
+    }
 }
 
 pub(super) type WorkspaceClipboardImagePasteController =
     ClipboardImagePasteController<SftpRuntimeHandle>;
+pub(super) type WorkspaceClipboardInlineImageController = ClipboardInlineImageController;
+
+type InlineClipboardImageSourceReader =
+    dyn Fn() -> Result<Option<ClipboardImageSource>> + Send + Sync + 'static;
+
+static INLINE_CLIPBOARD_IMAGE_SOURCE_READER: OnceLock<
+    Mutex<Option<Arc<InlineClipboardImageSourceReader>>>,
+> = OnceLock::new();
+
+fn inline_clipboard_image_source_reader()
+-> &'static Mutex<Option<Arc<InlineClipboardImageSourceReader>>> {
+    INLINE_CLIPBOARD_IMAGE_SOURCE_READER.get_or_init(|| Mutex::new(None))
+}
+
+fn inline_clipboard_image_source() -> Result<Option<ClipboardImageSource>> {
+    let reader = inline_clipboard_image_source_reader()
+        .lock()
+        .expect("lock inline clipboard image source reader")
+        .clone();
+    match reader {
+        Some(reader) => reader(),
+        None => system_clipboard_image_source(),
+    }
+}
+
+pub(super) struct InlineClipboardImageSourceReaderGuard {
+    previous: Option<Option<Arc<InlineClipboardImageSourceReader>>>,
+}
+
+impl Drop for InlineClipboardImageSourceReaderGuard {
+    fn drop(&mut self) {
+        let Some(previous) = self.previous.take() else {
+            return;
+        };
+        *inline_clipboard_image_source_reader()
+            .lock()
+            .expect("lock inline clipboard image source reader") = previous;
+    }
+}
+
+pub(super) fn install_inline_clipboard_image_source_for_test<F>(
+    reader: F,
+) -> InlineClipboardImageSourceReaderGuard
+where
+    F: Fn() -> Result<Option<Vec<u8>>> + Send + Sync + 'static,
+{
+    let mut slot = inline_clipboard_image_source_reader()
+        .lock()
+        .expect("lock inline clipboard image source reader");
+    let previous = slot.clone();
+    *slot = Some(Arc::new(move || {
+        reader().map(|image| image.map(ClipboardImageSource::Encoded))
+    }));
+    InlineClipboardImageSourceReaderGuard {
+        previous: Some(previous),
+    }
+}
 
 pub(super) fn sync_clipboard_image_paste_preview(
     window: &AppWindow,
@@ -55,6 +151,18 @@ pub(super) fn sync_clipboard_image_paste_preview(
             paste_enabled: projection.paste_enabled,
             copy_enabled: projection.copy_enabled,
             collapsed: projection.collapsed,
+            progress_value: if projection.bytes_total == 0 {
+                0.0
+            } else {
+                (projection.bytes_transferred as f32 / projection.bytes_total as f32)
+                    .clamp(0.0, 1.0)
+            },
+            progress_text: format_clipboard_transfer_progress(
+                projection.bytes_transferred,
+                projection.bytes_total,
+            )
+            .into(),
+            speed_text: format_clipboard_transfer_speed(projection.bytes_per_second).into(),
         })
         .collect::<Vec<_>>();
     window.set_workspace_session_clipboard_image_preview_items(ModelRc::new(VecModel::from(items)));
@@ -69,6 +177,37 @@ fn slint_image_from_clipboard_preview(preview: &ClipboardImagePreview) -> slint:
         .make_mut_bytes()
         .copy_from_slice(preview.rgba.as_slice());
     slint::Image::from_rgba8(pixels)
+}
+
+fn format_clipboard_transfer_progress(done: u64, total: u64) -> String {
+    let done = done.min(total);
+    let percent = if total == 0 {
+        0
+    } else {
+        u64::try_from(u128::from(done).saturating_mul(100) / u128::from(total)).unwrap_or(100)
+    };
+    format!(
+        "{} / {} ({percent}%)",
+        format_clipboard_transfer_bytes(done),
+        format_clipboard_transfer_bytes(total),
+    )
+}
+
+fn format_clipboard_transfer_speed(bytes_per_second: u64) -> String {
+    format!("{}/s", format_clipboard_transfer_bytes(bytes_per_second))
+}
+
+fn format_clipboard_transfer_bytes(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = 1024 * KIB;
+
+    if bytes >= MIB {
+        format!("{:.1} MiB", bytes as f64 / MIB as f64)
+    } else if bytes >= KIB {
+        format!("{:.1} KiB", bytes as f64 / KIB as f64)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1328,15 +1467,57 @@ fn schedule_clipboard_image_preparation(
     });
 }
 
+fn schedule_clipboard_inline_image_preparation(
+    runtime_handle: tokio::runtime::Handle,
+    request: ClipboardInlineImageRequest,
+    image: ClipboardImageSource,
+    result_tx: std::sync::mpsc::Sender<ClipboardInlineImageBackgroundMessage>,
+    preparation_gate: Arc<tokio::sync::Semaphore>,
+) {
+    runtime_handle.spawn(async move {
+        let permit = match preparation_gate.acquire_owned().await {
+            Ok(permit) => permit,
+            Err(error) => {
+                let _ = result_tx.send(ClipboardInlineImageBackgroundMessage::Prepared {
+                    request,
+                    result: Err(format!("clipboard image preparation queue closed: {error}")),
+                });
+                return;
+            }
+        };
+        let result = match tokio::task::spawn_blocking(move || encode_clipboard_image(image)).await
+        {
+            Ok(result) => result.map_err(|error| error.to_string()),
+            Err(error) => Err(format!("clipboard image worker failed: {error}")),
+        };
+        drop(permit);
+        let _ = result_tx.send(ClipboardInlineImageBackgroundMessage::Prepared { request, result });
+    });
+}
+
 fn schedule_prepared_clipboard_image_upload(
     runtime_handle: tokio::runtime::Handle,
     job: ClipboardImageUploadJob<SftpRuntimeHandle>,
     result_tx: std::sync::mpsc::Sender<ClipboardImagePasteBackgroundMessage>,
 ) {
     runtime_handle.spawn(async move {
+        let request_id = job.request_id;
+        let started_at = Instant::now();
+        let mut progress_gate = ClipboardProgressGate::default();
         let result = job
             .runtime
-            .upload_clipboard_png(job.session_id, job.png_bytes)
+            .upload_clipboard_png_with_progress(job.session_id, job.png_bytes, |progress| {
+                let elapsed = started_at.elapsed();
+                let is_final = progress.bytes_transferred == progress.bytes_total;
+                if progress_gate.should_emit(elapsed, is_final) {
+                    let _ = result_tx.send(ClipboardImagePasteBackgroundMessage::Progress {
+                        request_id,
+                        bytes_transferred: progress.bytes_transferred,
+                        bytes_total: progress.bytes_total,
+                        elapsed,
+                    });
+                }
+            })
             .await
             .map_err(|error| error.to_string());
         tracing::debug!(
@@ -1349,10 +1530,8 @@ fn schedule_prepared_clipboard_image_upload(
             encoded_bytes = job.encoded_bytes,
             "finished clipboard image upload task"
         );
-        let _ = result_tx.send(ClipboardImagePasteBackgroundMessage::Uploaded {
-            request_id: job.request_id,
-            result,
-        });
+        let _ =
+            result_tx.send(ClipboardImagePasteBackgroundMessage::Uploaded { request_id, result });
     });
 }
 
@@ -1465,6 +1644,19 @@ pub(super) fn drain_clipboard_image_paste_messages(
                     }
                 }
             },
+            ClipboardImagePasteBackgroundMessage::Progress {
+                request_id,
+                bytes_transferred,
+                bytes_total,
+                elapsed,
+            } => {
+                controller.mark_upload_progress(
+                    request_id,
+                    bytes_transferred,
+                    bytes_total,
+                    elapsed,
+                );
+            }
         }
     }
     for binding_context in controller.stale_binding_contexts() {
@@ -1579,6 +1771,210 @@ fn show_clipboard_image_upload_error(state: &mut ShellViewModel, error: String) 
         state.toggle_transfer_center();
     }
     state.show_transfer_center_feedback("error", format!("Clipboard image upload failed: {error}"));
+}
+
+pub(super) fn forward_active_workspace_inline_clipboard_image(
+    state: &mut ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+    controller: &mut WorkspaceClipboardInlineImageController,
+    result_tx: &std::sync::mpsc::Sender<ClipboardInlineImageBackgroundMessage>,
+    image_preparation_gate: &Arc<tokio::sync::Semaphore>,
+) -> bool {
+    forward_active_workspace_inline_clipboard_image_with_reader(
+        state,
+        bridge.map(|bridge| bridge.manager.runtime_handle()),
+        controller,
+        result_tx,
+        image_preparation_gate,
+        inline_clipboard_image_source,
+    )
+}
+
+fn forward_active_workspace_inline_clipboard_image_with_reader<F>(
+    state: &mut ShellViewModel,
+    runtime_handle: Option<tokio::runtime::Handle>,
+    controller: &mut WorkspaceClipboardInlineImageController,
+    result_tx: &std::sync::mpsc::Sender<ClipboardInlineImageBackgroundMessage>,
+    image_preparation_gate: &Arc<tokio::sync::Semaphore>,
+    image_reader: F,
+) -> bool
+where
+    F: FnOnce() -> Result<Option<ClipboardImageSource>>,
+{
+    let Some(session_id) = active_workspace_session_uuid(state) else {
+        show_clipboard_inline_image_feedback(state, "no active terminal session");
+        return false;
+    };
+    let active_session_generation = state.active_workspace_session_generation();
+    let Some(surface) = state.active_workspace_terminal_surface() else {
+        show_clipboard_inline_image_feedback(state, "the terminal surface is not ready");
+        return false;
+    };
+    if !surface_allows_inline_image(surface) {
+        show_clipboard_inline_image_feedback(
+            state,
+            "images cannot be displayed in the current interactive terminal mode",
+        );
+        return false;
+    }
+
+    let image = match image_reader() {
+        Ok(Some(image)) => image,
+        Ok(None) => {
+            show_clipboard_inline_image_feedback(state, "the clipboard contains no image");
+            return false;
+        }
+        Err(error) => {
+            show_clipboard_inline_image_feedback(state, error.to_string());
+            return false;
+        }
+    };
+    let Some(runtime_handle) = runtime_handle else {
+        show_clipboard_inline_image_feedback(state, "the terminal runtime is unavailable");
+        return false;
+    };
+
+    let request = controller.begin(session_id, active_session_generation);
+    schedule_clipboard_inline_image_preparation(
+        runtime_handle,
+        request,
+        image,
+        result_tx.clone(),
+        Arc::clone(image_preparation_gate),
+    );
+    true
+}
+
+fn show_clipboard_inline_image_feedback(state: &mut ShellViewModel, detail: impl AsRef<str>) {
+    const MAX_DETAIL_CHARS: usize = 240;
+
+    let detail = detail
+        .as_ref()
+        .chars()
+        .take(MAX_DETAIL_CHARS)
+        .collect::<String>();
+    state.show_transfer_center_feedback(
+        "error",
+        format!("Clipboard image display failed: {detail}"),
+    );
+}
+
+fn finish_prepared_clipboard_inline_image<F>(
+    state: &mut ShellViewModel,
+    controller: &mut WorkspaceClipboardInlineImageController,
+    request: ClipboardInlineImageRequest,
+    result: std::result::Result<EncodedClipboardImage, String>,
+    current_surface: Option<TerminalSurfaceState>,
+    apply_local_image: F,
+) -> bool
+where
+    F: FnOnce(Uuid, LocalTerminalImage) -> Result<TerminalSurfaceState>,
+{
+    let request_was_pending = controller.is_pending(request);
+    let active_session_id = active_workspace_session_uuid(state);
+    let active_session_generation = state.active_workspace_session_generation();
+    if controller
+        .finish_if_current(request, active_session_id, active_session_generation)
+        .is_none()
+    {
+        if request_was_pending {
+            controller.discard_if_pending(request);
+            show_clipboard_inline_image_feedback(
+                state,
+                "the active terminal session changed while the image was being prepared",
+            );
+        }
+        return false;
+    }
+
+    let encoded = match result {
+        Ok(encoded) => encoded,
+        Err(error) => {
+            show_clipboard_inline_image_feedback(state, error);
+            return false;
+        }
+    };
+    let Some(surface) = current_surface.filter(|surface| surface.session_id == request.session_id)
+    else {
+        show_clipboard_inline_image_feedback(
+            state,
+            "the originating terminal runtime is no longer available",
+        );
+        return false;
+    };
+    if !surface_allows_inline_image(&surface) {
+        show_clipboard_inline_image_feedback(
+            state,
+            "the terminal entered an interactive mode while the image was being prepared",
+        );
+        return false;
+    }
+    let cell_size = match inline_image_cell_size(encoded.width, encoded.height, &surface) {
+        Ok(cell_size) => cell_size,
+        Err(error) => {
+            show_clipboard_inline_image_feedback(state, error.to_string());
+            return false;
+        }
+    };
+    let image = LocalTerminalImage {
+        png_bytes: encoded.png_bytes,
+        source_width: encoded.width,
+        source_height: encoded.height,
+        columns: cell_size.columns,
+        rows: cell_size.rows,
+    };
+    let updated_surface = match apply_local_image(request.session_id, image) {
+        Ok(surface) if surface.session_id == request.session_id => surface,
+        Ok(_) => {
+            show_clipboard_inline_image_feedback(
+                state,
+                "the terminal runtime returned a mismatched surface",
+            );
+            return false;
+        }
+        Err(error) => {
+            show_clipboard_inline_image_feedback(state, error.to_string());
+            return false;
+        }
+    };
+    state.set_active_workspace_terminal_surface(Some(updated_surface));
+    true
+}
+
+pub(super) fn drain_clipboard_inline_image_messages(
+    state: &mut ShellViewModel,
+    manager: &SessionManager,
+    controller: &mut WorkspaceClipboardInlineImageController,
+    result_rx: &std::sync::mpsc::Receiver<ClipboardInlineImageBackgroundMessage>,
+) -> bool {
+    let mut changed = false;
+    while let Ok(message) = result_rx.try_recv() {
+        changed = true;
+        let ClipboardInlineImageBackgroundMessage::Prepared { request, result } = message;
+        let current_surface = manager.terminal_surface(request.session_id);
+        finish_prepared_clipboard_inline_image(
+            state,
+            controller,
+            request,
+            result,
+            current_surface,
+            |session_id, image| {
+                manager.apply_session_local_image(session_id, image)?;
+                if let Err(error) = manager.scroll_session_to_bottom(session_id) {
+                    tracing::warn!(
+                        target: "app.terminal",
+                        session_id = %session_id,
+                        error = %error,
+                        "failed to snap locally displayed clipboard image to the live viewport"
+                    );
+                }
+                manager
+                    .terminal_surface(session_id)
+                    .context("local clipboard image surface disappeared after placement")
+            },
+        );
+    }
+    changed
 }
 
 pub(super) fn posix_shell_quote(value: &str) -> String {
@@ -1726,7 +2122,347 @@ pub(super) fn parse_terminal_mouse_button(value: &str) -> Option<TerminalMouseBu
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_workspace_paste_text, posix_shell_quote};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use super::{
+        ClipboardInlineImageBackgroundMessage, ClipboardProgressGate,
+        WorkspaceClipboardInlineImageController, finish_prepared_clipboard_inline_image,
+        format_clipboard_transfer_progress, format_clipboard_transfer_speed,
+        forward_active_workspace_inline_clipboard_image_with_reader,
+        normalize_workspace_paste_text, posix_shell_quote,
+    };
+    use crate::app::clipboard::{
+        ClipboardImageSource, EncodedClipboardImage, encode_clipboard_image,
+    };
+    use crate::app::ssh::runtime::{TerminalCursorState, TerminalSurfaceState};
+    use crate::app::ssh::session_manager::{EnhancedSessionState, SessionHandle, SessionState};
+    use crate::shell::tabs::WorkspaceTab;
+    use crate::shell::view_model::ShellViewModel;
+    use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
+    use std::io::Cursor;
+    use std::sync::mpsc;
+    use uuid::Uuid;
+
+    fn inline_fixture() -> EncodedClipboardImage {
+        let image =
+            DynamicImage::ImageRgba8(RgbaImage::from_pixel(4, 2, Rgba([0x20, 0x80, 0xe0, 0xff])));
+        let mut png_bytes = Vec::new();
+        image
+            .write_to(&mut Cursor::new(&mut png_bytes), ImageFormat::Png)
+            .expect("encode inline clipboard fixture");
+        encode_clipboard_image(ClipboardImageSource::Encoded(png_bytes))
+            .expect("prepare inline clipboard fixture")
+    }
+
+    fn session_handle(session_id: Uuid, title: &str) -> SessionHandle {
+        SessionHandle {
+            session_id,
+            asset_id: format!("asset-{session_id}"),
+            title: title.to_string(),
+            subtitle: "tester@localhost:22".to_string(),
+            state: SessionState::Connected,
+            can_reconnect: false,
+            enhanced_session_state: EnhancedSessionState::Plain,
+        }
+    }
+
+    fn inline_state(session_ids: &[Uuid]) -> ShellViewModel {
+        let mut state = ShellViewModel::default();
+        state.set_workspace_tabs(
+            session_ids
+                .iter()
+                .enumerate()
+                .map(|(index, session_id)| {
+                    WorkspaceTab::from_session(&session_handle(
+                        *session_id,
+                        format!("Session {index}").as_str(),
+                    ))
+                })
+                .collect(),
+        );
+        if let Some(session_id) = session_ids.first() {
+            state.set_active_workspace_terminal_surface(Some(inline_surface(*session_id)));
+        }
+        state
+    }
+
+    fn inline_surface(session_id: Uuid) -> TerminalSurfaceState {
+        let mut surface =
+            TerminalSurfaceState::from_visible_lines(session_id, 1, 12, 24, Vec::new());
+        surface.viewport_metrics =
+            crate::app::terminal_core::TerminalViewportMetrics::new(240, 240, 96);
+        surface.cursor = TerminalCursorState {
+            row: 1,
+            col: 2,
+            ..surface.cursor
+        };
+        surface
+    }
+
+    fn apply_prepared(
+        state: &mut ShellViewModel,
+        controller: &mut WorkspaceClipboardInlineImageController,
+        message: ClipboardInlineImageBackgroundMessage,
+        current_surface: Option<TerminalSurfaceState>,
+        apply_calls: &AtomicUsize,
+    ) -> bool {
+        let ClipboardInlineImageBackgroundMessage::Prepared { request, result } = message;
+        finish_prepared_clipboard_inline_image(
+            state,
+            controller,
+            request,
+            result,
+            current_surface,
+            |session_id, image| {
+                apply_calls.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(session_id, request.session_id);
+                assert_eq!(image.source_width, 4);
+                assert_eq!(image.source_height, 2);
+                let mut surface = inline_surface(session_id);
+                surface.seqno = 2;
+                Ok(surface)
+            },
+        )
+    }
+
+    #[test]
+    fn clipboard_inline_image_valid_image_prepares_and_applies_once() {
+        let runtime = crate::app::async_runtime::AppAsyncRuntime::new()
+            .expect("create inline clipboard runtime");
+        let session_id = Uuid::new_v4();
+        let mut state = inline_state(&[session_id]);
+        let mut controller = WorkspaceClipboardInlineImageController::default();
+        let (tx, rx) = mpsc::channel();
+
+        assert!(forward_active_workspace_inline_clipboard_image_with_reader(
+            &mut state,
+            Some(runtime.handle()),
+            &mut controller,
+            &tx,
+            &Arc::new(tokio::sync::Semaphore::new(2)),
+            || Ok(Some(ClipboardImageSource::Encoded(
+                inline_fixture().png_bytes
+            ))),
+        ));
+        let message = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("receive prepared inline image");
+        let apply_calls = AtomicUsize::new(0);
+
+        assert!(apply_prepared(
+            &mut state,
+            &mut controller,
+            message,
+            Some(inline_surface(session_id)),
+            &apply_calls,
+        ));
+        assert_eq!(apply_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            state
+                .active_workspace_terminal_surface()
+                .expect("updated inline surface")
+                .seqno,
+            2
+        );
+    }
+
+    #[test]
+    fn clipboard_inline_image_empty_clipboard_reports_without_fallback() {
+        let session_id = Uuid::new_v4();
+        let mut state = inline_state(&[session_id]);
+        let mut controller = WorkspaceClipboardInlineImageController::default();
+        let (tx, rx) = mpsc::channel();
+
+        assert!(
+            !forward_active_workspace_inline_clipboard_image_with_reader(
+                &mut state,
+                None,
+                &mut controller,
+                &tx,
+                &Arc::new(tokio::sync::Semaphore::new(2)),
+                || Ok(None),
+            )
+        );
+        assert!(rx.try_recv().is_err());
+        assert!(
+            state
+                .transfer_center_feedback_state()
+                .text
+                .contains("no image")
+        );
+    }
+
+    #[test]
+    fn clipboard_inline_image_start_guard_precedes_clipboard_read() {
+        for guarded_surface in [
+            |surface: &mut TerminalSurfaceState| surface.alternate_screen_active = true,
+            |surface: &mut TerminalSurfaceState| surface.mouse_grabbed = true,
+            |surface: &mut TerminalSurfaceState| surface.application_cursor_keys = true,
+        ] {
+            let session_id = Uuid::new_v4();
+            let mut state = inline_state(&[session_id]);
+            let mut surface = inline_surface(session_id);
+            guarded_surface(&mut surface);
+            state.set_active_workspace_terminal_surface(Some(surface));
+            let mut controller = WorkspaceClipboardInlineImageController::default();
+            let (tx, _rx) = mpsc::channel();
+            let reads = AtomicUsize::new(0);
+
+            assert!(
+                !forward_active_workspace_inline_clipboard_image_with_reader(
+                    &mut state,
+                    None,
+                    &mut controller,
+                    &tx,
+                    &Arc::new(tokio::sync::Semaphore::new(2)),
+                    || {
+                        reads.fetch_add(1, Ordering::SeqCst);
+                        Ok(Some(ClipboardImageSource::Encoded(Vec::new())))
+                    },
+                )
+            );
+            assert_eq!(reads.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[test]
+    fn clipboard_inline_image_switch_away_and_back_invalidates_prepared_result() {
+        let session_a = Uuid::new_v4();
+        let session_b = Uuid::new_v4();
+        let mut state = inline_state(&[session_a, session_b]);
+        let mut controller = WorkspaceClipboardInlineImageController::default();
+        let request = controller.begin(session_a, state.active_workspace_session_generation());
+        assert!(state.activate_workspace_tab(session_b.to_string().as_str()));
+        assert!(state.activate_workspace_tab(session_a.to_string().as_str()));
+        state.set_active_workspace_terminal_surface(Some(inline_surface(session_a)));
+        let apply_calls = AtomicUsize::new(0);
+
+        assert!(!finish_prepared_clipboard_inline_image(
+            &mut state,
+            &mut controller,
+            request,
+            Ok(inline_fixture()),
+            Some(inline_surface(session_a)),
+            |_session_id, _image| {
+                apply_calls.fetch_add(1, Ordering::SeqCst);
+                unreachable!("invalidated result must not apply")
+            },
+        ));
+        assert_eq!(apply_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn clipboard_inline_image_only_newest_request_can_apply() {
+        let session_id = Uuid::new_v4();
+        let mut state = inline_state(&[session_id]);
+        let mut controller = WorkspaceClipboardInlineImageController::default();
+        let generation = state.active_workspace_session_generation();
+        let first = controller.begin(session_id, generation);
+        let second = controller.begin(session_id, generation);
+        let apply_calls = AtomicUsize::new(0);
+
+        assert!(!finish_prepared_clipboard_inline_image(
+            &mut state,
+            &mut controller,
+            first,
+            Ok(inline_fixture()),
+            Some(inline_surface(session_id)),
+            |_session_id, _image| unreachable!("superseded result must not apply"),
+        ));
+        assert!(finish_prepared_clipboard_inline_image(
+            &mut state,
+            &mut controller,
+            second,
+            Ok(inline_fixture()),
+            Some(inline_surface(session_id)),
+            |session_id, _image| {
+                apply_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(inline_surface(session_id))
+            },
+        ));
+        assert_eq!(apply_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn clipboard_inline_image_close_or_missing_runtime_drops_prepared_result() {
+        let session_id = Uuid::new_v4();
+        let mut state = inline_state(&[session_id]);
+        let mut controller = WorkspaceClipboardInlineImageController::default();
+        let request = controller.begin(session_id, state.active_workspace_session_generation());
+        state.set_workspace_tabs(Vec::new());
+
+        assert!(!finish_prepared_clipboard_inline_image(
+            &mut state,
+            &mut controller,
+            request,
+            Ok(inline_fixture()),
+            None,
+            |_session_id, _image| unreachable!("closed session must not apply"),
+        ));
+
+        let mut state = inline_state(&[session_id]);
+        let request = controller.begin(session_id, state.active_workspace_session_generation());
+        assert!(!finish_prepared_clipboard_inline_image(
+            &mut state,
+            &mut controller,
+            request,
+            Ok(inline_fixture()),
+            None,
+            |_session_id, _image| unreachable!("missing replacement runtime must not apply"),
+        ));
+    }
+
+    #[test]
+    fn clipboard_inline_image_final_tui_revalidation_blocks_apply() {
+        let session_id = Uuid::new_v4();
+        let mut state = inline_state(&[session_id]);
+        let mut controller = WorkspaceClipboardInlineImageController::default();
+        let request = controller.begin(session_id, state.active_workspace_session_generation());
+        let mut guarded = inline_surface(session_id);
+        guarded.mouse_grabbed = true;
+        let apply_calls = AtomicUsize::new(0);
+
+        assert!(!finish_prepared_clipboard_inline_image(
+            &mut state,
+            &mut controller,
+            request,
+            Ok(inline_fixture()),
+            Some(guarded),
+            |_session_id, _image| {
+                apply_calls.fetch_add(1, Ordering::SeqCst);
+                unreachable!("guarded surface must not apply")
+            },
+        ));
+        assert_eq!(apply_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn clipboard_progress_gate_keeps_initial_tenth_second_and_final_samples() {
+        let mut gate = ClipboardProgressGate::default();
+        assert!(gate.should_emit(Duration::ZERO, false));
+        assert!(!gate.should_emit(Duration::from_millis(40), false));
+        assert!(gate.should_emit(Duration::from_millis(100), false));
+        assert!(gate.should_emit(Duration::from_millis(101), true));
+    }
+
+    #[test]
+    fn clipboard_transfer_formatting_uses_binary_units_and_bounded_percentage() {
+        assert_eq!(format_clipboard_transfer_progress(0, 0), "0 B / 0 B (0%)");
+        assert_eq!(
+            format_clipboard_transfer_progress(64 * 1024, 1024 * 1024),
+            "64.0 KiB / 1.0 MiB (6%)"
+        );
+        assert_eq!(
+            format_clipboard_transfer_progress(2_048, 1_024),
+            "1.0 KiB / 1.0 KiB (100%)"
+        );
+        assert_eq!(format_clipboard_transfer_speed(0), "0 B/s");
+        assert_eq!(format_clipboard_transfer_speed(1_023), "1023 B/s");
+        assert_eq!(format_clipboard_transfer_speed(1_024), "1.0 KiB/s");
+        assert_eq!(format_clipboard_transfer_speed(1024 * 1024), "1.0 MiB/s");
+    }
 
     #[test]
     fn workspace_paste_normalizer_is_idempotent_and_strips_carriage_returns() {

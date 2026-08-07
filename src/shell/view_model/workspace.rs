@@ -50,6 +50,10 @@ impl ShellViewModel {
         self.active_workspace_session_id.as_deref()
     }
 
+    pub fn active_workspace_session_generation(&self) -> u64 {
+        self.active_workspace_session_generation
+    }
+
     pub fn active_workspace_terminal_session_id(&self) -> Option<&str> {
         let tab = self.active_workspace_tab()?;
         if !tab.uses_terminal_surface()

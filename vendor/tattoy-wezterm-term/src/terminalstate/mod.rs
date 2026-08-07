@@ -31,7 +31,7 @@ mod kitty;
 mod mouse;
 pub(crate) mod performer;
 mod sixel;
-use crate::terminalstate::image::*;
+pub use image::{ImageAttachParams, ImageAttachStyle, PlacementInfo};
 use crate::terminalstate::kitty::*;
 
 lazy_static::lazy_static! {

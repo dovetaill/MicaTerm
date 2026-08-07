@@ -1,3 +1,5 @@
+#![cfg(feature = "terminal-native-renderer")]
+
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_font::DirectWriteFontSystem;
 use mica_term::app::terminal_font::mock::mock_font_system;

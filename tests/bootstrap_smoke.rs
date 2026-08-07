@@ -34,8 +34,9 @@ use mica_term::app::bootstrap::{
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_terminal_defaults,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_transfer_store,
     build_shared_app_credential_store_for_paths, default_window_size,
-    install_url_open_handler_for_test, workspace_sftp_clear_selection_shortcut_matches,
-    workspace_sftp_path_edit_shortcut_matches, workspace_sftp_select_all_shortcut_matches,
+    install_inline_clipboard_image_source_for_test, install_url_open_handler_for_test,
+    workspace_sftp_clear_selection_shortcut_matches, workspace_sftp_path_edit_shortcut_matches,
+    workspace_sftp_select_all_shortcut_matches,
 };
 use mica_term::app::keychain::KeychainCatalog;
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
@@ -65,8 +66,10 @@ use mica_term::app::ssh::runtime::{
     ZmodemTransferState,
 };
 use mica_term::app::ssh::session_manager::{
-    EnhancementPolicy, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher,
+    EnhancementPolicy, OpenSessionMode, SessionManager, SessionRuntimeControl,
+    SessionRuntimeLauncher,
 };
+use mica_term::app::terminal_core::LocalTerminalImage;
 use mica_term::app::terminal_theme::{
     preset_for_theme, preset_for_theme_mode, projected_theme_for_mode,
 };
@@ -109,6 +112,7 @@ use uuid::Uuid;
 
 static KNOWN_HOSTS_ENV_LOCK: Mutex<()> = Mutex::new(());
 static URL_OPEN_HOOK_LOCK: Mutex<()> = Mutex::new(());
+static INLINE_CLIPBOARD_IMAGE_HOOK_LOCK: Mutex<()> = Mutex::new(());
 
 fn run_on_large_stack(test_name: &str, test: fn()) {
     let handle = std::thread::Builder::new()
@@ -631,6 +635,184 @@ fn session_manager_skips_auto_bootstrap_for_cached_fallback_host() {
     let policy = manager.enhancement_policy_for(&profile);
 
     assert_eq!(policy, EnhancementPolicy::SkipAutoBootstrap);
+}
+
+#[derive(Clone, Default)]
+struct RecordingLocalImageState {
+    images: Arc<Mutex<Vec<LocalTerminalImage>>>,
+    remote_input_calls: Arc<AtomicUsize>,
+}
+
+#[derive(Clone)]
+struct RecordingLocalImageLauncher {
+    state: RecordingLocalImageState,
+}
+
+struct RecordingLocalImageRuntimeControl {
+    session_id: Uuid,
+    terminal: Arc<Mutex<TerminalSession>>,
+    state: RecordingLocalImageState,
+}
+
+impl SessionRuntimeControl for RecordingLocalImageRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_text_input(&self, _text: String) -> Result<()> {
+        self.state.remote_input_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn send_key_input(&self, _event: TerminalKeyEvent) -> Result<()> {
+        self.state.remote_input_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
+        self.state.remote_input_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn send_paste(&self, _text: String) -> Result<()> {
+        self.state.remote_input_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+
+    fn apply_local_image(&self, image: LocalTerminalImage) -> Result<TerminalSurfaceState> {
+        self.state
+            .images
+            .lock()
+            .expect("lock recorded local images")
+            .push(image.clone());
+        let mut terminal = self
+            .terminal
+            .lock()
+            .expect("lock recording local image terminal");
+        terminal.apply_local_image(image)?;
+        Ok(terminal.surface_state(self.session_id))
+    }
+}
+
+impl SessionRuntimeLauncher for RecordingLocalImageLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: Uuid,
+        _attempt_id: Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let state = self.state.clone();
+        Box::pin(async move {
+            let terminal = Arc::new(Mutex::new(TerminalSession::new(6, 12)));
+            let initial_surface = terminal
+                .lock()
+                .expect("lock initial local image terminal")
+                .surface_state(session_id);
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(initial_surface));
+            Ok(Box::new(RecordingLocalImageRuntimeControl {
+                session_id,
+                terminal,
+                state,
+            }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+fn one_pixel_local_terminal_image() -> LocalTerminalImage {
+    let image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+        1,
+        1,
+        image::Rgba([0x20, 0x80, 0xe0, 0xff]),
+    ));
+    let mut png_bytes = Vec::new();
+    image
+        .write_to(&mut Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+        .expect("encode local terminal image fixture");
+    LocalTerminalImage {
+        png_bytes,
+        source_width: 1,
+        source_height: 1,
+        columns: 1,
+        rows: 1,
+    }
+}
+
+#[test]
+fn session_manager_applies_local_image_to_target_runtime() {
+    let runtime =
+        mica_term::app::async_runtime::AppAsyncRuntime::new().expect("create app async runtime");
+    let state = RecordingLocalImageState::default();
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(RecordingLocalImageLauncher {
+            state: state.clone(),
+        }),
+    );
+    let profile = ConnectionProfile {
+        asset_id: Some("asset-local-image".into()),
+        name: "Local Image".into(),
+        host: "127.0.0.1".into(),
+        user: "tester".into(),
+        port: 22,
+        auth_method: SshAuthMethod::Password,
+        credential_ref: None,
+        private_key_path: None,
+        password: Some("secret".into()),
+        private_key_content: None,
+        passphrase: None,
+        proxy: ConnectionProxyProfile::None,
+        resolved_proxy_hops: Vec::new(),
+        remark: String::new(),
+    };
+    let session = manager
+        .open_session(profile, OpenSessionMode::ForceNewTab)
+        .expect("open recording local image session");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while manager.diagnostics_snapshot().runtime_control_count != 1
+        || manager.terminal_surface(session.session_id).is_none()
+    {
+        assert!(
+            Instant::now() < deadline,
+            "local-image runtime did not become ready"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let before = manager
+        .terminal_surface(session.session_id)
+        .expect("initial terminal surface");
+
+    manager
+        .apply_session_local_image(session.session_id, one_pixel_local_terminal_image())
+        .expect("apply local image through manager");
+
+    let after = manager
+        .terminal_surface(session.session_id)
+        .expect("updated terminal surface");
+    assert!(after.seqno > before.seqno);
+    assert!(!after.image_placements.is_empty());
+    assert_eq!(state.images.lock().expect("lock local images").len(), 1);
+    assert_eq!(state.remote_input_calls.load(Ordering::SeqCst), 0);
+
+    assert!(
+        manager
+            .apply_session_local_image(Uuid::new_v4(), one_pixel_local_terminal_image())
+            .is_err()
+    );
+    assert_eq!(state.images.lock().expect("lock local images").len(), 1);
 }
 
 #[test]
@@ -4998,7 +5180,7 @@ fn choose_terminal_context_menu_copy(app: &AppWindow, menu_origin: LogicalPositi
 }
 
 fn choose_terminal_context_menu_select_all(app: &AppWindow, menu_origin: LogicalPosition) {
-    let select_all_row_position = LogicalPosition::new(menu_origin.x + 20.0, menu_origin.y + 96.0);
+    let select_all_row_position = LogicalPosition::new(menu_origin.x + 20.0, menu_origin.y + 132.0);
     app.window().dispatch_event(WindowEvent::PointerMoved {
         position: select_all_row_position,
     });
@@ -19978,7 +20160,7 @@ fn clipboard_image_preparation_and_upload_use_separate_bounded_stages() {
         .find("drop(permit)")
         .expect("clipboard image preparation releases its permit explicitly");
     let upload_index = workspace_terminal_source
-        .find(".upload_clipboard_png(job.session_id, job.png_bytes)")
+        .find(".upload_clipboard_png_with_progress(job.session_id, job.png_bytes")
         .expect("clipboard image upload uses the captured SFTP runtime");
     assert!(
         permit_index < decode_index && decode_index < release_index && release_index < upload_index,
@@ -19992,5 +20174,130 @@ fn clipboard_image_preparation_and_upload_use_separate_bounded_stages() {
     assert!(
         workspace_terminal_source.contains("send_session_paste_if_sftp_binding_current("),
         "upload completion must use the binding-aware paste operation"
+    );
+}
+
+#[test]
+fn clipboard_image_upload_progress_is_request_keyed_and_projected() {
+    let workspace_terminal_source = fs::read_to_string("src/app/bootstrap/workspace_terminal.rs")
+        .expect("read workspace terminal bootstrap module");
+    let overlay_source = fs::read_to_string("ui/components/clipboard-image-preview-overlay.slint")
+        .expect("read clipboard image preview overlay");
+
+    assert!(
+        workspace_terminal_source.contains("Progress {")
+            && workspace_terminal_source.contains("request_id: Uuid")
+            && workspace_terminal_source.contains("controller.mark_upload_progress("),
+        "clipboard upload progress must retain request identity through the background channel"
+    );
+    assert!(
+        workspace_terminal_source.contains("upload_clipboard_png_with_progress")
+            && workspace_terminal_source.contains("ClipboardProgressGate"),
+        "clipboard uploads must use the progress-capable SFTP boundary and monotonic throttle"
+    );
+    for field in [
+        "progress-value: float",
+        "progress-text: string",
+        "speed-text: string",
+    ] {
+        assert!(
+            overlay_source.contains(field),
+            "clipboard preview model should expose `{field}`"
+        );
+    }
+}
+
+#[test]
+fn clipboard_inline_image_lifecycle_is_generation_guarded_and_remote_side_effect_free() {
+    let workspace_terminal_source = fs::read_to_string("src/app/bootstrap/workspace_terminal.rs")
+        .expect("read workspace terminal bootstrap module");
+    let bootstrap_source =
+        fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap module");
+
+    for contract in [
+        "ClipboardInlineImageBackgroundMessage",
+        "forward_active_workspace_inline_clipboard_image",
+        "system_clipboard_image_source",
+        "active_workspace_session_generation",
+        "finish_if_current",
+        "surface_allows_inline_image",
+        "inline_image_cell_size",
+        "apply_session_local_image",
+    ] {
+        assert!(
+            workspace_terminal_source.contains(contract),
+            "inline clipboard image workflow should contain `{contract}`"
+        );
+    }
+    assert!(
+        bootstrap_source.contains("ClipboardInlineImageController")
+            && bootstrap_source.contains("drain_clipboard_inline_image_messages"),
+        "bootstrap should own and drain the single-pending inline image controller"
+    );
+
+    let inline_start = workspace_terminal_source
+        .find("forward_active_workspace_inline_clipboard_image")
+        .expect("inline image action");
+    let inline_end = workspace_terminal_source[inline_start..]
+        .find("pub(super) fn forward_active_workspace_scroll_ratio")
+        .map(|offset| inline_start + offset)
+        .expect("end of inline image workflow");
+    let inline_workflow = &workspace_terminal_source[inline_start..inline_end];
+    for forbidden in [
+        "select_clipboard_payload",
+        "system_clipboard_text",
+        "send_session_paste",
+        "send_text_input",
+        "sftp_runtime",
+        "upload_clipboard_png",
+    ] {
+        assert!(
+            !inline_workflow.contains(forbidden),
+            "inline image workflow must not reference remote/text path `{forbidden}`"
+        );
+    }
+}
+
+#[test]
+fn display_clipboard_image_action_reaches_inline_runtime_once_without_paste_or_upload() {
+    let _bootstrap_smoke_test_guard = init_bootstrap_smoke_test();
+    let _clipboard_hook_lock = INLINE_CLIPBOARD_IMAGE_HOOK_LOCK
+        .lock()
+        .expect("lock inline clipboard image hook");
+    let fixture_png = one_pixel_local_terminal_image().png_bytes;
+    let _clipboard_hook =
+        install_inline_clipboard_image_source_for_test(move || Ok(Some(fixture_png.clone())));
+    let state = RecordingLocalImageState::default();
+    let app = AppWindow::new().expect("create app window");
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingLocalImageLauncher {
+            state: state.clone(),
+        }),
+    );
+    let ssh_id = create_root_ssh(&app, "Inline Image", "127.0.0.1");
+    app.invoke_asset_activated(ssh_id.into());
+    wait_for_condition(Duration::from_secs(2), || {
+        app.get_workspace_session_host_mode().as_str() == "terminal"
+    });
+
+    app.invoke_workspace_session_display_clipboard_image_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        state
+            .images
+            .lock()
+            .expect("lock displayed inline images")
+            .len()
+            == 1
+    });
+
+    assert_eq!(state.images.lock().expect("lock inline images").len(), 1);
+    assert_eq!(state.remote_input_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        app.get_workspace_session_clipboard_image_preview_items()
+            .row_count(),
+        0,
+        "local display must not create the standard Paste upload preview"
     );
 }

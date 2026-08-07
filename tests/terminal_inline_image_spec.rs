@@ -5,16 +5,25 @@ use base64::engine::general_purpose::STANDARD;
 use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 
 use mica_term::app::ssh::runtime::TerminalSession;
-use mica_term::app::terminal_core::TerminalViewportMetrics;
+use mica_term::app::terminal_core::{
+    LocalTerminalImage, TerminalCoreAdapter, TerminalViewportMetrics, WeztermTerminalCoreAdapter,
+};
 
-fn one_pixel_png() -> Vec<u8> {
-    let image =
-        DynamicImage::ImageRgba8(RgbaImage::from_pixel(1, 1, Rgba([0x20, 0x80, 0xe0, 0x80])));
+fn fixture_png(width: u32, height: u32) -> Vec<u8> {
+    let image = DynamicImage::ImageRgba8(RgbaImage::from_pixel(
+        width,
+        height,
+        Rgba([0x20, 0x80, 0xe0, 0x80]),
+    ));
     let mut bytes = Vec::new();
     image
         .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
         .expect("encode fixture png");
     bytes
+}
+
+fn one_pixel_png() -> Vec<u8> {
+    fixture_png(1, 1)
 }
 
 fn iterm_inline_sequence(inline: bool) -> Vec<u8> {
@@ -33,6 +42,105 @@ fn kitty_direct_sequence(image_id: u32, placement_id: u32) -> Vec<u8> {
         STANDARD.encode(rgba)
     )
     .into_bytes()
+}
+
+fn local_image(width: u32, height: u32, columns: u32, rows: u32) -> LocalTerminalImage {
+    LocalTerminalImage {
+        png_bytes: fixture_png(width, height),
+        source_width: width,
+        source_height: height,
+        columns,
+        rows,
+    }
+}
+
+#[test]
+fn local_clipboard_image_uses_unowned_cells_and_advances_below_it() {
+    let mut terminal = WeztermTerminalCoreAdapter::new(6, 12, 32);
+    assert!(terminal.apply_remote_bytes(b"prompt> ").is_empty());
+    let before = terminal.frame_snapshot();
+
+    let result: anyhow::Result<()> = terminal.apply_local_image(local_image(40, 20, 4, 2));
+    result.expect("place local clipboard image");
+
+    let after = terminal.frame_snapshot();
+    assert!(after.seqno > before.seqno);
+    assert_eq!(after.image_resources.len(), 1);
+    assert!(!after.image_placements.is_empty());
+    assert!(
+        after
+            .image_placements
+            .iter()
+            .all(|placement| { placement.image_id.is_none() && placement.placement_id.is_none() })
+    );
+    assert_eq!(after.cursor.col, 0);
+    assert!(after.cursor.row >= before.cursor.row.saturating_add(2));
+}
+
+#[test]
+fn local_clipboard_image_is_not_owned_by_remote_kitty_delete_commands() {
+    let mut terminal = WeztermTerminalCoreAdapter::new(6, 12, 32);
+    terminal
+        .apply_local_image(local_image(20, 20, 2, 2))
+        .expect("place local image");
+    let local_placement_count = terminal.frame_snapshot().image_placements.len();
+
+    terminal.apply_remote_bytes(b"\x1b_Ga=d,d=I,i=405,q=0;\x1b\\");
+    assert_eq!(
+        terminal.frame_snapshot().image_placements.len(),
+        local_placement_count
+    );
+
+    terminal.apply_remote_bytes(b"\x1b_Ga=d,d=A,q=0;\x1b\\");
+    let after_delete_all = terminal.frame_snapshot();
+    assert_eq!(
+        after_delete_all.image_placements.len(),
+        local_placement_count
+    );
+    assert!(
+        after_delete_all
+            .image_placements
+            .iter()
+            .all(|placement| { placement.image_id.is_none() && placement.placement_id.is_none() })
+    );
+}
+
+#[test]
+fn local_clipboard_image_follows_terminal_scrollback() {
+    let mut terminal = WeztermTerminalCoreAdapter::new(3, 8, 32);
+    terminal
+        .apply_local_image(local_image(20, 10, 2, 1))
+        .expect("place local image");
+    terminal.apply_remote_bytes(b"one\r\ntwo\r\nthree\r\nfour\r\nfive\r\n");
+    assert!(terminal.frame_snapshot().image_placements.is_empty());
+
+    terminal.scroll_viewport_lines(5);
+    assert!(
+        !terminal.frame_snapshot().image_placements.is_empty(),
+        "local image cells should remain available in scrollback"
+    );
+}
+
+#[test]
+fn local_clipboard_image_rejects_invalid_input_without_terminal_mutation() {
+    let mut terminal = WeztermTerminalCoreAdapter::new(6, 12, 32);
+    terminal.apply_remote_bytes(b"prompt> ");
+    let before = terminal.frame_snapshot();
+
+    let result: anyhow::Result<()> = terminal.apply_local_image(LocalTerminalImage {
+        png_bytes: fixture_png(1, 1),
+        source_width: 5_001,
+        source_height: 5_001,
+        columns: 1,
+        rows: 1,
+    });
+
+    assert!(result.is_err());
+    let after = terminal.frame_snapshot();
+    assert_eq!(after.seqno, before.seqno);
+    assert_eq!(after.cursor, before.cursor);
+    assert_eq!(after.image_resources, before.image_resources);
+    assert_eq!(after.image_placements, before.image_placements);
 }
 
 #[test]

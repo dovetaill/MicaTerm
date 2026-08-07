@@ -62,7 +62,7 @@ pub enum ImageAttachStyle {
 }
 
 impl TerminalState {
-    pub(crate) fn assign_image_to_cells(
+    pub fn assign_image_to_cells(
         &mut self,
         params: ImageAttachParams,
     ) -> anyhow::Result<PlacementInfo> {

@@ -43,13 +43,14 @@ use anyhow::{Context, Result, anyhow};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+use crate::app::clipboard_inline_image::surface_allows_inline_image;
 use crate::app::sftp::SftpRuntimeHandle;
 use crate::app::ssh::connection_progress::{ConnectionHeadlineState, ConnectionProgressEvent};
 use crate::app::ssh::credentials::{CredentialStore, SystemCredentialStore};
 use crate::app::ssh::profile::ConnectionProfile;
 use crate::app::ssh::session_manager::{EnhancedSessionState, SessionRuntimeControl};
 use crate::app::ssh::shell_integration::runtime_shell_events;
-use crate::app::terminal_core::TerminalViewportMetrics;
+use crate::app::terminal_core::{LocalTerminalImage, TerminalViewportMetrics};
 use crate::theme::{ThemeMode, ThemeVariant};
 
 const DEFAULT_TERMINAL_ROWS: usize = 24;
@@ -741,6 +742,21 @@ impl SshSessionRuntime {
         Ok(terminal.surface_state(self.session_id))
     }
 
+    pub fn apply_local_image(&self, image: LocalTerminalImage) -> Result<TerminalSurfaceState> {
+        let mut terminal = self
+            .terminal
+            .lock()
+            .map_err(|_| anyhow!("failed to lock terminal for local image"))?;
+        let surface = terminal.surface_state(self.session_id);
+        if !surface_allows_inline_image(&surface) {
+            return Err(anyhow!(
+                "local clipboard images are unavailable in the current terminal mode"
+            ));
+        }
+        terminal.apply_local_image(image)?;
+        Ok(terminal.surface_state(self.session_id))
+    }
+
     pub fn release_terminal_memory(&self) -> Result<()> {
         let mut terminal = self
             .terminal
@@ -809,6 +825,10 @@ impl SessionRuntimeControl for SshSessionRuntime {
 
     fn send_paste(&self, text: String) -> Result<()> {
         SshSessionRuntime::send_paste(self, text)
+    }
+
+    fn apply_local_image(&self, image: LocalTerminalImage) -> Result<TerminalSurfaceState> {
+        SshSessionRuntime::apply_local_image(self, image)
     }
 
     fn start_zmodem_upload(&self, local_paths: Vec<PathBuf>) -> Result<()> {

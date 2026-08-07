@@ -2,9 +2,9 @@ pub mod types;
 pub mod wezterm_adapter;
 
 pub use types::{
-    SelectionState, TERMINAL_IMAGE_UV_SCALE, TerminalCoreAdapter, TerminalFrameSnapshot,
-    TerminalImagePlacement, TerminalImageResource, TerminalImageUvRect, TerminalViewportMetrics,
-    ViewportState,
+    LocalTerminalImage, SelectionState, TERMINAL_IMAGE_UV_SCALE, TerminalCoreAdapter,
+    TerminalFrameSnapshot, TerminalImagePlacement, TerminalImageResource, TerminalImageUvRect,
+    TerminalViewportMetrics, ViewportState,
 };
 pub use wezterm_adapter::WeztermTerminalCoreAdapter;
 

@@ -159,6 +159,7 @@ export component WorkspacePane inherits Rectangle {
     callback copy-selection-requested(int, int, int, int);
     callback select-all-requested();
     callback paste-requested();
+    callback display-clipboard-image-requested();
     callback clipboard-image-paste-path-requested(string);
     callback clipboard-image-copy-path-requested(string);
     callback clipboard-image-dismiss-requested(string);
@@ -562,6 +563,10 @@ export component WorkspacePane inherits Rectangle {
 
                 paste-requested() => {
                     root.paste-requested();
+                }
+
+                display-clipboard-image-requested() => {
+                    root.display-clipboard-image-requested();
                 }
 
                 clipboard-image-paste-path-requested(request-id) => {

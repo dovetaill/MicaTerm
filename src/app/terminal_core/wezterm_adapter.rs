@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, Cursor, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use anyhow::{Result, bail};
 use image::{ImageReader, Limits};
@@ -12,11 +12,14 @@ use uuid::Uuid;
 use wezterm_surface::{CursorShape, CursorVisibility};
 use wezterm_term::color::{ColorAttribute, ColorPalette, SrgbaTuple};
 use wezterm_term::image::{ImageData, ImageDataType};
-use wezterm_term::{Intensity, Line, Terminal, TerminalConfiguration, TerminalSize, Underline};
+use wezterm_term::{
+    ImageAttachParams, ImageAttachStyle, Intensity, Line, Terminal, TerminalConfiguration,
+    TerminalSize, Underline,
+};
 
 use crate::app::image_policy::{
-    MAX_BASE64_IMAGE_SEQUENCE_BYTES, MAX_DECODED_IMAGE_BYTES, MAX_IMAGE_PIXELS,
-    MAX_SIXEL_SEQUENCE_BYTES, MAX_TERMINAL_IMAGE_RESOURCE_BYTES,
+    MAX_BASE64_IMAGE_SEQUENCE_BYTES, MAX_DECODED_IMAGE_BYTES, MAX_ENCODED_IMAGE_BYTES,
+    MAX_IMAGE_PIXELS, MAX_SIXEL_SEQUENCE_BYTES, MAX_TERMINAL_IMAGE_RESOURCE_BYTES,
 };
 use crate::app::ssh::runtime::{
     TerminalCellState, TerminalCursorShape, TerminalCursorState, TerminalKeyEvent, TerminalKeyKind,
@@ -24,8 +27,9 @@ use crate::app::ssh::runtime::{
     TerminalSurfaceState,
 };
 use crate::app::terminal_core::{
-    SelectionState, TerminalCoreAdapter, TerminalFrameSnapshot, TerminalImagePlacement,
-    TerminalImageResource, TerminalImageUvRect, TerminalViewportMetrics, ViewportState,
+    LocalTerminalImage, SelectionState, TerminalCoreAdapter, TerminalFrameSnapshot,
+    TerminalImagePlacement, TerminalImageResource, TerminalImageUvRect, TerminalViewportMetrics,
+    ViewportState,
 };
 use crate::app::terminal_theme::{palette_for_theme, preset_for_theme};
 use crate::theme::{ThemeMode, ThemeVariant};
@@ -48,6 +52,61 @@ pub struct WeztermTerminalCoreAdapter {
     mouse_modes: TerminalMouseModes,
     viewport_offset_lines: usize,
     image_resource_cache: Mutex<ImageResourceProjectionCache>,
+    local_image_resource_budget: LocalImageResourceBudget,
+}
+
+struct LocalImageResourceLease {
+    resource: Weak<ImageData>,
+    decoded_bytes: usize,
+}
+
+#[derive(Default)]
+struct LocalImageResourceBudget {
+    leases: VecDeque<LocalImageResourceLease>,
+    retained_bytes: usize,
+}
+
+impl LocalImageResourceBudget {
+    fn ensure_can_admit(&mut self, decoded_bytes: usize) -> Result<()> {
+        self.prune_expired();
+        if decoded_bytes > MAX_TERMINAL_IMAGE_RESOURCE_BYTES
+            || self.retained_bytes.saturating_add(decoded_bytes) > MAX_TERMINAL_IMAGE_RESOURCE_BYTES
+        {
+            bail!(
+                "local terminal image resources exceed the {} MiB session limit",
+                MAX_TERMINAL_IMAGE_RESOURCE_BYTES / (1024 * 1024)
+            );
+        }
+        Ok(())
+    }
+
+    fn retain(&mut self, resource: &Arc<ImageData>, decoded_bytes: usize) {
+        self.retained_bytes = self.retained_bytes.saturating_add(decoded_bytes);
+        self.leases.push_back(LocalImageResourceLease {
+            resource: Arc::downgrade(resource),
+            decoded_bytes,
+        });
+    }
+
+    fn prune_expired(&mut self) {
+        self.leases.retain(|lease| {
+            if lease.resource.upgrade().is_some() {
+                true
+            } else {
+                self.retained_bytes = self.retained_bytes.saturating_sub(lease.decoded_bytes);
+                false
+            }
+        });
+    }
+}
+
+struct ValidatedLocalImage {
+    resource: Arc<ImageData>,
+    source_width: u32,
+    source_height: u32,
+    columns: u32,
+    rows: u32,
+    decoded_bytes: usize,
 }
 
 impl WeztermTerminalCoreAdapter {
@@ -98,6 +157,7 @@ impl WeztermTerminalCoreAdapter {
             mouse_modes: TerminalMouseModes::default(),
             viewport_offset_lines: 0,
             image_resource_cache: Mutex::new(ImageResourceProjectionCache::default()),
+            local_image_resource_budget: LocalImageResourceBudget::default(),
         }
     }
 
@@ -141,6 +201,47 @@ impl WeztermTerminalCoreAdapter {
         }
         self.clamp_viewport_offset();
         self.writer.take()
+    }
+
+    pub fn apply_local_image(&mut self, image: LocalTerminalImage) -> Result<()> {
+        let image = validate_local_image(image)?;
+        self.local_image_resource_budget
+            .ensure_can_admit(image.decoded_bytes)?;
+
+        let pending_writer_bytes = self.writer.take();
+        if !pending_writer_bytes.is_empty() {
+            bail!("terminal writer was not empty before local image placement");
+        }
+
+        let resource = image.resource;
+        self.terminal.assign_image_to_cells(ImageAttachParams {
+            image_width: image.source_width,
+            image_height: image.source_height,
+            source_width: None,
+            source_height: None,
+            source_origin_x: 0,
+            source_origin_y: 0,
+            cell_padding_left: 0,
+            cell_padding_top: 0,
+            z_index: 0,
+            columns: Some(image.columns as usize),
+            rows: Some(image.rows as usize),
+            image_id: None,
+            placement_id: None,
+            style: ImageAttachStyle::Kitty,
+            do_not_move_cursor: false,
+            data: Arc::clone(&resource),
+        })?;
+        self.terminal.advance_bytes(b"\r\n");
+        self.snap_viewport_to_bottom();
+        self.local_image_resource_budget
+            .retain(&resource, image.decoded_bytes);
+
+        let unexpected_writer_bytes = self.writer.take();
+        if !unexpected_writer_bytes.is_empty() {
+            bail!("local image placement unexpectedly generated terminal reply bytes");
+        }
+        Ok(())
     }
 
     pub fn screen_text(&self) -> String {
@@ -638,6 +739,73 @@ impl WeztermTerminalCoreAdapter {
             self.scroll_viewport_to_bottom();
         }
     }
+}
+
+fn validate_local_image(image: LocalTerminalImage) -> Result<ValidatedLocalImage> {
+    if image.source_width == 0 || image.source_height == 0 {
+        bail!("local terminal image dimensions must be non-zero");
+    }
+    if image.columns == 0 || image.rows == 0 {
+        bail!("local terminal image cell span must be non-zero");
+    }
+    if image.png_bytes.is_empty() || image.png_bytes.len() > MAX_ENCODED_IMAGE_BYTES {
+        bail!(
+            "local terminal image exceeds the {} MiB encoded limit",
+            MAX_ENCODED_IMAGE_BYTES / (1024 * 1024)
+        );
+    }
+
+    let pixels = u64::from(image.source_width)
+        .checked_mul(u64::from(image.source_height))
+        .ok_or_else(|| anyhow::anyhow!("local terminal image pixel count overflowed"))?;
+    if pixels > MAX_IMAGE_PIXELS {
+        bail!("local terminal image exceeds the pixel limit");
+    }
+    let decoded_bytes_u64 = pixels
+        .checked_mul(4)
+        .ok_or_else(|| anyhow::anyhow!("local terminal image decoded size overflowed"))?;
+    if decoded_bytes_u64 > MAX_DECODED_IMAGE_BYTES {
+        bail!("local terminal image exceeds the decoded byte limit");
+    }
+
+    let dimensions = ImageReader::new(Cursor::new(image.png_bytes.as_slice()))
+        .with_guessed_format()
+        .map_err(|error| anyhow::anyhow!("failed to detect local terminal image format: {error}"))?
+        .into_dimensions()
+        .map_err(|error| {
+            anyhow::anyhow!("failed to read local terminal image dimensions: {error}")
+        })?;
+    if dimensions != (image.source_width, image.source_height) {
+        bail!("local terminal image dimensions do not match the encoded payload");
+    }
+
+    let mut reader = ImageReader::new(Cursor::new(image.png_bytes.as_slice()))
+        .with_guessed_format()
+        .map_err(|error| {
+            anyhow::anyhow!("failed to detect local terminal image format: {error}")
+        })?;
+    let mut limits = Limits::default();
+    limits.max_alloc = Some(MAX_DECODED_IMAGE_BYTES);
+    reader.limits(limits);
+    let decoded = reader
+        .decode()
+        .map_err(|error| anyhow::anyhow!("failed to decode local terminal image: {error}"))?
+        .into_rgba8();
+    if decoded.dimensions() != dimensions || decoded.as_raw().len() as u64 != decoded_bytes_u64 {
+        bail!("local terminal image decoded payload is inconsistent");
+    }
+    let decoded_bytes = usize::try_from(decoded_bytes_u64)
+        .map_err(|_| anyhow::anyhow!("local terminal image decoded size overflowed"))?;
+    drop(decoded);
+
+    Ok(ValidatedLocalImage {
+        resource: Arc::new(ImageData::with_raw_data(image.png_bytes)),
+        source_width: image.source_width,
+        source_height: image.source_height,
+        columns: image.columns,
+        rows: image.rows,
+        decoded_bytes,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1797,6 +1965,10 @@ impl TerminalCoreAdapter for WeztermTerminalCoreAdapter {
         WeztermTerminalCoreAdapter::apply_remote_bytes(self, bytes)
     }
 
+    fn apply_local_image(&mut self, image: LocalTerminalImage) -> Result<()> {
+        WeztermTerminalCoreAdapter::apply_local_image(self, image)
+    }
+
     fn screen_text(&self) -> String {
         WeztermTerminalCoreAdapter::screen_text(self)
     }
@@ -1886,6 +2058,34 @@ impl TerminalCoreAdapter for WeztermTerminalCoreAdapter {
 
     fn encode_paste(&mut self, text: &str) -> Result<Vec<u8>> {
         WeztermTerminalCoreAdapter::encode_paste(self, text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expired_local_image_leases_release_session_budget() {
+        let resource = Arc::new(ImageData::with_data(ImageDataType::new_single_frame(
+            1,
+            1,
+            vec![0, 0, 0, 0xff],
+        )));
+        let mut budget = LocalImageResourceBudget::default();
+
+        budget
+            .ensure_can_admit(MAX_TERMINAL_IMAGE_RESOURCE_BYTES)
+            .expect("empty budget admits the limit");
+        budget.retain(&resource, MAX_TERMINAL_IMAGE_RESOURCE_BYTES);
+        assert!(budget.ensure_can_admit(1).is_err());
+
+        drop(resource);
+        budget
+            .ensure_can_admit(1)
+            .expect("expired weak lease releases budget");
+        assert_eq!(budget.retained_bytes, 0);
+        assert!(budget.leases.is_empty());
     }
 }
 

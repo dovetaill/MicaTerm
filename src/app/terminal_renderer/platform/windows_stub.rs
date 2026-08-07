@@ -3,6 +3,7 @@
 use anyhow::Result;
 
 use crate::AppWindow;
+use crate::app::terminal_renderer::{NativeSurfaceDamage, NativeTerminalSurfaceDiagnostics};
 
 use super::backend::{
     NativeTerminalSurfaceRect, PlatformNativeSurfaceBackend, RetainedNativeTerminalSurfaceFrame,
@@ -27,7 +28,22 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
         self.frame = frame;
     }
 
-    fn present(&mut self) {}
+    fn present(&mut self, _damage: NativeSurfaceDamage) {}
+
+    fn host_image_snapshot(&self) -> Option<slint::Image> {
+        None
+    }
+
+    fn diagnostics_snapshot(&self) -> NativeTerminalSurfaceDiagnostics {
+        NativeTerminalSurfaceDiagnostics {
+            last_prepared_frame_token: self
+                .frame
+                .as_ref()
+                .map(|frame| frame.frame.frame_token)
+                .unwrap_or_default(),
+            ..NativeTerminalSurfaceDiagnostics::default()
+        }
+    }
 
     fn detach(&mut self) {
         self.frame = None;

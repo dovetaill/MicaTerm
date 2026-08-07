@@ -21,6 +21,13 @@ const CLIPBOARD_CACHE_DIRECTORY_PERMISSIONS: u32 = 0o700;
 const CLIPBOARD_CACHE_FILE_PERMISSIONS: u32 = 0o600;
 const MAX_OLD_CLIPBOARD_CACHE_SESSION_DIRS_SCANNED: usize = 32;
 const MAX_CLIPBOARD_CACHE_FILES_SCANNED_PER_SESSION: usize = 128;
+pub const CLIPBOARD_UPLOAD_CHUNK_BYTES: usize = 64 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClipboardUploadProgress {
+    pub bytes_transferred: u64,
+    pub bytes_total: u64,
+}
 
 pub type SftpOperationFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 pub type SftpReaderFuture<'a> = Pin<Box<dyn Future<Output = Result<BoxedSftpReader>> + Send + 'a>>;
@@ -163,20 +170,37 @@ impl SftpRuntimeHandle {
     }
 
     pub async fn upload_clipboard_png(&self, session_id: Uuid, data: Vec<u8>) -> Result<String> {
+        self.upload_clipboard_png_with_progress(session_id, data, |_| {})
+            .await
+    }
+
+    pub async fn upload_clipboard_png_with_progress<F>(
+        &self,
+        session_id: Uuid,
+        data: Vec<u8>,
+        on_progress: F,
+    ) -> Result<String>
+    where
+        F: FnMut(ClipboardUploadProgress) + Send,
+    {
         let now_unix_seconds = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        self.upload_clipboard_png_at(session_id, data, now_unix_seconds)
+        self.upload_clipboard_png_at(session_id, data, now_unix_seconds, on_progress)
             .await
     }
 
-    async fn upload_clipboard_png_at(
+    async fn upload_clipboard_png_at<F>(
         &self,
         session_id: Uuid,
         data: Vec<u8>,
         now_unix_seconds: u64,
-    ) -> Result<String> {
+        mut on_progress: F,
+    ) -> Result<String>
+    where
+        F: FnMut(ClipboardUploadProgress) + Send,
+    {
         if data.len() > MAX_ENCODED_IMAGE_BYTES {
             bail!(
                 "clipboard PNG exceeds the {} MiB upload limit",
@@ -232,8 +256,23 @@ impl SftpRuntimeHandle {
                 format!("failed to exclusively create remote clipboard image `{remote_path}`")
             })?;
 
+        let bytes_total = data.len() as u64;
+        on_progress(ClipboardUploadProgress {
+            bytes_transferred: 0,
+            bytes_total,
+        });
         let write_result = async {
-            writer.write_all(data.as_slice()).await?;
+            let mut bytes_transferred = 0_u64;
+            for chunk in data.chunks(CLIPBOARD_UPLOAD_CHUNK_BYTES) {
+                writer.write_all(chunk).await?;
+                bytes_transferred = bytes_transferred.saturating_add(chunk.len() as u64);
+                if bytes_transferred < bytes_total {
+                    on_progress(ClipboardUploadProgress {
+                        bytes_transferred,
+                        bytes_total,
+                    });
+                }
+            }
             writer.flush().await?;
             writer.shutdown().await
         }
@@ -245,6 +284,10 @@ impl SftpRuntimeHandle {
                 format!("failed to write remote clipboard image `{remote_path}`")
             });
         }
+        on_progress(ClipboardUploadProgress {
+            bytes_transferred: bytes_total,
+            bytes_total,
+        });
 
         Ok(remote_path)
     }

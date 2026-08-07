@@ -24,9 +24,10 @@ component TerminalContextMenuRow inherits Rectangle {
     Text {
         x: 12px;
         y: 0px;
-        width: parent.width - 24px;
+        width: max(0px, parent.width - 24px);
         height: parent.height;
         text: root.label;
+        overflow: elide;
         color: ThemeTokens.text-primary;
         opacity: root.enabled ? 1.0 : 0.48;
         vertical-alignment: center;
@@ -384,6 +385,7 @@ export component TerminalSessionHost inherits Rectangle {
     callback copy-selection-requested(int, int, int, int);
     callback select-all-requested();
     callback paste-requested();
+    callback display-clipboard-image-requested();
     callback clipboard-image-paste-path-requested(string);
     callback clipboard-image-copy-path-requested(string);
     callback clipboard-image-dismiss-requested(string);
@@ -803,6 +805,10 @@ export component TerminalSessionHost inherits Rectangle {
         return text == "v" || text == "V" || text == "\u{16}";
     }
 
+    function is-display-clipboard-image-shortcut-key(text: string) -> bool {
+        return text == "i" || text == "I" || text == "\u{9}";
+    }
+
     function terminal-local-action-id(text: string) -> string {
         if text == "t" || text == "T" {
             return "new-tab";
@@ -934,11 +940,11 @@ export component TerminalSessionHost inherits Rectangle {
     }
 
     function terminal-menu-width() -> length {
-        return 168px;
+        return min(232px, max(0px, root.width - 24px));
     }
 
     function terminal-menu-height() -> length {
-        return 148px;
+        return 184px;
     }
 
     function search-match-summary() -> string {
@@ -1398,6 +1404,11 @@ export component TerminalSessionHost inherits Rectangle {
                 } else if (event.modifiers.control && event.modifiers.shift && !event.modifiers.alt
                     && root.is-paste-shortcut-key(event.text)) {
                     root.paste-requested();
+                    accept
+                } else if (event.modifiers.control && event.modifiers.shift && !event.modifiers.alt
+                    && root.is-display-clipboard-image-shortcut-key(event.text)) {
+                    root.close-context-menu();
+                    root.display-clipboard-image-requested();
                     accept
                 } else if (event.modifiers.control && event.modifiers.shift && !event.modifiers.alt
                     && root.terminal-local-action-id(event.text) != "") {
@@ -2175,6 +2186,17 @@ export component TerminalSessionHost inherits Rectangle {
                         invoked => {
                             root.close-context-menu();
                             root.paste-requested();
+                        }
+                    }
+
+                    display-clipboard-image-row := TerminalContextMenuRow {
+                        width: parent.width;
+                        label: "Display Clipboard Image";
+
+                        invoked => {
+                            root.close-context-menu();
+                            root.display-clipboard-image-requested();
+                            terminal-input.focus();
                         }
                     }
 

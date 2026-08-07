@@ -287,6 +287,37 @@ fn tab_model_tracks_active_session_and_closeability() {
 }
 
 #[test]
+fn active_workspace_session_generation_tracks_real_a_b_a_transitions() {
+    let first = WorkspaceTab::from_session(&sample_handle(
+        "Prod Bastion",
+        "ops@example.com:22",
+        SessionState::Connected,
+    ));
+    let second = WorkspaceTab::from_session(&sample_handle(
+        "Staging Bastion",
+        "ops@staging.example.com:22",
+        SessionState::Connected,
+    ));
+    let mut view_model = ShellViewModel::default();
+    view_model.set_workspace_tabs(vec![first.clone(), second.clone()]);
+    let generation_a = view_model.active_workspace_session_generation();
+
+    assert!(view_model.activate_workspace_session(second.session_id.as_str()));
+    let generation_b = view_model.active_workspace_session_generation();
+    assert_eq!(generation_b, generation_a.wrapping_add(1));
+
+    assert!(view_model.activate_workspace_session(first.session_id.as_str()));
+    let generation_a_again = view_model.active_workspace_session_generation();
+    assert_eq!(generation_a_again, generation_b.wrapping_add(1));
+
+    assert!(view_model.activate_workspace_session(first.session_id.as_str()));
+    assert_eq!(
+        view_model.active_workspace_session_generation(),
+        generation_a_again
+    );
+}
+
+#[test]
 fn disconnected_session_stays_visible_and_can_reconnect() {
     let mut disconnected = WorkspaceTab::from_session(&sample_handle(
         "Prod Bastion",

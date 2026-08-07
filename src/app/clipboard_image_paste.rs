@@ -57,6 +57,9 @@ pub(crate) struct ClipboardImagePasteProjection {
     pub paste_enabled: bool,
     pub copy_enabled: bool,
     pub collapsed: bool,
+    pub bytes_transferred: u64,
+    pub bytes_total: u64,
+    pub bytes_per_second: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,6 +88,9 @@ struct ClipboardImagePasteRequest<R> {
     detail: String,
     dismissed: bool,
     state: ClipboardImagePasteState,
+    bytes_transferred: u64,
+    bytes_total: u64,
+    bytes_per_second: u64,
 }
 
 pub(crate) struct ClipboardImagePasteController<R> {
@@ -136,6 +142,9 @@ impl<R> ClipboardImagePasteController<R> {
             detail: "Preparing image".into(),
             dismissed: false,
             state: ClipboardImagePasteState::Preparing,
+            bytes_transferred: 0,
+            bytes_total: 0,
+            bytes_per_second: 0,
         });
         self.bump_revision();
         Ok(request_id)
@@ -165,6 +174,7 @@ impl<R> ClipboardImagePasteController<R> {
             height,
             preview,
         } = encoded;
+        request.bytes_total = png_bytes.len() as u64;
         request.png_bytes = Some(png_bytes);
         request.source_width = width;
         request.source_height = height;
@@ -250,6 +260,43 @@ impl<R> ClipboardImagePasteController<R> {
         };
         self.bump_revision();
         Some(job)
+    }
+
+    pub(crate) fn mark_upload_progress(
+        &mut self,
+        request_id: Uuid,
+        bytes_transferred: u64,
+        bytes_total: u64,
+        elapsed: Duration,
+    ) -> bool {
+        if self.active_upload_id != Some(request_id) {
+            return false;
+        }
+        let Some(index) = self.request_index(request_id) else {
+            return false;
+        };
+        let request = &mut self.requests[index];
+        if request.state != ClipboardImagePasteState::Uploading
+            || request.bytes_total != bytes_total
+        {
+            return false;
+        }
+
+        let bytes_transferred = bytes_transferred.min(bytes_total);
+        if bytes_transferred < request.bytes_transferred {
+            return false;
+        }
+        let bytes_per_second = average_bytes_per_second(bytes_transferred, elapsed);
+        if request.bytes_transferred == bytes_transferred
+            && request.bytes_per_second == bytes_per_second
+        {
+            return false;
+        }
+
+        request.bytes_transferred = bytes_transferred;
+        request.bytes_per_second = bytes_per_second;
+        self.bump_revision();
+        true
     }
 
     pub(crate) fn mark_upload_succeeded(
@@ -558,6 +605,9 @@ impl<R> ClipboardImagePasteController<R> {
                     paste_enabled,
                     copy_enabled,
                     collapsed,
+                    bytes_transferred: request.bytes_transferred,
+                    bytes_total: request.bytes_total,
+                    bytes_per_second: request.bytes_per_second,
                 }
             })
             .collect()
@@ -584,6 +634,20 @@ impl<R> ClipboardImagePasteController<R> {
     fn bump_revision(&mut self) {
         self.revision = self.revision.wrapping_add(1);
     }
+}
+
+fn average_bytes_per_second(bytes: u64, elapsed: Duration) -> u64 {
+    let nanos = elapsed.as_nanos();
+    if bytes == 0 || nanos == 0 {
+        return 0;
+    }
+    u64::try_from(
+        u128::from(bytes)
+            .saturating_mul(1_000_000_000)
+            .checked_div(nanos)
+            .unwrap_or_default(),
+    )
+    .unwrap_or(u64::MAX)
 }
 
 fn transition_to_error<R>(request: &mut ClipboardImagePasteRequest<R>, error: String) {
@@ -621,6 +685,83 @@ mod tests {
                 rgba: vec![seed; 80 * 40 * 4],
             },
         }
+    }
+
+    fn uploading_controller_fixture(
+        bytes_total: usize,
+    ) -> (ClipboardImagePasteController<&'static str>, Uuid, Uuid) {
+        let session_id = Uuid::new_v4();
+        let binding_id = Uuid::new_v4();
+        let mut controller = ClipboardImagePasteController::default();
+        let request_id = controller
+            .register(session_id, binding_id, "runtime")
+            .expect("register request");
+        let mut encoded = prepared(1);
+        encoded.png_bytes = vec![1; bytes_total];
+        assert!(controller.mark_prepared(request_id, encoded));
+        assert_eq!(
+            controller.take_next_upload().map(|job| job.encoded_bytes),
+            Some(bytes_total)
+        );
+        (controller, session_id, request_id)
+    }
+
+    #[test]
+    fn upload_progress_is_monotonic_and_retained_after_success() {
+        let (mut controller, session_id, request_id) = uploading_controller_fixture(1_024);
+
+        assert!(controller.mark_upload_progress(request_id, 512, 1_024, Duration::from_secs(1),));
+        assert!(!controller.mark_upload_progress(request_id, 256, 1_024, Duration::from_secs(2),));
+        assert!(matches!(
+            controller.mark_upload_succeeded(request_id, "/tmp/image.png".into()),
+            ClipboardImageCompletion::AutoInsert(_),
+        ));
+
+        let item = controller.projections(session_id)[0].clone();
+        assert_eq!(item.bytes_transferred, 512);
+        assert_eq!(item.bytes_total, 1_024);
+        assert_eq!(item.bytes_per_second, 512);
+
+        assert!(controller.mark_inserted(request_id, Instant::now()));
+        let item = controller.projections(session_id)[0].clone();
+        assert_eq!(item.status, "success");
+        assert_eq!(item.bytes_transferred, 512);
+        assert_eq!(item.bytes_total, 1_024);
+        assert_eq!(item.bytes_per_second, 512);
+    }
+
+    #[test]
+    fn upload_progress_rejects_stale_total_and_regressing_samples_and_clamps_bytes() {
+        let (mut controller, session_id, request_id) = uploading_controller_fixture(1_024);
+
+        assert!(!controller.mark_upload_progress(
+            Uuid::new_v4(),
+            256,
+            1_024,
+            Duration::from_secs(1),
+        ));
+        assert!(!controller.mark_upload_progress(request_id, 256, 512, Duration::from_secs(1),));
+        assert!(controller.mark_upload_progress(request_id, 2_048, 1_024, Duration::from_secs(2),));
+        assert!(
+            !controller.mark_upload_progress(request_id, 1_023, 1_024, Duration::from_secs(3),)
+        );
+
+        let item = controller.projections(session_id)[0].clone();
+        assert_eq!(item.bytes_transferred, 1_024);
+        assert_eq!(item.bytes_total, 1_024);
+        assert_eq!(item.bytes_per_second, 512);
+    }
+
+    #[test]
+    fn upload_progress_handles_zero_elapsed_without_division_failure() {
+        let (mut controller, session_id, request_id) = uploading_controller_fixture(1_024);
+
+        assert!(controller.mark_upload_progress(request_id, 512, 1_024, Duration::ZERO));
+
+        let item = controller.projections(session_id)[0].clone();
+        assert_eq!(item.bytes_transferred, 512);
+        assert_eq!(item.bytes_total, 1_024);
+        assert_eq!(item.bytes_per_second, 0);
     }
 
     #[test]

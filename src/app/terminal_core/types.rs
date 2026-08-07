@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use termwiz::input::{KeyCode, Modifiers as KeyModifiers};
 
 use crate::app::ssh::runtime::{
@@ -53,6 +53,15 @@ impl Default for TerminalViewportMetrics {
     fn default() -> Self {
         Self::fallback(24, 80)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalTerminalImage {
+    pub png_bytes: Vec<u8>,
+    pub source_width: u32,
+    pub source_height: u32,
+    pub columns: u32,
+    pub rows: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,6 +146,9 @@ pub struct TerminalFrameSnapshot {
 pub trait TerminalCoreAdapter: Send {
     fn sequence_number(&self) -> usize;
     fn apply_remote_bytes(&mut self, bytes: &[u8]) -> Vec<u8>;
+    fn apply_local_image(&mut self, _image: LocalTerminalImage) -> Result<()> {
+        bail!("terminal core does not support local images")
+    }
     fn screen_text(&self) -> String;
     fn visible_rows(&self) -> Vec<TerminalRowState>;
     fn visible_lines(&self) -> Vec<String>;
