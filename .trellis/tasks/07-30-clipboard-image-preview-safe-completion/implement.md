@@ -1054,7 +1054,7 @@ git diff --stat
 
 Do not commit. If the user later explicitly authorizes a commit, show `git diff --cached --stat` and the exact staged paths before committing; do not stage unrelated worktree changes.
 
-Actual: final handoff reports 145 focused tests and 1,986/1,986 executed all-target tests passing (one planned bundled-font asset test filtered), four renderer combinations, both Windows cross-checks, the strict-Clippy baseline, final status/stat, and the outstanding Windows manual checklist. The implementation was committed as `9c074fc`; documentation and merge hashes are recorded in `validation-and-handoff.md`. The unrelated untracked `.superpowers/` directory remains untouched.
+Actual: final handoff reports 145 focused tests and 1,986/1,986 executed all-target tests passing (one planned bundled-font asset test filtered), four renderer combinations, both Windows cross-checks, the strict-Clippy baseline, final status/stat, and the outstanding Windows manual checklist. The implementation was committed as `9c074fc`, documentation as `e03de03`, and merged into `master` as `1437d21`. Post-merge verification found and resolved the README semantic contract loss introduced by the diverged master documentation history; details and final passing evidence are retained in `validation-and-handoff.md`. The unrelated untracked `.superpowers/` directory remains untouched.
 
 ## Requirement Coverage Matrix
 

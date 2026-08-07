@@ -130,9 +130,31 @@ scripts/        Development, verification, and asset tooling
 
 - The default feature set uses the Slint software renderer and the native terminal renderer.
 - Windows mainline packages use the Skia host renderer and retained native terminal presentation.
-- Linux and macOS currently use the bitmap terminal presenter.
+- Linux/macOS currently use the bitmap terminal presenter; native renderer support remains follow-up work.
 - Build output is written to `dist/`; local Cargo output stays in `target/`.
 - Runtime diagnostics can be enabled with `MICA_TERM_LOG=debug`.
+- Packaged Windows memory baselines use the renderer/path matrix and counter checklist in [the memory verification playbook](docs/plans/2026-06-09-memory-footprint-reduction/verification.md).
+
+### Windows-first native renderer
+
+- The WezTerm-backed terminal core remains the shipped default today; Rio remains an architectural reference rather than migrated runtime code.
+- Windows mainline and Windows software compatibility packages both use the retained-native presenter as the live Windows terminal path.
+- `app.terminal` diagnostics report the requested render mode, active presenter mode, and fallback transitions during startup and recovery.
+- The bundled shell UI family is `JetBrains Maple Mono`; terminal-grid text uses the bundled `Sarasa Term SC Nerd` family.
+
+### Windows Memory Diagnostics
+
+Packaged Windows runs can enable the opt-in diagnostics from PowerShell:
+
+```powershell
+$env:MICA_TERM_LOG = "debug"
+$env:MICA_TERM_MEMORY_DIAGNOSTICS = "1"
+.\mica-term.exe
+```
+
+`MICA_TERM_MEMORY_DIAGNOSTICS=1` enables the `startup-snapshot`, `startup-checkpoint`, `session-close`, `close-shrink`, `idle-shrink`, `trim-request`, and `trim-executed` event families. Startup checkpoints identify their `startup_stage` as `after-ui-font-fallbacks`, `after-window-new`, `after-ui-font-diagnostics`, or `after-bootstrap-bind`, alongside `ui_shared_collection_configure_calls`, `ui_shared_collection_diagnostics_calls`, and `system_font_database_load_calls`.
+
+Use `private_usage_bytes` and `pagefile_usage_bytes` to distinguish committed-memory release from working-set trimming. The close path also reports `before_session_count`, `after_session_count`, `terminal_memory_release_succeeded`, and `runtime_disconnect_succeeded` so session/runtime cleanup can be verified directly.
 
 For detailed troubleshooting, see [troubleshooting-notes.md](troubleshooting-notes.md). The current manual terminal smoke checklist lives in [docs/terminal-tui-smoke-checklist.md](docs/terminal-tui-smoke-checklist.md).
 

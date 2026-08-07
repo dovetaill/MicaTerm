@@ -15,7 +15,7 @@ This handoff covers task `07-30-clipboard-image-preview-safe-completion` on
 - Local display has no PTY, SSH, SFTP, remote command, or remote-helper side
   effect.
 
-The implementation will be merged before physical Windows acceptance. Keep the
+The implementation was merged before physical Windows acceptance. Keep the
 Trellis task active until the manual checklist below is completed.
 
 ## Commit Gate Rerun: 2026-08-07
@@ -178,5 +178,46 @@ the session journal. Do not archive it before that evidence exists.
 - Merge strategy: non-fast-forward merge because both branches diverged from
   `40c71d9`.
 - Work commit: `9c074fc` (`feat: add clipboard image progress and local display`).
-- Documentation commit: recorded after commit/merge.
-- Merge commit: recorded after commit/merge.
+- Documentation commit: `e03de03` (`docs: record clipboard image validation handoff`).
+- Merge commit: `1437d21` (`Merge branch 'feat/image-dual-channel'`).
+- The merge completed without conflicts. A post-merge check/test result is
+  recorded below before the integration-record follow-up commit.
+
+## Post-Merge Verification
+
+Run from `/home/wwwroot/mica-term` after merge:
+
+```bash
+cargo fmt --all -- --check
+git diff --check
+python3 ./.trellis/scripts/task.py validate 07-30-clipboard-image-preview-safe-completion
+cargo check --all-targets
+cargo test --all-targets --quiet -- --skip bundled_font_assets_cover_terminal_and_shell_contracts
+```
+
+Actual results:
+
+| Check | Result |
+| --- | --- |
+| Format, diff, and Trellis validation | All exited 0 |
+| `cargo check --all-targets` | Exit 0 in 49.4s |
+| Final complete Linux test command | Exit 0 in 63.5s; 1,986 passed, 0 failed, 1 filtered |
+
+### Merge-time semantic documentation issue
+
+The first post-merge full test exposed a semantic conflict that Git could not
+detect textually. Master commit `1c48973` had modernized `readme.md` while the
+feature branch added source-contract tests for current terminal runtime facts.
+The new README had removed these still-required facts:
+
+- shipped WezTerm core and Rio reference boundaries;
+- retained-native Windows package/presenter and fallback diagnostics;
+- packaged memory-baseline playbook and memory diagnostic fields;
+- bundled UI/terminal font identities and the Linux/macOS follow-up status.
+
+The failures appeared in `bootstrap_profile_smoke`,
+`memory_baseline_contract_spec`, `terminal_memory_diagnostics_contract_spec`,
+`startup_font_memory_regression`, and `terminal_scrollback_spec`. The modern
+README layout was retained; concise current facts and the existing playbook link
+were restored under Development Notes. All five focused targets then passed,
+followed by the final 1,986-test all-target run above.

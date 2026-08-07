@@ -170,4 +170,7 @@ diff validation, non-strict Clippy with zero new warnings, all four renderer
 feature combinations, and Windows GNU/MSVC cross-checks pass. Strict
 `-D warnings` remains blocked by the repository's pre-existing warnings. Final
 Windows manual acceptance remains pending. The implementation work is committed
-as `9c074fc`; integration details are retained in `validation-and-handoff.md`.
+as `9c074fc` and merged into `master` as `1437d21`; integration details are
+retained in `validation-and-handoff.md`. Post-merge all-target verification passes
+after reconciling the modern README with the repository's runtime-documentation
+contracts.
