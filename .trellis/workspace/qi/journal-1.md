@@ -138,3 +138,40 @@ Implemented Windows clipboard image upload and Kitty/iTerm2/Sixel static inline 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: Finalize image dual-channel integration
+
+**Date**: 2026-08-12
+**Task**: Finalize image dual-channel integration
+**Branch**: `master`
+
+### Summary
+
+Confirmed feat/image-dual-channel was fully merged into master, reran the post-merge format/task/check/full Linux test gate, removed the obsolete worktree and local branch, and kept the pending Windows acceptance tasks active.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fb28623` | (see git log) |
+| `9c074fc` | (see git log) |
+| `e03de03` | (see git log) |
+| `1437d21` | (see git log) |
+| `cc06a63` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
