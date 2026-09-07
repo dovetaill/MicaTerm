@@ -1566,6 +1566,14 @@ impl SessionTerminalConfig {
 }
 
 impl TerminalConfiguration for SessionTerminalConfig {
+    fn secondary_device_attributes(&self) -> (u16, u16, u16) {
+        // Vim recognizes this compatibility profile as supporting 256 colors
+        // and SGR mouse input, without starting the xterm >= 141 XTGETTCAP
+        // probe chain. Over SSH, those replies can arrive after Vim exits and
+        // become shell input. Explicit capability queries still work normally.
+        (0, 100, 0)
+    }
+
     fn generation(&self) -> usize {
         self.state
             .lock()

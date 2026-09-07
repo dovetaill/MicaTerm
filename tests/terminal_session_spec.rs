@@ -37,6 +37,54 @@ fn terminal_session_applies_remote_bytes_and_tracks_seqno() {
 }
 
 #[test]
+fn vim_device_negotiation_avoids_xterm_key_probe_chain() {
+    for query in [b"\x1b[>c".as_slice(), b"\x1b[>0c".as_slice()] {
+        // SSH may split a query at any byte boundary.
+        for split in 0..=query.len() {
+            let mut session = TerminalSession::new(24, 80);
+            let mut reply = session.apply_remote_bytes(&query[..split]);
+            reply.extend(session.apply_remote_bytes(&query[split..]));
+            assert_eq!(reply, b"\x1b[>0;100;0c");
+            // Vim recognizes 0;100;0 as SGR-mouse/256-color capable and only
+            // starts automatic XTGETTCAP probes for versions >= 141.
+            assert!(session.apply_remote_bytes(b"\x1b[?1049h\x1b[?1h").is_empty());
+            assert!(
+                session
+                    .apply_remote_bytes(b"\x1b[?1049l\x1b[?1l$ ")
+                    .is_empty()
+            );
+            assert_eq!(
+                session
+                    .send_key_down(KeyCode::UpArrow, Modifiers::NONE)
+                    .unwrap(),
+                b"\x1b[A"
+            );
+            assert_eq!(
+                session
+                    .send_key_down(KeyCode::Char('a'), Modifiers::NONE)
+                    .unwrap(),
+                b"a"
+            );
+        }
+    }
+}
+
+#[test]
+fn explicit_terminal_capability_queries_are_answered_immediately() {
+    let mut session = TerminalSession::new(24, 80);
+    assert_eq!(
+        session.apply_remote_bytes(b"\x1bP+q436f\x1b\\"),
+        b"\x1bP1+r436F=323536\x1b\\"
+    );
+    assert_eq!(
+        session
+            .send_key_down(KeyCode::UpArrow, Modifiers::NONE)
+            .unwrap(),
+        b"\x1b[A"
+    );
+}
+
+#[test]
 fn exact_cockpit_banner_is_filtered_before_terminal_parser() {
     let mut session = TerminalSession::new(24, 80);
 

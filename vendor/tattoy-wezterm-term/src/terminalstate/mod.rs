@@ -1306,17 +1306,19 @@ impl TerminalState {
             }
             Device::RequestSecondaryDeviceAttributes => {
                 // Response is: Pp ; Pv ; Pc
-                // Where Pp=1 means vt220
+                // The default has Pp=1, meaning vt220,
                 // and Pv is the firmware version.
                 // Pc is always 0.
                 // Because our default TERM is xterm, the firmware
-                // version will be considered to be equialent to xterm's
+                // version will be considered to be equivalent to xterm's
                 // patch levels, with the following effects:
                 // pv < 95 -> ttymouse=xterm
                 // pv >= 95 < 277 -> ttymouse=xterm2
                 // pv >= 277 -> ttymouse=sgr
                 // pv >= 279 - xterm will probe for additional device settings.
-                self.writer.write(b"\x1b[>1;277;0c").ok();
+                // Embedders can select a different compatibility profile.
+                let (terminal_type, version, rom) = self.config.secondary_device_attributes();
+                write!(self.writer, "\x1b[>{};{};{}c", terminal_type, version, rom).ok();
                 self.writer.flush().ok();
             }
             Device::RequestTertiaryDeviceAttributes => {

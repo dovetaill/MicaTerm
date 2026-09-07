@@ -133,6 +133,11 @@ impl Default for NewlineCanon {
 /// increments the generation counter appropriately, the changes will be detected
 /// and applied at the next appropriate opportunity.
 pub trait TerminalConfiguration: Downcast + std::fmt::Debug + Send + Sync {
+    /// Secondary device attributes (terminal type, compatibility version, ROM).
+    fn secondary_device_attributes(&self) -> (u16, u16, u16) {
+        (1, 277, 0)
+    }
+
     /// Returns a generation counter for the active
     /// configuration.  If the implementation may be
     /// changed at runtime, it must increment the generation
