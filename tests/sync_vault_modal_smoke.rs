@@ -919,6 +919,219 @@ fn sync_modal_can_switch_between_https_and_ssh_auth_modes() {
     );
 }
 
+#[derive(Default)]
+struct AuthRecordingMetadataSource {
+    calls: Mutex<Vec<(ProviderAuthKind, Option<String>)>>,
+    public: std::sync::atomic::AtomicBool,
+}
+
+impl GitRepositoryMetadataSource for AuthRecordingMetadataSource {
+    fn fetch_repository_metadata(
+        &self,
+        remote: &BootstrapRemoteConfig,
+        access_token: Option<&str>,
+    ) -> Result<GitRepositoryMetadata> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push((remote.auth_kind, access_token.map(str::to_string)));
+        Ok(sample_git_repository_metadata(
+            "demo/mica-vault",
+            if self.public.load(Ordering::SeqCst) {
+                GitRepositoryVisibility::Public
+            } else {
+                GitRepositoryVisibility::Private
+            },
+            GitRepositoryWritePermission::Writable,
+        ))
+    }
+}
+
+fn exercise_sync_auth_mode(mode: &str, expected_auth: ProviderAuthKind) {
+    i_slint_backend_testing::init_no_event_loop();
+    let temp_root = sample_vault_runtime_root(mode);
+    let store = Arc::new(MemoryCredentialStore::default());
+    let metadata = Arc::new(AuthRecordingMetadataSource::default());
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let factory = RecordingVaultProviderFactory::default();
+    factory.insert(primary.clone());
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        store.clone(),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root.clone()),
+            provider_factory: Arc::new(factory),
+            bootstrap_template: None,
+            git_repo_metadata_source: metadata.clone(),
+        },
+    );
+    app.invoke_open_sync_modal_requested();
+    for (field, value) in [
+        ("git-namespace", "demo"),
+        ("git-repository", "mica-vault"),
+        ("git-auth-mode", mode),
+        ("git-https-username", "demo"),
+        ("git-https-secret", " transport password "),
+        ("git-ssh-private-key", "test-private-key\n"),
+        ("git-ssh-passphrase", " key passphrase "),
+        ("git-pat", "metadata-token"),
+    ] {
+        app.invoke_sync_modal_draft_changed(field.into(), value.into());
+    }
+    assert_eq!(
+        app.get_sync_modal_git_https_secret().as_str(),
+        " transport password "
+    );
+    app.invoke_sync_modal_validate_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        app.get_sync_modal_validation_state() == "success"
+    });
+    app.invoke_sync_modal_draft_changed("master-password".into(), "vault-pass".into());
+    app.invoke_sync_modal_primary_action_requested();
+    assert_eq!(
+        app.get_sync_modal_mode(),
+        "ready",
+        "{}",
+        app.get_sync_modal_error_text()
+    );
+
+    let saved = load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+        .unwrap()
+        .unwrap();
+    let remote = saved.bundle.primary_remote().unwrap();
+    assert_eq!(remote.auth_kind, expected_auth);
+    let BootstrapRemoteLocator::GitRepo { remote_url, .. } = &remote.locator else {
+        panic!("expected Git remote")
+    };
+    assert_eq!(
+        remote_url,
+        if mode == "ssh" {
+            "git@gitee.com:demo/mica-vault.git"
+        } else {
+            "https://gitee.com/demo/mica-vault.git"
+        }
+    );
+    let mut resolved = remote.clone();
+    resolved.credential_ref = store
+        .get_secret(remote.credential_ref.as_deref().unwrap())
+        .unwrap();
+    let config =
+        mica_term::app::vault::provider::git_repo::GitRepoProviderConfig::from_bootstrap_remote(
+            &resolved,
+            temp_root.join("git-cache"),
+        )
+        .unwrap();
+    use mica_term::app::vault::auth::git::GitTransportAuthPlan;
+    assert_eq!(
+        config.auth,
+        if mode == "ssh" {
+            GitTransportAuthPlan::SshKey {
+                private_key: "test-private-key\n".into(),
+                passphrase: Some(" key passphrase ".into()),
+            }
+        } else {
+            GitTransportAuthPlan::HttpsCredentials {
+                username: "demo".into(),
+                secret: " transport password ".into(),
+            }
+        }
+    );
+
+    app.invoke_sync_modal_sync_now_requested();
+    wait_for_condition(Duration::from_secs(3), || {
+        !primary.recorded_writes().is_empty()
+    });
+    assert!(
+        metadata.calls.lock().unwrap().len() >= 2,
+        "sync must revalidate using persisted credentials"
+    );
+    assert!(
+        metadata
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|(auth, token)| *auth == expected_auth
+                && token.as_deref() == Some("metadata-token"))
+    );
+
+    // Reopening must preserve independent Git and API credentials.
+    app.invoke_sync_modal_close_requested();
+    app.invoke_open_sync_modal_requested();
+    assert_eq!(app.get_sync_modal_git_auth_mode(), mode);
+    assert_eq!(app.get_sync_modal_git_pat(), "metadata-token");
+    assert_eq!(
+        app.get_sync_modal_git_https_secret(),
+        " transport password "
+    );
+    assert_eq!(app.get_sync_modal_git_ssh_passphrase(), " key passphrase ");
+
+    let write_count = primary.recorded_writes().len();
+    metadata.public.store(true, Ordering::SeqCst);
+    app.invoke_sync_modal_sync_now_requested();
+    wait_for_condition(Duration::from_secs(3), || {
+        app.get_sync_modal_mode() == "paused"
+    });
+    assert_eq!(
+        primary.recorded_writes().len(),
+        write_count,
+        "public repositories must never receive a write"
+    );
+}
+
+#[test]
+fn ssh_sync_persists_key_and_revalidates_private_visibility_with_api_token() {
+    exercise_sync_auth_mode("ssh", ProviderAuthKind::SshKey);
+}
+
+#[test]
+fn password_sync_keeps_transport_password_separate_from_validation_token() {
+    exercise_sync_auth_mode("password", ProviderAuthKind::HttpsCredentials);
+}
+
+#[test]
+fn ssh_sync_requires_api_token_and_key_edits_invalidate_validation() {
+    i_slint_backend_testing::init_no_event_loop();
+    let app = AppWindow::new().unwrap();
+    let metadata = Arc::new(AuthRecordingMetadataSource::default());
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(MemoryCredentialStore::default()),
+        VaultRuntimeOptions {
+            root_dir: Some(sample_vault_runtime_root("ssh-token-required")),
+            git_repo_metadata_source: metadata.clone(),
+            ..VaultRuntimeOptions::default()
+        },
+    );
+    app.invoke_open_sync_modal_requested();
+    for (field, value) in [
+        ("git-namespace", "demo"),
+        ("git-repository", "mica-vault"),
+        ("git-auth-mode", "ssh"),
+        ("git-ssh-private-key", "test-key"),
+    ] {
+        app.invoke_sync_modal_draft_changed(field.into(), value.into());
+    }
+    app.invoke_sync_modal_validate_requested();
+    assert_eq!(app.get_sync_modal_validation_state(), "blocking-error");
+    assert!(
+        app.get_sync_modal_error_text()
+            .contains("Personal Access Token")
+    );
+    assert!(metadata.calls.lock().unwrap().is_empty());
+    app.invoke_sync_modal_draft_changed("git-pat".into(), "metadata-token".into());
+    app.invoke_sync_modal_validate_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        app.get_sync_modal_validation_state() == "success"
+    });
+    app.invoke_sync_modal_draft_changed("git-ssh-private-key".into(), "changed-key".into());
+    assert_eq!(app.get_sync_modal_validation_state(), "idle");
+}
+
 #[test]
 fn sync_modal_round_trips_secret_visibility_flags() {
     i_slint_backend_testing::init_no_event_loop();

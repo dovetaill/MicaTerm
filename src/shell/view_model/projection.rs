@@ -41,7 +41,13 @@ fn update_sync_modal_remote_url(modal: &mut SyncModalViewState) {
         return;
     }
 
-    modal.git_remote_url = format!("{base_url}/{namespace}/{repository}.git");
+    modal.git_remote_url = crate::app::vault::auth::git::build_git_remote_url(
+        base_url,
+        namespace,
+        repository,
+        modal.git_auth_mode == "ssh",
+    )
+    .unwrap_or_default();
 }
 
 impl ShellViewModel {
@@ -448,6 +454,7 @@ impl ShellViewModel {
                         sync_modal_default_base_url(modal.git_provider_kind.as_str()).into();
                     modal.git_api_base_url =
                         sync_modal_default_api_base_url(modal.git_provider_kind.as_str()).into();
+                    update_sync_modal_remote_url(modal);
                 }
             }
             "git-remote-url" => modal.git_remote_url = value,
@@ -470,16 +477,21 @@ impl ShellViewModel {
                 if modal.git_auth_mode != value {
                     modal.git_auth_mode = value;
                     reset_sync_modal_secret_visibility(modal);
+                    update_sync_modal_remote_url(modal);
                 }
             }
             "git-https-username" => modal.git_https_username = value,
             "git-https-secret" => {
                 modal.git_https_secret = value.clone();
-                modal.git_pat = value;
+                if modal.git_auth_mode == "https" {
+                    modal.git_pat = value;
+                }
             }
             "git-pat" => {
                 modal.git_pat = value.clone();
-                modal.git_https_secret = value;
+                if modal.git_auth_mode == "https" {
+                    modal.git_https_secret = value;
+                }
             }
             "git-https-secret-visibility" => modal.git_https_secret_visible = visible(&value),
             "git-ssh-private-key" => modal.git_ssh_private_key = value,

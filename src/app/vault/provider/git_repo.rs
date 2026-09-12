@@ -433,14 +433,95 @@ fn resolve_repository_target(
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| format!("{namespace}/{repository}"));
 
-    Ok(ResolvedGitRepositoryTarget {
+    let target = ResolvedGitRepositoryTarget {
         host_kind: *host_kind,
         base_url,
         api_base_url,
         namespace,
         repository,
         display_name,
-    })
+    };
+    ensure_repository_target_matches_remote(&target, remote_url)?;
+    Ok(target)
+}
+
+fn ensure_repository_target_matches_remote(
+    target: &ResolvedGitRepositoryTarget,
+    remote_url: &str,
+) -> Result<()> {
+    let base = reqwest::Url::parse(&target.base_url).context("invalid Git base URL")?;
+    let api = reqwest::Url::parse(&target.api_base_url).context("invalid Git API URL")?;
+    let remote = parse_git_remote_url(remote_url)?;
+    ensure!(
+        base.scheme() == "https" && api.scheme() == "https",
+        "repository visibility validation requires HTTPS"
+    );
+    let (expected_base, expected_api) = match target.host_kind {
+        GitHostKind::GitHub => (GITHUB_BASE_URL.to_string(), GITHUB_API_BASE_URL.to_string()),
+        GitHostKind::Gitee => (
+            GITEE_BASE_URL.to_string(),
+            format!("{GITEE_BASE_URL}/{GITEE_API_PATH}"),
+        ),
+        GitHostKind::GitLab => (
+            target.base_url.trim_end_matches('/').to_string(),
+            format!(
+                "{}/{}",
+                target.base_url.trim_end_matches('/'),
+                GITLAB_API_PATH
+            ),
+        ),
+        GitHostKind::Generic => {
+            return Err(anyhow!(
+                "generic Git hosts cannot verify private visibility"
+            ));
+        }
+    };
+    ensure!(
+        base.as_str().trim_end_matches('/') == expected_base
+            && api.as_str().trim_end_matches('/') == expected_api,
+        "repository metadata API must belong to the selected Git provider"
+    );
+    ensure!(
+        base.username().is_empty()
+            && base.password().is_none()
+            && base.query().is_none()
+            && base.fragment().is_none()
+            && remote.password().is_none()
+            && remote.query().is_none()
+            && remote.fragment().is_none(),
+        "repository URLs must not contain passwords, queries, or fragments"
+    );
+    let expected_path = format!(
+        "{}/{}/{}",
+        base.path().trim_end_matches('/'),
+        target.namespace,
+        target.repository
+    );
+    ensure!(
+        remote.host_str() == base.host_str()
+            && (remote.scheme() == "ssh"
+                || remote.port_or_known_default() == base.port_or_known_default())
+            && remote.path().trim_end_matches('/').trim_end_matches(".git") == expected_path,
+        "Git remote must match the repository whose private visibility is being validated"
+    );
+    Ok(())
+}
+
+fn parse_git_remote_url(remote_url: &str) -> Result<reqwest::Url> {
+    let remote_url = remote_url.trim();
+    let url = if let Some((host, path)) = remote_url
+        .strip_prefix("git@")
+        .and_then(|value| value.split_once(':'))
+    {
+        reqwest::Url::parse(&format!("ssh://git@{host}/{path}"))?
+    } else {
+        reqwest::Url::parse(remote_url).context("invalid Git remote URL")?
+    };
+    ensure!(
+        matches!(url.scheme(), "https" | "ssh"),
+        "Git sync requires an HTTPS or SSH remote URL"
+    );
+    Ok(url)
 }
 
 fn parse_namespace_and_repository(
@@ -452,23 +533,8 @@ fn parse_namespace_and_repository(
         return Ok((None, None));
     }
 
-    let path = if let Some(url) = remote_url
-        .strip_prefix("https://")
-        .or_else(|| remote_url.strip_prefix("http://"))
-    {
-        url.split_once('/').map(|(_, path)| path.to_string())
-    } else if let Some((_host, path)) = remote_url
-        .strip_prefix("git@")
-        .and_then(|value| value.split_once(':'))
-    {
-        Some(path.to_string())
-    } else {
-        None
-    };
-
-    let Some(path) = path else {
-        return Ok((None, None));
-    };
+    let url = parse_git_remote_url(remote_url)?;
+    let path = url.path();
     let trimmed = path.trim_matches('/').trim_end_matches(".git");
     let mut segments = trimmed.split('/').collect::<Vec<_>>();
     if segments.len() < 2 {
@@ -505,6 +571,12 @@ fn default_api_base_url(host_kind: GitHostKind, base_url: &str) -> String {
 }
 
 fn github_visibility(document: &GitHubRepositoryDocument) -> GitRepositoryVisibility {
+    if matches!(
+        (document.visibility.as_deref(), document.private),
+        (Some("private"), Some(false)) | (Some("public"), Some(true))
+    ) {
+        return GitRepositoryVisibility::Unknown;
+    }
     match document.visibility.as_deref() {
         Some("private") => GitRepositoryVisibility::Private,
         Some("public") => GitRepositoryVisibility::Public,
@@ -562,9 +634,9 @@ fn gitee_visibility(document: &GiteeRepositoryDocument) -> GitRepositoryVisibili
         return GitRepositoryVisibility::Internal;
     }
     match (document.private, document.public) {
+        (Some(true), Some(true)) => GitRepositoryVisibility::Unknown,
         (Some(true), _) => GitRepositoryVisibility::Private,
         (Some(false), _) | (_, Some(true)) => GitRepositoryVisibility::Public,
-        (_, Some(false)) => GitRepositoryVisibility::Private,
         _ => GitRepositoryVisibility::Unknown,
     }
 }
@@ -574,6 +646,85 @@ fn gitee_write_permission(document: &GiteeRepositoryDocument) -> GitRepositoryWr
         Some(true) => GitRepositoryWritePermission::Writable,
         Some(false) => GitRepositoryWritePermission::ReadOnly,
         None => GitRepositoryWritePermission::Unknown,
+    }
+}
+
+#[cfg(test)]
+mod repository_safety_tests {
+    use super::*;
+
+    #[test]
+    fn gitee_requires_explicit_unambiguous_private_visibility() {
+        for payload in [
+            r#"{"public":false}"#,
+            r#"{"private":true,"public":true}"#,
+            r#"{"private":true,"internal":true}"#,
+            r#"{}"#,
+        ] {
+            let document: GiteeRepositoryDocument = serde_json::from_str(payload).unwrap();
+            assert_ne!(
+                gitee_visibility(&document),
+                GitRepositoryVisibility::Private,
+                "{payload}"
+            );
+        }
+        let document = serde_json::from_str(r#"{"private":true,"public":false}"#).unwrap();
+        assert_eq!(
+            gitee_visibility(&document),
+            GitRepositoryVisibility::Private
+        );
+    }
+
+    #[test]
+    fn github_conflicting_visibility_fails_closed() {
+        let document = serde_json::from_str(r#"{"visibility":"private","private":false}"#).unwrap();
+        assert_eq!(
+            github_visibility(&document),
+            GitRepositoryVisibility::Unknown
+        );
+    }
+
+    #[test]
+    fn private_repository_check_must_target_the_actual_git_remote() {
+        let target = ResolvedGitRepositoryTarget {
+            host_kind: GitHostKind::Gitee,
+            base_url: GITEE_BASE_URL.into(),
+            api_base_url: format!("{GITEE_BASE_URL}/{GITEE_API_PATH}"),
+            namespace: "demo".into(),
+            repository: "private-vault".into(),
+            display_name: "demo/private-vault".into(),
+        };
+        for url in [
+            "https://gitee.com/demo/private-vault.git",
+            "git@gitee.com:demo/private-vault.git",
+            "ssh://git@gitee.com/demo/private-vault.git",
+        ] {
+            ensure_repository_target_matches_remote(&target, url).unwrap();
+        }
+        for url in [
+            "https://gitee.com/demo/public-vault.git",
+            "git@gitee.com:other/private-vault.git",
+            "ssh://git@example.com/demo/private-vault.git",
+            "https://example.com/demo/private-vault.git",
+            "http://gitee.com/demo/private-vault.git",
+            "https://gitee.com/demo/private-vault.git?redirect=public",
+        ] {
+            assert!(
+                ensure_repository_target_matches_remote(&target, url).is_err(),
+                "{url}"
+            );
+        }
+        let unrelated_api = ResolvedGitRepositoryTarget {
+            api_base_url: "https://example.com/api/v5".into(),
+            ..target
+        };
+        assert!(
+            ensure_repository_target_matches_remote(
+                &unrelated_api,
+                "git@gitee.com:demo/private-vault.git"
+            )
+            .is_err()
+        );
     }
 }
 

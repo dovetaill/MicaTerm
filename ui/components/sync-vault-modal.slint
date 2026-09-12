@@ -565,7 +565,7 @@ export component SyncVaultModal inherits Rectangle {
                     DialogFormSection {
                         width: parent.width;
                         title: "Auth mode";
-                        description: root.compact-layout ? "" : "Use a Personal Access Token for metadata validation and HTTPS Git push, or switch to SSH key auth.";
+                        description: "Only private writable repositories can sync. Every auth mode needs an API token to verify repository visibility before syncing.";
 
                         HorizontalLayout {
                             width: parent.width;
@@ -584,6 +584,16 @@ export component SyncVaultModal inherits Rectangle {
 
                             DialogSegmentButton {
                                 horizontal-stretch: 1;
+                                label: "Account / password";
+                                active: root.git-auth-mode == "password";
+
+                                clicked => {
+                                    root.draft-changed("git-auth-mode", "password");
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
                                 label: "SSH";
                                 active: root.git-auth-mode == "ssh";
 
@@ -593,7 +603,7 @@ export component SyncVaultModal inherits Rectangle {
                             }
                         }
 
-                        if root.git-auth-mode == "https" : git-https-username-field := DialogTextField {
+                        if root.git-auth-mode != "ssh" : git-https-username-field := DialogTextField {
                             width: parent.width;
                             label: "HTTPS username";
                             field-id: "sync.git-https-username";
@@ -602,7 +612,7 @@ export component SyncVaultModal inherits Rectangle {
                             active-text-context-menu-field-id: root.text-context-menu-action-field-id;
                             text-context-menu-action-sequence: root.text-context-menu-action-sequence;
                             value: root.git-https-username;
-                            helper-text: "Used for HTTPS Git transport together with the Personal Access Token.";
+                            helper-text: "Username for HTTPS Git access.";
 
                             value-changed(value) => {
                                 root.draft-changed("git-https-username", value);
@@ -631,9 +641,32 @@ export component SyncVaultModal inherits Rectangle {
                             }
                         }
 
-                        if root.git-auth-mode == "https" : git-pat-field := DialogTextField {
+                        if root.git-auth-mode == "password" : git-https-secret-field := DialogTextField {
+                            width: parent.width;
+                            label: root.git-provider-kind == "github" ? "Git HTTPS token" : "Git HTTPS password or token";
+                            field-id: "sync.git-https-secret";
+                            field-kind: "secret";
+                            context-menu-secret: true;
+                            text-context-menu-action-id: root.text-context-menu-action-id;
+                            active-text-context-menu-field-id: root.text-context-menu-action-field-id;
+                            text-context-menu-action-sequence: root.text-context-menu-action-sequence;
+                            value: root.git-https-secret;
+                            password-mode: true;
+                            helper-text: root.git-provider-kind == "github" ? "GitHub requires a token; account passwords are not accepted." : "Use an account password if your host allows it, or a Git access token.";
+
+                            value-changed(value) => {
+                                root.draft-changed("git-https-secret", value);
+                            }
+
+                            text-context-menu-requested(field-id, field-kind, read-only, is-secret, has-selection, supports-multiline, anchor-x, anchor-y) => {
+                                root.text-context-menu-requested(field-id, field-kind, read-only, is-secret, has-selection, supports-multiline, anchor-x, anchor-y);
+                            }
+                        }
+
+                        git-pat-field := DialogTextField {
                             width: parent.width;
                             label: "Personal Access Token";
+                            helper-text: root.git-auth-mode == "https" ? "Used for Git access and private repository validation." : "Required by the provider API to verify private visibility and write access; Git uses the credentials selected above.";
                             field-id: "sync.git-pat";
                             field-kind: "secret";
                             context-menu-secret: true;

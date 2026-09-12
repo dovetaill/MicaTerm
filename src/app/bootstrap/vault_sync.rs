@@ -877,7 +877,7 @@ fn git_repo_validation_access_token(remote: &BootstrapRemoteConfig) -> Result<Op
     }
 
     match remote.auth_kind {
-        ProviderAuthKind::Pat | ProviderAuthKind::HttpsCredentials => {
+        ProviderAuthKind::Pat | ProviderAuthKind::HttpsCredentials | ProviderAuthKind::SshKey => {
             let raw = remote.credential_ref.as_deref().ok_or_else(|| {
                 anyhow!(
                     "missing saved provider credential for remote `{}`",
@@ -885,9 +885,13 @@ fn git_repo_validation_access_token(remote: &BootstrapRemoteConfig) -> Result<Op
                 )
             })?;
             let credentials = parse_git_repo_credential_material(raw, remote.auth_kind);
-            let token = credentials
-                .personal_access_token
-                .if_empty_then(credentials.https_secret);
+            let token = if remote.auth_kind == ProviderAuthKind::SshKey {
+                credentials.personal_access_token
+            } else {
+                credentials
+                    .personal_access_token
+                    .if_empty_then(credentials.https_secret)
+            };
             if token.trim().is_empty() {
                 return Err(anyhow!(
                     "missing saved Personal Access Token for remote `{}`",
@@ -896,9 +900,6 @@ fn git_repo_validation_access_token(remote: &BootstrapRemoteConfig) -> Result<Op
             }
             Ok(Some(token))
         }
-        ProviderAuthKind::SshKey => Err(anyhow!(
-            "Git repository sync requires a Personal Access Token so repository visibility and write access can be revalidated before syncing"
-        )),
         _ => Ok(None),
     }
 }

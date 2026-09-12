@@ -5430,7 +5430,8 @@ struct PersistedGitRepoCredentialMaterial {
 
 fn git_auth_mode_for_provider_auth(auth_kind: ProviderAuthKind) -> &'static str {
     match auth_kind {
-        ProviderAuthKind::HttpsCredentials | ProviderAuthKind::Pat => "https",
+        ProviderAuthKind::Pat => "https",
+        ProviderAuthKind::HttpsCredentials => "password",
         ProviderAuthKind::SshKey => "ssh",
         _ => "https",
     }
@@ -5439,6 +5440,7 @@ fn git_auth_mode_for_provider_auth(auth_kind: ProviderAuthKind) -> &'static str 
 fn provider_auth_for_git_auth_mode(mode: &str) -> Result<ProviderAuthKind> {
     match mode.trim() {
         "" | "https" => Ok(ProviderAuthKind::Pat),
+        "password" => Ok(ProviderAuthKind::HttpsCredentials),
         "ssh" => Ok(ProviderAuthKind::SshKey),
         other => Err(anyhow!("Unsupported Git auth mode `{other}`")),
     }
@@ -5483,7 +5485,11 @@ fn build_git_repo_credential_material(
 ) -> Result<String> {
     serde_json::to_string(&PersistedGitRepoCredentialMaterial {
         https_username: modal.git_https_username.clone(),
-        https_secret: modal.git_pat.clone(),
+        https_secret: if modal.git_auth_mode == "https" {
+            modal.git_pat.clone()
+        } else {
+            modal.git_https_secret.clone()
+        },
         personal_access_token: modal.git_pat.clone(),
         ssh_private_key: modal.git_ssh_private_key.clone(),
         ssh_passphrase: modal.git_ssh_passphrase.clone(),
@@ -5551,10 +5557,7 @@ fn hydrate_sync_modal_draft(
             .unwrap_or_else(|| defaults.root_path.clone());
         modal.git_auth_mode = git_auth_mode_for_provider_auth(remote.auth_kind).into();
         modal.git_https_username = credentials.https_username;
-        modal.git_https_secret = credentials
-            .personal_access_token
-            .clone()
-            .if_empty_then(credentials.https_secret.clone());
+        modal.git_https_secret = credentials.https_secret.clone();
         modal.git_pat = credentials
             .personal_access_token
             .if_empty_then(credentials.https_secret);
@@ -5580,7 +5583,12 @@ fn build_sync_bundle_from_modal(
         if base_url.is_empty() || namespace.is_empty() || repository.is_empty() {
             String::new()
         } else {
-            format!("{base_url}/{namespace}/{repository}.git")
+            crate::app::vault::auth::git::build_git_remote_url(
+                base_url,
+                namespace,
+                repository,
+                modal.git_auth_mode == "ssh",
+            )?
         }
     };
     let git_branch = modal.git_branch.trim();
@@ -5604,6 +5612,12 @@ fn build_sync_bundle_from_modal(
                     "Enter a Personal Access Token before enabling sync"
                 ));
             }
+            if auth_kind == ProviderAuthKind::HttpsCredentials && modal.git_https_secret.is_empty()
+            {
+                return Err(anyhow!(
+                    "Enter an HTTPS password or token before enabling sync"
+                ));
+            }
         }
         ProviderAuthKind::SshKey => {
             if modal.git_ssh_private_key.trim().is_empty() {
@@ -5611,6 +5625,11 @@ fn build_sync_bundle_from_modal(
             }
         }
         _ => {}
+    }
+    if modal.git_pat.trim().is_empty() {
+        return Err(anyhow!(
+            "Enter a Personal Access Token to verify repository visibility and write access"
+        ));
     }
 
     let mut bundle = existing_bundle.cloned().unwrap_or_default();
@@ -5660,6 +5679,9 @@ fn sync_modal_validation_signature(modal: &crate::shell::view_model::SyncModalVi
         modal.git_auth_mode.as_str(),
         modal.git_https_username.as_str(),
         modal.git_pat.as_str(),
+        modal.git_https_secret.as_str(),
+        modal.git_ssh_private_key.as_str(),
+        modal.git_ssh_passphrase.as_str(),
         modal.git_remote_url.as_str(),
     ]
     .join("\n")
@@ -5688,7 +5710,16 @@ fn build_git_repo_validation_request(
         provider: ProviderKind::GitRepo,
         locator: BootstrapRemoteLocator::GitRepo {
             host_kind,
-            remote_url: format!("{base_url}/{namespace}/{repository}.git"),
+            remote_url: if modal.git_remote_url.trim().is_empty() {
+                crate::app::vault::auth::git::build_git_remote_url(
+                    base_url,
+                    namespace,
+                    repository,
+                    modal.git_auth_mode == "ssh",
+                )?
+            } else {
+                modal.git_remote_url.trim().to_string()
+            },
             branch: branch.into(),
             base_url: Some(base_url.to_string()),
             api_base_url: Some(modal.git_api_base_url.trim().to_string())
@@ -5700,7 +5731,7 @@ fn build_git_repo_validation_request(
             display_name: Some(format!("{namespace}/{repository}")),
         },
         credential_ref: None,
-        auth_kind: ProviderAuthKind::Pat,
+        auth_kind: provider_auth_for_git_auth_mode(modal.git_auth_mode.as_str())?,
         last_health: None,
     };
     let access_token = state.sync_modal_state().git_pat.trim().to_string();
