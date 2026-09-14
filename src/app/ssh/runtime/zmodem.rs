@@ -348,6 +348,18 @@ impl ZmodemController {
 
     pub(super) fn note_local_input(&mut self) {
         self.automatic_rz_echo_expected = false;
+
+        // A tentative suffix is held back only while checking for a ZMODEM
+        // handshake. Local input proves the bytes belong to the interactive
+        // shell echo, so make them visible immediately instead of waiting for
+        // another remote byte or the dirty-surface timer (which made a final
+        // `*` appear only after the next key press).
+        if self.session.is_none() && !self.tentative.bytes.is_empty() {
+            let unseen = self.tentative.visible_prefix_len.min(self.tentative.bytes.len());
+            self.released_terminal_bytes
+                .extend_from_slice(&self.tentative.bytes[unseen..]);
+            self.tentative = TentativeTerminalBytes::default();
+        }
     }
 
     pub(super) fn expect_automatic_rz_echo(&mut self) {
@@ -1679,6 +1691,18 @@ mod tests {
                 input,
                 "ordinary star bytes were not visible immediately for {input:?}"
             );
+            assert!(controller.flush_terminal_bytes().is_empty());
+        }
+    }
+
+    #[test]
+    fn local_input_releases_all_marker_like_suffixes_immediately() {
+        for input in [b"*".as_slice(), b"**", b"**\x18", b"**\x18B0"] {
+            let mut controller = ZmodemController::default();
+            let mut terminal_bytes = controller.intercept_remote_bytes(input);
+            controller.note_local_input();
+            terminal_bytes.extend(controller.take_released_terminal_bytes());
+            assert_eq!(terminal_bytes, input, "suffix was delayed for {input:?}");
             assert!(controller.flush_terminal_bytes().is_empty());
         }
     }
