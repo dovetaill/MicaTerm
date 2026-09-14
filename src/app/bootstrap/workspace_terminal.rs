@@ -1266,7 +1266,12 @@ pub(super) fn forward_active_workspace_copy_selection(
 }
 
 pub(super) fn normalize_workspace_paste_text(text: &str) -> String {
-    text.replace("\r\n", "\n").replace('\r', "\n")
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+    // Bash HISTCONTROL=ignorespace skips commands that start with a space.
+    // Strip initial clipboard whitespace while preserving indentation after
+    // the first non-whitespace character.
+    let leading_trimmed = normalized.trim_start_matches(char::is_whitespace);
+    leading_trimmed.to_string()
 }
 
 pub(super) fn workspace_paste_logical_line_count(text: &str) -> usize {
@@ -2475,6 +2480,15 @@ mod tests {
         );
         assert!(!normalized.contains('\r'));
         assert_eq!(normalize_workspace_paste_text(&normalized), normalized);
+    }
+
+    #[test]
+    fn workspace_paste_normalizer_removes_initial_whitespace_and_preserves_script_body() {
+        let raw = "  \r\n\t  for range in 1h today; do\r\n    echo \"$range\"\r\n  done\r\n";
+        let expected = "for range in 1h today; do\n    echo \"$range\"\n  done\n";
+        assert_eq!(normalize_workspace_paste_text(raw), expected);
+        assert_eq!(normalize_workspace_paste_text(expected), expected);
+        assert_eq!(normalize_workspace_paste_text(" \t\r\n"), "");
     }
 
     #[test]
