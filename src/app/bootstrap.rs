@@ -3008,6 +3008,7 @@ fn present_surface_update_with_bitmap_fallback(
                 Box::new(BitmapAtlasPresenter::new()?),
                 TerminalRenderMode::Bitmap,
             );
+            fallback_host.adjust_font_size((host.font_size_px() - fallback_host.font_size_px()) as i32);
             fallback_host.set_raster_scale(scale_factor);
             *host = fallback_host;
 
@@ -9903,6 +9904,21 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 session_bridge_ref.as_deref(),
                 &mut workspace_follow_tracker_ref.borrow_mut(),
             );
+        }
+    });
+
+    let view_model_ref = Rc::clone(&view_model);
+    let window_handle = window.as_weak();
+    window.on_workspace_session_font_zoom_requested(move |steps| {
+        let changed = WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            host.borrow_mut()
+                .as_mut()
+                .is_some_and(|host| host.adjust_font_size(steps))
+        });
+        if changed
+            && let Some(window) = window_handle.upgrade()
+        {
+            sync_workspace_terminal_surface_projection_only(&window, &view_model_ref.borrow());
         }
     });
 

@@ -5,12 +5,19 @@ use anyhow::Result;
 use crate::app::runtime_profile::TerminalRenderMode;
 use crate::app::ssh::runtime::TerminalSurfaceState;
 use crate::app::terminal_atlas::TerminalAtlasSelection;
+use crate::app::terminal_font::{
+    DEFAULT_TERMINAL_FONT_SIZE_PX, WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX,
+};
+
 use crate::app::terminal_presenter::{
     PresentedTerminalFrame, TerminalPresentationOptions, TerminalPresenter,
     TerminalPresenterCacheStats,
 };
 use crate::app::terminal_semantic::OutputRuleProfile;
 use crate::theme::{SearchMatchHighlightStrength, ThemeMode, ThemeVariant};
+
+pub const MIN_TERMINAL_FONT_SIZE_PX: f32 = 8.0;
+pub const MAX_TERMINAL_FONT_SIZE_PX: f32 = 40.0;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TerminalRendererHostOptions {
@@ -48,6 +55,8 @@ impl Default for TerminalRendererHostOptions {
 pub struct TerminalRendererHost {
     presenter: Box<dyn TerminalPresenter>,
     render_mode: TerminalRenderMode,
+    font_size_px: f32,
+    raster_scale: f32,
 }
 
 impl TerminalRendererHost {
@@ -55,6 +64,11 @@ impl TerminalRendererHost {
         Self {
             presenter,
             render_mode,
+            font_size_px: match render_mode {
+                TerminalRenderMode::Bitmap => DEFAULT_TERMINAL_FONT_SIZE_PX,
+                TerminalRenderMode::Native => WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX,
+            },
+            raster_scale: 1.0,
         }
     }
 
@@ -67,7 +81,28 @@ impl TerminalRendererHost {
     }
 
     pub fn set_raster_scale(&mut self, scale_factor: f32) {
-        self.presenter.set_raster_scale(scale_factor);
+        self.raster_scale = scale_factor.max(1.0);
+        let base_size = match self.render_mode {
+            TerminalRenderMode::Bitmap => DEFAULT_TERMINAL_FONT_SIZE_PX,
+            TerminalRenderMode::Native => WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX,
+        };
+        self.presenter
+            .set_raster_scale(self.raster_scale * self.font_size_px / base_size);
+    }
+
+    pub fn font_size_px(&self) -> f32 {
+        self.font_size_px
+    }
+
+    pub fn adjust_font_size(&mut self, steps: i32) -> bool {
+        let next = (self.font_size_px + steps as f32)
+            .clamp(MIN_TERMINAL_FONT_SIZE_PX, MAX_TERMINAL_FONT_SIZE_PX);
+        if next == self.font_size_px {
+            return false;
+        }
+        self.font_size_px = next;
+        self.set_raster_scale(self.raster_scale);
+        true
     }
 
     pub fn default_cell_size(&self) -> (u32, u32) {

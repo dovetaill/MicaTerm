@@ -390,6 +390,7 @@ export component TerminalSessionHost inherits Rectangle {
     callback clipboard-image-copy-path-requested(string);
     callback clipboard-image-dismiss-requested(string);
     callback local-action-requested(string);
+    callback font-zoom-requested(int);
     callback scroll-requested(int, int, int, int, bool, bool, bool);
     callback scroll-thumb-drag-requested(float);
     callback scroll-jump-requested(float);
@@ -424,6 +425,9 @@ export component TerminalSessionHost inherits Rectangle {
     private property <length> scrollbar-reserved-width: 12px;
     private property <length> scrollbar-track-width: 7px;
     private property <length> scrollbar-thumb-min-height: 28px;
+    // The winit backend converts one wheel line to 60 logical pixels.
+    private property <float> zoom-delta-threshold: 60;
+    private property <float> zoom-delta-remainder: 0;
     private property <float> wheel-delta-remainder: 0;
     private property <float> wheel-delta-threshold: 120;
     private property <int> wheel-lines-per-notch: 6;
@@ -1266,6 +1270,8 @@ export component TerminalSessionHost inherits Rectangle {
     changed mode => {
         root.close-context-menu();
         root.connection-progress-diagnostics-expanded = false;
+        root.zoom-delta-remainder = 0;
+        root.wheel-delta-remainder = 0;
         root.sync-cursor-blink-timer(true);
         if root.mode == "terminal" {
             root.schedule-surface-resize();
@@ -1275,6 +1281,8 @@ export component TerminalSessionHost inherits Rectangle {
     }
 
     changed session-id => {
+        root.zoom-delta-remainder = 0;
+        root.wheel-delta-remainder = 0;
         root.close-context-menu();
         root.connection-progress-diagnostics-expanded = false;
         root.sync-cursor-blink-timer(true);
@@ -1792,6 +1800,21 @@ export component TerminalSessionHost inherits Rectangle {
 
                     scroll-event(event) => {
                         if event.delta-y > 0px || event.delta-y < 0px {
+                            if event.modifiers.control {
+                                root.wheel-delta-remainder = 0;
+                                root.zoom-delta-remainder += (event.delta-y / 1px) / root.zoom-delta-threshold;
+                                let steps = root.zoom-delta-remainder >= 0
+                                    ? Math.floor(root.zoom-delta-remainder)
+                                    : -Math.floor(-root.zoom-delta-remainder);
+                                terminal-input.focus();
+                                root.close-context-menu();
+                                if steps != 0 {
+                                    root.zoom-delta-remainder -= steps;
+                                    root.font-zoom-requested(steps);
+                                }
+                                return accept;
+                            }
+                            root.zoom-delta-remainder = 0;
                             let row = root.terminal-hit-row(self.mouse-y);
                             let col = root.normalize-hit-col(
                                 row,

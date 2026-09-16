@@ -954,7 +954,7 @@ fn split_fractional_offset(position: f32) -> (i32, f32) {
 
 fn sanitize_raster_scale(scale: f32) -> f32 {
     if scale.is_finite() {
-        scale.max(1.0)
+        scale.max(0.1)
     } else {
         1.0
     }

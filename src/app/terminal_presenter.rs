@@ -533,7 +533,7 @@ impl TerminalPresenter for BitmapAtlasPresenter {
 #[cfg(feature = "terminal-native-renderer")]
 fn scaled_terminal_font_request(base_request: &FontRequest, scale_factor: f32) -> FontRequest {
     let mut request = base_request.clone();
-    request.px_size = (base_request.px_size * scale_factor.max(1.0)).max(1.0);
+    request.px_size = (base_request.px_size * scale_factor.max(0.1)).max(1.0);
     request
 }
 
@@ -576,13 +576,33 @@ impl WindowsNativePresenter {
 
     fn reload_loaded_font_for_scale(&mut self, scale_factor: f32) -> Result<()> {
         let request = scaled_terminal_font_request(&self.base_font_request, scale_factor);
-        self.loaded_font = self.font_system.load_font(&request)?;
+        let loaded_font = self.font_system.load_font(&request)?;
+        // Scale the entire base grid, including letter spacing, leading and baseline.
+        // Re-measuring with fixed minimum cell sizes prevents small fonts from shrinking.
+        let base = self
+            .font_system
+            .load_font(&self.base_font_request)?
+            .metrics();
+        let mut metrics = base;
+        metrics.ascent_px *= scale_factor;
+        metrics.descent_px *= scale_factor;
+        metrics.line_gap_px *= scale_factor;
+        metrics.baseline_px = (base.baseline_px * scale_factor).round();
+        metrics.cell_width_px = (base.cell_width_px * scale_factor).round().max(1.0);
+        metrics.cell_height_px = (base.cell_height_px * scale_factor).round().max(1.0);
+        self.loaded_font = LoadedFont::new(
+            loaded_font.face_key(),
+            request.clone(),
+            metrics,
+            loaded_font.render_profile(),
+        );
         let snapshot = self.font_system.resolution_snapshot(&self.loaded_font)?;
         log_terminal_font_diagnostics("directwrite-d2d", request.px_size, &snapshot);
         self.previous_source_frame = None;
         self.previous_styled_frame = None;
         self.previous_shaped_rows = None;
         self.shaped_row_cache.clear();
+        self.renderer.clear_transient_caches();
         Ok(())
     }
 
@@ -599,7 +619,11 @@ impl WindowsNativePresenter {
 #[cfg(feature = "terminal-native-renderer")]
 impl TerminalPresenter for WindowsNativePresenter {
     fn set_raster_scale(&mut self, scale_factor: f32) {
-        let next_scale = scale_factor.max(1.0);
+        let next_scale = if scale_factor.is_finite() {
+            scale_factor.max(0.1)
+        } else {
+            1.0
+        };
         if (next_scale - self.raster_scale).abs() < 0.01 {
             return;
         }

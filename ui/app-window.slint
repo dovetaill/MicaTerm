@@ -722,6 +722,7 @@ export component AppWindow inherits Window {
     callback workspace-sftp-upload-requested();
     callback workspace-sftp-new-folder-requested();
     callback workspace-sftp-retry-requested();
+    callback workspace-session-font-zoom-requested(int);
     callback workspace-session-scroll-requested(int, int, int, int, bool, bool, bool);
     callback workspace-session-scroll-thumb-drag-requested(float);
     callback workspace-session-scroll-jump-requested(float);
@@ -1616,6 +1617,7 @@ export component AppWindow inherits Window {
                             root.queue-workspace-sftp-tooltip-close(source-id);
                         }
 
+                        font-zoom-requested(steps) => { root.workspace-session-font-zoom-requested(steps); }
                         scroll-requested(delta-lines, row, col, selection-col, shift, ctrl, alt) => {
                             root.workspace-session-scroll-requested(delta-lines, row, col, selection-col, shift, ctrl, alt);
                         }

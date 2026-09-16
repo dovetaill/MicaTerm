@@ -164,6 +164,7 @@ export component WorkspacePane inherits Rectangle {
     callback clipboard-image-copy-path-requested(string);
     callback clipboard-image-dismiss-requested(string);
     callback local-action-requested(string);
+    callback font-zoom-requested(int);
     callback scroll-requested(int, int, int, int, bool, bool, bool);
     callback scroll-thumb-drag-requested(float);
     callback scroll-jump-requested(float);
@@ -585,6 +586,7 @@ export component WorkspacePane inherits Rectangle {
                     root.local-action-requested(action-id);
                 }
 
+                font-zoom-requested(steps) => { root.font-zoom-requested(steps); }
                 scroll-requested(delta-lines, row, col, selection-col, shift, ctrl, alt) => {
                     root.scroll-requested(delta-lines, row, col, selection-col, shift, ctrl, alt);
                 }
