@@ -326,6 +326,7 @@ export component TerminalSessionHost inherits Rectangle {
     in property <int> session-native-frame-token: 0;
     in property <int> session-rows: 24;
     in property <int> session-cols: 80;
+    in property <float> session-font-size-px: 16;
     in property <length> session-cell-width: 10px;
     in property <length> session-cell-height: 22px;
     in property <int> session-cursor-row: 0;
@@ -428,6 +429,7 @@ export component TerminalSessionHost inherits Rectangle {
     // The winit backend converts one wheel line to 60 logical pixels.
     private property <float> zoom-delta-threshold: 60;
     private property <float> zoom-delta-remainder: 0;
+    private property <bool> font-zoom-hint-visible: false;
     private property <float> wheel-delta-remainder: 0;
     private property <float> wheel-delta-threshold: 120;
     private property <int> wheel-lines-per-notch: 6;
@@ -1268,6 +1270,8 @@ export component TerminalSessionHost inherits Rectangle {
     background: transparent;
 
     changed mode => {
+        root.font-zoom-hint-visible = false;
+        font-zoom-hint-timer.stop();
         root.close-context-menu();
         root.connection-progress-diagnostics-expanded = false;
         root.zoom-delta-remainder = 0;
@@ -1281,6 +1285,8 @@ export component TerminalSessionHost inherits Rectangle {
     }
 
     changed session-id => {
+        root.font-zoom-hint-visible = false;
+        font-zoom-hint-timer.stop();
         root.zoom-delta-remainder = 0;
         root.wheel-delta-remainder = 0;
         root.close-context-menu();
@@ -1334,6 +1340,20 @@ export component TerminalSessionHost inherits Rectangle {
     changed session-search-open => {
         if !root.session-search-open && root.mode == "terminal" {
             terminal-input.focus();
+        }
+    }
+
+    function show-font-zoom-hint() {
+        root.font-zoom-hint-visible = true;
+        font-zoom-hint-timer.restart();
+    }
+
+    font-zoom-hint-timer := Timer {
+        interval: 1500ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            root.font-zoom-hint-visible = false;
         }
     }
 
@@ -1603,6 +1623,33 @@ export component TerminalSessionHost inherits Rectangle {
         height: parent.height;
         background: transparent;
 
+        // A non-interactive HUD: pointer input continues to reach the terminal below.
+        font-zoom-hint := Rectangle {
+            x: max(0px, parent.width - self.width - root.terminal-padding-right - root.scrollbar-reserved-width - 8px);
+            y: max(0px, parent.height - self.height - root.terminal-padding-bottom - 12px);
+            width: min(112px, parent.width);
+            height: 38px;
+            z: 25;
+            opacity: root.font-zoom-hint-visible ? 1 : 0;
+            visible: self.opacity > 0;
+            animate opacity { duration: 160ms; easing: ease-out; }
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: ThemeTokens.dark-mode ? #ffffff30 : #ffffffc0;
+            background: ThemeTokens.dark-mode ? #202734d9 : #f6f8fce6;
+
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: "字号  " + Math.round(root.session-font-size-px) + " px";
+                font-size: 13px;
+                font-weight: 600;
+                color: ThemeTokens.text-primary;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
         search-bar := Rectangle {
             visible: root.session-search-open;
             x: max(14px, parent.width - self.width - 16px);
@@ -1811,6 +1858,7 @@ export component TerminalSessionHost inherits Rectangle {
                                 if steps != 0 {
                                     root.zoom-delta-remainder -= steps;
                                     root.font-zoom-requested(steps);
+                                    root.show-font-zoom-hint();
                                 }
                                 return accept;
                             }

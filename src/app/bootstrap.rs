@@ -4849,6 +4849,11 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
     }
     let (default_cell_width_px, default_cell_height_px) =
         workspace_terminal_default_cell_size(scale_factor);
+    WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+        if let Some(host) = host.borrow().as_ref() {
+            window.set_workspace_session_font_size_px(host.font_size_px());
+        }
+    });
     window.set_workspace_session_cell_width(default_cell_width_px as f32 / scale_factor);
     window.set_workspace_session_cell_height(default_cell_height_px as f32 / scale_factor);
     sync_workspace_native_terminal_surface_geometry(window);
