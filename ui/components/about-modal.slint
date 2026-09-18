@@ -1,7 +1,64 @@
 import { ScrollView } from "std-widgets.slint";
-import { ModalHeaderBar, DialogActionButton } from "modal-chrome.slint";
+import { ModalHeaderBar, DialogActionButton, DialogFieldIconAction } from "modal-chrome.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 import { AppTypography } from "../theme/typography.slint";
+
+component IdentityRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <bool> copyable: false;
+    callback copy-requested();
+    private property <bool> compact: root.width < 390px;
+    height: max(32px, value-text.preferred-height + (root.compact ? 24px : 6px));
+    background: transparent;
+
+    Text {
+        x: 0px;
+        width: root.compact ? parent.width : 106px;
+        height: 20px;
+        y: root.compact ? 0px : 6px;
+        text: root.label;
+        color: ThemeTokens.text-secondary;
+        font-family: AppTypography.ui-font-family;
+        font-size: 12px;
+    }
+    value-text := Text {
+        x: root.compact ? 0px : 118px;
+        y: root.compact ? 24px : 6px;
+        width: parent.width - self.x - (root.copyable ? 38px : 0px);
+        text: root.value;
+        color: ThemeTokens.text-primary;
+        font-family: AppTypography.ui-font-family;
+        font-size: 13px;
+        wrap: word-wrap;
+    }
+    copy-button := DialogFieldIconAction {
+        visible: root.copyable;
+        x: parent.width - self.width;
+        y: root.compact ? 20px : 0px;
+        icon-source: @image-url("../../assets/icons/fluent/copy-20-regular.svg");
+        action-label: "Copy commit";
+        clicked => { root.copy-requested(); }
+    }
+    if root.copyable && (copy-button.has-hover || copy-button.has-focus) : Rectangle {
+        x: parent.width - 110px;
+        y: copy-button.y - 28px;
+        width: 110px;
+        height: 24px;
+        border-radius: 4px;
+        border-width: 1px;
+        border-color: ThemeTokens.divider-strong;
+        background: ThemeTokens.panel-surface;
+        Text {
+            text: "Copy commit";
+            color: ThemeTokens.text-primary;
+            font-family: AppTypography.ui-font-family;
+            font-size: 11px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
 
 export component AboutModal inherits Rectangle {
     in property <string> version;
@@ -9,44 +66,145 @@ export component AboutModal inherits Rectangle {
     in property <string> build-date;
     in property <string> revision;
     in property <string> repository;
+    in property <string> feedback;
     callback close-requested();
+    callback copy-requested(string);
+    callback repository-requested();
     background: ThemeTokens.modal-body-surface;
 
     VerticalLayout {
         spacing: 0px;
         ModalHeaderBar {
-            title: "About / 关于";
-            subtitle: "MicaTerm";
+            title: "About";
             close-requested => { root.close-requested(); }
         }
-        ScrollView {
-            horizontal-stretch: 1;
+        body-scroll := ScrollView {
             vertical-stretch: 1;
-            VerticalLayout {
-                padding: 20px;
-                spacing: 12px;
-                for line in [
-                    "MicaTerm",
-                    "Version / 版本：" + root.version,
-                    "Released / 发布时间：" + root.release-date,
-                    "Built / 构建时间：" + root.build-date,
-                    "Commit / 提交：" + root.revision,
-                    "GitHub：" + root.repository
-                ] : Text {
-                    text: line;
-                    color: ThemeTokens.text-primary;
-                    font-family: AppTypography.ui-font-family;
-                    font-size: AppTypography.ui-font-size-body;
-                    wrap: word-wrap;
+            horizontal-scrollbar-policy: always-off;
+            viewport-width: self.visible-width;
+            viewport-height: body.preferred-height;
+            body := VerticalLayout {
+                width: body-scroll.visible-width;
+                padding-left: 24px;
+                padding-right: 24px;
+                padding-top: 24px;
+                padding-bottom: 24px;
+                spacing: 16px;
+                alignment: start;
+                HorizontalLayout {
+                    spacing: 16px;
+                    Image {
+                        width: 48px;
+                        height: 48px;
+                        source: @image-url("../../assets/icons/png/mica-term-128.png");
+                        image-fit: contain;
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        alignment: center;
+                        Text {
+                            text: "MicaTerm";
+                            color: ThemeTokens.text-primary;
+                            font-family: AppTypography.ui-font-family;
+                            font-size: 22px;
+                            font-weight: 700;
+                        }
+                        Text {
+                            text: "Version " + root.version;
+                            color: ThemeTokens.text-secondary;
+                            font-family: AppTypography.ui-font-family;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                }
+                Rectangle { height: 1px; background: ThemeTokens.modal-inner-border; }
+                VerticalLayout {
+                    spacing: 6px;
+                    IdentityRow { label: "Released"; value: root.release-date; }
+                    IdentityRow { label: "Built"; value: root.build-date; }
+                    IdentityRow {
+                        label: "Commit";
+                        value: root.revision;
+                        copyable: true;
+                        copy-requested => { root.copy-requested(root.revision); }
+                    }
+                }
+                repository-link := Rectangle {
+                    height: max(28px, repository-text.preferred-height + 8px);
+                    background: transparent;
+                    border-width: repository-focus.has-focus ? 1px : 0px;
+                    border-color: ThemeTokens.focus-ring;
+                    border-radius: 4px;
+                    accessible-role: AccessibleRole.button;
+                    accessible-label: "Open project repository";
+                    accessible-action-default => { root.repository-requested(); }
+                    forward-focus: repository-focus;
+                    repository-text := Text {
+                        y: 4px;
+                        width: parent.width;
+                        text: root.repository;
+                        color: ThemeTokens.dark-mode ? #9abce0 : #315d8a;
+                        font-family: AppTypography.ui-font-family;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            repository-focus.focus();
+                            root.repository-requested();
+                        }
+                    }
+                    repository-focus := FocusScope {
+                        width: 0px;
+                        height: 0px;
+                        key-pressed(event) => {
+                            if event.text == " " || event.text == Key.Return {
+                                root.repository-requested();
+                                accept
+                            } else { reject }
+                        }
+                    }
                 }
             }
         }
-        HorizontalLayout {
-            padding: 16px;
-            Rectangle { horizontal-stretch: 1; background: transparent; }
-            DialogActionButton {
-                label: "Close / 关闭";
-                clicked => { root.close-requested(); }
+        Rectangle { height: 1px; background: ThemeTokens.modal-inner-border; }
+        Rectangle {
+            height: 94px;
+            background: ThemeTokens.modal-footer-surface;
+            VerticalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-top: 16px;
+                padding-bottom: 16px;
+                spacing: 6px;
+                Text {
+                    height: 18px;
+                    text: root.feedback;
+                    color: ThemeTokens.text-secondary;
+                    font-family: AppTypography.ui-font-family;
+                    font-size: 11px;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    DialogActionButton {
+                        label: "Copy details";
+                        clicked => {
+                            root.copy-requested("MicaTerm\nVersion: " + root.version
+                                + "\nReleased: " + root.release-date
+                                + "\nBuilt: " + root.build-date
+                                + "\nCommit: " + root.revision
+                                + "\nRepository: " + root.repository);
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                    DialogActionButton {
+                        label: "Close";
+                        clicked => { root.close-requested(); }
+                    }
+                }
             }
         }
     }

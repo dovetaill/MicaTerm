@@ -65,12 +65,16 @@ fn emit_build_metadata() {
     // Resolve these paths through Git so linked worktrees are tracked correctly too.
     for name in ["HEAD", "index", "packed-refs"] {
         if let Some(path) = git(&["rev-parse", "--git-path", name]) {
-            println!("cargo:rerun-if-changed={path}");
+            if std::path::Path::new(&path).exists() {
+                println!("cargo:rerun-if-changed={path}");
+            }
         }
     }
     if let Some(reference) = git(&["symbolic-ref", "-q", "HEAD"]) {
         if let Some(path) = git(&["rev-parse", "--git-path", &reference]) {
-            println!("cargo:rerun-if-changed={path}");
+            if std::path::Path::new(&path).exists() {
+                println!("cargo:rerun-if-changed={path}");
+            }
         }
     }
     println!("cargo:rerun-if-changed=src");
@@ -91,7 +95,7 @@ fn emit_build_metadata() {
         revision.push_str(" (modified)");
     }
     let released_at =
-        std::env::var("MICA_TERM_RELEASE_DATE").unwrap_or_else(|_| "Unreleased / 未发布".into());
+        std::env::var("MICA_TERM_RELEASE_DATE").unwrap_or_else(|_| "Unreleased".into());
     println!("cargo:rustc-env=MICA_TERM_REVISION={revision}");
     println!(
         "cargo:rustc-env=MICA_TERM_BUILT_AT={}",

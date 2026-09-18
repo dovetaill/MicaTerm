@@ -55,8 +55,11 @@ export component AppWindow inherits Window {
     in property <string> about-build-date;
     in property <string> about-revision;
     in property <string> about-repository;
+    in property <string> about-feedback;
     callback open-about-requested();
     callback close-about-requested();
+    callback copy-about-requested(string);
+    callback open-about-repository-requested();
     in-out property <bool> settings-modal-open: false;
     in-out property <string> settings-modal-theme-variant: "premium_default";
     in-out property <int> settings-modal-terminal-scrollback-limit: 1500;
@@ -887,6 +890,12 @@ export component AppWindow inherits Window {
         if root.sync-modal-open {
             root.blocking-modal-offset-x = 0px;
             root.blocking-modal-offset-y = 0px;
+            root.blocking-modal-focus-sequence = root.blocking-modal-focus-sequence + 1;
+        }
+    }
+
+    changed about-modal-open => {
+        if root.about-modal-open {
             root.blocking-modal-focus-sequence = root.blocking-modal-focus-sequence + 1;
         }
     }
@@ -2451,7 +2460,8 @@ export component AppWindow inherits Window {
     if root.about-modal-open : about-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
         modal-width: 580px;
-        modal-height: 390px;
+        modal-height: 440px;
+        focus-sequence: root.blocking-modal-focus-sequence;
         escape-requested => { root.close-about-requested(); }
         AboutModal {
             width: about-modal-shell.content-width;
@@ -2461,7 +2471,10 @@ export component AppWindow inherits Window {
             build-date: root.about-build-date;
             revision: root.about-revision;
             repository: root.about-repository;
+            feedback: root.about-feedback;
             close-requested => { root.close-about-requested(); }
+            copy-requested(text) => { root.copy-about-requested(text); }
+            repository-requested => { root.open-about-repository-requested(); }
         }
     }
 

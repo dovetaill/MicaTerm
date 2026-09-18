@@ -522,6 +522,7 @@ pub(super) fn bind_shell_chrome_callbacks(
         let window = handle.unwrap();
         state.borrow_mut().close_global_menu();
         window.set_show_global_menu(false);
+        window.set_about_feedback("".into());
         window.set_about_modal_open(true);
         super::sync_workspace_native_terminal_surface_geometry(&window);
     });
@@ -531,6 +532,26 @@ pub(super) fn bind_shell_chrome_callbacks(
         window.set_about_modal_open(false);
         super::sync_workspace_native_terminal_surface_geometry(&window);
         window.invoke_focus_workspace_primary();
+    });
+    let handle = window.as_weak();
+    window.on_copy_about_requested(move |text| {
+        let feedback = match super::workspace_terminal::set_system_clipboard_text(text.as_str()) {
+            Ok(()) => "Copied to clipboard",
+            Err(err) => {
+                tracing::warn!(error = %err, "failed to copy about details to clipboard");
+                "Could not copy to clipboard"
+            }
+        };
+        handle.unwrap().set_about_feedback(feedback.into());
+    });
+    let handle = window.as_weak();
+    window.on_open_about_repository_requested(move || {
+        if let Err(err) = crate::app::url_open::open_url(env!("CARGO_PKG_REPOSITORY")) {
+            tracing::warn!(error = %err, "failed to open project repository");
+            handle
+                .unwrap()
+                .set_about_feedback("Could not open browser".into());
+        }
     });
 
     let state = Rc::clone(view_model);
