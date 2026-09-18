@@ -44,7 +44,11 @@ detect_default_build_jobs() {
 
 usage() {
   cat <<'EOF'
-Usage: ./build-win-x64.sh [--help]
+Usage: ./build-win-x64.sh [--help|--build-only]
+
+Default: automatic patch release; requires clean Git checkout and Python 3.11+.
+Creates a version commit, builds/publishes, then tags on success. Never pushes.
+--build-only: build current version without release commits or tags.
 
 Windows Skia GPU wrapper.
 Direct3D-first native terminal renderer package with retained-native presenter default.
@@ -80,6 +84,15 @@ EOF
 if [[ "${1:-}" == "--help" ]]; then
   usage
   exit 0
+fi
+
+if [[ $# -eq 0 ]]; then
+  exec python3 "$ROOT_DIR/scripts/windows-release.py"
+elif [[ $# -eq 1 && "$1" == "--build-only" ]]; then
+  shift
+else
+  echo "error: expected --help or --build-only" >&2
+  exit 1
 fi
 
 TARGET="${TARGET:-x86_64-pc-windows-msvc}"
@@ -140,3 +153,8 @@ publish_archive() {
 
 "$ROOT_DIR/build-desktop.sh" "$@"
 publish_archive "$ARCHIVE_PATH" "$PUBLISH_DIR"
+if [[ -n "${MICA_TERM_RELEASE_VERSION:-}" ]]; then
+  VERSIONED_ARCHIVE="$DIST_DIR/${APP_NAME}-${MICA_TERM_RELEASE_VERSION}-${TARGET}-${PROFILE}${PACKAGE_FLAVOR_SUFFIX}.zip"
+  cp "$ARCHIVE_PATH" "$VERSIONED_ARCHIVE"
+  publish_archive "$VERSIONED_ARCHIVE" "$PUBLISH_DIR"
+fi
