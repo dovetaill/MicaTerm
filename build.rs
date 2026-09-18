@@ -4,6 +4,7 @@ mod xwin_link;
 // Cargo build script that compiles the Slint UI and embeds the Windows application icon.
 
 fn main() {
+    emit_build_metadata();
     println!("cargo:rerun-if-changed=assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-Regular.ttf");
     println!("cargo:rerun-if-changed=assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-SemiBold.ttf");
     println!(
@@ -50,4 +51,51 @@ fn run_build() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn emit_build_metadata() {
+    use std::process::Command;
+    fn git(args: &[&str]) -> Option<String> {
+        let output = Command::new("git").args(args).output().ok()?;
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    }
+    // Resolve these paths through Git so linked worktrees are tracked correctly too.
+    for name in ["HEAD", "index", "packed-refs"] {
+        if let Some(path) = git(&["rev-parse", "--git-path", name]) {
+            println!("cargo:rerun-if-changed={path}");
+        }
+    }
+    if let Some(reference) = git(&["symbolic-ref", "-q", "HEAD"]) {
+        if let Some(path) = git(&["rev-parse", "--git-path", &reference]) {
+            println!("cargo:rerun-if-changed={path}");
+        }
+    }
+    println!("cargo:rerun-if-changed=src");
+    println!("cargo:rerun-if-changed=ui");
+    println!("cargo:rerun-if-changed=vendor/tattoy-wezterm-term/src");
+    println!("cargo:rerun-if-env-changed=MICA_TERM_RELEASE_DATE");
+    println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
+    let built_at = match std::env::var("SOURCE_DATE_EPOCH") {
+        Ok(value) => {
+            chrono::DateTime::from_timestamp(value.parse().expect("invalid SOURCE_DATE_EPOCH"), 0)
+                .expect("SOURCE_DATE_EPOCH out of range")
+        }
+        Err(_) => chrono::Utc::now(),
+    };
+    let mut revision =
+        git(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    if git(&["status", "--porcelain", "--untracked-files=no"]).is_some_and(|s| !s.is_empty()) {
+        revision.push_str(" (modified)");
+    }
+    let released_at =
+        std::env::var("MICA_TERM_RELEASE_DATE").unwrap_or_else(|_| "Unreleased / 未发布".into());
+    println!("cargo:rustc-env=MICA_TERM_REVISION={revision}");
+    println!(
+        "cargo:rustc-env=MICA_TERM_BUILT_AT={}",
+        built_at.format("%Y-%m-%d %H:%M:%S UTC")
+    );
+    println!("cargo:rustc-env=MICA_TERM_RELEASE_DATE={released_at}");
 }

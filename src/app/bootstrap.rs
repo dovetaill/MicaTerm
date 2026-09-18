@@ -3044,7 +3044,8 @@ fn window_scale_factor(window: &AppWindow) -> f32 {
 }
 
 fn workspace_blocks_native_terminal_surface(window: &AppWindow) -> bool {
-    window.get_sync_modal_open()
+    window.get_about_modal_open()
+        || window.get_sync_modal_open()
         || window.get_settings_modal_open()
         || window.get_asset_modal_open()
         || window.get_asset_rename_modal_open()

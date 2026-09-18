@@ -38,10 +38,11 @@ component MenuActionItem inherits Rectangle {
 export component TitlebarMenu inherits PopupWindow {
     callback sync-settings-selected;
     callback settings-selected;
+    callback about-selected;
     callback close-requested;
 
     width: 196px;
-    height: 132px;
+    height: 172px;
     close-policy: PopupClosePolicy.close-on-click;
 
     background-layer := Rectangle {
@@ -69,6 +70,15 @@ export component TitlebarMenu inherits PopupWindow {
                 label: "Settings";
                 invoked => {
                     root.settings-selected();
+                    root.close-requested();
+                    root.close();
+                }
+            }
+
+            MenuActionItem {
+                label: "About / 关于";
+                invoked => {
+                    root.about-selected();
                     root.close-requested();
                     root.close();
                 }

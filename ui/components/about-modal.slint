@@ -1,0 +1,53 @@
+import { ScrollView } from "std-widgets.slint";
+import { ModalHeaderBar, DialogActionButton } from "modal-chrome.slint";
+import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
+
+export component AboutModal inherits Rectangle {
+    in property <string> version;
+    in property <string> release-date;
+    in property <string> build-date;
+    in property <string> revision;
+    in property <string> repository;
+    callback close-requested();
+    background: ThemeTokens.modal-body-surface;
+
+    VerticalLayout {
+        spacing: 0px;
+        ModalHeaderBar {
+            title: "About / 关于";
+            subtitle: "MicaTerm";
+            close-requested => { root.close-requested(); }
+        }
+        ScrollView {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+                for line in [
+                    "MicaTerm",
+                    "Version / 版本：" + root.version,
+                    "Released / 发布时间：" + root.release-date,
+                    "Built / 构建时间：" + root.build-date,
+                    "Commit / 提交：" + root.revision,
+                    "GitHub：" + root.repository
+                ] : Text {
+                    text: line;
+                    color: ThemeTokens.text-primary;
+                    font-family: AppTypography.ui-font-family;
+                    font-size: AppTypography.ui-font-size-body;
+                    wrap: word-wrap;
+                }
+            }
+        }
+        HorizontalLayout {
+            padding: 16px;
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            DialogActionButton {
+                label: "Close / 关闭";
+                clicked => { root.close-requested(); }
+            }
+        }
+    }
+}

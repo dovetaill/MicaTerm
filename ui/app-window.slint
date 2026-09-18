@@ -1,3 +1,4 @@
+import { AboutModal } from "components/about-modal.slint";
 // Root desktop window that composes chrome, sidebars, workspace content, overlays, and resize grips.
 import "../assets/fonts/JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf";
 import { AssetsCreateMenu } from "components/assets-create-menu.slint";
@@ -48,6 +49,14 @@ export component AppWindow inherits Window {
 
     in-out property <bool> dark-mode <=> ThemeTokens.dark-mode;
     in-out property <bool> sync-modal-open: false;
+    in-out property <bool> about-modal-open: false;
+    in property <string> about-version;
+    in property <string> about-release-date;
+    in property <string> about-build-date;
+    in property <string> about-revision;
+    in property <string> about-repository;
+    callback open-about-requested();
+    callback close-about-requested();
     in-out property <bool> settings-modal-open: false;
     in-out property <string> settings-modal-theme-variant: "premium_default";
     in-out property <int> settings-modal-terminal-scrollback-limit: 1500;
@@ -1178,6 +1187,8 @@ export component AppWindow inherits Window {
                     root.close-global-menu-requested();
                 }
 
+                open-about-requested => { root.open-about-requested(); }
+
                 open-settings-panel-requested => {
                     root.open-settings-panel-requested();
                 }
@@ -2208,7 +2219,7 @@ export component AppWindow inherits Window {
         y: titlebar.height;
         width: root.width;
         height: root.height - titlebar.height;
-        enabled: root.sync-modal-open || root.settings-modal-open || root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open || root.ssh-host-key-modal-open || root.workspace-paste-warning-modal-open || root.open-saved-ssh-modal-open || root.sftp-conflict-modal-open || root.sftp-remote-file-modal-open || root.zmodem-transfer-modal-open;
+        enabled: root.about-modal-open || root.sync-modal-open || root.settings-modal-open || root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open || root.ssh-host-key-modal-open || root.workspace-paste-warning-modal-open || root.open-saved-ssh-modal-open || root.sftp-conflict-modal-open || root.sftp-remote-file-modal-open || root.zmodem-transfer-modal-open;
 
         clicked => { }
     }
@@ -2434,6 +2445,23 @@ export component AppWindow inherits Window {
                 main-workspace.restore-primary-focus();
                 root.blocking-modal-focus-restore-requested();
             }
+        }
+    }
+
+    if root.about-modal-open : about-modal-shell := BlockingModalShell {
+        host-titlebar-height: titlebar.height;
+        modal-width: 580px;
+        modal-height: 390px;
+        escape-requested => { root.close-about-requested(); }
+        AboutModal {
+            width: about-modal-shell.content-width;
+            height: about-modal-shell.content-height;
+            version: root.about-version;
+            release-date: root.about-release-date;
+            build-date: root.about-build-date;
+            revision: root.about-revision;
+            repository: root.about-repository;
+            close-requested => { root.close-about-requested(); }
         }
     }
 

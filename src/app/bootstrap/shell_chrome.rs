@@ -511,6 +511,28 @@ pub(super) fn bind_shell_chrome_callbacks(
     workspace_follow_tracker: &Rc<RefCell<WorkspaceFollowTracker>>,
     controller: &Rc<WindowController<AppWindow>>,
 ) {
+    window.set_about_version(env!("CARGO_PKG_VERSION").into());
+    window.set_about_release_date(env!("MICA_TERM_RELEASE_DATE").into());
+    window.set_about_build_date(env!("MICA_TERM_BUILT_AT").into());
+    window.set_about_revision(env!("MICA_TERM_REVISION").into());
+    window.set_about_repository(env!("CARGO_PKG_REPOSITORY").into());
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    window.on_open_about_requested(move || {
+        let window = handle.unwrap();
+        state.borrow_mut().close_global_menu();
+        window.set_show_global_menu(false);
+        window.set_about_modal_open(true);
+        super::sync_workspace_native_terminal_surface_geometry(&window);
+    });
+    let handle = window.as_weak();
+    window.on_close_about_requested(move || {
+        let window = handle.unwrap();
+        window.set_about_modal_open(false);
+        super::sync_workspace_native_terminal_surface_geometry(&window);
+        window.invoke_focus_workspace_primary();
+    });
+
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
     let store_ref = store.clone();
