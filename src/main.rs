@@ -106,11 +106,13 @@ fn apply_renderer_selector(profile: AppRuntimeProfile) -> anyhow::Result<()> {
 
 fn main() -> anyhow::Result<()> {
     let profile = select_runtime_profile();
-    let async_runtime = AppAsyncRuntime::new()?;
     // Logging starts before UI initialization so startup failures and panic hooks always have a
     // stable place to write diagnostics.
     let logging = match mica_term::app::logging::runtime::try_init_global_logging() {
         Ok(runtime) => {
+            if let Err(err) = mica_term::app::logging::lifecycle::install(&runtime.paths.logs_dir) {
+                tracing::error!(target: "app.logging", error = %err, "failed to install lifecycle journal");
+            }
             if let Err(err) =
                 mica_term::app::logging::panic::install_panic_hook(runtime.paths.crash_dir.clone())
             {
@@ -128,29 +130,46 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    apply_renderer_selector(profile)?;
-    mica_term::app::logging::runtime::emit_startup_memory_snapshot(profile);
+    let result = run_application(profile);
+    if let Err(err) = &result {
+        tracing::error!(target: "app.lifecycle", error = %format!("{err:#}"), "application failed");
+        if let Some(runtime) = &logging {
+            if let Err(write_err) = mica_term::app::logging::panic::write_fatal_record(
+                &runtime.paths.crash_dir,
+                "application",
+                &format!("{err:#}"),
+            ) {
+                eprintln!("failed to write fatal record: {write_err}");
+            }
+        }
+        mica_term::app::logging::lifecycle::record("application-error");
+    } else {
+        mica_term::app::logging::lifecycle::record("shutdown-complete");
+    }
+    // Keep the writer guard alive through runtime teardown and the final error report.
+    drop(logging);
+    result
+}
 
-    if let Err(err) = mica_term::app::bootstrap::run_with_profile(profile, async_runtime.handle()) {
-        // Mirror fatal startup errors to stderr and the crash directory so failures remain visible
-        // in both interactive and packaged launches.
+fn run_application(profile: AppRuntimeProfile) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use mica_term::app::logging::lifecycle::record;
+    record("async-runtime-init");
+    let async_runtime = AppAsyncRuntime::new().context("create async runtime")?;
+    record("renderer-select");
+    apply_renderer_selector(profile).context("select renderer")?;
+    mica_term::app::logging::runtime::emit_startup_memory_snapshot(profile);
+    record("bootstrap-enter");
+    let result = mica_term::app::bootstrap::run_with_profile(profile, async_runtime.handle());
+    if let Err(err) = &result {
         if let Some(message) =
             mica_term::app::bootstrap::startup_failure_message(profile, &err.to_string())
         {
             eprintln!("{message}");
         }
-
-        if let Some(runtime) = &logging {
-            let _ = mica_term::app::logging::panic::write_fatal_record(
-                &runtime.paths.crash_dir,
-                "bootstrap.run_with_profile",
-                &err.to_string(),
-            );
-        } else {
-            eprintln!("fatal bootstrap error: {err}");
-        }
-        return Err(err);
     }
-
-    Ok(())
+    record("async-runtime-shutdown-begin");
+    drop(async_runtime);
+    record("async-runtime-shutdown-complete");
+    result
 }

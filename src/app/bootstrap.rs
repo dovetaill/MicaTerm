@@ -10219,7 +10219,18 @@ pub fn run_with_profile(
         after_bootstrap_bind,
     );
     windows_icon::log_window_icon_state(&window, "before_window_run");
-    window.run()?;
+    window.window().on_close_requested(|| {
+        crate::app::logging::lifecycle::record("os-window-close-requested");
+        slint::CloseRequestResponse::HideWindow
+    });
+    crate::app::logging::lifecycle::record("event-loop-enter");
+    let result = window.run();
+    crate::app::logging::lifecycle::record(if result.is_ok() {
+        "event-loop-returned-ok"
+    } else {
+        "event-loop-returned-error"
+    });
+    result?;
     Ok(())
 }
 

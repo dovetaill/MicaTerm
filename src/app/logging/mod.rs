@@ -2,6 +2,7 @@
 
 pub mod cleanup;
 pub mod config;
+pub mod lifecycle;
 pub mod panic;
 pub mod paths;
 pub mod runtime;

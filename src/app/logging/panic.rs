@@ -1,7 +1,8 @@
 //! Panic hook installation and crash-record formatting for post-mortem diagnostics.
 
 use std::backtrace::Backtrace;
-use std::fs;
+use std::fs::{self, File};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -12,7 +13,9 @@ pub fn install_panic_hook(crash_dir: PathBuf) -> Result<()> {
     let previous = std::panic::take_hook();
 
     std::panic::set_hook(Box::new(move |info| {
-        let _ = write_panic_record(&crash_dir, info);
+        if let Err(err) = write_panic_record(&crash_dir, info) {
+            eprintln!("failed to write panic record: {err}");
+        }
         previous(info);
     }));
 
@@ -21,16 +24,22 @@ pub fn install_panic_hook(crash_dir: PathBuf) -> Result<()> {
 
 pub fn write_fatal_record(crash_dir: &Path, phase: &str, error_text: &str) -> Result<PathBuf> {
     fs::create_dir_all(crash_dir)?;
-    let file_path = crash_dir.join(format!("fatal-{}.log", unix_millis()));
-    let backtrace = Backtrace::force_capture();
-    let body = format!("phase={phase}\nerror={error_text}\nbacktrace={backtrace}\n");
-    fs::write(&file_path, body)?;
+    let file_path = crash_dir.join(format!("fatal-{}-{}.log", std::process::id(), unix_nanos()));
+    let mut file = File::create(&file_path)?;
+    writeln!(
+        file,
+        "pid={}\nphase={phase}\nerror={error_text}",
+        std::process::id()
+    )?;
+    file.sync_data()?;
+    writeln!(file, "backtrace={}", Backtrace::force_capture())?;
+    file.sync_data()?;
     Ok(file_path)
 }
 
 fn write_panic_record(crash_dir: &Path, info: &std::panic::PanicHookInfo<'_>) -> Result<PathBuf> {
     fs::create_dir_all(crash_dir)?;
-    let file_path = crash_dir.join(format!("panic-{}.log", unix_millis()));
+    let file_path = crash_dir.join(format!("panic-{}-{}.log", std::process::id(), unix_nanos()));
     let location = info
         .location()
         .map(|loc| format!("{}:{}", loc.file(), loc.line()))
@@ -44,16 +53,22 @@ fn write_panic_record(crash_dir: &Path, info: &std::panic::PanicHookInfo<'_>) ->
     };
     let current_thread = std::thread::current();
     let thread = current_thread.name().unwrap_or("unnamed");
-    let backtrace = Backtrace::force_capture();
-    let body =
-        format!("message={payload}\nlocation={location}\nthread={thread}\nbacktrace={backtrace}\n");
-    fs::write(&file_path, body)?;
+    // Persist the essentials before symbolization, which can itself fail or stall.
+    let mut file = File::create(&file_path)?;
+    writeln!(
+        file,
+        "pid={}\nmessage={payload}\nlocation={location}\nthread={thread}",
+        std::process::id()
+    )?;
+    file.sync_data()?;
+    writeln!(file, "backtrace={}", Backtrace::force_capture())?;
+    file.sync_data()?;
     Ok(file_path)
 }
 
-fn unix_millis() -> u128 {
+fn unix_nanos() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_millis()
+        .as_nanos()
 }

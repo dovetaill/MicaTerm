@@ -660,7 +660,10 @@ pub(super) fn bind_windowing_callbacks(
 
     let controller_ref = Rc::clone(controller);
     window.on_close_requested(move || {
-        let _ = controller_ref.close();
+        crate::app::logging::lifecycle::record("ui-window-close-requested");
+        if let Err(err) = controller_ref.close() {
+            tracing::error!(target: "app.window", error = %err, "failed to close window");
+        }
     });
 
     let controller_ref = Rc::clone(controller);
