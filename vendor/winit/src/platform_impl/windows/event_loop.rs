@@ -2289,7 +2289,7 @@ unsafe fn public_window_callback_inner(
                 },
             });
 
-            let new_physical_inner_size = *new_inner_size.lock().unwrap();
+            let requested_inner_size = *new_inner_size.lock().unwrap();
             drop(new_inner_size);
 
             let dragging_window: bool;
@@ -2299,7 +2299,7 @@ unsafe fn public_window_callback_inner(
                 dragging_window =
                     window_state.window_flags().contains(WindowFlags::MARKER_IN_SIZE_MOVE);
                 // Unset maximized if we're changing the window's size.
-                if new_physical_inner_size != old_physical_inner_size {
+                if requested_inner_size != old_physical_inner_size {
                     WindowState::set_window_flags(window_state, window, |f| {
                         f.set(WindowFlags::MAXIMIZED, false)
                     });
@@ -2307,15 +2307,20 @@ unsafe fn public_window_callback_inner(
             }
 
             let new_outer_rect: RECT;
+            // winit#4341: the legacy monitor correction fights Windows 11's DPI placement.
+            if super::dark_mode::WIN10_BUILD_VERSION.is_some_and(|version| version >= 22000)
+                && requested_inner_size == new_physical_inner_size
             {
+                new_outer_rect = suggested_rect;
+            } else {
                 let suggested_ul =
                     (suggested_rect.left + margin_left, suggested_rect.top + margin_top);
 
                 let mut conservative_rect = RECT {
                     left: suggested_ul.0,
                     top: suggested_ul.1,
-                    right: suggested_ul.0 + new_physical_inner_size.width as i32,
-                    bottom: suggested_ul.1 + new_physical_inner_size.height as i32,
+                    right: suggested_ul.0 + requested_inner_size.width as i32,
+                    bottom: suggested_ul.1 + requested_inner_size.height as i32,
                 };
 
                 conservative_rect = window_flags
@@ -2467,10 +2472,17 @@ unsafe fn public_window_callback_inner(
         .catch_unwind(callback)
         .unwrap_or_else(|| result = ProcResult::Value(-1));
 
-    match result {
+    let result = match result {
         ProcResult::DefWindowProc(wparam) => unsafe { DefWindowProcW(window, msg, wparam, lparam) },
         ProcResult::Value(val) => val,
+    };
+
+    // A rejected native drag never sends WM_EXITSIZEMOVE; still release the initiating press.
+    if msg == WM_NCLBUTTONDOWN && mem::take(&mut userdata.window_state_lock().dragging) {
+        unsafe { PostMessageW(window, WM_LBUTTONUP, 0, 0) };
     }
+
+    result
 }
 
 unsafe extern "system" fn thread_event_target_callback(

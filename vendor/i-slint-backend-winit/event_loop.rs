@@ -220,6 +220,14 @@ impl winit::application::ApplicationHandler<SlintEvent> for EventLoopState {
                 } else {
                     have_focus
                 };
+                #[cfg(target_os = "windows")]
+                if !have_focus {
+                    // A disconnected desktop can lose the release event for an active press.
+                    self.pressed = false;
+                    self.current_touch_id = None;
+                    self.current_resize_direction = None;
+                    runtime_window.process_mouse_input(MouseEvent::Exit);
+                }
                 self.loop_error = window.activation_changed(have_focus).err();
             }
 
@@ -420,14 +428,24 @@ impl winit::application::ApplicationHandler<SlintEvent> for EventLoopState {
             }
             WindowEvent::ScaleFactorChanged { scale_factor, inner_size_writer: _ } => {
                 if std::env::var("SLINT_SCALE_FACTOR").is_err() {
+                    #[cfg(target_os = "windows")]
+                    let previous_scale_factor = runtime_window.scale_factor();
                     self.loop_error = window
                         .window()
                         .try_dispatch_event(corelib::platform::WindowEvent::ScaleFactorChanged {
                             scale_factor: scale_factor as f32,
                         })
                         .err();
-                    // TODO: send a resize event or try to keep the logical size the same.
-                    //window.resize_event(inner_size_writer.???)?;
+                    #[cfg(target_os = "windows")]
+                    if self.loop_error.is_none() {
+                        self.cursor_pos = self.cursor_pos
+                            * (previous_scale_factor / runtime_window.scale_factor());
+                        self.current_resize_direction = None;
+                        // DPI can change without a new physical size or a subsequent resize event.
+                        if let Some(winit_window) = window.winit_window() {
+                            self.loop_error = window.resize_event(winit_window.inner_size()).err();
+                        }
+                    }
                 }
                 #[cfg(target_os = "windows")]
                 if self.loop_error.is_none() {
