@@ -152,16 +152,6 @@ fn hex_value(byte: u8) -> Option<u8> {
     }
 }
 
-pub(super) fn snapshot_terminal_surface(
-    terminal: &Arc<Mutex<TerminalSession>>,
-    session_id: Uuid,
-) -> Option<TerminalSurfaceState> {
-    terminal
-        .lock()
-        .ok()
-        .map(|terminal| terminal.surface_state(session_id))
-}
-
 pub struct TerminalSession {
     core: Box<dyn TerminalCoreAdapter>,
 }

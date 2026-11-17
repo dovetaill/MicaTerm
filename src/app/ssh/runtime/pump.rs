@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use russh::client;
-use russh::{Channel, ChannelMsg, Disconnect};
+use russh::{Channel, ChannelMsg, ChannelReadHalf, ChannelWriteHalf, Disconnect};
 use tokio::sync::mpsc;
 use tokio::time::{Sleep, sleep, timeout};
 use uuid::Uuid;
@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::app::ssh::shell_integration::runtime_shell_events;
 
 use super::auth::RuntimeClientHandler;
-use super::terminal::{TerminalSession, apply_remote_output, snapshot_terminal_surface};
+use super::terminal::TerminalSession;
 use super::transport::TransportChainGuard;
 use super::zmodem::{ZMODEM_ABORT_WIRE, ZmodemAdvanceOutcome, ZmodemController};
 use super::{
@@ -27,6 +27,9 @@ const ZMODEM_EXEC_UPLOAD_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 const INTERACTIVE_ZMODEM_UPLOAD_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 const REMOTE_COMMAND_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const REMOTE_CWD_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+const MAX_OUTPUT_BATCH_BYTES: usize = 256 * 1024;
+const MAX_SYNC_OUTPUT_BYTES: usize = 1024 * 1024;
+const SYNC_OUTPUT_TIMEOUT: Duration = Duration::from_millis(250);
 const INTERACTIVE_RZ_UPLOAD_COMMAND: &[u8] = b" rz -q\r";
 const REMOTE_INTERACTIVE_SHELL_CWD_PROBE: &str = r#"if [ -d /proc ]; then
 __mica_term_probe_emit_cwd() {
@@ -92,17 +95,78 @@ impl PendingInteractiveZmodemUpload {
     }
 }
 
+struct ChannelInput {
+    read: ChannelReadHalf,
+    pending: VecDeque<ChannelMsg>,
+    closed: bool,
+}
+
+impl ChannelInput {
+    fn new(read: ChannelReadHalf) -> Self {
+        Self {
+            read,
+            pending: VecDeque::new(),
+            closed: false,
+        }
+    }
+
+    async fn wait(&mut self) -> Option<ChannelMsg> {
+        if let Some(message) = self.pending.pop_front() {
+            Some(message)
+        } else if self.closed {
+            None
+        } else {
+            let message = self.read.wait().await;
+            self.closed = message.is_none();
+            message
+        }
+    }
+
+    async fn while_sending<F: std::future::Future>(&mut self, send: F) -> F::Output {
+        tokio::pin!(send);
+        loop {
+            tokio::select! {
+                biased;
+                result = &mut send => return result,
+                // russh cannot dequeue writes while blocked delivering incoming channel data.
+                message = self.read.wait(), if !self.closed => {
+                    match message {
+                        Some(message) => self.pending.push_back(message),
+                        None => self.closed = true,
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn run_terminal_operation<T: Send + 'static>(
+    terminal: &Arc<Mutex<TerminalSession>>,
+    operation: impl FnOnce(&mut TerminalSession) -> Result<T> + Send + 'static,
+) -> Result<T> {
+    let terminal = Arc::clone(terminal);
+    tokio::task::spawn_blocking(move || {
+        let mut terminal = terminal
+            .lock()
+            .map_err(|_| anyhow!("failed to lock terminal"))?;
+        operation(&mut terminal)
+    })
+    .await
+    .context("terminal worker failed")?
+}
+
 pub(super) async fn run_channel_pump(
     session_id: Uuid,
     handle: Arc<client::Handle<RuntimeClientHandler>>,
-    mut channel: Channel<client::Msg>,
+    channel: Channel<client::Msg>,
     terminal: Arc<Mutex<TerminalSession>>,
     event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     mut command_rx: mpsc::UnboundedReceiver<RuntimeCommand>,
     _transport_chain_guard: TransportChainGuard,
 ) {
     let mut command_channel_open = true;
-    let mut pending_channel_messages = VecDeque::new();
+    let (read, channel) = channel.split();
+    let mut input = ChannelInput::new(read);
     let mut dirty_notifier = SurfaceDirtyNotifier::default();
     let mut dirty_timer: Option<std::pin::Pin<Box<Sleep>>> = None;
     let mut dirty_timer_interval: Option<std::time::Duration> = None;
@@ -117,6 +181,7 @@ pub(super) async fn run_channel_pump(
         let pending_interactive_zmodem_upload_timeout = pending_interactive_zmodem_upload
             .as_ref()
             .map(|pending| pending.remaining_timeout(Instant::now()));
+        let sync_timeout = synchronized_output.remaining_timeout(Instant::now());
         tokio::select! {
             maybe_command = command_rx.recv(), if command_channel_open => {
                 match maybe_command {
@@ -125,7 +190,7 @@ pub(super) async fn run_channel_pump(
                         zmodem.note_local_input();
                         dirty_notifier.note_local_input(Instant::now());
                         let bytes = text.into_bytes();
-                        if let Err(bytes) = handle.data(channel.id(), bytes).await {
+                        if let Err(bytes) = input.while_sending(handle.data(channel.id(), bytes)).await {
                             let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
                                 "failed to write {} bytes to SSH channel",
                                 bytes.len()
@@ -137,27 +202,21 @@ pub(super) async fn run_channel_pump(
                         pending_interactive_zmodem_upload = None;
                         zmodem.note_local_input();
                         dirty_notifier.note_local_input(Instant::now());
-                        let bytes = match terminal.lock() {
-                            Ok(mut terminal) => match terminal.send_key_event(event) {
-                                Ok(bytes) => bytes,
-                                Err(err) => {
-                                    let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
-                                        "failed to encode key input for SSH channel: {err}"
-                                    )));
-                                    break;
-                                }
-                            },
-                            Err(_) => {
-                                let _ = event_tx.send(SessionRuntimeEvent::Error(
-                                    "failed to lock terminal for key input".into()
-                                ));
+                        let bytes = match run_terminal_operation(&terminal, move |terminal| {
+                            terminal.send_key_event(event)
+                        }).await {
+                            Ok(bytes) => bytes,
+                            Err(err) => {
+                                let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                                    "failed to encode key input for SSH channel: {err}"
+                                )));
                                 break;
                             }
                         };
                         if bytes.is_empty() {
                             continue;
                         }
-                        if let Err(bytes) = handle.data(channel.id(), bytes).await {
+                        if let Err(bytes) = input.while_sending(handle.data(channel.id(), bytes)).await {
                             let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
                                 "failed to write {} key bytes to SSH channel",
                                 bytes.len()
@@ -166,27 +225,21 @@ pub(super) async fn run_channel_pump(
                         }
                     }
                     Some(RuntimeCommand::MouseInput(event)) => {
-                        let bytes = match terminal.lock() {
-                            Ok(mut terminal) => match terminal.send_mouse_input(event) {
-                                Ok(bytes) => bytes,
-                                Err(err) => {
-                                    let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
-                                        "failed to encode mouse input for SSH channel: {err}"
-                                    )));
-                                    break;
-                                }
-                            },
-                            Err(_) => {
-                                let _ = event_tx.send(SessionRuntimeEvent::Error(
-                                    "failed to lock terminal for mouse input".into()
-                                ));
+                        let bytes = match run_terminal_operation(&terminal, move |terminal| {
+                            terminal.send_mouse_input(event)
+                        }).await {
+                            Ok(bytes) => bytes,
+                            Err(err) => {
+                                let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                                    "failed to encode mouse input for SSH channel: {err}"
+                                )));
                                 break;
                             }
                         };
                         if bytes.is_empty() {
                             continue;
                         }
-                        if let Err(bytes) = handle.data(channel.id(), bytes).await {
+                        if let Err(bytes) = input.while_sending(handle.data(channel.id(), bytes)).await {
                             let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
                                 "failed to write {} mouse bytes to SSH channel",
                                 bytes.len()
@@ -198,27 +251,21 @@ pub(super) async fn run_channel_pump(
                         pending_interactive_zmodem_upload = None;
                         zmodem.note_local_input();
                         dirty_notifier.note_local_input(Instant::now());
-                        let bytes = match terminal.lock() {
-                            Ok(mut terminal) => match terminal.encode_paste(&text) {
-                                Ok(bytes) => bytes,
-                                Err(err) => {
-                                    let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
-                                        "failed to encode paste for SSH channel: {err}"
-                                    )));
-                                    break;
-                                }
-                            },
-                            Err(_) => {
-                                let _ = event_tx.send(SessionRuntimeEvent::Error(
-                                    "failed to lock terminal for paste".into()
-                                ));
+                        let bytes = match run_terminal_operation(&terminal, move |terminal| {
+                            terminal.encode_paste(&text)
+                        }).await {
+                            Ok(bytes) => bytes,
+                            Err(err) => {
+                                let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                                    "failed to encode paste for SSH channel: {err}"
+                                )));
                                 break;
                             }
                         };
                         if bytes.is_empty() {
                             continue;
                         }
-                        if let Err(bytes) = handle.data(channel.id(), bytes).await {
+                        if let Err(bytes) = input.while_sending(handle.data(channel.id(), bytes)).await {
                             let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
                                 "failed to write {} paste bytes to SSH channel",
                                 bytes.len()
@@ -244,8 +291,8 @@ pub(super) async fn run_channel_pump(
                         zmodem.note_local_input();
                         zmodem.expect_automatic_rz_echo();
                         dirty_notifier.note_local_input(Instant::now());
-                        if let Err(bytes) = handle
-                            .data(channel.id(), INTERACTIVE_RZ_UPLOAD_COMMAND.to_vec())
+                        if let Err(bytes) = input.while_sending(handle
+                            .data(channel.id(), INTERACTIVE_RZ_UPLOAD_COMMAND.to_vec()))
                             .await
                         {
                             let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
@@ -263,6 +310,7 @@ pub(super) async fn run_channel_pump(
                         let Some(terminal_bytes) = drive_zmodem(
                             &handle,
                             channel.id(),
+                            &mut input,
                             &event_tx,
                             &mut zmodem,
                         ).await else {
@@ -272,6 +320,7 @@ pub(super) async fn run_channel_pump(
                             terminal_bytes.as_slice(),
                             &handle,
                             channel.id(),
+                            &mut input,
                             &terminal,
                             &event_tx,
                             &mut shell_integration,
@@ -297,6 +346,7 @@ pub(super) async fn run_channel_pump(
                         let Some(terminal_bytes) = drive_zmodem(
                             &handle,
                             channel.id(),
+                            &mut input,
                             &event_tx,
                             &mut zmodem,
                         ).await else {
@@ -306,6 +356,7 @@ pub(super) async fn run_channel_pump(
                             terminal_bytes.as_slice(),
                             &handle,
                             channel.id(),
+                            &mut input,
                             &terminal,
                             &event_tx,
                             &mut shell_integration,
@@ -326,6 +377,7 @@ pub(super) async fn run_channel_pump(
                         let Some(terminal_bytes) = drive_zmodem(
                             &handle,
                             channel.id(),
+                            &mut input,
                             &event_tx,
                             &mut zmodem,
                         ).await else {
@@ -335,6 +387,7 @@ pub(super) async fn run_channel_pump(
                             terminal_bytes.as_slice(),
                             &handle,
                             channel.id(),
+                            &mut input,
                             &terminal,
                             &event_tx,
                             &mut shell_integration,
@@ -368,23 +421,30 @@ pub(super) async fn run_channel_pump(
                         cols,
                         viewport,
                     }) => {
-                        if let Ok(mut terminal) = terminal.lock() {
+                        let surface = match run_terminal_operation(&terminal, move |terminal| {
                             terminal.resize_with_viewport(rows as usize, cols as usize, viewport);
-                        }
-                        if let Some(surface) = snapshot_terminal_surface(&terminal, session_id) {
-                            tracing::trace!(
-                                target: "app.terminal",
-                                requested_rows = rows,
-                                requested_cols = cols,
-                                surface_rows = surface.rows,
-                                surface_cols = surface.cols,
-                                surface_seqno = surface.seqno,
-                                "ssh runtime applied terminal resize before publishing surface"
-                            );
-                            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
-                        }
-                        if let Err(err) = channel
-                            .window_change(cols, rows, viewport.pixel_width, viewport.pixel_height)
+                            Ok(terminal.surface_state(session_id))
+                        }).await {
+                            Ok(surface) => surface,
+                            Err(err) => {
+                                let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                                    "failed to resize terminal: {err}"
+                                )));
+                                break;
+                            }
+                        };
+                        tracing::trace!(
+                            target: "app.terminal",
+                            requested_rows = rows,
+                            requested_cols = cols,
+                            surface_rows = surface.rows,
+                            surface_cols = surface.cols,
+                            surface_seqno = surface.seqno,
+                            "ssh runtime applied terminal resize before publishing surface"
+                        );
+                        let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
+                        if let Err(err) = input.while_sending(channel
+                            .window_change(cols, rows, viewport.pixel_width, viewport.pixel_height))
                             .await
                         {
                             let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
@@ -403,7 +463,7 @@ pub(super) async fn run_channel_pump(
                                 &event_tx,
                             );
                             let Some(released_terminal_bytes) =
-                                drive_zmodem(&handle, channel.id(), &event_tx, &mut zmodem).await
+                                drive_zmodem(&handle, channel.id(), &mut input, &event_tx, &mut zmodem).await
                             else {
                                 break 'pump;
                             };
@@ -412,6 +472,7 @@ pub(super) async fn run_channel_pump(
                                 terminal_bytes.as_slice(),
                                 &handle,
                                 channel.id(),
+                                &mut input,
                                 &terminal,
                                 &event_tx,
                                 &mut shell_integration,
@@ -432,6 +493,7 @@ pub(super) async fn run_channel_pump(
                             trailing_terminal_bytes.as_slice(),
                             &handle,
                             channel.id(),
+                            &mut input,
                             &terminal,
                             &event_tx,
                             &mut shell_integration,
@@ -449,10 +511,10 @@ pub(super) async fn run_channel_pump(
                         if dirty_notifier.take_pending() {
                             let _ = event_tx.send(SessionRuntimeEvent::SurfaceDirty);
                         }
-                        let _ = channel.eof().await;
-                        let _ = channel.close().await;
-                        let _ = handle
-                            .disconnect(Disconnect::ByApplication, "session closed", "en-US")
+                        let _ = input.while_sending(channel.eof()).await;
+                        let _ = input.while_sending(channel.close()).await;
+                        let _ = input.while_sending(handle
+                            .disconnect(Disconnect::ByApplication, "session closed", "en-US"))
                             .await;
                         let _ = event_tx.send(SessionRuntimeEvent::Disconnected);
                         break;
@@ -462,17 +524,11 @@ pub(super) async fn run_channel_pump(
                     }
                 }
             }
-            maybe_message = async {
-                if let Some(message) = pending_channel_messages.pop_front() {
-                    Some(message)
-                } else {
-                    channel.wait().await
-                }
-            } => {
+            maybe_message = input.wait() => {
                 match maybe_message {
                     Some(message @ ChannelMsg::Data { .. }) | Some(message @ ChannelMsg::ExtendedData { .. }) => {
                         let output_batch =
-                            collect_ready_output_batch(message, &mut channel, &mut pending_channel_messages)
+                            collect_ready_output_batch(message, &mut input)
                                 .await;
                         for ready_bytes in synchronized_output.push_bytes(output_batch.raw_bytes.as_slice()) {
                             let mut terminal_bytes = zmodem.intercept_remote_bytes(ready_bytes.as_slice());
@@ -483,7 +539,7 @@ pub(super) async fn run_channel_pump(
                                 &event_tx,
                             );
                             let Some(released_terminal_bytes) =
-                                drive_zmodem(&handle, channel.id(), &event_tx, &mut zmodem).await
+                                drive_zmodem(&handle, channel.id(), &mut input, &event_tx, &mut zmodem).await
                             else {
                                 break 'pump;
                             };
@@ -492,6 +548,7 @@ pub(super) async fn run_channel_pump(
                                 terminal_bytes.as_slice(),
                                 &handle,
                                 channel.id(),
+                                &mut input,
                                 &terminal,
                                 &event_tx,
                                 &mut shell_integration,
@@ -517,7 +574,7 @@ pub(super) async fn run_channel_pump(
                                 &event_tx,
                             );
                             let Some(released_terminal_bytes) =
-                                drive_zmodem(&handle, channel.id(), &event_tx, &mut zmodem).await
+                                drive_zmodem(&handle, channel.id(), &mut input, &event_tx, &mut zmodem).await
                             else {
                                 break 'pump;
                             };
@@ -526,6 +583,7 @@ pub(super) async fn run_channel_pump(
                                 terminal_bytes.as_slice(),
                                 &handle,
                                 channel.id(),
+                                &mut input,
                                 &terminal,
                                 &event_tx,
                                 &mut shell_integration,
@@ -546,6 +604,7 @@ pub(super) async fn run_channel_pump(
                             trailing_terminal_bytes.as_slice(),
                             &handle,
                             channel.id(),
+                            &mut input,
                             &terminal,
                             &event_tx,
                             &mut shell_integration,
@@ -576,7 +635,7 @@ pub(super) async fn run_channel_pump(
                                 &event_tx,
                             );
                             let Some(released_terminal_bytes) =
-                                drive_zmodem(&handle, channel.id(), &event_tx, &mut zmodem).await
+                                drive_zmodem(&handle, channel.id(), &mut input, &event_tx, &mut zmodem).await
                             else {
                                 break 'pump;
                             };
@@ -585,6 +644,7 @@ pub(super) async fn run_channel_pump(
                                 terminal_bytes.as_slice(),
                                 &handle,
                                 channel.id(),
+                                &mut input,
                                 &terminal,
                                 &event_tx,
                                 &mut shell_integration,
@@ -605,6 +665,7 @@ pub(super) async fn run_channel_pump(
                             trailing_terminal_bytes.as_slice(),
                             &handle,
                             channel.id(),
+                            &mut input,
                             &terminal,
                             &event_tx,
                             &mut shell_integration,
@@ -628,6 +689,41 @@ pub(super) async fn run_channel_pump(
                         break;
                     }
                     Some(_) => {}
+                }
+            }
+            () = sleep(sync_timeout.unwrap_or(Duration::ZERO)), if sync_timeout.is_some() => {
+                if let Some(ready_bytes) = synchronized_output.finish() {
+                    let mut terminal_bytes = zmodem.intercept_remote_bytes(ready_bytes.as_slice());
+                    emit_zmodem_state_changes(&mut zmodem, &event_tx);
+                    start_pending_interactive_zmodem_upload(
+                        &mut zmodem,
+                        &mut pending_interactive_zmodem_upload,
+                        &event_tx,
+                    );
+                    let Some(released_terminal_bytes) =
+                        drive_zmodem(&handle, channel.id(), &mut input, &event_tx, &mut zmodem).await
+                    else {
+                        break 'pump;
+                    };
+                    terminal_bytes.extend(released_terminal_bytes);
+                    if !process_ready_remote_output(
+                        terminal_bytes.as_slice(),
+                        &handle,
+                        channel.id(),
+                        &mut input,
+                        &terminal,
+                        &event_tx,
+                        &mut shell_integration,
+                        &mut dirty_notifier,
+                        &mut dirty_timer,
+                        &mut dirty_timer_interval,
+                        &mut working_set_trim_scheduler,
+                        &mut working_set_trim_timer,
+                    )
+                    .await
+                    {
+                        break 'pump;
+                    }
                 }
             }
             () = async { if let Some(timer) = dirty_timer.as_mut() { timer.await } }, if dirty_timer.is_some() => {
@@ -663,6 +759,7 @@ pub(super) async fn run_channel_pump(
                         terminal_bytes.as_slice(),
                         &handle,
                         channel.id(),
+                        &mut input,
                         &terminal,
                         &event_tx,
                         &mut shell_integration,
@@ -896,7 +993,7 @@ async fn run_zmodem_exec_upload_inner(
     generation: u64,
     mut exec_command_rx: mpsc::UnboundedReceiver<ExecZmodemCommand>,
 ) -> Result<ExecZmodemUploadOutcome> {
-    let mut channel = handle
+    let channel = handle
         .channel_open_session()
         .await
         .context("failed to open SSH exec channel for ZMODEM upload")?;
@@ -905,6 +1002,8 @@ async fn run_zmodem_exec_upload_inner(
         .exec(true, command)
         .await
         .context("failed to request remote rz exec")?;
+    let (read, channel) = channel.split();
+    let mut input = ChannelInput::new(read);
 
     let mut zmodem = ZmodemController::default();
     let mut pending_local_paths = Some(local_paths);
@@ -914,11 +1013,11 @@ async fn run_zmodem_exec_upload_inner(
     let handshake_started = Instant::now();
 
     loop {
-        let input = if upload_started {
+        let incoming = if upload_started {
             tokio::select! {
                 biased;
                 command = exec_command_rx.recv() => ExecZmodemInput::Command(command),
-                message = channel.wait() => ExecZmodemInput::Channel(message),
+                message = input.wait() => ExecZmodemInput::Channel(message),
             }
         } else {
             let remaining = ZMODEM_EXEC_UPLOAD_HANDSHAKE_TIMEOUT
@@ -930,7 +1029,7 @@ async fn run_zmodem_exec_upload_inner(
             tokio::select! {
                 biased;
                 command = exec_command_rx.recv() => ExecZmodemInput::Command(command),
-                result = timeout(remaining, channel.wait()) => {
+                result = timeout(remaining, input.wait()) => {
                     ExecZmodemInput::Channel(
                         result.context("remote rz did not emit a ZMODEM upload handshake")?
                     )
@@ -938,20 +1037,21 @@ async fn run_zmodem_exec_upload_inner(
             }
         };
 
-        let message = match input {
+        let message = match incoming {
             ExecZmodemInput::Command(Some(ExecZmodemCommand::Cancel)) => {
                 return cancel_zmodem_exec_upload(
                     session_id,
                     generation,
                     &handle,
                     &event_tx,
-                    &mut channel,
+                    &channel,
+                    &mut input,
                     &mut zmodem,
                 )
                 .await;
             }
             ExecZmodemInput::Command(None) => {
-                settle_zmodem_exec_channel(&mut channel).await;
+                settle_zmodem_exec_channel(&channel, &mut input).await;
                 return Ok(ExecZmodemUploadOutcome::RuntimeClosed);
             }
             ExecZmodemInput::Channel(Some(message)) => message,
@@ -983,7 +1083,7 @@ async fn run_zmodem_exec_upload_inner(
                     upload_started = true;
                     emit_zmodem_state_changes(&mut zmodem, &event_tx);
                 }
-                if drive_zmodem(&handle, channel.id(), &event_tx, &mut zmodem)
+                if drive_zmodem(&handle, channel.id(), &mut input, &event_tx, &mut zmodem)
                     .await
                     .is_none()
                 {
@@ -1039,17 +1139,18 @@ async fn cancel_zmodem_exec_upload(
     generation: u64,
     handle: &Arc<client::Handle<RuntimeClientHandler>>,
     event_tx: &mpsc::UnboundedSender<SessionRuntimeEvent>,
-    channel: &mut Channel<client::Msg>,
+    channel: &ChannelWriteHalf<client::Msg>,
+    input: &mut ChannelInput,
     zmodem: &mut ZmodemController,
 ) -> Result<ExecZmodemUploadOutcome> {
     if let Some(state) = zmodem.current_state() {
         match state.phase {
             super::ZmodemTransferPhase::Completed => {
-                settle_zmodem_exec_channel(channel).await;
+                settle_zmodem_exec_channel(channel, input).await;
                 return Ok(ExecZmodemUploadOutcome::Completed);
             }
             super::ZmodemTransferPhase::Failed | super::ZmodemTransferPhase::Cancelled => {
-                settle_zmodem_exec_channel(channel).await;
+                settle_zmodem_exec_channel(channel, input).await;
                 return Ok(ExecZmodemUploadOutcome::Cancelled);
             }
             super::ZmodemTransferPhase::AwaitingUploadSelection
@@ -1060,14 +1161,17 @@ async fn cancel_zmodem_exec_upload(
             .cancel()
             .context("cancel dedicated exec zmodem upload")?;
         emit_zmodem_state_changes(zmodem, event_tx);
-        if drive_zmodem(handle, channel.id(), event_tx, zmodem)
+        if drive_zmodem(handle, channel.id(), input, event_tx, zmodem)
             .await
             .is_none()
         {
             bail!("failed to write ZMODEM abort bytes to SSH exec channel");
         }
     } else {
-        if let Err(bytes) = handle.data(channel.id(), ZMODEM_ABORT_WIRE.to_vec()).await {
+        if let Err(bytes) = input
+            .while_sending(handle.data(channel.id(), ZMODEM_ABORT_WIRE.to_vec()))
+            .await
+        {
             tracing::warn!(
                 target: "app.zmodem",
                 session_id = %session_id,
@@ -1083,13 +1187,16 @@ async fn cancel_zmodem_exec_upload(
             cancelled_zmodem_upload_state(),
         )));
     }
-    settle_zmodem_exec_channel(channel).await;
+    settle_zmodem_exec_channel(channel, input).await;
     Ok(ExecZmodemUploadOutcome::Cancelled)
 }
 
-async fn settle_zmodem_exec_channel(channel: &mut Channel<client::Msg>) {
-    let _ = channel.eof().await;
-    let _ = channel.close().await;
+async fn settle_zmodem_exec_channel(
+    channel: &ChannelWriteHalf<client::Msg>,
+    input: &mut ChannelInput,
+) {
+    let _ = input.while_sending(channel.eof()).await;
+    let _ = input.while_sending(channel.close()).await;
 }
 
 async fn remote_exec_exit_status(
@@ -1251,6 +1358,7 @@ fn emit_zmodem_state_changes(
 async fn drive_zmodem(
     handle: &Arc<client::Handle<RuntimeClientHandler>>,
     channel_id: russh::ChannelId,
+    input: &mut ChannelInput,
     event_tx: &mpsc::UnboundedSender<SessionRuntimeEvent>,
     zmodem: &mut ZmodemController,
 ) -> Option<Vec<u8>> {
@@ -1259,7 +1367,7 @@ async fn drive_zmodem(
         match zmodem.advance() {
             ZmodemAdvanceOutcome::WriteWire(bytes) => {
                 let written = bytes.len();
-                if let Err(bytes) = handle.data(channel_id, bytes).await {
+                if let Err(bytes) = input.while_sending(handle.data(channel_id, bytes)).await {
                     let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
                         "failed to write {} zmodem bytes to SSH channel",
                         bytes.len()
@@ -1293,78 +1401,65 @@ struct ParsedOutputBatch {
 
 #[derive(Debug, Default)]
 struct SynchronizedOutputBatcher {
-    plain_buffer: Vec<u8>,
-    sync_buffer: Vec<u8>,
-    sync_active: bool,
+    buffer: Vec<u8>,
+    sync_started_at: Option<Instant>,
 }
 
 impl SynchronizedOutputBatcher {
-    fn push_bytes(&mut self, bytes: &[u8]) -> Vec<Vec<u8>> {
+    fn push_bytes(&mut self, mut bytes: &[u8]) -> Vec<Vec<u8>> {
         let mut ready_batches = Vec::new();
-        if self.sync_active {
-            self.sync_buffer.extend_from_slice(bytes);
-            self.process_sync_buffer(&mut ready_batches);
-        } else {
-            self.plain_buffer.extend_from_slice(bytes);
-            self.process_plain_buffer(&mut ready_batches);
+        if self.remaining_timeout(Instant::now()) == Some(Duration::ZERO) {
+            ready_batches.extend(self.finish());
+        }
+        while !bytes.is_empty() {
+            let count = bytes.len().min(MAX_SYNC_OUTPUT_BYTES - self.buffer.len());
+            self.buffer.extend_from_slice(&bytes[..count]);
+            bytes = &bytes[count..];
+            self.process_buffer(&mut ready_batches);
+            if self.buffer.len() == MAX_SYNC_OUTPUT_BYTES {
+                ready_batches.extend(self.finish());
+            }
         }
         ready_batches
     }
 
+    fn remaining_timeout(&self, now: Instant) -> Option<Duration> {
+        self.sync_started_at.map(|started| {
+            SYNC_OUTPUT_TIMEOUT.saturating_sub(now.saturating_duration_since(started))
+        })
+    }
+
     fn finish(&mut self) -> Option<Vec<u8>> {
-        if self.sync_active {
-            self.sync_active = false;
-            if self.sync_buffer.is_empty() {
-                None
-            } else {
-                Some(std::mem::take(&mut self.sync_buffer))
-            }
-        } else if self.plain_buffer.is_empty() {
+        self.sync_started_at = None;
+        if self.buffer.is_empty() {
             None
         } else {
-            Some(std::mem::take(&mut self.plain_buffer))
+            Some(std::mem::take(&mut self.buffer))
         }
     }
 
-    fn process_plain_buffer(&mut self, ready_batches: &mut Vec<Vec<u8>>) {
+    fn process_buffer(&mut self, ready_batches: &mut Vec<Vec<u8>>) {
         loop {
-            let Some(sync_start) =
-                find_subsequence(self.plain_buffer.as_slice(), SYNC_OUTPUT_START)
-            else {
-                let keep_suffix_len =
-                    partial_marker_suffix_len(self.plain_buffer.as_slice(), SYNC_OUTPUT_START);
-                let emit_len = self.plain_buffer.len().saturating_sub(keep_suffix_len);
+            if self.sync_started_at.is_some() {
+                let Some(end) = find_subsequence(&self.buffer, SYNC_OUTPUT_END) else {
+                    return;
+                };
+                ready_batches.push(self.buffer.drain(..end + SYNC_OUTPUT_END.len()).collect());
+                self.sync_started_at = None;
+            } else if let Some(start) = find_subsequence(&self.buffer, SYNC_OUTPUT_START) {
+                if start > 0 {
+                    ready_batches.push(self.buffer.drain(..start).collect());
+                }
+                self.sync_started_at = Some(Instant::now());
+            } else {
+                let keep = partial_marker_suffix_len(&self.buffer, SYNC_OUTPUT_START);
+                let emit_len = self.buffer.len() - keep;
                 if emit_len > 0 {
-                    ready_batches.push(self.plain_buffer.drain(..emit_len).collect());
+                    ready_batches.push(self.buffer.drain(..emit_len).collect());
                 }
                 return;
-            };
-
-            if sync_start > 0 {
-                ready_batches.push(self.plain_buffer.drain(..sync_start).collect());
             }
-            self.sync_active = true;
-            self.sync_buffer.append(&mut self.plain_buffer);
-            self.process_sync_buffer(ready_batches);
-            if !self.sync_active {
-                continue;
-            }
-            return;
         }
-    }
-
-    fn process_sync_buffer(&mut self, ready_batches: &mut Vec<Vec<u8>>) {
-        let Some(sync_end) = find_subsequence(self.sync_buffer.as_slice(), SYNC_OUTPUT_END) else {
-            return;
-        };
-        let emit_len = sync_end + SYNC_OUTPUT_END.len();
-        ready_batches.push(self.sync_buffer.drain(..emit_len).collect());
-        self.sync_active = false;
-        if self.sync_buffer.is_empty() {
-            return;
-        }
-        self.plain_buffer.append(&mut self.sync_buffer);
-        self.process_plain_buffer(ready_batches);
     }
 }
 
@@ -1373,27 +1468,23 @@ const SYNC_OUTPUT_END: &[u8] = b"\x1b[?2026l";
 
 async fn collect_ready_output_batch(
     initial_message: ChannelMsg,
-    channel: &mut Channel<client::Msg>,
-    pending_channel_messages: &mut VecDeque<ChannelMsg>,
+    input: &mut ChannelInput,
 ) -> ReadyOutputBatch {
+    let mut bytes = channel_output_bytes(&initial_message).map_or(0, <[u8]>::len);
     let mut backlog = VecDeque::from([initial_message]);
-
-    while let Ok(Some(message)) = timeout(Duration::ZERO, channel.wait()).await {
-        backlog.push_back(message);
-        if !matches!(
-            backlog.back(),
-            Some(ChannelMsg::Data { .. } | ChannelMsg::ExtendedData { .. })
-        ) {
+    while bytes < MAX_OUTPUT_BATCH_BYTES && backlog.len() < 128 {
+        let Ok(Some(message)) = timeout(Duration::ZERO, input.wait()).await else {
             break;
-        }
+        };
+        let Some(data) = channel_output_bytes(&message) else {
+            input.pending.push_front(message);
+            break;
+        };
+        bytes += data.len();
+        backlog.push_back(message);
     }
-
-    let Some(first_message) = backlog.pop_front() else {
-        return ReadyOutputBatch::default();
-    };
-    let output_batch = take_contiguous_output_messages(first_message, &mut backlog);
-    pending_channel_messages.extend(backlog);
-    output_batch
+    let first = backlog.pop_front().expect("initial output message");
+    take_contiguous_output_messages(first, &mut backlog)
 }
 
 fn take_contiguous_output_messages(
@@ -1426,6 +1517,7 @@ async fn process_ready_remote_output(
     ready_bytes: &[u8],
     handle: &Arc<client::Handle<RuntimeClientHandler>>,
     channel_id: russh::ChannelId,
+    input: &mut ChannelInput,
     terminal: &Arc<Mutex<TerminalSession>>,
     event_tx: &mpsc::UnboundedSender<SessionRuntimeEvent>,
     shell_integration: &mut super::TerminalShellIntegrationState,
@@ -1447,9 +1539,24 @@ async fn process_ready_remote_output(
         ));
     }
     if !parsed.sanitized_bytes.is_empty() {
-        let terminal_replies = apply_remote_output(terminal, &parsed.sanitized_bytes);
+        let output_len = parsed.sanitized_bytes.len();
+        let terminal_replies = match run_terminal_operation(terminal, move |terminal| {
+            Ok(terminal.apply_remote_bytes(&parsed.sanitized_bytes))
+        })
+        .await
+        {
+            Ok(replies) => replies,
+            Err(error) => {
+                let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                    "failed to process SSH terminal output: {error}"
+                )));
+                return false;
+            }
+        };
         if !terminal_replies.is_empty()
-            && let Err(bytes) = handle.data(channel_id, terminal_replies).await
+            && let Err(bytes) = input
+                .while_sending(handle.data(channel_id, terminal_replies))
+                .await
         {
             let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
                 "failed to write {} terminal response bytes to SSH channel",
@@ -1457,7 +1564,7 @@ async fn process_ready_remote_output(
             )));
             return false;
         }
-        working_set_trim_scheduler.record_output(parsed.sanitized_bytes.len());
+        working_set_trim_scheduler.record_output(output_len);
         *working_set_trim_timer = Some(Box::pin(sleep(WORKING_SET_TRIM_IDLE_INTERVAL)));
         let now = Instant::now();
         let (should_arm, preferred_interval) = dirty_notifier.record_output(now);
@@ -1869,6 +1976,59 @@ mod tests {
             second,
             vec![b"\x1b[?2026hframe-1-continued\x1b[?2026l".to_vec()]
         );
+    }
+
+    #[test]
+    fn synchronized_output_deadline_is_not_extended_by_more_data() {
+        let mut batcher = SynchronizedOutputBatcher::default();
+        assert!(batcher.push_bytes(b"\x1b[?2026hfirst").is_empty());
+        let started = batcher.sync_started_at.unwrap();
+        assert!(batcher.push_bytes(b"second").is_empty());
+        assert_eq!(batcher.sync_started_at, Some(started));
+        assert_eq!(
+            batcher.remaining_timeout(started + SYNC_OUTPUT_TIMEOUT),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(batcher.finish().unwrap(), b"\x1b[?2026hfirstsecond");
+        assert_eq!(batcher.remaining_timeout(Instant::now()), None);
+        assert_eq!(
+            batcher.push_bytes(b"\x1b[?2026lplain").concat(),
+            b"\x1b[?2026lplain"
+        );
+        assert_eq!(
+            batcher.push_bytes(b"\x1b[?2026hnext\x1b[?2026l").concat(),
+            b"\x1b[?2026hnext\x1b[?2026l"
+        );
+    }
+
+    #[test]
+    fn oversized_synchronized_output_is_bounded_and_lossless() {
+        let mut batcher = SynchronizedOutputBatcher::default();
+        let mut bytes = SYNC_OUTPUT_START.to_vec();
+        bytes.extend(vec![b'x'; MAX_SYNC_OUTPUT_BYTES * 2]);
+        bytes.extend_from_slice(SYNC_OUTPUT_END);
+        bytes.extend_from_slice(b"tail");
+        let mut batches = batcher.push_bytes(&bytes);
+        assert!(batcher.buffer.len() < MAX_SYNC_OUTPUT_BYTES);
+        batches.extend(batcher.finish());
+        assert!(
+            batches
+                .iter()
+                .all(|batch| batch.len() <= MAX_SYNC_OUTPUT_BYTES)
+        );
+        assert_eq!(batches.concat(), bytes);
+    }
+
+    #[test]
+    fn synchronized_output_handles_many_frames_and_split_markers() {
+        let mut batcher = SynchronizedOutputBatcher::default();
+        let frame = b"\x1b[?2026hframe\x1b[?2026l";
+        let bytes = frame.repeat(2000);
+        assert_eq!(batcher.push_bytes(&bytes).concat(), bytes);
+        assert!(batcher.push_bytes(b"\x1b[?202").is_empty());
+        assert!(batcher.push_bytes(b"6hframe\x1b[?2026").is_empty());
+        assert_eq!(batcher.push_bytes(b"l").concat(), frame);
+        assert!(batcher.finish().is_none());
     }
 
     #[test]
