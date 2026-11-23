@@ -1,175 +1,56 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-// Binary entrypoint that selects the runtime profile, initializes logging, and launches the UI.
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
-use mica_term::app::{
-    async_runtime::AppAsyncRuntime,
-    runtime_profile::{AppRuntimeProfile, GraphicsApiRequirement, RendererMode},
-};
+use anyhow::{Context as _, Result};
+use gpui_kit::component::TitleBar;
+use gpui_kit::{AppContext as _, Bounds, WindowBounds, WindowOptions, px, size};
+use tracing_subscriber::EnvFilter;
 
-#[derive(Clone, Copy, Debug)]
-struct RendererSelectionAttempt {
-    renderer_mode: RendererMode,
-    graphics_api: Option<GraphicsApiRequirement>,
-}
+use mica_term_gpui::domain::build_default_credential_store;
+use mica_term_gpui::storage::{AppPaths, WorkspaceStore};
+use mica_term_gpui::ui::MicaWorkspace;
 
-fn select_runtime_profile() -> AppRuntimeProfile {
-    // Packaged wrappers now carry the native-only terminal contract through AppRuntimeProfile.
-    AppRuntimeProfile::packaged()
-}
-
-fn renderer_selection_attempts(profile: AppRuntimeProfile) -> Vec<RendererSelectionAttempt> {
-    profile
-        .renderer_fallback_chain()
-        .iter()
-        .copied()
-        .enumerate()
-        .map(|(index, renderer_mode)| RendererSelectionAttempt {
-            renderer_mode,
-            graphics_api: if index == 0 {
-                profile.preferred_graphics_api()
-            } else {
-                None
-            },
-        })
-        .collect()
-}
-
-fn apply_renderer_selector(profile: AppRuntimeProfile) -> anyhow::Result<()> {
-    use anyhow::{Context, anyhow};
-    use slint::BackendSelector;
-
-    let backend_name = profile.forced_backend().unwrap_or("winit");
-    let mut failures = Vec::new();
-
-    for (fallback_level, attempt) in renderer_selection_attempts(profile).into_iter().enumerate() {
-        let mut selector = BackendSelector::new()
-            .backend_name(backend_name.into())
-            .renderer_name(attempt.renderer_mode.renderer_name().into());
-        if matches!(attempt.graphics_api, Some(GraphicsApiRequirement::Direct3D)) {
-            selector = selector.require_d3d();
-        }
-
-        match selector.select() {
-            Ok(()) => {
-                tracing::info!(
-                    target: "app.renderer",
-                    requested_build_flavor = profile.build_flavor_label(),
-                    requested_terminal_render_mode = profile.terminal_render_mode_label(),
-                    requested_native_present_path = profile.native_present_path_label(),
-                    selected_backend = backend_name,
-                    selected_renderer = attempt.renderer_mode.renderer_name(),
-                    selected_graphics_api = ?attempt.graphics_api.map(GraphicsApiRequirement::as_str),
-                    fallback_level,
-                    profile_selector = profile.selector_label(),
-                    "selected renderer backend"
-                );
-                return Ok(());
-            }
-            Err(err) => {
-                tracing::warn!(
-                    target: "app.renderer",
-                    requested_build_flavor = profile.build_flavor_label(),
-                    requested_terminal_render_mode = profile.terminal_render_mode_label(),
-                    requested_native_present_path = profile.native_present_path_label(),
-                    attempted_backend = backend_name,
-                    attempted_renderer = attempt.renderer_mode.renderer_name(),
-                    attempted_graphics_api = ?attempt.graphics_api.map(GraphicsApiRequirement::as_str),
-                    fallback_level,
-                    error = %err,
-                    "renderer selection attempt failed"
-                );
-                failures.push(format!(
-                    "{}{}: {err}",
-                    attempt.renderer_mode.renderer_name(),
-                    if matches!(attempt.graphics_api, Some(GraphicsApiRequirement::Direct3D)) {
-                        "+direct3d"
-                    } else {
-                        ""
-                    }
-                ));
-            }
-        }
-    }
-
-    Err(anyhow!(
-        "renderer selection attempts exhausted: {}",
-        failures.join(" | ")
-    ))
-    .with_context(|| {
-        format!(
-            "failed to select {} backend for packaged runtime with {} terminal rendering",
-            profile.selector_label(),
-            profile.terminal_render_mode_label(),
+fn main() -> Result<()> {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
-    })
-}
+        .try_init();
 
-fn main() -> anyhow::Result<()> {
-    let profile = select_runtime_profile();
-    // Logging starts before UI initialization so startup failures and panic hooks always have a
-    // stable place to write diagnostics.
-    let logging = match mica_term::app::logging::runtime::try_init_global_logging() {
-        Ok(runtime) => {
-            if let Err(err) = mica_term::app::logging::lifecycle::install(&runtime.paths.logs_dir) {
-                tracing::error!(target: "app.logging", error = %err, "failed to install lifecycle journal");
-            }
-            if let Err(err) =
-                mica_term::app::logging::panic::install_panic_hook(runtime.paths.crash_dir.clone())
-            {
-                tracing::error!(
-                    target: "app.logging",
-                    error = %err,
-                    "failed to install panic hook"
-                );
-            }
-            Some(runtime)
-        }
-        Err(err) => {
-            eprintln!("failed to initialize system logging: {err}");
-            None
-        }
-    };
+    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(4)
+        .thread_name("mica-tokio")
+        .build()
+        .context("初始化异步运行时失败")?;
+    let tokio_handle = tokio_runtime.handle().clone();
 
-    let result = run_application(profile);
-    if let Err(err) = &result {
-        tracing::error!(target: "app.lifecycle", error = %format!("{err:#}"), "application failed");
-        if let Some(runtime) = &logging {
-            if let Err(write_err) = mica_term::app::logging::panic::write_fatal_record(
-                &runtime.paths.crash_dir,
-                "application",
-                &format!("{err:#}"),
-            ) {
-                eprintln!("failed to write fatal record: {write_err}");
-            }
-        }
-        mica_term::app::logging::lifecycle::record("application-error");
-    } else {
-        mica_term::app::logging::lifecycle::record("shutdown-complete");
-    }
-    // Keep the writer guard alive through runtime teardown and the final error report.
-    drop(logging);
-    result
-}
+    let paths = AppPaths::resolve()?;
+    let store = WorkspaceStore::open(&paths.db_path)?;
+    let credentials = build_default_credential_store(&paths.secrets_dir);
 
-fn run_application(profile: AppRuntimeProfile) -> anyhow::Result<()> {
-    use anyhow::Context;
-    use mica_term::app::logging::lifecycle::record;
-    record("async-runtime-init");
-    let async_runtime = AppAsyncRuntime::new().context("create async runtime")?;
-    record("renderer-select");
-    apply_renderer_selector(profile).context("select renderer")?;
-    mica_term::app::logging::runtime::emit_startup_memory_snapshot(profile);
-    record("bootstrap-enter");
-    let result = mica_term::app::bootstrap::run_with_profile(profile, async_runtime.handle());
-    if let Err(err) = &result {
-        if let Some(message) =
-            mica_term::app::bootstrap::startup_failure_message(profile, &err.to_string())
-        {
-            eprintln!("{message}");
-        }
-    }
-    record("async-runtime-shutdown-begin");
-    drop(async_runtime);
-    record("async-runtime-shutdown-complete");
-    result
+    gpui_kit::application()
+        .with_assets(gpui_kit::assets::AllAssets)
+        .run(move |cx| {
+            gpui_kit::init(cx);
+
+            let bounds = Bounds::centered(None, size(px(1280.0), px(800.0)), cx);
+            let options = WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                window_min_size: Some(size(px(860.0), px(540.0))),
+                ..TitleBar::window_options()
+            };
+
+            let paths = paths.clone();
+            let credentials = credentials.clone();
+            let tokio_handle = tokio_handle.clone();
+
+            gpui_kit::open_window(options, cx, move |window, cx| {
+                cx.new(|cx| {
+                    MicaWorkspace::new(paths, store, credentials, tokio_handle, window, cx)
+                })
+            })
+            .expect("打开 Mica Term 主窗口失败");
+        });
+
+    Ok(())
 }

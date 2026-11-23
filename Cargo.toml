@@ -1,122 +1,41 @@
 [package]
-name = "mica-term"
-version = "0.1.3"
+name = "mica-term-gpui"
+version = "0.2.0"
 edition = "2024"
 repository = "https://github.com/dovetaill/MicaTerm"
+description = "Mica Term — GPU-accelerated Terminal, SSH & SFTP Workspace powered by GPUI Kit & Alacritty Terminal"
+license = "MIT"
 
-[features]
-default = ["slint-renderer-software", "terminal-native-renderer"]
-slint-renderer-software = ["slint/renderer-software"]
-slint-renderer-skia = ["slint/renderer-skia"]
-terminal-native-renderer = ["dep:rustybuzz"]
+[lib]
+name = "mica_term_gpui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mica-term-gpui"
+path = "src/main.rs"
 
 [dependencies]
+alacritty_terminal = "0.26.0"
 anyhow = "1.0.102"
-argon2 = "0.5.3"
-aws-config = "1"
-aws-sdk-s3 = "1"
-bincode = "1.3.3"
+arboard = "3.4"
 chacha20poly1305 = "0.10.1"
 chrono = { version = "0.4.44", default-features = false, features = ["clock", "std"] }
 directories = "5"
-ab_glyph = "0.2.32"
-fontdb = "0.23.0"
-gix = "0.81.0"
-gix-credentials = "0.37.1"
-git2 = { version = "0.20.4", default-features = false, features = ["https", "ssh", "vendored-libgit2", "vendored-openssl"] }
+gpui-kit = "0.10.0"
 keyring = "3.6.3"
-oauth2 = "5"
+parking_lot = "0.12"
+portable-pty = "0.9.0"
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 redb = "2"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rfd = "0.17.2"
-rustybuzz = { version = "0.20.1", optional = true }
-russh = "0.58.0"
-russh-sftp = "2.1.1"
-secrecy = "0.10.3"
+russh = "0.65"
+russh-sftp = "2.4"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10.9"
-i-slint-backend-selector = "1.15.1"
-i-slint-backend-winit = { version = "1.15.1", default-features = false }
-image = { version = "0.25.9", default-features = false, features = [
-    "bmp",
-    "gif",
-    "ico",
-    "jpeg",
-    "png",
-    "tiff",
-    "webp",
-] }
-slint = { version = "1.15.1", default-features = false, features = [
-    "std",
-    "backend-winit-x11",
-    "backend-winit-wayland",
-    "compat-1-2",
-    "unstable-fontique-07",
-    "unstable-winit-030",
-] }
-swash = "0.2.7"
-termwiz = "0.23.3"
-tokio = { version = "1.50.0", features = ["rt-multi-thread", "sync", "time", "macros", "net", "io-util"] }
-trash = "5.2.5"
+tokio = { version = "1.50.0", features = ["rt-multi-thread", "sync", "time", "macros", "net", "io-util", "fs"] }
 tracing = "0.1"
-tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
-unicode-segmentation = "1.12.0"
-unicode-properties = "0.1.4"
-uuid = { version = "1.22.0", features = ["v4"] }
-wezterm-surface = { package = "tattoy-wezterm-surface", version = "0.1.0-fork.2" }
-wezterm-term = { package = "tattoy-wezterm-term", version = "0.1.0-fork.5" }
-window-vibrancy = "0.7.1"
-windows-sys = { version = "0.59", features = [
-    "Win32_Foundation",
-    "Win32_Graphics_Gdi",
-    "Win32_System_ProcessStatus",
-    "Win32_System_Threading",
-    "Win32_UI_Controls",
-    "Win32_UI_HiDpi",
-    "Win32_UI_Shell",
-    "Win32_UI_WindowsAndMessaging",
-] }
+unicode-width = "0.2"
+uuid = { version = "1.22.0", features = ["v4", "serde"] }
 zeroize = "1.8.2"
-zstd = "0.13.3"
-zmodem2 = "0.7.1"
-
-[target.'cfg(target_os = "windows")'.dependencies]
-clipboard-win = { version = "5.4.1", features = ["std"] }
-windows = { version = "0.58", features = [
-    "Foundation_Numerics",
-    "Win32_Foundation",
-    "Win32_Graphics_DirectWrite",
-    "Win32_Graphics_Direct2D",
-    "Win32_Graphics_Direct2D_Common",
-    "Win32_Graphics_Gdi",
-    "Win32_Graphics_Imaging",
-    "Win32_Graphics_Dxgi_Common",
-    "Win32_System_Com",
-    "Win32_System_DataExchange",
-    "Win32_System_LibraryLoader",
-    "Win32_System_Memory",
-    "Win32_UI_HiDpi",
-    "Win32_UI_Shell",
-    "Win32_UI_WindowsAndMessaging",
-] }
-
-[build-dependencies]
-chrono = { version = "0.4.44", default-features = false, features = ["clock", "std"] }
-slint-build = "1.15.1"
-winresource = "0.1.19"
-
-[dev-dependencies]
-base64 = "0.22.1"
-filetime = "0.2"
-i-slint-backend-testing = "1.15.1"
-
-[patch.crates-io]
-tattoy-wezterm-term = { path = "vendor/tattoy-wezterm-term" }
-i-slint-backend-winit = { path = "vendor/i-slint-backend-winit" }
-i-slint-renderer-skia = { path = "vendor/i-slint-renderer-skia" }
-dirs-sys = { path = "vendor/dirs-sys" }
-muda = { path = "vendor/muda" }
-winit = { path = "vendor/winit" }
