@@ -1,6 +1,8 @@
-//! Context-aware Right SFTP Panel with directory follow, file operations, and inline transfer status.
+//! Context-aware Right SFTP Inspector Panel with directory follow, symlink directory traversal,
+//! confirmation dialogs, streaming chunked transfers with live progress bars, and macOS Finder styling.
 
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use gpui_kit::assets::IconName as LucideIcon;
 use gpui_kit::component::{
@@ -13,35 +15,51 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AppContext as _, ClipboardItem, Context, Entity, Focusable as _, FontWeight,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    AnyElement, App, AppContext as _, ClipboardItem, Context, Entity, EventEmitter, Focusable as _,
+    FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Window, div, px, relative,
 };
+use tokio::sync::mpsc;
 
 use crate::sftp::{
-    RemoteEntry, SftpService, TransferDirection, TransferRecord, TransferStatus, format_bytes,
-    join_remote_path, parent_remote_path,
+    RemoteEntry, RemoteEntryKind, SftpService, TransferDirection, TransferRecord, TransferStatus,
+    format_bytes, join_remote_path, parent_remote_path,
 };
-use crate::ui::modals::{open_remote_editor_dialog, open_simple_name_dialog};
+use crate::ui::modals::{open_confirm_dialog, open_remote_editor_dialog, open_simple_name_dialog};
+use crate::ui::theme::{macos_hex, macos_squircle_badge};
+
+pub enum SftpPanelEvent {
+    FollowChanged(bool),
+    CloseRequested,
+}
 
 pub struct SftpPanelView {
     service: Option<SftpService>,
     bound_session_label: String,
     pub current_path: String,
     pub follow_cwd: bool,
+    pub panel_visible: bool,
+    needs_load_when_shown: bool,
     pub loading: bool,
     pub error_message: Option<String>,
     pub entries: Vec<RemoteEntry>,
     pub selected_path: Option<String>,
     pub transfers: Vec<TransferRecord>,
     path_input: Option<Entity<InputState>>,
+    editor_font_family: String,
+    editor_font_size: f32,
     downloads_dir: PathBuf,
     tokio_handle: tokio::runtime::Handle,
 }
 
+impl EventEmitter<SftpPanelEvent> for SftpPanelView {}
+
 impl SftpPanelView {
     pub fn new(
         follow_cwd: bool,
+        panel_visible: bool,
+        editor_font_family: String,
+        editor_font_size: f32,
         downloads_dir: PathBuf,
         tokio_handle: tokio::runtime::Handle,
     ) -> Self {
@@ -50,21 +68,46 @@ impl SftpPanelView {
             bound_session_label: String::new(),
             current_path: "/".to_string(),
             follow_cwd,
+            panel_visible,
+            needs_load_when_shown: false,
             loading: false,
             error_message: None,
             entries: Vec::new(),
             selected_path: None,
             transfers: Vec::new(),
             path_input: None,
+            editor_font_family,
+            editor_font_size,
             downloads_dir,
             tokio_handle,
         }
+    }
+
+    pub fn set_editor_typography(&mut self, family: String, size: f32) {
+        self.editor_font_family = family;
+        self.editor_font_size = size;
     }
 
     pub fn has_active_transfers(&self) -> bool {
         self.transfers
             .iter()
             .any(|t| matches!(t.status, TransferStatus::Running))
+    }
+
+    pub fn set_panel_visible(
+        &mut self,
+        visible: bool,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
+        self.panel_visible = visible;
+        if visible && self.needs_load_when_shown && self.service.is_some() {
+            self.needs_load_when_shown = false;
+            let p = self.current_path.clone();
+            self.navigate_to(p, window, cx);
+        } else {
+            cx.notify();
+        }
     }
 
     pub fn bind_session(
@@ -82,13 +125,22 @@ impl SftpPanelView {
         if self.service.is_none() {
             self.entries.clear();
             self.loading = false;
+            self.needs_load_when_shown = false;
             cx.notify();
             return;
         }
         let dir = initial_dir
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "/".to_string());
-        self.navigate_to(dir, window, cx);
+        if self.panel_visible {
+            self.needs_load_when_shown = false;
+            self.navigate_to(dir, window, cx);
+        } else {
+            self.current_path = dir;
+            self.entries.clear();
+            self.needs_load_when_shown = true;
+            cx.notify();
+        }
     }
 
     pub fn on_terminal_cwd_changed(
@@ -97,8 +149,14 @@ impl SftpPanelView {
         window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
-        if self.follow_cwd && self.service.is_some() && new_cwd != self.current_path {
+        if !self.follow_cwd || self.service.is_none() || new_cwd == self.current_path {
+            return;
+        }
+        if self.panel_visible {
             self.navigate_to(new_cwd, window, cx);
+        } else {
+            self.current_path = new_cwd;
+            self.needs_load_when_shown = true;
         }
     }
 
@@ -230,10 +288,47 @@ impl SftpPanelView {
                     cx.notify();
                 });
 
+                let (prog_tx, mut prog_rx) = mpsc::unbounded_channel::<(u64, Option<u64>)>();
+                let tid_prog = tid.clone();
+                let weak_prog = weak.clone();
+                let prog_task = cx.spawn(async move |cx| {
+                    while let Some((done, total)) = prog_rx.recv().await {
+                        let ok = weak_prog.update(cx, |this, cx| {
+                            if let Some(rec) = this.transfers.iter_mut().find(|r| r.id == tid_prog)
+                            {
+                                rec.bytes_done = done;
+                                rec.bytes_total = total;
+                                cx.notify();
+                            }
+                        });
+                        if ok.is_err() {
+                            break;
+                        }
+                    }
+                });
+
                 let svc = service.clone();
                 let res = rt
-                    .spawn(async move { svc.upload_local_file(&local_path, &remote_path).await })
+                    .spawn(async move {
+                        let mut last_emit = Instant::now() - Duration::from_secs(1);
+                        svc.upload_local_file_with_progress(
+                            &local_path,
+                            &remote_path,
+                            |done, total| {
+                                let now = Instant::now();
+                                if done == 0
+                                    || done >= total
+                                    || now.duration_since(last_emit) >= Duration::from_millis(45)
+                                {
+                                    last_emit = now;
+                                    let _ = prog_tx.send((done, Some(total)));
+                                }
+                            },
+                        )
+                        .await
+                    })
                     .await;
+                let _ = prog_task.await;
 
                 let _ = weak.update(cx, |this, cx| {
                     if let Some(rec) = this.transfers.iter_mut().find(|r| r.id == tid) {
@@ -296,10 +391,46 @@ impl SftpPanelView {
                 cx.notify();
             });
 
+            let (prog_tx, mut prog_rx) = mpsc::unbounded_channel::<(u64, Option<u64>)>();
+            let tid_prog = tid.clone();
+            let weak_prog = weak.clone();
+            let prog_task = cx.spawn(async move |cx| {
+                while let Some((done, total)) = prog_rx.recv().await {
+                    let ok = weak_prog.update(cx, |this, cx| {
+                        if let Some(rec) = this.transfers.iter_mut().find(|r| r.id == tid_prog) {
+                            rec.bytes_done = done;
+                            if total.is_some() {
+                                rec.bytes_total = total;
+                            }
+                            cx.notify();
+                        }
+                    });
+                    if ok.is_err() {
+                        break;
+                    }
+                }
+            });
+
             let remote_path = entry.path.clone();
             let res = rt
-                .spawn(async move { service.download_to_local(&remote_path, &local_path).await })
+                .spawn(async move {
+                    let mut last_emit = Instant::now() - Duration::from_secs(1);
+                    service
+                        .download_to_local_with_progress(&remote_path, &local_path, |done, total| {
+                            let now = Instant::now();
+                            let finished = total.is_some_and(|t| done >= t);
+                            if done == 0
+                                || finished
+                                || now.duration_since(last_emit) >= Duration::from_millis(45)
+                            {
+                                last_emit = now;
+                                let _ = prog_tx.send((done, total));
+                            }
+                        })
+                        .await
+                })
                 .await;
+            let _ = prog_task.await;
 
             let _ = weak.update(cx, |this, cx| {
                 if let Some(rec) = this.transfers.iter_mut().find(|r| r.id == tid) {
@@ -397,16 +528,43 @@ impl SftpPanelView {
         );
     }
 
+    fn confirm_delete_entry(
+        &mut self,
+        entry: RemoteEntry,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let panel = cx.entity().clone();
+        let kind_label = if entry.kind.is_dir() {
+            "远程目录"
+        } else if entry.kind == RemoteEntryKind::Symlink {
+            "软链接"
+        } else {
+            "远程文件"
+        };
+        let msg = format!("确定要永久删除{kind_label} `{}` 吗？此操作无法撤销。", entry.path);
+        open_confirm_dialog(
+            format!("删除{kind_label}"),
+            msg,
+            "确认删除",
+            window,
+            cx,
+            move |_, cx| {
+                panel.update(cx, |this, cx| this.delete_entry(entry.clone(), cx));
+            },
+        );
+    }
+
     fn delete_entry(&mut self, entry: RemoteEntry, cx: &mut Context<Self>) {
         let Some(service) = self.service.clone() else {
             return;
         };
         let rt = self.tokio_handle.clone();
         let path = entry.path.clone();
-        let is_dir = entry.kind.is_dir();
+        let is_real_dir = entry.kind.is_dir();
         cx.spawn(async move |weak, cx| {
             let res = rt
-                .spawn(async move { service.remove(&path, is_dir).await })
+                .spawn(async move { service.remove(&path, is_real_dir).await })
                 .await;
             let _ = weak.update(cx, |this, cx| {
                 if let Ok(Err(err)) = res {
@@ -431,6 +589,8 @@ impl SftpPanelView {
         let rt = self.tokio_handle.clone();
         let path = entry.path.clone();
         let file_name = entry.name.clone();
+        let ed_font_family = self.editor_font_family.clone();
+        let ed_font_size = self.editor_font_size;
         let win_handle = window.window_handle();
 
         cx.spawn(async move |weak, cx| {
@@ -451,29 +611,20 @@ impl SftpPanelView {
                             &file_name,
                             &path,
                             &content,
+                            &ed_font_family,
+                            ed_font_size,
                             window,
                             cx,
-                            move |updated_text, _, cx| {
+                            move |updated_text, cx| {
                                 let s = svc_save.clone();
                                 let p = path_save.clone();
-                                let r = rt_save.clone();
-                                if let Some(panel_ent) = weak_panel.upgrade() {
-                                    panel_ent.update(cx, |_, cx| {
-                                        cx.spawn(async move |w, cx| {
-                                            let write_res = r
-                                                .spawn(async move { s.write_text(&p, updated_text).await })
-                                                .await;
-                                            let _ = w.update(cx, |this, cx| {
-                                                if let Ok(Err(e)) = write_res {
-                                                    this.error_message = Some(format!("{e:#}"));
-                                                }
-                                                this.refresh(cx);
-                                                cx.notify();
-                                            });
-                                        })
-                                        .detach();
-                                    });
-                                }
+                                let write = rt_save.spawn(async move { s.write_text(&p, updated_text).await });
+                                let panel = weak_panel.clone();
+                                cx.spawn(async move |cx| {
+                                    write.await??;
+                                    let _ = panel.update(cx, |this, cx| this.refresh(cx));
+                                    Ok(())
+                                })
                             },
                         );
                     });
@@ -496,6 +647,195 @@ impl SftpPanelView {
     }
 }
 
+#[inline(never)]
+fn render_sftp_entry_row(
+    panel_ent: Entity<SftpPanelView>,
+    entry: RemoteEntry,
+    is_sel: bool,
+    cx: &App,
+) -> AnyElement {
+    let nav_dir = entry.is_navigable_dir();
+    let is_symlink = entry.kind == RemoteEntryKind::Symlink;
+    let size_label = entry.formatted_size();
+    let time_label = entry.formatted_mtime();
+    let display_name = if is_symlink {
+        format!("{} ↗", entry.name)
+    } else {
+        entry.name.clone()
+    };
+
+    let folder_tint = if cx.theme().is_dark() {
+        macos_hex(0x5AC8FA, 1.0)
+    } else {
+        macos_hex(0x007AFF, 1.0)
+    };
+
+    let p_click = panel_ent.clone();
+    let entry_click = entry.clone();
+    let p_ctx_open = panel_ent.clone();
+    let p_ctx_dl = panel_ent.clone();
+    let p_ctx_rename = panel_ent.clone();
+    let p_ctx_del = panel_ent.clone();
+    let e1 = entry.clone();
+    let e2 = entry.clone();
+    let e3 = entry.clone();
+    let e4 = entry.clone();
+    let copy_path = entry.path.clone();
+
+    h_flex()
+        .id(SharedString::from(format!("sftp-row-{}", entry.path)))
+        .px_2()
+        .py_1p5()
+        .gap_2()
+        .items_center()
+        .justify_between()
+        .rounded(px(7.0))
+        .cursor_pointer()
+        .bg(if is_sel {
+            cx.theme().list_active
+        } else {
+            cx.theme().transparent
+        })
+        .hover(|s| {
+            if is_sel {
+                s
+            } else {
+                s.bg(cx.theme().list_hover)
+            }
+        })
+        .on_click(move |ev, window, cx| {
+            p_click.update(cx, |this, cx| {
+                this.selected_path = Some(entry_click.path.clone());
+                if ev.click_count() >= 2 {
+                    if entry_click.is_navigable_dir() {
+                        this.navigate_to(entry_click.path.clone(), Some(window), cx);
+                    } else {
+                        this.open_remote_file_editor(entry_click.clone(), window, cx);
+                    }
+                } else {
+                    cx.notify();
+                }
+            });
+        })
+        .context_menu(move |menu, _, _| {
+            let po = p_ctx_open.clone();
+            let eo = e1.clone();
+            let pd = p_ctx_dl.clone();
+            let ed = e2.clone();
+            let pr = p_ctx_rename.clone();
+            let er = e3.clone();
+            let pdel = p_ctx_del.clone();
+            let edel = e4.clone();
+            let cp = copy_path.clone();
+
+            let menu = if nav_dir {
+                menu.item(
+                    PopupMenuItem::new("进入目录")
+                        .icon(LucideIcon::FolderOpen)
+                        .on_click(move |_, window, cx| {
+                            po.update(cx, |this, cx| {
+                                this.navigate_to(eo.path.clone(), Some(window), cx)
+                            });
+                        }),
+                )
+            } else {
+                menu.item(
+                    PopupMenuItem::new("在线编辑文本")
+                        .icon(LucideIcon::FileText)
+                        .on_click(move |_, window, cx| {
+                            po.update(cx, |this, cx| {
+                                this.open_remote_file_editor(eo.clone(), window, cx)
+                            });
+                        }),
+                )
+                .item(
+                    PopupMenuItem::new("下载到本地")
+                        .icon(LucideIcon::Download)
+                        .on_click(move |_, _, cx| {
+                            pd.update(cx, |this, cx| this.trigger_download(ed.clone(), cx));
+                        }),
+                )
+            };
+
+            menu.item(
+                PopupMenuItem::new("复制远程路径")
+                    .icon(LucideIcon::Copy)
+                    .on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(cp.clone()));
+                    }),
+            )
+            .item(
+                PopupMenuItem::new("重命名")
+                    .icon(LucideIcon::Pencil)
+                    .on_click(move |_, window, cx| {
+                        pr.update(cx, |this, cx| this.prompt_rename(er.clone(), window, cx));
+                    }),
+            )
+            .separator()
+            .item(PopupMenuItem::new("删除").on_click(move |_, window, cx| {
+                pdel.update(cx, |this, cx| {
+                    this.confirm_delete_entry(edel.clone(), window, cx)
+                });
+            }))
+        })
+        .child(
+            h_flex()
+                .min_w_0()
+                .flex_1()
+                .gap_2()
+                .items_center()
+                .child(if nav_dir {
+                    Icon::new(LucideIcon::Folder)
+                        .small()
+                        .text_color(folder_tint)
+                } else {
+                    Icon::new(LucideIcon::File)
+                        .small()
+                        .text_color(cx.theme().muted_foreground)
+                })
+                .child(
+                    v_flex()
+                        .min_w_0()
+                        .flex_1()
+                        .child(
+                            div()
+                                .truncate()
+                                .text_xs()
+                                .font_weight(if nav_dir {
+                                    FontWeight::MEDIUM
+                                } else {
+                                    FontWeight::NORMAL
+                                })
+                                .text_color(cx.theme().foreground)
+                                .child(display_name),
+                        )
+                        .child(
+                            div()
+                                .truncate()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(format!("{size_label} · {time_label}")),
+                        ),
+                ),
+        )
+        .children((!nav_dir).then(|| {
+            let pdl = panel_ent;
+            let edl = entry.clone();
+            Button::new(SharedString::from(format!("dl-btn-{}", entry.path)))
+                .tab_stop(false)
+                .ghost()
+                .xsmall()
+                .compact()
+                .icon(LucideIcon::Download)
+                .tooltip("下载文件")
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    pdl.update(cx, |this, cx| this.trigger_download(edl.clone(), cx));
+                })
+        }))
+        .into_any_element()
+}
+
 impl Render for SftpPanelView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let connected = self.service.is_some();
@@ -508,12 +848,61 @@ impl Render for SftpPanelView {
             "未绑定 SSH 会话".to_string()
         };
 
-        let view_follow = cx.entity().clone();
         let view_up = cx.entity().clone();
         let view_refresh = cx.entity().clone();
         let view_upload = cx.entity().clone();
         let view_mkdir = cx.entity().clone();
         let view_clear_tx = cx.entity().clone();
+
+        let list_body = if !connected {
+            v_flex()
+                .py_12()
+                .px_4()
+                .gap_3()
+                .items_center()
+                .child(macos_squircle_badge(
+                    LucideIcon::FolderOpen,
+                    cx.theme().muted_foreground,
+                    38.0,
+                    9.5,
+                ))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("切换到已连接的 SSH 标签即可自动浏览并传输远程文件"),
+                )
+                .into_any_element()
+        } else if self.loading && self.entries.is_empty() {
+            div()
+                .py_8()
+                .px_4()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child("正在读取远程目录...")
+                .into_any_element()
+        } else if self.entries.is_empty() {
+            div()
+                .py_8()
+                .px_4()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child("当前远程目录为空")
+                .into_any_element()
+        } else {
+            let selected = self.selected_path.clone();
+            let panel_ent = cx.entity().clone();
+            let rows: Vec<AnyElement> = self
+                .entries
+                .iter()
+                .cloned()
+                .map(|entry| {
+                    let is_sel = selected.as_deref() == Some(entry.path.as_str());
+                    render_sftp_entry_row(panel_ent.clone(), entry, is_sel, cx)
+                })
+                .collect();
+            v_flex().gap_0p5().children(rows).into_any_element()
+        };
 
         v_flex()
             .size_full()
@@ -521,14 +910,13 @@ impl Render for SftpPanelView {
             .border_l_1()
             .border_color(cx.theme().sidebar_border)
             .child(
-                // Header: bound session + follow toggle + quick actions
                 v_flex()
                     .px_3()
                     .pt_2p5()
                     .pb_2()
                     .gap_2()
                     .border_b_1()
-                    .border_color(cx.theme().border)
+                    .border_color(cx.theme().sidebar_border)
                     .child(
                         h_flex()
                             .justify_between()
@@ -538,12 +926,18 @@ impl Render for SftpPanelView {
                                 h_flex()
                                     .min_w_0()
                                     .flex_1()
-                                    .gap_1p5()
+                                    .gap_2()
                                     .items_center()
                                     .child(
-                                        Icon::new(LucideIcon::FolderOpen)
-                                            .small()
-                                            .text_color(cx.theme().primary),
+                                        div()
+                                            .w(px(7.0))
+                                            .h(px(7.0))
+                                            .rounded_full()
+                                            .bg(if connected {
+                                                cx.theme().success
+                                            } else {
+                                                cx.theme().muted_foreground.opacity(0.45)
+                                            }),
                                     )
                                     .child(
                                         div()
@@ -556,24 +950,28 @@ impl Render for SftpPanelView {
                             )
                             .child(
                                 h_flex()
-                                    .gap_1()
+                                    .gap_0p5()
+                                    .items_center()
                                     .child(
                                         Button::new("sftp-follow-toggle")
+                                            .tab_stop(false)
                                             .ghost()
                                             .xsmall()
                                             .compact()
                                             .selected(follow)
                                             .icon(LucideIcon::Link)
-                                            .tooltip("跟随终端目录 (OSC 7)")
-                                            .on_click(move |_, _, cx| {
-                                                view_follow.update(cx, |this, cx| {
-                                                    this.follow_cwd = !this.follow_cwd;
-                                                    cx.notify();
-                                                });
-                                            }),
+                                            .tooltip("跟随终端当前目录")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.follow_cwd = !this.follow_cwd;
+                                                cx.emit(SftpPanelEvent::FollowChanged(
+                                                    this.follow_cwd,
+                                                ));
+                                                cx.notify();
+                                            })),
                                     )
                                     .child(
                                         Button::new("sftp-up")
+                                            .tab_stop(false)
                                             .ghost()
                                             .xsmall()
                                             .compact()
@@ -581,11 +979,13 @@ impl Render for SftpPanelView {
                                             .icon(LucideIcon::ArrowUp)
                                             .tooltip("上级目录")
                                             .on_click(move |_, window, cx| {
-                                                view_up.update(cx, |this, cx| this.go_up(window, cx));
+                                                view_up
+                                                    .update(cx, |this, cx| this.go_up(window, cx));
                                             }),
                                     )
                                     .child(
                                         Button::new("sftp-refresh")
+                                            .tab_stop(false)
                                             .ghost()
                                             .xsmall()
                                             .compact()
@@ -598,6 +998,7 @@ impl Render for SftpPanelView {
                                     )
                                     .child(
                                         Button::new("sftp-upload")
+                                            .tab_stop(false)
                                             .ghost()
                                             .xsmall()
                                             .compact()
@@ -612,6 +1013,7 @@ impl Render for SftpPanelView {
                                     )
                                     .child(
                                         Button::new("sftp-mkdir")
+                                            .tab_stop(false)
                                             .ghost()
                                             .xsmall()
                                             .compact()
@@ -623,10 +1025,31 @@ impl Render for SftpPanelView {
                                                     this.prompt_mkdir(window, cx)
                                                 });
                                             }),
+                                    )
+                                    .child(
+                                        Button::new("sftp-close-panel-btn")
+                                            .tab_stop(false)
+                                            .ghost()
+                                            .xsmall()
+                                            .compact()
+                                            .icon(LucideIcon::PanelRightClose)
+                                            .tooltip("隐藏 SFTP 面板")
+                                            .on_click(cx.listener(|_, _, _, cx| {
+                                                cx.emit(SftpPanelEvent::CloseRequested);
+                                            })),
                                     ),
                             ),
                     )
-                    .child(Input::new(&path_input).xsmall().disabled(!connected)),
+                    .child(
+                        Input::new(&path_input)
+                            .xsmall()
+                            .prefix(
+                                Icon::new(LucideIcon::Folder)
+                                    .xsmall()
+                                    .text_color(cx.theme().muted_foreground),
+                            )
+                            .disabled(!connected),
+                    ),
             )
             .children(self.error_message.as_ref().map(|err| {
                 div()
@@ -640,252 +1063,19 @@ impl Render for SftpPanelView {
                     .child(err.clone())
             }))
             .child(
-                // File table
                 div()
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scrollbar()
                     .px_2()
                     .py_1p5()
-                    .child(if !connected {
-                        v_flex()
-                            .py_10()
-                            .px_4()
-                            .gap_2()
-                            .items_center()
-                            .child(
-                                Icon::new(LucideIcon::Server)
-                                    .large()
-                                    .text_color(cx.theme().muted_foreground),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("切换到已连接的 SSH 终端标签，即可自动浏览并传输远程文件。"),
-                            )
-                            .into_any_element()
-                    } else if self.loading && self.entries.is_empty() {
-                        div()
-                            .py_8()
-                            .px_4()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("正在读取远程目录...")
-                            .into_any_element()
-                    } else if self.entries.is_empty() {
-                        div()
-                            .py_8()
-                            .px_4()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("当前远程目录为空")
-                            .into_any_element()
-                    } else {
-                        let selected = self.selected_path.clone();
-                        let panel_ent = cx.entity().clone();
-                        v_flex()
-                            .gap_0p5()
-                            .children(self.entries.iter().cloned().map(|entry| {
-                                let row_path = entry.path.clone();
-                                let is_sel = selected.as_deref() == Some(row_path.as_str());
-                                let is_dir = entry.kind.is_dir();
-                                let size_label = entry.formatted_size();
-                                let time_label = entry.formatted_mtime();
-
-                                let p_click = panel_ent.clone();
-                                let entry_click = entry.clone();
-
-                                let p_ctx_open = panel_ent.clone();
-                                let p_ctx_dl = panel_ent.clone();
-                                let p_ctx_rename = panel_ent.clone();
-                                let p_ctx_del = panel_ent.clone();
-                                let e1 = entry.clone();
-                                let e2 = entry.clone();
-                                let e3 = entry.clone();
-                                let e4 = entry.clone();
-                                let copy_path = entry.path.clone();
-
-                                h_flex()
-                                    .id(SharedString::from(format!("sftp-row-{}", entry.path)))
-                                    .px_2()
-                                    .py_1p5()
-                                    .gap_2()
-                                    .items_center()
-                                    .justify_between()
-                                    .rounded(cx.theme().radius)
-                                    .cursor_pointer()
-                                    .bg(if is_sel {
-                                        cx.theme().list_active
-                                    } else {
-                                        cx.theme().transparent
-                                    })
-                                    .hover(|s| s.bg(cx.theme().list_hover))
-                                    .on_click(move |ev, window, cx| {
-                                        p_click.update(cx, |this, cx| {
-                                            this.selected_path = Some(entry_click.path.clone());
-                                            if ev.click_count() >= 2 {
-                                                if entry_click.kind.is_dir() {
-                                                    this.navigate_to(
-                                                        entry_click.path.clone(),
-                                                        Some(window),
-                                                        cx,
-                                                    );
-                                                } else {
-                                                    this.open_remote_file_editor(
-                                                        entry_click.clone(),
-                                                        window,
-                                                        cx,
-                                                    );
-                                                }
-                                            } else {
-                                                cx.notify();
-                                            }
-                                        });
-                                    })
-                                    .context_menu(move |menu, _, _| {
-                                        let po = p_ctx_open.clone();
-                                        let eo = e1.clone();
-                                        let pd = p_ctx_dl.clone();
-                                        let ed = e2.clone();
-                                        let pr = p_ctx_rename.clone();
-                                        let er = e3.clone();
-                                        let pdel = p_ctx_del.clone();
-                                        let edel = e4.clone();
-                                        let cp = copy_path.clone();
-
-                                        let menu = if is_dir {
-                                            menu.item(
-                                                PopupMenuItem::new("进入目录")
-                                                    .icon(LucideIcon::FolderOpen)
-                                                    .on_click(move |_, window, cx| {
-                                                        po.update(cx, |this, cx| {
-                                                            this.navigate_to(
-                                                                eo.path.clone(),
-                                                                Some(window),
-                                                                cx,
-                                                            )
-                                                        });
-                                                    }),
-                                            )
-                                        } else {
-                                            menu.item(
-                                                PopupMenuItem::new("在线编辑文本")
-                                                    .icon(LucideIcon::FileText)
-                                                    .on_click(move |_, window, cx| {
-                                                        po.update(cx, |this, cx| {
-                                                            this.open_remote_file_editor(
-                                                                eo.clone(),
-                                                                window,
-                                                                cx,
-                                                            )
-                                                        });
-                                                    }),
-                                            )
-                                            .item(
-                                                PopupMenuItem::new("下载到本地")
-                                                    .icon(LucideIcon::Download)
-                                                    .on_click(move |_, _, cx| {
-                                                        pd.update(cx, |this, cx| {
-                                                            this.trigger_download(ed.clone(), cx)
-                                                        });
-                                                    }),
-                                            )
-                                        };
-
-                                        menu.item(
-                                            PopupMenuItem::new("复制远程路径")
-                                                .icon(LucideIcon::Copy)
-                                                .on_click(move |_, _, cx| {
-                                                    cx.write_to_clipboard(
-                                                        ClipboardItem::new_string(cp.clone()),
-                                                    );
-                                                }),
-                                        )
-                                        .item(
-                                            PopupMenuItem::new("重命名")
-                                                .icon(LucideIcon::Pencil)
-                                                .on_click(move |_, window, cx| {
-                                                    pr.update(cx, |this, cx| {
-                                                        this.prompt_rename(er.clone(), window, cx)
-                                                    });
-                                                }),
-                                        )
-                                        .separator()
-                                        .item(PopupMenuItem::new("删除").on_click(
-                                            move |_, _, cx| {
-                                                pdel.update(cx, |this, cx| {
-                                                    this.delete_entry(edel.clone(), cx)
-                                                });
-                                            },
-                                        ))
-                                    })
-                                    .child(
-                                        h_flex()
-                                            .min_w_0()
-                                            .flex_1()
-                                            .gap_2()
-                                            .items_center()
-                                            .child(if is_dir {
-                                                Icon::new(LucideIcon::Folder)
-                                                    .small()
-                                                    .text_color(cx.theme().primary)
-                                            } else {
-                                                Icon::new(LucideIcon::File)
-                                                    .small()
-                                                    .text_color(cx.theme().muted_foreground)
-                                            })
-                                            .child(
-                                                v_flex()
-                                                    .min_w_0()
-                                                    .flex_1()
-                                                    .child(
-                                                        div()
-                                                            .truncate()
-                                                            .text_xs()
-                                                            .text_color(cx.theme().foreground)
-                                                            .child(entry.name.clone()),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .truncate()
-                                                            .text_xs()
-                                                            .text_color(cx.theme().muted_foreground)
-                                                            .child(format!(
-                                                                "{size_label} · {time_label}"
-                                                            )),
-                                                    ),
-                                            ),
-                                    )
-                                    .children((!is_dir).then(|| {
-                                        let pdl = panel_ent.clone();
-                                        let edl = entry.clone();
-                                        Button::new(SharedString::from(format!(
-                                            "dl-btn-{}",
-                                            entry.path
-                                        )))
-                                        .ghost()
-                                        .xsmall()
-                                        .compact()
-                                        .icon(LucideIcon::Download)
-                                        .tooltip("下载文件")
-                                        .on_click(move |_, _, cx| {
-                                            cx.stop_propagation();
-                                            pdl.update(cx, |this, cx| {
-                                                this.trigger_download(edl.clone(), cx)
-                                            });
-                                        })
-                                    }))
-                            }))
-                            .into_any_element()
-                    }),
+                    .child(list_body),
             )
             .children((!self.transfers.is_empty()).then(|| {
-                // Lightweight embedded bottom transfer status strip
                 v_flex()
-                    .max_h(px(148.0))
+                    .max_h(px(172.0))
                     .border_t_1()
-                    .border_color(cx.theme().border)
+                    .border_color(cx.theme().sidebar_border)
                     .bg(cx.theme().secondary.opacity(0.35))
                     .px_3()
                     .py_2()
@@ -899,10 +1089,11 @@ impl Render for SftpPanelView {
                                     .text_xs()
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(cx.theme().foreground)
-                                    .child(format!("传输记录 ({})", self.transfers.len())),
+                                    .child(format!("传输队列 ({})", self.transfers.len())),
                             )
                             .child(
                                 Button::new("sftp-clear-transfers")
+                                    .tab_stop(false)
                                     .ghost()
                                     .xsmall()
                                     .compact()
@@ -918,12 +1109,26 @@ impl Render for SftpPanelView {
                             ),
                     )
                     .child(
-                        div()
-                            .overflow_y_scrollbar()
-                            .child(v_flex().gap_1().children(self.transfers.iter().take(6).map(
-                                |tr| {
+                        div().overflow_y_scrollbar().child(
+                            v_flex()
+                                .gap_1p5()
+                                .children(self.transfers.iter().take(6).map(|tr| {
+                                    let ratio = tr.progress_ratio();
+                                    let is_running = matches!(tr.status, TransferStatus::Running);
                                     let status_text = match &tr.status {
-                                        TransferStatus::Running => "传输中...".to_string(),
+                                        TransferStatus::Running => {
+                                            if let Some(total) = tr.bytes_total {
+                                                let pct =
+                                                    (ratio.unwrap_or(0.0) * 100.0).round() as u32;
+                                                format!(
+                                                    "{pct}% · {} / {}",
+                                                    format_bytes(tr.bytes_done),
+                                                    format_bytes(total)
+                                                )
+                                            } else {
+                                                format!("传输中 · {}", format_bytes(tr.bytes_done))
+                                            }
+                                        }
                                         TransferStatus::Completed => {
                                             format!("已完成 · {}", format_bytes(tr.bytes_done))
                                         }
@@ -933,37 +1138,56 @@ impl Render for SftpPanelView {
                                         TransferDirection::Upload => LucideIcon::Upload,
                                         TransferDirection::Download => LucideIcon::Download,
                                     };
-                                    h_flex()
-                                        .justify_between()
-                                        .items_center()
-                                        .gap_2()
+                                    v_flex()
+                                        .gap_1()
                                         .child(
                                             h_flex()
-                                                .min_w_0()
-                                                .flex_1()
-                                                .gap_1p5()
+                                                .justify_between()
                                                 .items_center()
+                                                .gap_2()
                                                 .child(
-                                                    Icon::new(dir_icon)
-                                                        .xsmall()
-                                                        .text_color(cx.theme().primary),
+                                                    h_flex()
+                                                        .min_w_0()
+                                                        .flex_1()
+                                                        .gap_1p5()
+                                                        .items_center()
+                                                        .child(
+                                                            Icon::new(dir_icon)
+                                                                .xsmall()
+                                                                .text_color(cx.theme().primary),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .truncate()
+                                                                .text_xs()
+                                                                .text_color(cx.theme().foreground)
+                                                                .child(tr.file_name.clone()),
+                                                        ),
                                                 )
                                                 .child(
                                                     div()
-                                                        .truncate()
                                                         .text_xs()
-                                                        .text_color(cx.theme().foreground)
-                                                        .child(tr.file_name.clone()),
+                                                        .text_color(cx.theme().muted_foreground)
+                                                        .child(status_text),
                                                 ),
                                         )
-                                        .child(
+                                        .children(is_running.then(|| {
+                                            let fill_pct = ratio.unwrap_or(0.15).clamp(0.03, 1.0);
                                             div()
-                                                .text_xs()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .child(status_text),
-                                        )
-                                },
-                            ))),
+                                                .w_full()
+                                                .h(px(3.0))
+                                                .rounded_full()
+                                                .bg(cx.theme().border)
+                                                .child(
+                                                    div()
+                                                        .w(relative(fill_pct))
+                                                        .h_full()
+                                                        .rounded_full()
+                                                        .bg(cx.theme().primary),
+                                                )
+                                        }))
+                                })),
+                        ),
                     )
             }))
     }

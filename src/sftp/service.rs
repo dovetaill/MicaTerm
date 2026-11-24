@@ -1,4 +1,5 @@
-//! Session-bound SFTP service (`russh-sftp` 2.4) and lightweight transfer tracker.
+//! Session-bound SFTP service (`russh-sftp` 2.4) with cached SFTP subsystem channel,
+//! symlink target resolution, and streaming chunked transfers with live byte progress.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -8,11 +9,13 @@ use chrono::{DateTime, Local, TimeZone};
 use russh::client;
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::FilePermissions;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::ssh::client::SshClientHandler;
 
 const MAX_REMOTE_EDIT_BYTES: u64 = 2 * 1024 * 1024;
+const STREAM_CHUNK_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoteEntryKind {
@@ -33,17 +36,24 @@ pub struct RemoteEntry {
     pub name: String,
     pub path: String,
     pub kind: RemoteEntryKind,
+    pub points_to_dir: bool,
     pub size_bytes: Option<u64>,
     pub modified_unix: Option<u64>,
     pub permissions: String,
 }
 
 impl RemoteEntry {
+    pub fn is_navigable_dir(&self) -> bool {
+        self.kind.is_dir() || self.points_to_dir
+    }
+
     pub fn formatted_size(&self) -> String {
-        if self.kind.is_dir() {
+        if self.is_navigable_dir() {
             return "--".to_string();
         }
-        self.size_bytes.map(format_bytes).unwrap_or_else(|| "--".to_string())
+        self.size_bytes
+            .map(format_bytes)
+            .unwrap_or_else(|| "--".to_string())
     }
 
     pub fn formatted_mtime(&self) -> String {
@@ -81,17 +91,31 @@ pub struct TransferRecord {
     pub status: TransferStatus,
 }
 
+impl TransferRecord {
+    pub fn progress_ratio(&self) -> Option<f32> {
+        let total = self.bytes_total?;
+        if total == 0 {
+            return Some(1.0);
+        }
+        Some((self.bytes_done as f32 / total as f32).clamp(0.0, 1.0))
+    }
+}
+
 #[derive(Clone)]
 pub struct SftpService {
     handle: Arc<client::Handle<SshClientHandler>>,
+    cached_session: Arc<AsyncMutex<Option<Arc<SftpSession>>>>,
 }
 
 impl SftpService {
     pub(crate) fn from_ssh_handle(handle: Arc<client::Handle<SshClientHandler>>) -> Self {
-        Self { handle }
+        Self {
+            handle,
+            cached_session: Arc::new(AsyncMutex::new(None)),
+        }
     }
 
-    async fn open_sftp(&self) -> Result<SftpSession> {
+    async fn create_new_sftp(&self) -> Result<Arc<SftpSession>> {
         let channel = self
             .handle
             .channel_open_session()
@@ -101,31 +125,63 @@ impl SftpService {
             .request_subsystem(true, "sftp")
             .await
             .context("远程服务器未开启 SFTP 子系统")?;
-        SftpSession::new(channel.into_stream())
+        let session = SftpSession::new(channel.into_stream())
             .await
-            .context("初始化 SFTP 会话失败")
+            .context("初始化 SFTP 会话失败")?;
+        Ok(Arc::new(session))
+    }
+
+    async fn get_or_open_sftp(&self) -> Result<Arc<SftpSession>> {
+        let mut guard = self.cached_session.lock().await;
+        if let Some(existing) = guard.as_ref() {
+            return Ok(Arc::clone(existing));
+        }
+        let fresh = self.create_new_sftp().await?;
+        *guard = Some(Arc::clone(&fresh));
+        Ok(fresh)
+    }
+
+    async fn invalidate_cached_sftp(&self) {
+        let mut guard = self.cached_session.lock().await;
+        *guard = None;
     }
 
     pub async fn canonicalize(&self, path: &str) -> Result<String> {
-        let sftp = self.open_sftp().await?;
-        sftp.canonicalize(path)
-            .await
-            .with_context(|| format!("解析远程路径 `{path}` 失败"))
+        let sftp = self.get_or_open_sftp().await?;
+        match sftp.canonicalize(path).await {
+            Ok(resolved) => Ok(resolved),
+            Err(_) => {
+                self.invalidate_cached_sftp().await;
+                let sftp = self.get_or_open_sftp().await?;
+                sftp.canonicalize(path)
+                    .await
+                    .with_context(|| format!("解析远程路径 `{path}` 失败"))
+            }
+        }
     }
 
     pub async fn list_dir(&self, dir_path: &str) -> Result<Vec<RemoteEntry>> {
-        let sftp = self.open_sftp().await?;
-        let read_dir = sftp
-            .read_dir(dir_path)
-            .await
-            .with_context(|| format!("读取远程目录 `{dir_path}` 失败"))?;
+        let sftp = self.get_or_open_sftp().await?;
+        let read_dir = match sftp.read_dir(dir_path).await {
+            Ok(rd) => rd,
+            Err(_) => {
+                self.invalidate_cached_sftp().await;
+                let fresh = self.get_or_open_sftp().await?;
+                fresh
+                    .read_dir(dir_path)
+                    .await
+                    .with_context(|| format!("读取远程目录 `{dir_path}` 失败"))?
+            }
+        };
 
+        let sftp_for_stat = self.get_or_open_sftp().await?;
         let mut items = Vec::new();
         for entry in read_dir {
             let name = entry.file_name();
             if name == "." || name == ".." {
                 continue;
             }
+            let full_path = join_remote_path(dir_path, &name);
             let meta = entry.metadata();
             let kind = if meta.is_dir() {
                 RemoteEntryKind::Directory
@@ -136,46 +192,58 @@ impl SftpService {
             } else {
                 RemoteEntryKind::Other
             };
+
+            let mut points_to_dir = false;
+            let mut size_bytes = meta.size;
+            if kind == RemoteEntryKind::Symlink
+                && let Ok(target_meta) = sftp_for_stat.metadata(&full_path).await
+            {
+                points_to_dir = target_meta.is_dir();
+                if !points_to_dir {
+                    size_bytes = target_meta.size;
+                }
+            }
+
             let permissions = meta
                 .permissions
                 .map(|p| FilePermissions::from(p).to_string())
                 .unwrap_or_default();
             items.push(RemoteEntry {
-                path: join_remote_path(dir_path, &name),
+                path: full_path,
                 name,
                 kind,
-                size_bytes: meta.size,
+                points_to_dir,
+                size_bytes,
                 modified_unix: meta.mtime.map(u64::from),
                 permissions,
             });
         }
 
         items.sort_by(|a, b| {
-            b.kind
-                .is_dir()
-                .cmp(&a.kind.is_dir())
+            b.is_navigable_dir()
+                .cmp(&a.is_navigable_dir())
                 .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
         });
         Ok(items)
     }
 
     pub async fn mkdir(&self, remote_path: &str) -> Result<()> {
-        let sftp = self.open_sftp().await?;
+        let sftp = self.get_or_open_sftp().await?;
         sftp.create_dir(remote_path)
             .await
             .with_context(|| format!("创建目录 `{remote_path}` 失败"))
     }
 
     pub async fn rename(&self, from: &str, to: &str) -> Result<()> {
-        let sftp = self.open_sftp().await?;
+        let sftp = self.get_or_open_sftp().await?;
         sftp.rename(from, to)
             .await
             .with_context(|| format!("重命名 `{from}` -> `{to}` 失败"))
     }
 
-    pub async fn remove(&self, remote_path: &str, is_dir: bool) -> Result<()> {
-        let sftp = self.open_sftp().await?;
-        if is_dir {
+    pub async fn remove(&self, remote_path: &str, is_real_dir: bool) -> Result<()> {
+        let sftp = self.get_or_open_sftp().await?;
+        if is_real_dir {
             sftp.remove_dir(remote_path)
                 .await
                 .with_context(|| format!("删除远程目录 `{remote_path}` 失败（请确认目录为空）"))
@@ -187,7 +255,7 @@ impl SftpService {
     }
 
     pub async fn read_text(&self, remote_path: &str) -> Result<String> {
-        let sftp = self.open_sftp().await?;
+        let sftp = self.get_or_open_sftp().await?;
         let meta = sftp
             .metadata(remote_path)
             .await
@@ -208,47 +276,107 @@ impl SftpService {
     }
 
     pub async fn write_text(&self, remote_path: &str, content: String) -> Result<()> {
-        let sftp = self.open_sftp().await?;
+        let sftp = self.get_or_open_sftp().await?;
         let mut file = sftp
             .create(remote_path)
             .await
             .with_context(|| format!("打开远程文件 `{remote_path}` 写入失败"))?;
         file.write_all(content.as_bytes()).await?;
         file.flush().await?;
+        file.shutdown().await?;
         Ok(())
     }
 
-    pub async fn upload_local_file(&self, local_path: &Path, remote_path: &str) -> Result<u64> {
-        let data = tokio::fs::read(local_path)
+    /// Streams a local file to `remote_path` in 64 KiB chunks using a dedicated SFTP session
+    /// so concurrent uploads do not block interactive directory browsing.
+    pub async fn upload_local_file_with_progress<F>(
+        &self,
+        local_path: &Path,
+        remote_path: &str,
+        mut on_progress: F,
+    ) -> Result<u64>
+    where
+        F: FnMut(u64, u64) + Send,
+    {
+        let meta = tokio::fs::metadata(local_path)
             .await
-            .with_context(|| format!("读取本地文件 `{}` 失败", local_path.display()))?;
-        let total = data.len() as u64;
-        let sftp = self.open_sftp().await?;
+            .with_context(|| format!("读取本地文件属性 `{}` 失败", local_path.display()))?;
+        let total = meta.len();
+        let mut local_file = tokio::fs::File::open(local_path)
+            .await
+            .with_context(|| format!("打开本地文件 `{}` 失败", local_path.display()))?;
+
+        let sftp = self.create_new_sftp().await?;
         let mut remote_file = sftp
             .create(remote_path)
             .await
             .with_context(|| format!("创建远程文件 `{remote_path}` 失败"))?;
-        for chunk in data.chunks(64 * 1024) {
-            remote_file.write_all(chunk).await?;
+
+        on_progress(0, total);
+        let mut buf = vec![0u8; STREAM_CHUNK_BYTES];
+        let mut written = 0u64;
+        loop {
+            let n = local_file.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            remote_file.write_all(&buf[..n]).await?;
+            written += n as u64;
+            on_progress(written, total);
         }
         remote_file.flush().await?;
-        Ok(total)
+        remote_file.shutdown().await?;
+        Ok(written)
     }
 
-    pub async fn download_to_local(&self, remote_path: &str, local_path: &Path) -> Result<u64> {
-        let sftp = self.open_sftp().await?;
-        let bytes = sftp
-            .read(remote_path)
+    /// Streams a remote file to `local_path` in 64 KiB chunks with live progress callbacks.
+    pub async fn download_to_local_with_progress<F>(
+        &self,
+        remote_path: &str,
+        local_path: &Path,
+        mut on_progress: F,
+    ) -> Result<u64>
+    where
+        F: FnMut(u64, Option<u64>) + Send,
+    {
+        let sftp = self.create_new_sftp().await?;
+        let total = sftp.metadata(remote_path).await.ok().and_then(|m| m.size);
+        let mut remote_file = sftp
+            .open(remote_path)
             .await
-            .with_context(|| format!("下载远程文件 `{remote_path}` 失败"))?;
+            .with_context(|| format!("打开远程文件 `{remote_path}` 失败"))?;
+
         if let Some(parent) = local_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
-        let total = bytes.len() as u64;
-        tokio::fs::write(local_path, bytes)
+        let mut local_file = tokio::fs::File::create(local_path)
             .await
-            .with_context(|| format!("写入本地文件 `{}` 失败", local_path.display()))?;
-        Ok(total)
+            .with_context(|| format!("创建本地文件 `{}` 失败", local_path.display()))?;
+
+        on_progress(0, total);
+        let mut buf = vec![0u8; STREAM_CHUNK_BYTES];
+        let mut downloaded = 0u64;
+        loop {
+            let n = remote_file.read(&mut buf).await?;
+            if n == 0 {
+                break;
+            }
+            local_file.write_all(&buf[..n]).await?;
+            downloaded += n as u64;
+            on_progress(downloaded, total);
+        }
+        local_file.flush().await?;
+        Ok(downloaded)
+    }
+
+    pub async fn upload_local_file(&self, local_path: &Path, remote_path: &str) -> Result<u64> {
+        self.upload_local_file_with_progress(local_path, remote_path, |_, _| {})
+            .await
+    }
+
+    pub async fn download_to_local(&self, remote_path: &str, local_path: &Path) -> Result<u64> {
+        self.download_to_local_with_progress(remote_path, local_path, |_, _| {})
+            .await
     }
 }
 

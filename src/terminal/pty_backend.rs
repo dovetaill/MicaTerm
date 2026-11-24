@@ -1,6 +1,9 @@
-//! Cross-platform local PTY shell backend powered by `portable-pty`.
+//! Cross-platform local PTY shell backend powered by `portable-pty`,
+//! with automatic OSC 133 + OSC 7 shell integration for local Bash.
 
 use std::env;
+#[cfg(any(target_os = "windows", test))]
+use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::thread;
@@ -50,8 +53,24 @@ impl LocalPtyBackend {
         {
             cmd.arg("-l");
         }
+        #[cfg(target_os = "windows")]
+        if shell.file_name().is_some_and(|name| {
+            name.eq_ignore_ascii_case("pwsh.exe") || name.eq_ignore_ascii_case("powershell.exe")
+        }) {
+            cmd.arg("-NoLogo");
+        }
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
+        cmd.env("TERM_PROGRAM", "mica-term");
+
+        // Emit OSC 133 exit code + prompt start + OSC 7 CWD in local bash sessions
+        if shell.to_string_lossy().ends_with("bash") && env::var_os("PROMPT_COMMAND").is_none() {
+            cmd.env(
+                "PROMPT_COMMAND",
+                r#"__mica_ec=$?; printf '\033]133;D;%s\007\033]7;file://%s%s\007\033]133;A\007' "$__mica_ec" "${HOSTNAME:-localhost}" "$PWD""#,
+            );
+        }
+
         if let Some(cwd) = working_dir
             .or_else(|| directories::UserDirs::new().map(|u| u.home_dir().to_path_buf()))
             && cwd.is_dir()
@@ -62,7 +81,7 @@ impl LocalPtyBackend {
         let mut child = pair
             .slave
             .spawn_command(cmd)
-            .with_context(|| format!("启动本地 Shell `{shell}` 失败"))?;
+            .with_context(|| format!("启动本地 Shell `{}` 失败", shell.display()))?;
         let child_killer = child.clone_killer();
         drop(pair.slave);
 
@@ -74,7 +93,6 @@ impl LocalPtyBackend {
 
         let (write_tx, mut write_rx) = mpsc::unbounded_channel::<PtyWriteCmd>();
 
-        // Writer thread
         thread::Builder::new()
             .name("mica-pty-writer".into())
             .spawn(move || {
@@ -90,7 +108,6 @@ impl LocalPtyBackend {
                 }
             })?;
 
-        // Reader thread
         let reader_tx = event_tx.clone();
         thread::Builder::new()
             .name("mica-pty-reader".into())
@@ -151,37 +168,85 @@ impl Drop for LocalPtyBackend {
     }
 }
 
-fn detect_default_shell() -> String {
+fn detect_default_shell() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
-        env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".to_string())
+        windows_default_shell(
+            &env::var_os("PATH").unwrap_or_default(),
+            env::var_os("SystemRoot").as_deref(),
+            env::var_os("COMSPEC").as_deref(),
+        )
     }
     #[cfg(not(target_os = "windows"))]
     {
         if let Ok(shell) = env::var("SHELL")
             && !shell.trim().is_empty()
         {
-            return shell;
+            return shell.into();
         }
         if std::path::Path::new("/bin/bash").exists() {
-            "/bin/bash".to_string()
+            "/bin/bash".into()
         } else {
-            "/bin/sh".to_string()
+            "/bin/sh".into()
         }
     }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn windows_default_shell(
+    path: &OsStr,
+    system_root: Option<&OsStr>,
+    comspec: Option<&OsStr>,
+) -> PathBuf {
+    let on_path = ["pwsh.exe", "powershell.exe"].into_iter().flat_map(|name| {
+        env::split_paths(path)
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .map(move |dir| dir.join(name))
+    });
+    let inbox = system_root
+        .map(|root| PathBuf::from(root).join("System32/WindowsPowerShell/v1.0/powershell.exe"));
+    on_path
+        .chain(inbox)
+        .find(|exe| exe.is_file())
+        .or_else(|| comspec.filter(|shell| !shell.is_empty()).map(PathBuf::from))
+        .unwrap_or_else(|| "cmd.exe".into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::terminal::{AlacrittyTerminalEngine, TerminalPalette};
+    use crate::terminal::{AlacrittyTerminalEngine, SemanticOptions, TerminalPalette};
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn windows_shell_prefers_pwsh_then_powershell_then_comspec() {
+        let root = env::temp_dir().join(format!("mica-gpui-shell-{}", uuid::Uuid::new_v4()));
+        let bin = root.join("bin");
+        let inbox = root.join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(inbox.parent().unwrap()).unwrap();
+        let path = env::join_paths([&root, &bin]).unwrap();
+        let comspec = root.join("custom-cmd.exe");
+        let detect =
+            || windows_default_shell(&path, Some(root.as_os_str()), Some(comspec.as_os_str()));
+
+        assert_eq!(
+            windows_default_shell(&path, None, None),
+            PathBuf::from("cmd.exe")
+        );
+        assert_eq!(detect(), comspec);
+        for candidate in [inbox, root.join("powershell.exe"), bin.join("pwsh.exe")] {
+            std::fs::write(&candidate, []).unwrap();
+            assert_eq!(detect(), candidate);
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn spawns_local_pty_and_renders_command_output() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let pty = LocalPtyBackend::spawn(24, 80, None, tx).expect("spawn local pty");
-        pty.write(b"printf 'MICA_GPUI_OK\\n'\r".to_vec());
+        pty.write(b"echo MICA_GPUI_OK\r".to_vec());
 
         let mut engine = AlacrittyTerminalEngine::new(24, 80, 500);
         let deadline = Instant::now() + Duration::from_secs(4);
@@ -191,14 +256,16 @@ mod tests {
             if let Ok(ev) = rx.try_recv() {
                 if let LocalPtyEvent::Output(bytes) = ev {
                     let _ = engine.feed_bytes(&bytes);
-                    let snap = engine.snapshot(&TerminalPalette::dark(), true);
-                    let text_dump: String = snap
-                        .lines
-                        .iter()
-                        .flat_map(|row| row.text_runs.iter().map(|r| r.text.as_str()))
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    if text_dump.contains("MICA_GPUI_OK") {
+                    let snap = engine.snapshot(
+                        &TerminalPalette::dark(),
+                        true,
+                        SemanticOptions::default(),
+                    );
+                    if snap.lines.iter().any(|row| {
+                        row.text_runs
+                            .iter()
+                            .any(|run| run.start_col == 0 && run.text == "MICA_GPUI_OK")
+                    }) {
                         matched = true;
                         break;
                     }

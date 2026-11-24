@@ -12,6 +12,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 
+use crate::domain::expand_tilde_path;
 use crate::domain::models::{ResolvedAuthMaterial, ResolvedProxyHop, ResolvedSshConfig};
 use crate::sftp::SftpService;
 use crate::ssh::known_hosts::{KnownHostStatus, KnownHostsStore};
@@ -37,6 +38,7 @@ pub enum SshSessionEvent {
     Connected {
         sftp: SftpService,
         initial_dir: String,
+        home_dir: Option<String>,
     },
     Output(Vec<u8>),
     Disconnected(Option<String>),
@@ -125,9 +127,17 @@ impl SshClientSession {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let tx_err = event_tx.clone();
         rt.spawn(async move {
+            tracing::info!(
+                host = %config.host,
+                port = config.port,
+                user = %config.user,
+                proxy_hops = config.proxy_hops.len(),
+                "后台任务开始建立 SSH 会话"
+            );
             if let Err(err) =
                 run_ssh_session(config, known_hosts, rows, cols, event_tx, cmd_rx).await
             {
+                tracing::error!(error = ?err, "SSH 会话建立或运行失败");
                 let _ = tx_err.send(SshSessionEvent::Error(format!("{err:#}")));
             }
         });
@@ -282,6 +292,7 @@ async fn run_ssh_session(
         "正在进行 SSH 握手与认证 {}@{}...",
         config.user, config.host
     )));
+    tracing::debug!(host = %config.host, port = config.port, "TCP 流就绪，开始 russh 协议握手");
     let handler = SshClientHandler {
         host: config.host.clone(),
         port: config.port,
@@ -291,7 +302,9 @@ async fn run_ssh_session(
     let mut handle = client::connect_stream(client_cfg, stream, handler)
         .await
         .with_context(|| format!("SSH 握手失败 `{}:{}`", config.host, config.port))?;
+    tracing::debug!(host = %config.host, user = %config.user, "SSH 密钥交换完成，开始用户身份认证");
     authenticate_ssh(&mut handle, &config).await?;
+    tracing::info!(host = %config.host, user = %config.user, "SSH 用户认证通过，正在打开 PTY 与 SFTP 通道");
 
     let handle = Arc::new(handle);
     let channel = handle
@@ -311,21 +324,25 @@ async fn run_ssh_session(
         .await
         .context("请求远程 PTY 失败")?;
     let _ = channel.set_env(false, "COLORTERM", "truecolor").await;
+    let _ = channel.set_env(false, "TERM_PROGRAM", "mica-term").await;
     channel
         .request_shell(true)
         .await
         .context("启动远程 Shell 失败")?;
 
     let sftp = SftpService::from_ssh_handle(Arc::clone(&handle));
+    let home_dir = sftp.canonicalize(".").await.ok();
     let initial_dir = if !config.default_remote_dir.is_empty() {
         config.default_remote_dir.clone()
     } else {
-        sftp.canonicalize(".")
-            .await
-            .unwrap_or_else(|_| "/".to_string())
+        home_dir.clone().unwrap_or_else(|| "/".to_string())
     };
 
-    let _ = event_tx.send(SshSessionEvent::Connected { sftp, initial_dir });
+    let _ = event_tx.send(SshSessionEvent::Connected {
+        sftp,
+        initial_dir,
+        home_dir,
+    });
 
     let (mut read_half, write_half) = channel.split();
     let mut disconnect_reason: Option<String> = None;
@@ -397,8 +414,9 @@ async fn authenticate_ssh(
             .await
             .context("SSH 密码认证请求失败")?,
         ResolvedAuthMaterial::PrivateKeyPath { path, passphrase } => {
-            let key = keys::load_secret_key(path, passphrase.as_deref())
-                .with_context(|| format!("读取私钥文件 `{path}` 失败"))?;
+            let expanded = expand_tilde_path(path);
+            let key = keys::load_secret_key(&expanded, passphrase.as_deref())
+                .with_context(|| format!("读取私钥文件 `{expanded}` 失败"))?;
             let rsa_hash = handle.best_supported_rsa_hash().await?.flatten();
             handle
                 .authenticate_publickey(
@@ -438,7 +456,7 @@ async fn negotiate_socks5(
     target_host: &str,
     target_port: u16,
 ) -> Result<()> {
-    let has_auth = username.is_some() && password.is_some();
+    let has_auth = username.is_some();
     if has_auth {
         stream.write_all(&[0x05, 0x02, 0x00, 0x02]).await?;
     } else {
@@ -523,7 +541,8 @@ async fn negotiate_http_connect(
         format!("{target_host}:{target_port}")
     };
     let mut req = format!("CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n");
-    if let (Some(u), Some(p)) = (username, password) {
+    if let Some(u) = username {
+        let p = password.unwrap_or_default();
         let auth = base64_encode(format!("{u}:{p}").as_bytes());
         req.push_str(&format!("Proxy-Authorization: Basic {auth}\r\n"));
     }
@@ -538,7 +557,10 @@ async fn negotiate_http_connect(
         buf.push(stream.read_u8().await?);
     }
     let text = String::from_utf8_lossy(&buf);
-    let line = text.lines().next().ok_or_else(|| anyhow!("空的 HTTP 代理响应"))?;
+    let line = text
+        .lines()
+        .next()
+        .ok_or_else(|| anyhow!("空的 HTTP 代理响应"))?;
     let code: u16 = line
         .split_whitespace()
         .nth(1)

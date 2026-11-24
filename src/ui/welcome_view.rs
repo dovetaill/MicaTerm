@@ -1,4 +1,5 @@
-//! Clean Quick-Launch Welcome View shown when no session tabs are open.
+//! macOS Sonoma / Sequoia Quick-Launch Welcome View:
+//! Squircle hero header, Cupertino action cards, and System Settings Inset Grouped host list.
 
 use std::rc::Rc;
 
@@ -11,9 +12,15 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    App, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, RenderOnce,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    AnyElement, App, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
+    RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
+    prelude::FluentBuilder as _, px,
 };
+
+use crate::ui::theme::{macos_env_badge_colors, macos_inset_group, macos_squircle_badge};
+
+type WindowActionFn = Rc<dyn Fn(&mut Window, &mut App)>;
+type HostConnectFn = Rc<dyn Fn(&str, &mut Window, &mut App)>;
 
 #[derive(Clone)]
 pub struct QuickConnectItem {
@@ -26,9 +33,9 @@ pub struct QuickConnectItem {
 #[derive(IntoElement)]
 pub struct WelcomeView {
     quick_hosts: Vec<QuickConnectItem>,
-    on_open_local: Rc<dyn Fn(&mut Window, &mut App)>,
-    on_new_ssh: Rc<dyn Fn(&mut Window, &mut App)>,
-    on_connect_host: Rc<dyn Fn(&str, &mut Window, &mut App)>,
+    on_open_local: WindowActionFn,
+    on_new_ssh: WindowActionFn,
+    on_connect_host: HostConnectFn,
 }
 
 impl WelcomeView {
@@ -47,11 +54,198 @@ impl WelcomeView {
     }
 }
 
+#[inline(never)]
+fn render_action_card(
+    id: &'static str,
+    icon: LucideIcon,
+    tint: gpui_kit::Hsla,
+    title: &'static str,
+    subtitle: &'static str,
+    action: WindowActionFn,
+    cx: &App,
+) -> AnyElement {
+    macos_inset_group(cx)
+        .flex_1()
+        .child(
+            h_flex()
+                .id(id)
+                .p_4()
+                .gap_3p5()
+                .items_center()
+                .justify_between()
+                .cursor_pointer()
+                .hover(|s| s.bg(cx.theme().list_hover))
+                .on_click(move |_, window, cx| action(window, cx))
+                .child(
+                    h_flex()
+                        .min_w_0()
+                        .flex_1()
+                        .gap_3p5()
+                        .items_center()
+                        .child(macos_squircle_badge(icon, tint, 38.0, 9.5))
+                        .child(
+                            v_flex()
+                                .min_w_0()
+                                .flex_1()
+                                .gap_0p5()
+                                .child(
+                                    div()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_sm()
+                                        .text_color(cx.theme().foreground)
+                                        .child(title),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(subtitle),
+                                ),
+                        ),
+                )
+                .child(
+                    Icon::new(LucideIcon::ChevronRight)
+                        .small()
+                        .text_color(cx.theme().muted_foreground),
+                ),
+        )
+        .into_any_element()
+}
+
+#[inline(never)]
+fn render_quick_host_row(
+    item: QuickConnectItem,
+    show_divider: bool,
+    on_connect: HostConnectFn,
+    cx: &App,
+) -> AnyElement {
+    let host_id = item.id.clone();
+    let host_id_btn = item.id.clone();
+    let cb = on_connect.clone();
+    let cb_btn = on_connect;
+
+    let env_pill = (!item.env_tag.is_empty()).then(|| {
+        let (bg, fg) = macos_env_badge_colors(&item.env_tag, cx);
+        div()
+            .px_1p5()
+            .py_0p5()
+            .rounded(px(5.0))
+            .bg(bg)
+            .text_xs()
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(fg)
+            .child(item.env_tag)
+    });
+
+    h_flex()
+        .id(SharedString::from(format!("quick-host-{}", item.id)))
+        .px_3p5()
+        .py_2p5()
+        .justify_between()
+        .items_center()
+        .when(show_divider, |el| {
+            el.border_t_1().border_color(cx.theme().border)
+        })
+        .cursor_pointer()
+        .hover(|s| s.bg(cx.theme().list_hover))
+        .on_click(move |_, window, cx| cb(&host_id, window, cx))
+        .child(
+            h_flex()
+                .min_w_0()
+                .flex_1()
+                .gap_3()
+                .items_center()
+                .child(macos_squircle_badge(
+                    LucideIcon::Server,
+                    cx.theme().primary,
+                    30.0,
+                    7.5,
+                ))
+                .child(
+                    v_flex()
+                        .min_w_0()
+                        .flex_1()
+                        .gap_0p5()
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .text_sm()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(cx.theme().foreground)
+                                        .child(item.name),
+                                )
+                                .children(env_pill),
+                        )
+                        .child(
+                            div()
+                                .truncate()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(item.endpoint),
+                        ),
+                ),
+        )
+        .child(
+            Button::new(SharedString::from(format!("quick-btn-{}", item.id)))
+                .tab_stop(false)
+                .secondary()
+                .xsmall()
+                .label("连接")
+                .on_click(move |_, window, cx| {
+                    cx.stop_propagation();
+                    cb_btn(&host_id_btn, window, cx);
+                }),
+        )
+        .into_any_element()
+}
+
 impl RenderOnce for WelcomeView {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let on_local = self.on_open_local.clone();
-        let on_ssh = self.on_new_ssh.clone();
-        let on_connect = self.on_connect_host.clone();
+        let local_card = render_action_card(
+            "welcome-open-local-card",
+            LucideIcon::Terminal,
+            cx.theme().primary,
+            "本地终端",
+            "启动本机 Shell，内置更纱黑体与 OSC 133 命令块",
+            self.on_open_local,
+            cx,
+        );
+        let ssh_card = render_action_card(
+            "welcome-new-ssh-card",
+            LucideIcon::Server,
+            cx.theme().success,
+            "新建 SSH 连接",
+            "支持密码、密钥库、跳板机与实时 SFTP 文件浏览",
+            self.on_new_ssh,
+            cx,
+        );
+
+        let quick_section = if self.quick_hosts.is_empty() {
+            macos_inset_group(cx)
+                .p_6()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("暂无已保存的服务器。点击上方「新建 SSH 连接」或左侧栏「+」添加你的第一台主机。"),
+                )
+                .into_any_element()
+        } else {
+            let on_connect = self.on_connect_host;
+            let rows: Vec<AnyElement> = self
+                .quick_hosts
+                .into_iter()
+                .enumerate()
+                .map(|(idx, item)| render_quick_host_row(item, idx > 0, on_connect.clone(), cx))
+                .collect();
+            macos_inset_group(cx).children(rows).into_any_element()
+        };
 
         div()
             .size_full()
@@ -62,211 +256,53 @@ impl RenderOnce for WelcomeView {
             .child(
                 v_flex()
                     .w_full()
-                    .max_w(px(720.0))
+                    .max_w(px(680.0))
                     .px_8()
                     .py_12()
-                    .gap_8()
+                    .gap_7()
+                    .child(
+                        h_flex()
+                            .gap_3p5()
+                            .items_center()
+                            .child(macos_squircle_badge(
+                                LucideIcon::Terminal,
+                                cx.theme().primary,
+                                46.0,
+                                11.5,
+                            ))
+                            .child(
+                                v_flex()
+                                    .gap_0p5()
+                                    .child(
+                                        div()
+                                            .text_xl()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(cx.theme().foreground)
+                                            .child("Mica Term"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(
+                                                "轻量流畅、GPU 加速的本地终端与远程 SSH / SFTP 工作台",
+                                            ),
+                                    ),
+                            ),
+                    )
+                    .child(h_flex().gap_3p5().child(local_card).child(ssh_card))
                     .child(
                         v_flex()
                             .gap_2()
                             .child(
-                                h_flex()
-                                    .gap_2p5()
-                                    .items_center()
-                                    .child(
-                                        Icon::new(LucideIcon::Terminal)
-                                            .large()
-                                            .text_color(cx.theme().primary),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xl()
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(cx.theme().foreground)
-                                            .child("Mica Term"),
-                                    ),
-                            )
-                            .child(
                                 div()
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("专注、轻量、GPU 加速的本地终端与远程服务器工作空间"),
-                            ),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_4()
-                            .child(
-                                div()
-                                    .id("welcome-open-local-card")
-                                    .flex_1()
-                                    .p_4()
-                                    .rounded(cx.theme().radius_lg)
-                                    .border_1()
-                                    .border_color(cx.theme().border)
-                                    .bg(cx.theme().secondary.opacity(0.45))
-                                    .cursor_pointer()
-                                    .hover(|s| s.border_color(cx.theme().primary).bg(cx.theme().secondary))
-                                    .on_click(move |_, window, cx| on_local(window, cx))
-                                    .child(
-                                        v_flex()
-                                            .gap_2()
-                                            .child(
-                                                h_flex()
-                                                    .gap_2()
-                                                    .items_center()
-                                                    .child(
-                                                        Icon::new(LucideIcon::Terminal)
-                                                            .text_color(cx.theme().primary),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .font_weight(FontWeight::SEMIBOLD)
-                                                            .text_sm()
-                                                            .text_color(cx.theme().foreground)
-                                                            .child("打开本地终端"),
-                                                    ),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child("启动本机默认 Shell (PTY)，支持多标签与分屏"),
-                                            ),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .id("welcome-new-ssh-card")
-                                    .flex_1()
-                                    .p_4()
-                                    .rounded(cx.theme().radius_lg)
-                                    .border_1()
-                                    .border_color(cx.theme().border)
-                                    .bg(cx.theme().secondary.opacity(0.45))
-                                    .cursor_pointer()
-                                    .hover(|s| s.border_color(cx.theme().primary).bg(cx.theme().secondary))
-                                    .on_click(move |_, window, cx| on_ssh(window, cx))
-                                    .child(
-                                        v_flex()
-                                            .gap_2()
-                                            .child(
-                                                h_flex()
-                                                    .gap_2()
-                                                    .items_center()
-                                                    .child(
-                                                        Icon::new(LucideIcon::Server)
-                                                            .text_color(cx.theme().primary),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .font_weight(FontWeight::SEMIBOLD)
-                                                            .text_sm()
-                                                            .text_color(cx.theme().foreground)
-                                                            .child("新建 SSH 连接"),
-                                                    ),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(cx.theme().muted_foreground)
-                                                    .child("支持密码、私钥、跳板机与联动 SFTP 文件浏览"),
-                                            ),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        v_flex()
-                            .gap_3()
-                            .child(
-                                div()
+                                    .px_1()
                                     .text_xs()
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("快速连接主机"),
+                                    .child("最近与常用主机"),
                             )
-                            .child(if self.quick_hosts.is_empty() {
-                                div()
-                                    .p_5()
-                                    .rounded(cx.theme().radius_lg)
-                                    .border_1()
-                                    .border_color(cx.theme().border)
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("暂无已保存的 SSH 主机。点击上方「新建 SSH 连接」或左侧栏「+」添加你的第一台服务器。")
-                                    .into_any_element()
-                            } else {
-                                v_flex()
-                                    .gap_2()
-                                    .children(self.quick_hosts.into_iter().map(|item| {
-                                        let host_id = item.id.clone();
-                                        let cb = on_connect.clone();
-                                        h_flex()
-                                            .id(SharedString::from(format!("quick-host-{}", item.id)))
-                                            .px_3p5()
-                                            .py_2p5()
-                                            .justify_between()
-                                            .items_center()
-                                            .rounded(cx.theme().radius)
-                                            .border_1()
-                                            .border_color(cx.theme().border)
-                                            .cursor_pointer()
-                                            .hover(|s| s.bg(cx.theme().list_hover))
-                                            .on_click(move |_, window, cx| cb(&host_id, window, cx))
-                                            .child(
-                                                h_flex()
-                                                    .gap_3()
-                                                    .items_center()
-                                                    .child(
-                                                        Icon::new(LucideIcon::Server)
-                                                            .small()
-                                                            .text_color(cx.theme().muted_foreground),
-                                                    )
-                                                    .child(
-                                                        v_flex()
-                                                            .gap_0p5()
-                                                            .child(
-                                                                h_flex()
-                                                                    .gap_2()
-                                                                    .items_center()
-                                                                    .child(
-                                                                        div()
-                                                                            .text_sm()
-                                                                            .font_weight(FontWeight::MEDIUM)
-                                                                            .text_color(cx.theme().foreground)
-                                                                            .child(item.name),
-                                                                    )
-                                                                    .children((!item.env_tag.is_empty()).then(|| {
-                                                                        div()
-                                                                            .px_1p5()
-                                                                            .py_0p5()
-                                                                            .rounded(cx.theme().radius)
-                                                                            .bg(cx.theme().secondary)
-                                                                            .text_xs()
-                                                                            .text_color(cx.theme().secondary_foreground)
-                                                                            .child(item.env_tag)
-                                                                    })),
-                                                            )
-                                                            .child(
-                                                                div()
-                                                                    .text_xs()
-                                                                    .text_color(cx.theme().muted_foreground)
-                                                                    .child(item.endpoint),
-                                                            ),
-                                                    ),
-                                            )
-                                            .child(
-                                                Button::new(SharedString::from(format!(
-                                                    "quick-btn-{}",
-                                                    item.id
-                                                )))
-                                                .ghost()
-                                                .xsmall()
-                                                .label("连接"),
-                                            )
-                                    }))
-                                    .into_any_element()
-                            }),
+                            .child(quick_section),
                     ),
             )
     }

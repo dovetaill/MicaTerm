@@ -9,7 +9,10 @@ use directories::ProjectDirs;
 use redb::{Database, TableDefinition};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use crate::domain::{AppSettings, HostTree, KeychainEntry, SnippetItem};
+use crate::domain::{
+    AppSettings, BUNDLED_SARASA_FONT_FAMILY, HostTree, KeychainEntry, SnippetItem,
+    default_terminal_font_size, is_legacy_system_default_font,
+};
 
 const KV_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("mica_workspace_kv");
 
@@ -24,8 +27,12 @@ pub struct AppPaths {
     pub root_dir: PathBuf,
     pub db_path: PathBuf,
     pub secrets_dir: PathBuf,
+    pub syntaxes_dir: PathBuf,
     pub known_hosts_path: PathBuf,
     pub downloads_dir: PathBuf,
+    pub logs_dir: PathBuf,
+    pub runtime_log_path: PathBuf,
+    pub crash_log_path: PathBuf,
 }
 
 impl AppPaths {
@@ -46,19 +53,26 @@ impl AppPaths {
     pub fn from_root(root_dir: impl AsRef<Path>) -> Result<Self> {
         let root_dir = root_dir.as_ref().to_path_buf();
         let secrets_dir = root_dir.join("secrets");
+        let syntaxes_dir = root_dir.join("syntaxes");
+        let logs_dir = root_dir.join("logs");
         let downloads_dir = directories::UserDirs::new()
             .and_then(|u| u.download_dir().map(Path::to_path_buf))
             .unwrap_or_else(|| root_dir.join("downloads"));
         fs::create_dir_all(&root_dir)
             .with_context(|| format!("创建数据目录失败 `{}`", root_dir.display()))?;
         fs::create_dir_all(&secrets_dir)?;
+        fs::create_dir_all(&logs_dir)?;
 
         Ok(Self {
             db_path: root_dir.join("workspace.redb"),
             known_hosts_path: root_dir.join("known_hosts"),
+            runtime_log_path: logs_dir.join("mica-term.log"),
+            crash_log_path: logs_dir.join("crash.log"),
             root_dir,
             secrets_dir,
+            syntaxes_dir,
             downloads_dir,
+            logs_dir,
         })
     }
 }
@@ -110,7 +124,26 @@ impl WorkspaceStore {
             None => default_starter_snippets(),
         };
         let recent_host_ids: Vec<String> = self.read_json(KEY_RECENT_HOSTS)?.unwrap_or_default();
-        let settings: AppSettings = self.read_json(KEY_SETTINGS)?.unwrap_or_default();
+        let mut settings: AppSettings = self.read_json(KEY_SETTINGS)?.unwrap_or_default();
+        let mut migrated = false;
+        if !settings.font_migrated_sarasa {
+            if is_legacy_system_default_font(&settings.font_family) {
+                settings.font_family = BUNDLED_SARASA_FONT_FAMILY.to_string();
+            }
+            settings.font_migrated_sarasa = true;
+            migrated = true;
+        }
+        if !settings.typography_v2_migrated {
+            if cfg!(target_os = "windows") && (settings.font_size - 14.0).abs() < f32::EPSILON {
+                settings.font_size = default_terminal_font_size();
+            }
+            settings.typography_v2_migrated = true;
+            migrated = true;
+        }
+        if migrated {
+            self.save_settings(&settings)
+                .context("保存工作区设置迁移失败")?;
+        }
 
         Ok(WorkspaceSnapshot {
             hosts,
@@ -165,16 +198,59 @@ impl WorkspaceStore {
 
 fn default_starter_snippets() -> Vec<SnippetItem> {
     vec![
-        SnippetItem::new("系统资源概览", "常用诊断", "uname -a && uptime && df -h", true),
+        SnippetItem::new(
+            "系统资源概览",
+            "常用诊断",
+            "uname -a && uptime && df -h",
+            true,
+        ),
         SnippetItem::new("查看监听端口", "网络排查", "ss -tulnp", true),
-        SnippetItem::new("Docker 容器状态", "容器运维", "docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'", true),
+        SnippetItem::new(
+            "Docker 容器状态",
+            "容器运维",
+            "docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'",
+            true,
+        ),
     ]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::HostNode;
+    use crate::domain::{DoubleClickAction, HostNode, ShortcutAction, ShortcutChord, ShortcutConfig};
+    use gpui_kit::Keystroke;
+
+    #[test]
+    fn legacy_font_size_migration_only_updates_the_old_default_once() {
+        let dir = std::env::temp_dir().join(format!("mica-gpui-store-{}", uuid::Uuid::new_v4()));
+        let store = WorkspaceStore::open(dir.join("workspace.redb")).unwrap();
+        for (size, expected) in [(14.0, default_terminal_font_size()), (18.0, 18.0)] {
+            let mut legacy = serde_json::to_value(AppSettings::default()).unwrap();
+            legacy
+                .as_object_mut()
+                .unwrap()
+                .remove("typography_v2_migrated");
+            legacy["font_size"] = size.into();
+            legacy.as_object_mut().unwrap().remove("double_click_action");
+            legacy.as_object_mut().unwrap().remove("shortcuts");
+            store.write_json(KEY_SETTINGS, &legacy).unwrap();
+
+            let settings = store.load_snapshot().unwrap().settings;
+            assert_eq!(settings.font_size, expected);
+            assert!(settings.typography_v2_migrated);
+            assert_eq!(settings.double_click_action, DoubleClickAction::SelectWord);
+            assert_eq!(settings.shortcuts, ShortcutConfig::default());
+            assert_eq!(store.read_json(KEY_SETTINGS).unwrap(), Some(settings));
+        }
+        let settings = AppSettings {
+            font_size: 14.0,
+            ..Default::default()
+        };
+        store.save_settings(&settings).unwrap();
+        assert_eq!(store.load_snapshot().unwrap().settings, settings);
+        drop(store);
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn store_persists_and_reloads_snapshot() {
@@ -186,8 +262,14 @@ mod tests {
         tree.upsert(HostNode::new_folder("Dev", None));
         store.save_hosts(&tree).unwrap();
 
-        let mut settings = AppSettings::default();
-        settings.font_size = 16.0;
+        let mut settings = AppSettings {
+            font_size: 16.0,
+            double_click_action: DoubleClickAction::Paste,
+            ..Default::default()
+        };
+        let custom = ShortcutChord::try_record(&Keystroke::parse("alt-n").unwrap()).unwrap();
+        settings.shortcuts.set(ShortcutAction::NewLocalTab, Some(custom.clone()));
+        settings.shortcuts.set(ShortcutAction::Copy, None);
         store.save_settings(&settings).unwrap();
 
         drop(store);
@@ -196,8 +278,17 @@ mod tests {
         let snap = reopened.load_snapshot().unwrap();
         assert_eq!(snap.hosts.nodes.len(), 1);
         assert_eq!(snap.settings.font_size, 16.0);
+        assert_eq!(snap.settings.font_family, BUNDLED_SARASA_FONT_FAMILY);
+        assert_eq!(snap.settings.double_click_action, DoubleClickAction::Paste);
+        assert_eq!(
+            snap.settings.shortcuts.get(ShortcutAction::NewLocalTab),
+            Some(custom)
+        );
+        assert!(snap.settings.shortcuts.is_customized(ShortcutAction::Copy));
+        assert_eq!(snap.settings.shortcuts.get(ShortcutAction::Copy), None);
         assert_eq!(snap.snippets.len(), 3);
 
-        let _ = fs::remove_dir_all(&dir);
+        drop(reopened);
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

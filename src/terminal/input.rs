@@ -25,6 +25,9 @@ pub fn encode_keystroke(ks: &Keystroke, mode: TermMode) -> Option<Vec<u8>> {
             return Some(b"\r".to_vec());
         }
         "tab" => {
+            if mods.control || mods.alt {
+                return None;
+            }
             if mods.shift {
                 return Some(b"\x1b[Z".to_vec());
             }
@@ -74,14 +77,18 @@ pub fn encode_keystroke(ks: &Keystroke, mode: TermMode) -> Option<Vec<u8>> {
         _ => {}
     }
 
-    // Control + ASCII key combinations (Ctrl+A .. Ctrl+Z, Ctrl+[, Ctrl+\, Ctrl+], Ctrl+_, Ctrl+/)
-    if mods.control && !mods.shift {
-        if let Some(ctrl_byte) = control_byte_for_key(key) {
-            if mods.alt {
-                return Some(vec![0x1b, ctrl_byte]);
-            }
-            return Some(vec![ctrl_byte]);
+    // Control + ASCII key combinations (including shifted punctuation like Ctrl+^ / Ctrl+_ / Ctrl+@)
+    if mods.control
+        && (!mods.shift || !key.as_bytes().first().is_some_and(u8::is_ascii_alphabetic))
+        && let Some(ctrl_byte) = control_byte_for_key(key)
+    {
+        if mods.alt {
+            return Some(vec![0x1b, ctrl_byte]);
         }
+        return Some(vec![ctrl_byte]);
+    }
+    if mods.control {
+        return None;
     }
 
     // Printable text from `key_char` or single-character `key`
@@ -105,7 +112,6 @@ pub fn encode_keystroke(ks: &Keystroke, mode: TermMode) -> Option<Vec<u8>> {
 
 pub fn encode_paste(text: &str, mode: TermMode) -> Vec<u8> {
     if mode.contains(TermMode::BRACKETED_PASTE) {
-        // Strip accidental closing bracketed-paste escape sequences for paste safety
         let sanitized = text.replace("\x1b[201~", "");
         let mut out = Vec::with_capacity(sanitized.len() + 12);
         out.extend_from_slice(b"\x1b[200~");
@@ -258,7 +264,7 @@ fn control_byte_for_key(key: &str) -> Option<u8> {
         b'\\' | b'4' => Some(0x1c),
         b']' | b'5' => Some(0x1d),
         b'^' | b'6' => Some(0x1e),
-        b'_' | b'/' | b'7' => Some(0x1f),
+        b'_' | b'-' | b'/' | b'7' => Some(0x1f),
         b'?' | b'8' => Some(0x7f),
         _ => None,
     }
@@ -267,6 +273,31 @@ fn control_byte_for_key(key: &str) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn distinguishes_terminal_input_from_workspace_shortcuts() {
+        for (shortcut, expected) in [
+            ("tab", Some(&b"\t"[..])),
+            ("shift-tab", Some(&b"\x1b[Z"[..])),
+            ("ctrl-tab", None),
+            ("ctrl-shift-tab", None),
+            ("alt-tab", None),
+            ("alt-1", Some(&b"\x1b1"[..])),
+            ("alt-n", Some(&b"\x1bn"[..])),
+            ("ctrl-b", Some(&b"\x02"[..])),
+            ("ctrl-_", Some(&b"\x1f"[..])),
+            ("ctrl-shift--", Some(&b"\x1f"[..])),
+            ("ctrl-shift-t", None),
+            ("ctrl-shift-t->T", None),
+        ] {
+            let key = Keystroke::parse(shortcut).unwrap();
+            assert_eq!(
+                encode_keystroke(&key, TermMode::NONE).as_deref(),
+                expected,
+                "{shortcut}"
+            );
+        }
+    }
 
     #[test]
     fn encodes_arrows_and_ctrl_keys_and_bracketed_paste() {
@@ -289,7 +320,10 @@ mod tests {
             key: "c".into(),
             key_char: None,
         };
-        assert_eq!(encode_keystroke(&ks_ctrl_c, TermMode::NONE).unwrap(), vec![0x03]);
+        assert_eq!(
+            encode_keystroke(&ks_ctrl_c, TermMode::NONE).unwrap(),
+            vec![0x03]
+        );
 
         let pasted = encode_paste("echo hi", TermMode::BRACKETED_PASTE);
         assert_eq!(pasted, b"\x1b[200~echo hi\x1b[201~");

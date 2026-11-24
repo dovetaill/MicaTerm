@@ -1,0 +1,4 @@
+[env]
+# Use OS CSPRNG (Windows BCryptGenRandom/ProcessPrng, macOS/Linux getrandom) instead of
+# AWS-LC's JENT_FORCE_FIPS CPU jitter timer, which calls C abort() on VMs / Windows 11 VBS / Hyper-V.
+AWS_LC_SYS_NO_JITTER_ENTROPY = "1"

@@ -14,14 +14,15 @@ use crate::sftp::SftpService;
 use crate::ssh::{KnownHostsStore, SshClientSession, SshSessionEvent};
 use crate::terminal::{
     AlacrittyTerminalEngine, EngineSideEffect, LocalPtyBackend, LocalPtyEvent, MouseReportKind,
-    TerminalPalette, TerminalRenderSnapshot, encode_keystroke, encode_mouse_report, encode_paste,
+    SemanticOptions, TerminalPalette, TerminalRenderSnapshot, encode_keystroke,
+    encode_mouse_report, encode_paste,
 };
 
 #[derive(Clone)]
 pub enum SessionKind {
     LocalShell,
     Ssh {
-        config: ResolvedSshConfig,
+        config: Box<ResolvedSshConfig>,
         known_hosts: KnownHostsStore,
     },
 }
@@ -115,7 +116,7 @@ impl TerminalSessionEntity {
             id: uuid::Uuid::new_v4().to_string(),
             title,
             kind: SessionKind::Ssh {
-                config,
+                config: Box::new(config),
                 known_hosts,
             },
             phase: SessionPhase::Connecting("正在初始化 SSH 会话...".into()),
@@ -136,6 +137,10 @@ impl TerminalSessionEntity {
         matches!(self.kind, SessionKind::Ssh { .. })
     }
 
+    pub fn viewport_rows(&self) -> usize {
+        self.engine.dimensions().0
+    }
+
     pub fn sftp_service(&self) -> Option<SftpService> {
         self.sftp.clone()
     }
@@ -147,7 +152,9 @@ impl TerminalSessionEntity {
     pub fn endpoint_subtitle(&self) -> String {
         match &self.kind {
             SessionKind::LocalShell => "本地 Shell".to_string(),
-            SessionKind::Ssh { config, .. } => format!("{}@{}:{}", config.user, config.host, config.port),
+            SessionKind::Ssh { config, .. } => {
+                format!("{}@{}:{}", config.user, config.host, config.port)
+            }
         }
     }
 
@@ -168,7 +175,8 @@ impl TerminalSessionEntity {
             if trust {
                 self.phase = SessionPhase::Connecting("已信任主机密钥，继续认证中...".into());
             } else {
-                self.phase = SessionPhase::Disconnected(Some("已取消连接（拒绝未知主机密钥）".into()));
+                self.phase =
+                    SessionPhase::Disconnected(Some("已取消连接（拒绝未知主机密钥）".into()));
             }
             cx.emit(SessionEntityEvent::PhaseChanged);
             cx.notify();
@@ -198,7 +206,7 @@ impl TerminalSessionEntity {
                 let (tx, rx) = mpsc::unbounded_channel::<SshSessionEvent>();
                 let ssh = SshClientSession::connect_in_runtime(
                     &self.tokio_handle,
-                    config,
+                    *config,
                     known_hosts,
                     rows as u16,
                     cols as u16,
@@ -230,7 +238,6 @@ impl TerminalSessionEntity {
 
         cx.spawn(async move |weak, cx| {
             while wake_rx.recv().await.is_ok() {
-                // Coalesce high-throughput bursts (~4ms) for silky 120fps rendering
                 cx.background_executor()
                     .timer(Duration::from_millis(4))
                     .await;
@@ -308,8 +315,14 @@ impl TerminalSessionEntity {
                                 });
                                 cx.emit(SessionEntityEvent::PhaseChanged);
                             }
-                            SshSessionEvent::Connected { sftp, initial_dir } => {
+                            SshSessionEvent::Connected {
+                                sftp,
+                                initial_dir,
+                                home_dir,
+                            } => {
+                                tracing::info!(session_id = %this.id, initial_dir = %initial_dir, "SSH 终端会话已进入 Connected 状态");
                                 this.phase = SessionPhase::Connected;
+                                this.engine.set_remote_home_dir(home_dir);
                                 this.sftp = Some(sftp.clone());
                                 this.remote_cwd = Some(initial_dir.clone());
                                 cx.emit(SessionEntityEvent::RemoteConnected { sftp, initial_dir });
@@ -319,11 +332,13 @@ impl TerminalSessionEntity {
                                 this.apply_output_bytes(&bytes, cx);
                             }
                             SshSessionEvent::Disconnected(reason) => {
+                                tracing::info!(session_id = %this.id, ?reason, "SSH 终端会话已断开");
                                 this.sftp = None;
                                 this.phase = SessionPhase::Disconnected(reason);
                                 cx.emit(SessionEntityEvent::PhaseChanged);
                             }
                             SshSessionEvent::Error(err) => {
+                                tracing::warn!(session_id = %this.id, error = %err, "SSH 终端会话错误");
                                 this.sftp = None;
                                 this.phase = SessionPhase::Error(err);
                                 cx.emit(SessionEntityEvent::PhaseChanged);
@@ -346,7 +361,8 @@ impl TerminalSessionEntity {
             match effect {
                 EngineSideEffect::PtyReply(reply) => self.write_raw(reply),
                 EngineSideEffect::TitleChanged(new_title) => {
-                    if !new_title.trim().is_empty() && matches!(self.kind, SessionKind::LocalShell) {
+                    if !new_title.trim().is_empty() && matches!(self.kind, SessionKind::LocalShell)
+                    {
                         self.title = new_title.trim().to_string();
                         cx.emit(SessionEntityEvent::TitleChanged(self.title.clone()));
                     }
@@ -369,6 +385,18 @@ impl TerminalSessionEntity {
             ActiveBackend::Ssh(ssh) => ssh.write(bytes),
             ActiveBackend::None => {}
         }
+    }
+
+    pub fn send_ime_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        if text.is_empty() || !matches!(self.phase, SessionPhase::Connected) {
+            return;
+        }
+        if self.engine.display_offset() > 0 {
+            self.engine.scroll(Scroll::Bottom);
+        }
+        self.engine.clear_selection();
+        self.write_raw(text.as_bytes().to_vec());
+        cx.notify();
     }
 
     pub fn handle_keystroke(&mut self, ks: &gpui_kit::Keystroke, cx: &mut Context<Self>) -> bool {
@@ -414,7 +442,15 @@ impl TerminalSessionEntity {
     }
 
     pub fn clear_screen(&mut self, cx: &mut Context<Self>) {
+        if self.engine.display_offset() > 0 {
+            self.engine.scroll(Scroll::Bottom);
+        }
         self.write_raw(vec![0x0c]);
+        cx.notify();
+    }
+
+    pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
+        self.engine.clear_selection();
         cx.notify();
     }
 
@@ -435,7 +471,6 @@ impl TerminalSessionEntity {
             && mode.contains(alacritty_terminal::term::TermMode::ALTERNATE_SCROLL)
             && !mode.intersects(alacritty_terminal::term::TermMode::MOUSE_MODE)
         {
-            // Translate scroll wheel in alternate screen (e.g. less / man) into Up/Down cursor keys
             let seq: &[u8] = if delta > 0 {
                 if mode.contains(alacritty_terminal::term::TermMode::APP_CURSOR) {
                     b"\x1bOA"
@@ -464,6 +499,18 @@ impl TerminalSessionEntity {
         cx.notify();
     }
 
+    pub fn jump_command_block(&mut self, previous: bool, cx: &mut Context<Self>) -> bool {
+        let jumped = self.engine.jump_command_block(previous);
+        if jumped {
+            cx.notify();
+        }
+        jumped
+    }
+
+    pub fn url_at(&self, row: usize, col: usize) -> Option<String> {
+        self.engine.url_at(row, col)
+    }
+
     pub fn try_report_mouse(
         &self,
         kind: MouseReportKind,
@@ -472,7 +519,6 @@ impl TerminalSessionEntity {
         mods: gpui_kit::Modifiers,
     ) -> bool {
         if mods.shift {
-            // Shift + mouse bypasses TUI mouse capture to allow local text selection
             return false;
         }
         if let Some(bytes) = encode_mouse_report(kind, col, row, mods, self.engine.mode()) {
@@ -483,12 +529,24 @@ impl TerminalSessionEntity {
         }
     }
 
-    pub fn begin_selection(&mut self, row: usize, col: usize, click_count: usize, cx: &mut Context<Self>) {
+    pub fn begin_selection(
+        &mut self,
+        row: usize,
+        col: usize,
+        click_count: usize,
+        cx: &mut Context<Self>,
+    ) {
         self.engine.start_selection(row, col, click_count);
         cx.notify();
     }
 
-    pub fn update_selection(&mut self, row: usize, col: usize, right_side: bool, cx: &mut Context<Self>) {
+    pub fn update_selection(
+        &mut self,
+        row: usize,
+        col: usize,
+        right_side: bool,
+        cx: &mut Context<Self>,
+    ) {
         let side = if right_side { Side::Right } else { Side::Left };
         self.engine.update_selection(row, col, side);
         cx.notify();
@@ -524,16 +582,17 @@ impl TerminalSessionEntity {
         cx.notify();
     }
 
-    pub fn render_snapshot(&mut self, palette: &TerminalPalette, focused: bool) -> TerminalRenderSnapshot {
-        self.engine.snapshot(palette, focused)
+    pub fn render_snapshot(
+        &mut self,
+        palette: &TerminalPalette,
+        focused: bool,
+        semantic_opts: SemanticOptions,
+    ) -> TerminalRenderSnapshot {
+        self.engine.snapshot(palette, focused, semantic_opts)
     }
 }
 
-/// Bounded 1-slot wakeup channel using std/tokio-independent async channel from GPUI ecosystem.
-fn smol_wakeup_channel() -> (
-    tokio::sync::mpsc::Sender<()>,
-    WakeupReceiver,
-) {
+fn smol_wakeup_channel() -> (tokio::sync::mpsc::Sender<()>, WakeupReceiver) {
     let (tx, rx) = tokio::sync::mpsc::channel(1);
     (tx, WakeupReceiver { rx })
 }

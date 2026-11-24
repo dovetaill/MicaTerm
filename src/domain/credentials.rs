@@ -1,4 +1,4 @@
-//! Secure credential storage: OS keyring with XChaCha20-Poly1305 encrypted file fallback.
+//! Secure credential storage: OS keyring primary store with XChaCha20-Poly1305 encrypted file fallback.
 
 use std::collections::HashMap;
 use std::fs;
@@ -14,9 +14,13 @@ use parking_lot::Mutex;
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 const SERVICE_NAME: &str = "mica-term-gpui";
 const NONCE_LEN: usize = 24;
+const KEY_LEN: usize = 32;
+const KEY_FILE_NAME: &str = ".vault_master_key";
 const AAD: &[u8] = b"mica-term-gpui/credential/v1";
 
 pub fn host_secret_key(host_id: &str) -> String {
@@ -27,7 +31,7 @@ pub fn keychain_secret_key(keychain_id: &str) -> String {
     format!("keychain/{keychain_id}")
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct SecretPayload {
     pub password: Option<String>,
     pub private_key_pem: Option<String>,
@@ -56,16 +60,19 @@ pub trait CredentialStore: Send + Sync {
         if payload.is_empty() {
             return self.delete(key);
         }
-        let json = serde_json::to_string(payload)?;
-        self.put_raw(key, &json)
+        let mut json = serde_json::to_string(payload)?;
+        let res = self.put_raw(key, &json);
+        json.zeroize();
+        res
     }
 
     fn get_payload(&self, key: &str) -> Result<Option<SecretPayload>> {
-        let Some(raw) = self.get_raw(key)? else {
+        let Some(mut raw) = self.get_raw(key)? else {
             return Ok(None);
         };
-        let parsed = serde_json::from_str::<SecretPayload>(&raw)?;
-        Ok(Some(parsed))
+        let parsed = serde_json::from_str::<SecretPayload>(&raw);
+        raw.zeroize();
+        Ok(Some(parsed?))
     }
 }
 
@@ -85,7 +92,9 @@ impl CredentialStore for MemoryCredentialStore {
     }
 
     fn delete(&self, key: &str) -> Result<()> {
-        self.map.lock().remove(key);
+        if let Some(mut old) = self.map.lock().remove(key) {
+            old.zeroize();
+        }
         Ok(())
     }
 }
@@ -94,12 +103,21 @@ impl CredentialStore for MemoryCredentialStore {
 pub struct SystemCredentialStore;
 
 impl CredentialStore for SystemCredentialStore {
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     fn put_raw(&self, key: &str, value: &str) -> Result<()> {
         let entry = keyring::Entry::new(SERVICE_NAME, key)?;
         entry.set_password(value)?;
         Ok(())
     }
 
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    fn put_raw(&self, _key: &str, _value: &str) -> Result<()> {
+        // Never fall into `keyring::mock` (ephemeral RAM store); let `FallbackCredentialStore`
+        // persist via `EncryptedFileCredentialStore` on targets without native OS keyring enabled.
+        bail!("native OS keyring backend is not enabled on this target")
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     fn get_raw(&self, key: &str) -> Result<Option<String>> {
         let entry = keyring::Entry::new(SERVICE_NAME, key)?;
         match entry.get_password() {
@@ -109,6 +127,12 @@ impl CredentialStore for SystemCredentialStore {
         }
     }
 
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    fn get_raw(&self, _key: &str) -> Result<Option<String>> {
+        bail!("native OS keyring backend is not enabled on this target")
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     fn delete(&self, key: &str) -> Result<()> {
         let entry = keyring::Entry::new(SERVICE_NAME, key)?;
         match entry.delete_credential() {
@@ -116,11 +140,26 @@ impl CredentialStore for SystemCredentialStore {
             Err(err) => Err(err.into()),
         }
     }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    fn delete(&self, _key: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub struct EncryptedFileCredentialStore {
     dir: PathBuf,
-    key: [u8; 32],
+    legacy_key: [u8; KEY_LEN],
+    cached_key: Mutex<Option<[u8; KEY_LEN]>>,
+}
+
+impl Drop for EncryptedFileCredentialStore {
+    fn drop(&mut self) {
+        self.legacy_key.zeroize();
+        if let Some(mut k) = self.cached_key.lock().take() {
+            k.zeroize();
+        }
+    }
 }
 
 impl EncryptedFileCredentialStore {
@@ -130,9 +169,40 @@ impl EncryptedFileCredentialStore {
         hasher.update(b"mica-term-gpui/local-vault-key/v1:");
         hasher.update(dir.to_string_lossy().as_bytes());
         let digest = hasher.finalize();
-        let mut key = [0u8; 32];
-        key.copy_from_slice(&digest);
-        Self { dir, key }
+        let mut legacy_key = [0u8; KEY_LEN];
+        legacy_key.copy_from_slice(&digest);
+        Self {
+            dir,
+            legacy_key,
+            cached_key: Mutex::new(None),
+        }
+    }
+
+    fn master_key(&self, create_if_missing: bool) -> Result<Option<[u8; KEY_LEN]>> {
+        if let Some(k) = *self.cached_key.lock() {
+            return Ok(Some(k));
+        }
+        let key_path = self.dir.join(KEY_FILE_NAME);
+        if key_path.exists() {
+            let raw = fs::read(&key_path)?;
+            if raw.len() == KEY_LEN {
+                let mut k = [0u8; KEY_LEN];
+                k.copy_from_slice(&raw);
+                *self.cached_key.lock() = Some(k);
+                return Ok(Some(k));
+            }
+        }
+        if !create_if_missing {
+            return Ok(None);
+        }
+        fs::create_dir_all(&self.dir)
+            .with_context(|| format!("failed to create secrets dir `{}`", self.dir.display()))?;
+        let mut k = [0u8; KEY_LEN];
+        OsRng.fill_bytes(&mut k);
+        fs::write(&key_path, k)?;
+        restrict_file_permissions(&key_path);
+        *self.cached_key.lock() = Some(k);
+        Ok(Some(k))
     }
 
     fn file_path(&self, key: &str) -> PathBuf {
@@ -143,11 +213,27 @@ impl EncryptedFileCredentialStore {
     }
 }
 
+fn restrict_file_permissions(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+}
+
 impl CredentialStore for EncryptedFileCredentialStore {
     fn put_raw(&self, key: &str, value: &str) -> Result<()> {
         fs::create_dir_all(&self.dir)
             .with_context(|| format!("failed to create secrets dir `{}`", self.dir.display()))?;
-        let cipher = XChaCha20Poly1305::new((&self.key).into());
+        let mut master = self
+            .master_key(true)?
+            .expect("master key created when create_if_missing is true");
+        let cipher = XChaCha20Poly1305::new((&master).into());
+        master.zeroize();
         let mut nonce_bytes = [0u8; NONCE_LEN];
         OsRng.fill_bytes(&mut nonce_bytes);
         let ciphertext = cipher
@@ -164,11 +250,7 @@ impl CredentialStore for EncryptedFileCredentialStore {
         out.extend_from_slice(&ciphertext);
         let path = self.file_path(key);
         fs::write(&path, out)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
-        }
+        restrict_file_permissions(&path);
         Ok(())
     }
 
@@ -183,8 +265,24 @@ impl CredentialStore for EncryptedFileCredentialStore {
             bail!("corrupted encrypted credential file");
         }
         let (nonce, ciphertext) = bytes.split_at(NONCE_LEN);
-        let cipher = XChaCha20Poly1305::new((&self.key).into());
-        let plaintext = cipher
+
+        if let Some(mut master) = self.master_key(false)? {
+            let cipher = XChaCha20Poly1305::new((&master).into());
+            master.zeroize();
+            if let Ok(plaintext) = cipher.decrypt(
+                XNonce::from_slice(nonce),
+                Payload {
+                    msg: ciphertext,
+                    aad: AAD,
+                },
+            ) {
+                return Ok(Some(String::from_utf8(plaintext)?));
+            }
+        }
+
+        // Backward-compatible read for v0.2.0 deterministic key files
+        let legacy_cipher = XChaCha20Poly1305::new((&self.legacy_key).into());
+        let plaintext = legacy_cipher
             .decrypt(
                 XNonce::from_slice(nonce),
                 Payload {
@@ -212,6 +310,14 @@ pub struct FallbackCredentialStore {
     cache: Mutex<HashMap<String, String>>,
 }
 
+impl Drop for FallbackCredentialStore {
+    fn drop(&mut self) {
+        for v in self.cache.lock().values_mut() {
+            v.zeroize();
+        }
+    }
+}
+
 impl FallbackCredentialStore {
     pub fn new(primary: Arc<dyn CredentialStore>, fallback: Arc<dyn CredentialStore>) -> Self {
         Self {
@@ -224,10 +330,13 @@ impl FallbackCredentialStore {
 
 impl CredentialStore for FallbackCredentialStore {
     fn put_raw(&self, key: &str, value: &str) -> Result<()> {
-        let primary_ok = self.primary.put_raw(key, value).is_ok();
-        let fallback_res = self.fallback.put_raw(key, value);
-        if !primary_ok {
-            fallback_res?;
+        // Always persist to the local XChaCha20-Poly1305 encrypted vault so credentials survive
+        // portable folder moves, OS credential blob size limits (e.g. Win32 2560-byte cap), and
+        // targets without a native keyring daemon. Also mirror best-effort to OS keyring; if OS
+        // keyring rejects the update, purge any stale entry there so `get_raw` reads the fresh vault.
+        self.fallback.put_raw(key, value)?;
+        if self.primary.put_raw(key, value).is_err() {
+            let _ = self.primary.delete(key);
         }
         self.cache.lock().insert(key.to_string(), value.to_string());
         Ok(())
@@ -248,7 +357,9 @@ impl CredentialStore for FallbackCredentialStore {
     }
 
     fn delete(&self, key: &str) -> Result<()> {
-        self.cache.lock().remove(key);
+        if let Some(mut old) = self.cache.lock().remove(key) {
+            old.zeroize();
+        }
         let _ = self.primary.delete(key);
         let _ = self.fallback.delete(key);
         Ok(())
@@ -266,9 +377,23 @@ pub fn build_default_credential_store(secrets_dir: impl AsRef<Path>) -> Arc<dyn 
 mod tests {
     use super::*;
 
+    struct FailingStore;
+    impl CredentialStore for FailingStore {
+        fn put_raw(&self, _key: &str, _value: &str) -> Result<()> {
+            bail!("keyring unavailable")
+        }
+        fn get_raw(&self, _key: &str) -> Result<Option<String>> {
+            bail!("keyring unavailable")
+        }
+        fn delete(&self, _key: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
     #[test]
     fn encrypted_file_store_roundtrips_secrets() {
-        let dir = std::env::temp_dir().join(format!("mica-gpui-cred-test-{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("mica-gpui-cred-test-{}", uuid::Uuid::new_v4()));
         let store = EncryptedFileCredentialStore::new(&dir);
         let payload = SecretPayload {
             password: Some("p@ssw0rd!".into()),
@@ -281,6 +406,61 @@ mod tests {
         assert_eq!(loaded, payload);
         store.delete("host/1").unwrap();
         assert!(store.get_payload("host/1").unwrap().is_none());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fallback_mirrors_to_vault_and_recovers_when_primary_fails() {
+        let primary = Arc::new(MemoryCredentialStore::default());
+        let fallback_mem = Arc::new(MemoryCredentialStore::default());
+        let combined = FallbackCredentialStore::new(primary.clone(), fallback_mem.clone());
+
+        combined.put_raw("host/a", "sec1").unwrap();
+        assert_eq!(primary.get_raw("host/a").unwrap().as_deref(), Some("sec1"));
+        assert_eq!(
+            fallback_mem.get_raw("host/a").unwrap().as_deref(),
+            Some("sec1")
+        );
+
+        let combined_fail =
+            FallbackCredentialStore::new(Arc::new(FailingStore), fallback_mem.clone());
+        combined_fail.put_raw("host/b", "sec2").unwrap();
+        assert_eq!(
+            fallback_mem.get_raw("host/b").unwrap().as_deref(),
+            Some("sec2")
+        );
+    }
+
+    #[test]
+    fn default_credential_store_persists_password_across_reopen() {
+        let dir = std::env::temp_dir().join(format!(
+            "mica-gpui-default-cred-reopen-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let key = host_secret_key(&format!("test-host-{}", uuid::Uuid::new_v4()));
+        let payload = SecretPayload {
+            password: Some("PersistAcrossRestart#2026".into()),
+            private_key_pem: None,
+            passphrase: None,
+            proxy_password: Some("px-secret".into()),
+        };
+
+        {
+            let store_first = build_default_credential_store(&dir);
+            store_first.put_payload(&key, &payload).unwrap();
+        }
+
+        {
+            let store_reopened = build_default_credential_store(&dir);
+            let loaded = store_reopened
+                .get_payload(&key)
+                .unwrap()
+                .expect("saved SSH password should persist across store reopen");
+            assert_eq!(loaded, payload);
+            store_reopened.delete(&key).unwrap();
+            assert!(store_reopened.get_payload(&key).unwrap().is_none());
+        }
+
         let _ = fs::remove_dir_all(&dir);
     }
 }

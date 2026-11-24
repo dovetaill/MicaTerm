@@ -1,14 +1,21 @@
 //! Core domain models for Mica Term GPUI: Hosts, Keychain, Snippets, and Settings.
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::credentials::{
-    CredentialStore, host_secret_key, keychain_secret_key,
-};
+use crate::domain::credentials::{CredentialStore, host_secret_key, keychain_secret_key};
+use crate::domain::shortcuts::{DoubleClickAction, ShortcutConfig};
+
+pub const BUNDLED_SARASA_FONT_FAMILY: &str = "Sarasa Term SC Nerd";
+pub const BUNDLED_MAPLE_FONT_FAMILY: &str = "JetBrains Maple Mono";
+
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppSettings {
@@ -19,6 +26,22 @@ pub struct AppSettings {
     pub follow_sftp_cwd: bool,
     pub show_left_sidebar: bool,
     pub show_sftp_panel: bool,
+    #[serde(default = "default_true")]
+    pub command_blocks: bool,
+    #[serde(default = "default_true")]
+    pub semantic_highlighting: bool,
+    #[serde(default = "default_true")]
+    pub code_highlighting: bool,
+    #[serde(default = "default_true")]
+    pub overview_markers: bool,
+    #[serde(default)]
+    pub double_click_action: DoubleClickAction,
+    #[serde(default)]
+    pub shortcuts: ShortcutConfig,
+    #[serde(default)]
+    pub font_migrated_sarasa: bool,
+    #[serde(default)]
+    pub typography_v2_migrated: bool,
 }
 
 impl Default for AppSettings {
@@ -26,42 +49,94 @@ impl Default for AppSettings {
         Self {
             dark_mode: true,
             font_family: default_terminal_font_family(),
-            font_size: 14.0,
+            font_size: default_terminal_font_size(),
             scrollback_lines: 5_000,
             follow_sftp_cwd: true,
             show_left_sidebar: true,
             show_sftp_panel: false,
+            command_blocks: true,
+            semantic_highlighting: true,
+            code_highlighting: true,
+            overview_markers: true,
+            double_click_action: DoubleClickAction::SelectWord,
+            shortcuts: ShortcutConfig::default(),
+            font_migrated_sarasa: true,
+            typography_v2_migrated: true,
         }
     }
 }
 
 pub fn default_terminal_font_family() -> String {
+    BUNDLED_SARASA_FONT_FAMILY.to_string()
+}
+
+pub fn default_terminal_font_size() -> f32 {
+    if cfg!(target_os = "windows") {
+        16.0
+    } else {
+        14.0
+    }
+}
+
+pub fn system_monospace_font_family() -> &'static str {
     #[cfg(target_os = "macos")]
     {
-        "Menlo".to_string()
+        "Menlo"
     }
     #[cfg(target_os = "windows")]
     {
-        "Cascadia Mono".to_string()
+        "Cascadia Mono"
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
-        "DejaVu Sans Mono".to_string()
+        "DejaVu Sans Mono"
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub fn is_legacy_system_default_font(family: &str) -> bool {
+    let trimmed = family.trim();
+    trimmed.is_empty()
+        || matches!(
+            trimmed,
+            "DejaVu Sans Mono" | "Cascadia Mono" | "Menlo"
+        )
+}
+
+/// Expands leading `~` or `~/...` (`~\...` on Windows) to the current user's home directory.
+pub fn expand_tilde_path(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed == "~" {
+        if let Some(home) = resolve_user_home_dir() {
+            return home.to_string_lossy().into_owned();
+        }
+    } else if let Some(rest) = trimmed
+        .strip_prefix("~/")
+        .or_else(|| trimmed.strip_prefix("~\\"))
+        && let Some(home) = resolve_user_home_dir()
+    {
+        return home.join(rest).to_string_lossy().into_owned();
+    }
+    trimmed.to_string()
+}
+
+fn resolve_user_home_dir() -> Option<PathBuf> {
+    directories::UserDirs::new()
+        .map(|u| u.home_dir().to_path_buf())
+        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SshAuthConfig {
+    #[default]
     Password,
-    PrivateKeyPath { path: String },
+    PrivateKeyPath {
+        path: String,
+    },
     PrivateKeyInline,
-    Keychain { keychain_id: String },
-}
-
-impl Default for SshAuthConfig {
-    fn default() -> Self {
-        Self::Password
-    }
+    Keychain {
+        keychain_id: String,
+    },
 }
 
 impl SshAuthConfig {
@@ -150,7 +225,7 @@ pub struct HostFolder {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum HostNodeKind {
     Folder(HostFolder),
-    Host(SshHostConfig),
+    Host(Box<SshHostConfig>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -180,7 +255,7 @@ impl HostNode {
             id: Uuid::new_v4().to_string(),
             parent_id,
             name: name.into(),
-            kind: HostNodeKind::Host(config),
+            kind: HostNodeKind::Host(Box::new(config)),
         }
     }
 
@@ -190,7 +265,7 @@ impl HostNode {
 
     pub fn as_host(&self) -> Option<&SshHostConfig> {
         match &self.kind {
-            HostNodeKind::Host(cfg) => Some(cfg),
+            HostNodeKind::Host(cfg) => Some(cfg.as_ref()),
             HostNodeKind::Folder(_) => None,
         }
     }
@@ -232,6 +307,27 @@ impl HostTree {
 
     pub fn hosts(&self) -> Vec<&HostNode> {
         self.nodes.iter().filter(|n| !n.is_folder()).collect()
+    }
+
+    pub fn descendant_count(&self, id: &str) -> usize {
+        let mut set = HashSet::new();
+        set.insert(id.to_string());
+        loop {
+            let mut grew = false;
+            for node in &self.nodes {
+                if let Some(pid) = &node.parent_id
+                    && set.contains(pid)
+                    && !set.contains(&node.id)
+                {
+                    set.insert(node.id.clone());
+                    grew = true;
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
+        set.len().saturating_sub(1)
     }
 
     pub fn folder_path_label(&self, id: &str) -> String {
@@ -537,27 +633,30 @@ impl ResolvedSshConfig {
             SshAuthConfig::Password => {
                 let pwd = host_secrets
                     .password
+                    .clone()
                     .filter(|s| !s.is_empty())
                     .with_context(|| format!("主机 `{}` 缺少保存的密码", node.name))?;
                 ResolvedAuthMaterial::Password(pwd)
             }
             SshAuthConfig::PrivateKeyPath { path } => {
-                if path.trim().is_empty() {
+                let expanded = expand_tilde_path(path);
+                if expanded.is_empty() {
                     bail!("主机 `{}` 未配置私钥文件路径", node.name);
                 }
                 ResolvedAuthMaterial::PrivateKeyPath {
-                    path: path.trim().to_string(),
-                    passphrase: host_secrets.passphrase.filter(|s| !s.is_empty()),
+                    path: expanded,
+                    passphrase: host_secrets.passphrase.clone().filter(|s| !s.is_empty()),
                 }
             }
             SshAuthConfig::PrivateKeyInline => {
                 let pem = host_secrets
                     .private_key_pem
+                    .clone()
                     .filter(|s| !s.trim().is_empty())
                     .with_context(|| format!("主机 `{}` 缺少内联私钥内容", node.name))?;
                 ResolvedAuthMaterial::PrivateKeyInline {
                     private_key_pem: pem,
-                    passphrase: host_secrets.passphrase.filter(|s| !s.is_empty()),
+                    passphrase: host_secrets.passphrase.clone().filter(|s| !s.is_empty()),
                 }
             }
             SshAuthConfig::Keychain { keychain_id } => {
@@ -575,6 +674,7 @@ impl ResolvedSshConfig {
                     KeychainKind::PasswordIdentity => {
                         let pwd = kc_secrets
                             .password
+                            .clone()
                             .filter(|s| !s.is_empty())
                             .with_context(|| format!("密钥库凭据 `{}` 缺少密码", entry.name))?;
                         ResolvedAuthMaterial::Password(pwd)
@@ -582,11 +682,12 @@ impl ResolvedSshConfig {
                     KeychainKind::SshKey => {
                         let pem = kc_secrets
                             .private_key_pem
+                            .clone()
                             .filter(|s| !s.trim().is_empty())
                             .with_context(|| format!("密钥库 `{}` 缺少私钥内容", entry.name))?;
                         ResolvedAuthMaterial::PrivateKeyInline {
                             private_key_pem: pem,
-                            passphrase: kc_secrets.passphrase.filter(|s| !s.is_empty()),
+                            passphrase: kc_secrets.passphrase.clone().filter(|s| !s.is_empty()),
                         }
                     }
                 }
@@ -605,11 +706,14 @@ impl ResolvedSshConfig {
                 port,
                 username,
             } => {
+                if host.trim().is_empty() {
+                    bail!("主机 `{}` 的 SOCKS5 代理地址为空", node.name);
+                }
                 proxy_hops.push(ResolvedProxyHop::Socks5 {
                     host: host.trim().to_string(),
                     port: *port,
                     username: username.clone().filter(|s| !s.trim().is_empty()),
-                    password: host_secrets.proxy_password.filter(|s| !s.is_empty()),
+                    password: host_secrets.proxy_password.clone().filter(|s| !s.is_empty()),
                 });
             }
             SshProxyConfig::Http {
@@ -617,11 +721,14 @@ impl ResolvedSshConfig {
                 port,
                 username,
             } => {
+                if host.trim().is_empty() {
+                    bail!("主机 `{}` 的 HTTP 代理地址为空", node.name);
+                }
                 proxy_hops.push(ResolvedProxyHop::Http {
                     host: host.trim().to_string(),
                     port: *port,
                     username: username.clone().filter(|s| !s.trim().is_empty()),
-                    password: host_secrets.proxy_password.filter(|s| !s.is_empty()),
+                    password: host_secrets.proxy_password.clone().filter(|s| !s.is_empty()),
                 });
             }
             SshProxyConfig::JumpHost {
@@ -668,13 +775,17 @@ mod tests {
         let folder_id = folder.id.clone();
         tree.upsert(folder);
 
-        let mut cfg = SshHostConfig::default();
-        cfg.host = "10.0.0.12".to_string();
-        cfg.user = "ubuntu".to_string();
-        cfg.environment_tag = "PROD".to_string();
+        let cfg = SshHostConfig {
+            host: "10.0.0.12".to_string(),
+            user: "ubuntu".to_string(),
+            environment_tag: "PROD".to_string(),
+            ..Default::default()
+        };
         let host = HostNode::new_host("Web-01", Some(folder_id.clone()), cfg);
         let host_id = host.id.clone();
         tree.upsert(host);
+
+        assert_eq!(tree.descendant_count(&folder_id), 1);
 
         let rows = tree.flatten_visible("");
         assert_eq!(rows.len(), 2);
@@ -702,27 +813,33 @@ mod tests {
                 &keychain_secret_key(&kc.id),
                 &SecretPayload {
                     password: Some("top-secret".to_string()),
-                    ..Default::default()
+                    private_key_pem: None,
+                    passphrase: None,
+                    proxy_password: None,
                 },
             )
             .unwrap();
 
-        let mut bastion_cfg = SshHostConfig::default();
-        bastion_cfg.host = "bastion.example.com".to_string();
-        bastion_cfg.user = String::new();
-        bastion_cfg.auth = SshAuthConfig::Keychain {
-            keychain_id: kc.id.clone(),
+        let bastion_cfg = SshHostConfig {
+            host: "bastion.example.com".to_string(),
+            user: String::new(),
+            auth: SshAuthConfig::Keychain {
+                keychain_id: kc.id.clone(),
+            },
+            ..Default::default()
         };
         let bastion = HostNode::new_host("Bastion", None, bastion_cfg);
         let bastion_id = bastion.id.clone();
         tree.upsert(bastion);
 
-        let mut app_cfg = SshHostConfig::default();
-        app_cfg.host = "10.10.1.5".to_string();
-        app_cfg.user = "deploy".to_string();
-        app_cfg.auth = SshAuthConfig::Password;
-        app_cfg.proxy = SshProxyConfig::JumpHost {
-            host_id: bastion_id,
+        let app_cfg = SshHostConfig {
+            host: "10.10.1.5".to_string(),
+            user: "deploy".to_string(),
+            auth: SshAuthConfig::Password,
+            proxy: SshProxyConfig::JumpHost {
+                host_id: bastion_id,
+            },
+            ..Default::default()
         };
         let app_node = HostNode::new_host("App-Server", None, app_cfg);
         let app_id = app_node.id.clone();
@@ -731,7 +848,9 @@ mod tests {
                 &host_secret_key(&app_id),
                 &SecretPayload {
                     password: Some("app-pass".to_string()),
-                    ..Default::default()
+                    private_key_pem: None,
+                    passphrase: None,
+                    proxy_password: None,
                 },
             )
             .unwrap();
@@ -748,5 +867,12 @@ mod tests {
             }
             _ => panic!("expected jump host hop"),
         }
+    }
+
+    #[test]
+    fn expands_tilde_in_private_key_path() {
+        let expanded = expand_tilde_path("~/.ssh/id_ed25519");
+        assert!(!expanded.starts_with("~/"));
+        assert!(expanded.ends_with(".ssh/id_ed25519"));
     }
 }
