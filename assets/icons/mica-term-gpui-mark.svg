@@ -1,0 +1,16 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="mk-teal" x1="36" y1="48" x2="140" y2="208" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#67E8F9"/>
+      <stop offset="0.5" stop-color="#2DD4BF"/>
+      <stop offset="1" stop-color="#0891B2"/>
+    </linearGradient>
+    <linearGradient id="mk-amber" x1="140" y1="172" x2="224" y2="208" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FDE047"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+  </defs>
+
+  <path d="M44 54L128 128L44 202" stroke="url(#mk-teal)" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="140" y="172" width="82" height="36" rx="16" fill="url(#mk-amber)"/>
+</svg>

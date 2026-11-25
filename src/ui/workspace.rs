@@ -23,8 +23,8 @@ use gpui_kit::{
 };
 
 use crate::domain::{
-    AppSettings, CredentialStore, DoubleClickAction, HostNode, HostTree, KeychainEntry,
-    ResolvedSshConfig, SecretPayload, ShortcutAction, ShortcutChord, ShortcutScope, SnippetItem,
+    AppSettings, CredentialStore, HostNode, HostTree, KeychainEntry, ResolvedSshConfig,
+    RightClickAction, SecretPayload, ShortcutAction, ShortcutChord, ShortcutScope, SnippetItem,
     host_secret_key, keychain_secret_key, tooltip,
 };
 use crate::ssh::KnownHostsStore;
@@ -319,7 +319,8 @@ impl MicaWorkspace {
             default_font_size: self.settings.font_size,
             dark_mode: self.settings.dark_mode,
             scrollback_lines: self.settings.scrollback_lines,
-            double_click_action: self.settings.double_click_action,
+            right_click_action: self.settings.right_click_action,
+            copy_on_select: self.settings.copy_on_select,
             shortcuts: self.settings.shortcuts.clone(),
             semantic: SemanticOptions {
                 command_blocks: self.settings.command_blocks,
@@ -525,8 +526,15 @@ impl MicaWorkspace {
         cx.notify();
     }
 
-    pub fn set_double_click_action(&mut self, action: DoubleClickAction, cx: &mut Context<Self>) {
-        self.settings.double_click_action = action;
+    pub fn set_right_click_action(&mut self, action: RightClickAction, cx: &mut Context<Self>) {
+        self.settings.right_click_action = action;
+        let _ = self.store.save_settings(&self.settings);
+        self.propagate_pane_preferences(cx);
+        cx.notify();
+    }
+
+    pub fn set_copy_on_select(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        self.settings.copy_on_select = enabled;
         let _ = self.store.save_settings(&self.settings);
         self.propagate_pane_preferences(cx);
         cx.notify();
@@ -576,7 +584,7 @@ impl MicaWorkspace {
     fn create_pane_for_session(
         &self,
         session: Entity<TerminalSessionEntity>,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<TerminalPaneView> {
         cx.subscribe(&session, move |this, session_ent, event, cx| match event {
@@ -606,7 +614,7 @@ impl MicaWorkspace {
         .detach();
 
         let prefs = self.current_pane_preferences();
-        let pane = cx.new(|cx| TerminalPaneView::new(session, prefs, cx));
+        let pane = cx.new(|cx| TerminalPaneView::new(session, prefs, window, cx));
         cx.subscribe_in(&pane, window, |this, pane, event, window, cx| match event {
             TerminalPaneEvent::Activate => this.activate_pane(pane, Some(window), cx),
             TerminalPaneEvent::CloseRequested => this.close_pane(pane, window, cx),
@@ -1671,11 +1679,7 @@ impl MicaWorkspace {
                             .px_1p5()
                             .gap_1p5()
                             .items_center()
-                            .child(
-                                Icon::new(LucideIcon::Terminal)
-                                    .xsmall()
-                                    .text_color(cx.theme().primary),
-                            )
+                            .child(crate::ui::brand::brand_mark_icon_element(16.0))
                             .child(
                                 div()
                                     .text_xs()
@@ -1964,6 +1968,15 @@ impl Render for MicaWorkspace {
 
         v_flex()
             .id("mica-workspace-root")
+            .on_modifiers_changed(cx.listener(
+                |this, ev: &gpui_kit::ModifiersChangedEvent, _, cx| {
+                    if let Some(tab) = this.active_tab() {
+                        for pane in tab.panes() {
+                            pane.update(cx, |p, cx| p.sync_modifiers(ev.modifiers, cx));
+                        }
+                    }
+                },
+            ))
             .track_focus(&self.focus_handle)
             .capture_key_down(cx.listener(Self::handle_capture_key_down))
             .size_full()

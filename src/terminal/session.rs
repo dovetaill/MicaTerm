@@ -99,6 +99,7 @@ impl TerminalSessionEntity {
             remote_cwd: None,
             tokio_handle,
         };
+        this.engine.is_windows_local_pty = cfg!(target_os = "windows");
         this.start_backend(cx);
         this
     }
@@ -161,6 +162,7 @@ impl TerminalSessionEntity {
     pub fn reconnect(&mut self, scrollback_lines: usize, cx: &mut Context<Self>) {
         let (rows, cols) = self.engine.dimensions();
         self.engine = AlacrittyTerminalEngine::new(rows, cols, scrollback_lines);
+        self.engine.is_windows_local_pty = cfg!(target_os = "windows") && !self.is_ssh();
         self.sftp = None;
         self.remote_cwd = None;
         self.start_backend(cx);
@@ -507,8 +509,22 @@ impl TerminalSessionEntity {
         jumped
     }
 
-    pub fn url_at(&self, row: usize, col: usize) -> Option<String> {
-        self.engine.url_at(row, col)
+    pub fn mode(&self) -> alacritty_terminal::term::TermMode {
+        self.engine.mode()
+    }
+
+    pub fn dimensions(&self) -> (usize, usize) {
+        self.engine.dimensions()
+    }
+
+    pub fn scroll_selection(&mut self, delta: i32) -> bool {
+        let offset = self.engine.display_offset();
+        self.engine.scroll(Scroll::Delta(delta));
+        self.engine.display_offset() != offset
+    }
+
+    pub fn link_at(&self, row: usize, col: usize) -> Option<super::engine::HoveredLinkMatch> {
+        self.engine.link_at(row, col)
     }
 
     pub fn try_report_mouse(

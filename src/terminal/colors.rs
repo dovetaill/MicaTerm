@@ -161,8 +161,8 @@ impl TerminalPalette {
     pub fn semantic_style(&self, role: SemanticRole) -> (Hsla, bool, bool) {
         if self.dark {
             match role {
-                SemanticRole::OutputUrl => (rgba_u8(0x61, 0xaf, 0xef, 1.0), false, true),
-                SemanticRole::OutputFileLine => (rgba_u8(0x56, 0xb6, 0xc2, 1.0), false, true),
+                SemanticRole::OutputUrl => (rgba_u8(0x6c, 0xb6, 0xff, 1.0), false, false),
+                SemanticRole::OutputFileLine => (rgba_u8(0x56, 0xc2, 0xc6, 1.0), false, false),
                 SemanticRole::OutputPath => (rgba_u8(0x7d, 0xcf, 0xff, 1.0), false, false),
                 SemanticRole::OutputEndpoint => (rgba_u8(0xc6, 0x78, 0xdd, 1.0), false, false),
                 SemanticRole::DiagnosticError => (rgba_u8(0xf0, 0x80, 0x89, 1.0), true, false),
@@ -176,8 +176,8 @@ impl TerminalPalette {
             }
         } else {
             match role {
-                SemanticRole::OutputUrl => (rgba_u8(0x09, 0x69, 0xda, 1.0), false, true),
-                SemanticRole::OutputFileLine => (rgba_u8(0x1b, 0x7c, 0x83, 1.0), false, true),
+                SemanticRole::OutputUrl => (rgba_u8(0x09, 0x69, 0xda, 1.0), false, false),
+                SemanticRole::OutputFileLine => (rgba_u8(0x1b, 0x7c, 0x83, 1.0), false, false),
                 SemanticRole::OutputPath => (rgba_u8(0x05, 0x50, 0xae, 1.0), false, false),
                 SemanticRole::OutputEndpoint => (rgba_u8(0x82, 0x50, 0xdf, 1.0), false, false),
                 SemanticRole::DiagnosticError => (rgba_u8(0xcf, 0x22, 0x2e, 1.0), true, false),

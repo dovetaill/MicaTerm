@@ -31,15 +31,14 @@ use crate::syntax::{CodeTokenRole, SyntaxPack, SyntaxRegistry};
 use crate::terminal::colors::{TerminalPalette, rgb_to_hsla};
 use crate::terminal::semantic::{
     CommandBlockStatus, CommandSyntaxTarget, OverviewMarker, OverviewMarkerKind, RowTextMap,
-    SemanticOptions, VisibleCommandBlock, detect_command_syntax_target,
+    SemanticOptions, SemanticRole, VisibleCommandBlock, detect_command_syntax_target,
     detect_input_spans_for_prompt_row, detect_output_spans_for_row,
-    detect_prompt_command_byte_offset, extract_cwd_from_window_title, find_url_at_col,
-    line_has_error_signature,
+    detect_prompt_command_byte_offset, extract_cwd_from_window_title, extract_http_url_byte_ranges,
+    line_has_error_signature, openable_http_url, validate_openable_http_url,
 };
 
 const MAX_OSC133_RECORDS: usize = 512;
-const MAX_BLOCK_LOOKBACK_LINES: i32 = 600;
-const MAX_SYNTAX_BLOCK_LINES: usize = 2_000;
+const MAX_SYNTAX_BLOCK_LINES: usize = 8_000;
 const MAX_SYNTAX_LINE_BYTES: usize = 2_048;
 
 #[derive(Debug, Clone)]
@@ -167,6 +166,22 @@ struct StitchedLogicalLine {
     text: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HoveredLinkMatch {
+    pub url: String,
+    pub osc8_host_hint: Option<String>,
+    pub viewport_spans: Vec<(usize, usize, usize)>,
+}
+
+#[derive(Default)]
+struct PromptScanCache {
+    // Absolute physical rows already classified, including gaps between prompts.
+    checked: Range<usize>,
+    anchors: Vec<usize>,
+    #[cfg(test)]
+    scanned_lines: usize,
+}
+
 pub struct AlacrittyTerminalEngine {
     term: Term<TerminalEventProxy>,
     processor: Processor,
@@ -183,6 +198,8 @@ pub struct AlacrittyTerminalEngine {
     row_search: Option<Regex>,
     dirty_generation: u64,
     cached_overview: Option<(u64, String, Vec<OverviewMarker>, usize)>,
+    pub(super) is_windows_local_pty: bool,
+    prompt_scan: PromptScanCache,
     block_syntax_cache: Option<BlockSyntaxCache>,
 }
 
@@ -215,6 +232,8 @@ impl AlacrittyTerminalEngine {
             row_search: None,
             dirty_generation: 1,
             cached_overview: None,
+            is_windows_local_pty: false,
+            prompt_scan: PromptScanCache::default(),
             block_syntax_cache: None,
         }
     }
@@ -236,26 +255,16 @@ impl AlacrittyTerminalEngine {
     }
 
     pub fn feed_bytes(&mut self, bytes: &[u8]) -> Vec<EngineSideEffect> {
-        let prev_history = self.term.grid().history_size();
-        self.processor.advance(&mut self.term, bytes);
-        let new_history = self.term.grid().history_size();
-        self.dirty_generation = self.dirty_generation.wrapping_add(1);
-
-        // If scrollback was already at capacity, estimate overflow shift on OSC 133 records
-        if prev_history >= self.scrollback_limit && new_history >= self.scrollback_limit {
-            let newline_approx = bytes.iter().filter(|&&b| b == b'\n').count();
-            if newline_approx > 0 {
-                for rec in &mut self.osc133_records {
-                    rec.abs_start_line = rec.abs_start_line.saturating_sub(newline_approx);
-                    if let Some(end) = &mut rec.abs_end_line {
-                        *end = end.saturating_sub(newline_approx);
-                    }
-                }
+        let mut detected_cwd = None;
+        // Observe each OSC at its actual cursor position, even in a multi-command PTY read.
+        for chunk in bytes.split_inclusive(|&b| b == 7 || b == b'\\') {
+            self.advance_grid(chunk);
+            if let Some(dir) = self.scan_osc_sequences(chunk) {
+                detected_cwd = Some(dir);
             }
         }
-
+        self.dirty_generation = self.dirty_generation.wrapping_add(1);
         let mut effects = self.proxy.drain();
-        let mut detected_cwd = self.scan_osc_sequences(bytes);
 
         // Fallback CWD extraction from standard OSC 0/2 shell prompt titles (`user@host:/path`)
         if detected_cwd.is_none() {
@@ -279,6 +288,69 @@ impl AlacrittyTerminalEngine {
         effects
     }
 
+    fn advance_grid(&mut self, chunk: &[u8]) {
+        let history = self.term.grid().history_size();
+        // Grid scrolling rotates row allocations. Locate the former last history row
+        // when the history length alone cannot tell us how many rows were evicted.
+        let tail = (history > 0).then(|| self.term.grid()[Line(-1)][..].as_ptr());
+        let alt = self.mode().contains(TermMode::ALT_SCREEN);
+        let mut stable = history;
+        if self.prompt_scan.checked.end >= history {
+            while stable > 0 && self.row_has_wrapline(Line(stable as i32 - history as i32 - 1)) {
+                stable -= 1;
+            }
+        }
+        self.processor.advance(&mut self.term, chunk);
+        let now = self.term.grid().history_size();
+        let dropped = if now < history || alt != self.mode().contains(TermMode::ALT_SCREEN) {
+            None
+        } else if now < self.scrollback_limit {
+            // A clear followed by fresh output can finish at the old history length.
+            tail.is_none_or(|ptr| {
+                self.term.grid()[Line(-((now - history) as i32) - 1)][..].as_ptr() == ptr
+            })
+            .then_some(0)
+        } else {
+            // A control sequence can scroll a screenful. If a full rotation was possible
+            // the old allocation may already contain unrelated text.
+            let max_scroll = if chunk.contains(&0x1b) {
+                chunk.len().saturating_mul(self.rows)
+            } else {
+                chunk.len().saturating_add(self.rows)
+            };
+            tail.filter(|_| max_scroll < history).and_then(|ptr| {
+                (0..=max_scroll)
+                    .find(|&i| self.term.grid()[Line(-(i as i32) - 1)][..].as_ptr() == ptr)
+                    .map(|i| (history + i).saturating_sub(now))
+            })
+        };
+        self.prompt_scan.checked.end = self.prompt_scan.checked.end.min(stable);
+        self.prompt_scan.checked.start = self.prompt_scan.checked.start.min(stable);
+        self.prompt_scan
+            .anchors
+            .truncate(self.prompt_scan.anchors.partition_point(|&a| a < stable));
+        let dropped = dropped.unwrap_or(history + self.rows);
+        if dropped != 0 {
+            self.prompt_scan.checked.start = self.prompt_scan.checked.start.saturating_sub(dropped);
+            self.prompt_scan.checked.end = self.prompt_scan.checked.end.saturating_sub(dropped);
+            self.prompt_scan.anchors.retain_mut(|a| {
+                if *a < dropped {
+                    return false;
+                }
+                *a -= dropped;
+                true
+            });
+            self.osc133_records.retain_mut(|rec| {
+                if rec.abs_start_line < dropped {
+                    return false;
+                }
+                rec.abs_start_line -= dropped;
+                rec.abs_end_line = rec.abs_end_line.map(|end| end.saturating_sub(dropped));
+                true
+            });
+        }
+    }
+
     pub fn resize(&mut self, rows: usize, cols: usize) -> bool {
         let rows = rows.max(2);
         let cols = cols.max(4);
@@ -287,6 +359,8 @@ impl AlacrittyTerminalEngine {
         }
         self.rows = rows;
         self.cols = cols;
+        self.prompt_scan = PromptScanCache::default();
+        self.osc133_records.clear();
         self.term.resize(TermSize::new(cols, rows));
         self.dirty_generation = self.dirty_generation.wrapping_add(1);
         true
@@ -340,14 +414,125 @@ impl AlacrittyTerminalEngine {
         false
     }
 
-    pub fn url_at(&self, row: usize, col: usize) -> Option<String> {
-        if row >= self.rows || col >= self.cols {
+    pub fn link_at(&self, vp_row: usize, col: usize) -> Option<HoveredLinkMatch> {
+        if vp_row >= self.rows || col >= self.cols {
             return None;
         }
-        let display_offset = self.term.grid().display_offset() as i32;
-        let grid_line = Line(row as i32 - display_offset);
-        let map = self.build_row_text_map(grid_line);
-        find_url_at_col(&map, col)
+        let view_top = -(self.display_offset() as i32);
+        let gl = view_top + vp_row as i32;
+        let grid = self.term.grid();
+        let top = grid.topmost_line().0;
+        let bottom = grid.bottommost_line().0;
+        if grid[Line(gl)][Column(col)]
+            .flags
+            .contains(Flags::LEADING_WIDE_CHAR_SPACER)
+        {
+            return None;
+        }
+        let cell_at = |line: i32, col: usize| {
+            let row = &grid[Line(line)];
+            let col = if row[Column(col)].flags.contains(Flags::WIDE_CHAR_SPACER) {
+                col.saturating_sub(1)
+            } else {
+                col
+            };
+            &row[Column(col)]
+        };
+        if let Some(link) = cell_at(gl, col).hyperlink() {
+            let parsed = openable_http_url(link.uri())?;
+            let index = (gl - top) as usize * self.cols + col;
+            let len = (bottom - top + 1) as usize * self.cols;
+            let same = |i: usize| {
+                cell_at(top + (i / self.cols) as i32, i % self.cols)
+                    .hyperlink()
+                    .as_ref()
+                    == Some(&link)
+            };
+            let mut start = index;
+            let mut end = index + 1;
+            while start > 0 && same(start - 1) {
+                start -= 1;
+            }
+            while end < len && same(end) {
+                end += 1;
+            }
+            let mut label = String::new();
+            let viewport_spans = self.viewport_spans(top, start, end).collect();
+            while start < end {
+                let line = top + (start / self.cols) as i32;
+                let left = start % self.cols;
+                let width = (end - start).min(self.cols - left);
+                label.extend(
+                    self.row_text_cells(Line(line))
+                        .filter(|(c, _, _)| (left..left + width).contains(c))
+                        .map(|(_, _, ch)| ch),
+                );
+                start += width;
+            }
+            let host = parsed.host_str()?;
+            let osc8_host_hint = (!label.to_ascii_lowercase().contains(host)
+                && label != link.uri())
+            .then(|| host.to_owned());
+            return Some(HoveredLinkMatch {
+                url: link.uri().into(),
+                viewport_spans,
+                osc8_host_hint,
+            });
+        }
+
+        let lines = self.logical_rows(gl);
+        let start = *lines.start();
+        let map = self.logical_text_map(lines);
+        let offset = map.byte_at_col((gl - start) as usize * self.cols + col)?;
+        let (left, right) = extract_http_url_byte_ranges(&map.text)
+            .into_iter()
+            .find(|&(a, b)| (a..b).contains(&offset))?;
+        let (sc, ec) = map.byte_range_to_cols(left, right)?;
+        Some(HoveredLinkMatch {
+            url: map.text[left..right].into(),
+            viewport_spans: self.viewport_spans(start, sc, ec).collect(),
+            osc8_host_hint: None,
+        })
+    }
+
+    fn logical_rows(&self, gl: i32) -> std::ops::RangeInclusive<i32> {
+        let mut start = gl;
+        let mut end = gl;
+        while start > self.term.topmost_line().0 && self.row_has_wrapline(Line(start - 1)) {
+            start -= 1;
+        }
+        while end < self.term.bottommost_line().0 && self.row_has_wrapline(Line(end)) {
+            end += 1;
+        }
+        start..=end
+    }
+
+    fn logical_text_map(&self, lines: std::ops::RangeInclusive<i32>) -> RowTextMap {
+        let start = *lines.start();
+        RowTextMap::from_cells(lines.flat_map(|gl| {
+            self.row_text_cells(Line(gl))
+                .map(move |(col, width, ch)| ((gl - start) as usize * self.cols + col, width, ch))
+        }))
+    }
+
+    fn viewport_spans(
+        &self,
+        start: i32,
+        sc: usize,
+        ec: usize,
+    ) -> impl Iterator<Item = (usize, usize, usize)> + '_ {
+        let top = -(self.display_offset() as i32);
+        let first = (start + (sc / self.cols) as i32).max(top);
+        let last = (start + ((ec - 1) / self.cols) as i32).min(top + self.rows as i32 - 1);
+        (first..=last).filter_map(move |gl| {
+            let base = (gl - start) as usize * self.cols;
+            let last_is_spacer = self.term.grid()[Line(gl)][Column(self.cols - 1)]
+                .flags
+                .contains(Flags::LEADING_WIDE_CHAR_SPACER);
+            let left = sc.saturating_sub(base);
+            let right = (ec - base).min(self.cols - usize::from(last_is_spacer));
+            (left < right).then_some(((gl - top) as usize, left, right))
+        })
     }
 
     pub fn start_selection(&mut self, row: usize, col: usize, click_count: usize) {
@@ -490,6 +675,7 @@ impl AlacrittyTerminalEngine {
 
         // Precompute per-row semantic & syntax role overrides for unstyled default-fg cells
         let mut semantic_cell_overrides: Vec<Vec<Option<(Hsla, bool, bool)>>> = Vec::new();
+        let mut white_rows = vec![false; rows];
         let mut row_maps: Vec<RowTextMap> = Vec::with_capacity(rows);
         if self.row_search.is_some()
             || (!is_tui
@@ -514,35 +700,52 @@ impl AlacrittyTerminalEngine {
                     history_size,
                     palette,
                     &mut semantic_cell_overrides,
+                    &mut white_rows,
                 );
             }
 
             // 2. Top layer: input command tokens on prompt rows & URLs / file:line / diagnostics on output rows
             if semantic_opts.semantic_highlighting {
-                for (r, map) in row_maps.iter().enumerate() {
-                    let gl = Line(r as i32 - display_offset as i32);
-                    let is_wrapped_cont =
-                        gl.0 > -(history_size as i32) && self.row_has_wrapline(Line(gl.0 - 1));
-                    let spans = if !is_wrapped_cont
-                        && let Some((cmd_byte, true)) = detect_prompt_command_byte_offset(&map.text)
+                let view_top = -(display_offset as i32);
+                let mut gl = view_top;
+                while gl < view_top + rows as i32 {
+                    let lines = self.logical_rows(gl);
+                    let start = *lines.start();
+                    gl = *lines.end() + 1;
+                    let stitched;
+                    let map = if start == gl - 1 {
+                        &row_maps[(start - view_top) as usize]
+                    } else {
+                        stitched = self.logical_text_map(lines);
+                        &stitched
+                    };
+                    let spans = if let Some((cmd_byte, true)) =
+                        detect_prompt_command_byte_offset(&map.text)
                     {
                         detect_input_spans_for_prompt_row(map, cmd_byte)
                     } else {
                         detect_output_spans_for_row(map)
                     };
-
                     for sp in spans {
                         let style = palette.semantic_style(sp.role);
-                        let sc = sp.start_col.min(cols);
-                        let ec = sp.end_col.min(cols);
-                        for slot in &mut semantic_cell_overrides[r][sc..ec] {
-                            *slot = Some(style);
+                        for (r, sc, ec) in self.viewport_spans(start, sp.start_col, sp.end_col) {
+                            let row = &self.term.grid()[Line(view_top + r as i32)];
+                            for c in sc..ec {
+                                let cell = &row[Column(c)];
+                                if cell.fg == Color::Named(NamedColor::Foreground)
+                                    && !(sp.role == SemanticRole::OutputUrl
+                                        && cell.hyperlink().is_some())
+                                {
+                                    semantic_cell_overrides[r][c] = Some(style);
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
+        let mut last_osc_style = None;
         let mut row_snapshots = vec![TerminalRowSnapshot::default(); rows];
         {
             let content = self.term.renderable_content();
@@ -578,7 +781,8 @@ impl AlacrittyTerminalEngine {
                 // Apply semantic/syntax coloring ONLY if cell uses unstyled default fg/bg and no INVERSE/HIDDEN/DIM
                 if let Some(row_ov) = semantic_cell_overrides.get(r)
                     && let Some(Some((sem_fg, sem_bold, sem_ul))) = row_ov.get(c)
-                    && matches!(cell.fg, Color::Named(NamedColor::Foreground))
+                    && (cell.fg == Color::Named(NamedColor::Foreground)
+                        || (white_rows[r] && cell.fg == Color::Named(NamedColor::White)))
                     && bg_opt.is_none()
                     && !flags.intersects(Flags::INVERSE | Flags::HIDDEN | Flags::DIM)
                 {
@@ -591,6 +795,23 @@ impl AlacrittyTerminalEngine {
                     }
                 }
 
+                if semantic_opts.semantic_highlighting
+                    && cell.fg == Color::Named(NamedColor::Foreground)
+                    && bg_opt.is_none()
+                    && !flags.intersects(Flags::INVERSE | Flags::HIDDEN | Flags::DIM)
+                    && let Some(link) = cell.hyperlink()
+                {
+                    if last_osc_style
+                        .as_ref()
+                        .is_none_or(|(last, _)| last != &link)
+                    {
+                        let valid = validate_openable_http_url(link.uri()).is_some();
+                        last_osc_style = Some((link, valid));
+                    }
+                    if last_osc_style.as_ref().is_some_and(|(_, valid)| *valid) {
+                        fg = palette.semantic_style(SemanticRole::OutputUrl).0;
+                    }
+                }
                 let row_snap = &mut row_snapshots[r];
 
                 if let Some(bg_color) = bg_opt {
@@ -763,6 +984,22 @@ impl AlacrittyTerminalEngine {
         }
     }
 
+    fn valid_osc_prompt(&self, record: &Osc133Record) -> bool {
+        let grid = self.term.grid();
+        if record.abs_start_line >= grid.history_size() + self.rows {
+            return false;
+        }
+        let gl = record.abs_start_line as i32 - grid.history_size() as i32;
+        if gl > grid.topmost_line().0 && self.row_has_wrapline(Line(gl - 1)) {
+            return false;
+        }
+        let line = self.stitch_logical_line_at(gl, grid.bottommost_line().0, gl, &[]);
+        matches!(
+            detect_prompt_command_byte_offset(&line.text),
+            Some((_, true))
+        )
+    }
+
     fn compute_visible_command_blocks(
         &self,
         row_maps: &[RowTextMap],
@@ -782,7 +1019,11 @@ impl AlacrittyTerminalEngine {
                 (history_size as i32 + self.term.grid().cursor.point.line.0).max(0) as usize;
             let mut out = Vec::new();
             let mut starts_above_viewport = false;
-            for rec in &self.osc133_records {
+            for rec in self
+                .osc133_records
+                .iter()
+                .filter(|r| self.valid_osc_prompt(r))
+            {
                 let end_abs = rec.abs_end_line.unwrap_or(cursor_abs);
                 if end_abs < view_abs_top || rec.abs_start_line > view_abs_bottom {
                     continue;
@@ -872,9 +1113,13 @@ impl AlacrittyTerminalEngine {
         let mut match_count = 0usize;
 
         // Add exact OSC 133 command markers if available
-        let has_osc133 = !self.osc133_records.is_empty();
+        let has_osc133 = self.osc133_records.iter().any(|r| self.valid_osc_prompt(r));
         if has_osc133 {
-            for rec in &self.osc133_records {
+            for rec in self
+                .osc133_records
+                .iter()
+                .filter(|r| self.valid_osc_prompt(r))
+            {
                 let ratio = (rec.abs_start_line as f32 / total_lines as f32).clamp(0.0, 1.0);
                 let kind = match rec.status {
                     CommandBlockStatus::Running => OverviewMarkerKind::CommandRunning,
@@ -999,26 +1244,76 @@ impl AlacrittyTerminalEngine {
     }
 
     fn find_enclosing_prompt_start(
-        &self,
+        &mut self,
         view_top: i32,
         min_history_gl: i32,
         max_grid_gl: i32,
         row_maps: &[RowTextMap],
     ) -> i32 {
-        let lower_bound = view_top
-            .saturating_sub(MAX_BLOCK_LOOKBACK_LINES)
-            .max(min_history_gl);
-
-        for gl in (lower_bound..=view_top).rev() {
-            if gl > min_history_gl && self.row_has_wrapline(Line(gl - 1)) {
-                continue;
-            }
-            let line = self.stitch_logical_line_at(gl, max_grid_gl, view_top, row_maps);
-            if detect_prompt_command_byte_offset(&line.text).is_some() {
-                return gl;
+        let top_abs = (view_top - min_history_gl) as usize;
+        if self.prompt_scan.checked.is_empty() || top_abs < self.prompt_scan.checked.start {
+            let from = self
+                .osc133_records
+                .iter()
+                .rev()
+                .find(|r| r.abs_start_line <= top_abs && self.valid_osc_prompt(r))
+                .map_or(0, |r| r.abs_start_line);
+            if self.prompt_scan.checked.is_empty() {
+                self.prompt_scan.checked = from..from;
+            } else {
+                let mut earlier = self
+                    .scan_prompt_anchors(
+                        from..self.prompt_scan.checked.start,
+                        min_history_gl,
+                        max_grid_gl,
+                        view_top,
+                        row_maps,
+                    )
+                    .0;
+                earlier.append(&mut self.prompt_scan.anchors);
+                self.prompt_scan.anchors = earlier;
+                self.prompt_scan.checked.start = from;
             }
         }
-        view_top
+        if self.prompt_scan.checked.end <= top_abs {
+            let (anchors, end) = self.scan_prompt_anchors(
+                self.prompt_scan.checked.end..top_abs + 1,
+                min_history_gl,
+                max_grid_gl,
+                view_top,
+                row_maps,
+            );
+            self.prompt_scan.anchors.extend(anchors);
+            self.prompt_scan.checked.end = end;
+        }
+        let end = self.prompt_scan.anchors.partition_point(|&a| a <= top_abs);
+        self.prompt_scan.anchors[..end]
+            .last()
+            .map_or(view_top, |a| min_history_gl + *a as i32)
+    }
+
+    fn scan_prompt_anchors(
+        &mut self,
+        range: Range<usize>,
+        min_gl: i32,
+        max_gl: i32,
+        view_top: i32,
+        maps: &[RowTextMap],
+    ) -> (Vec<usize>, usize) {
+        let mut anchors = Vec::new();
+        let mut abs = range.start;
+        while abs < range.end {
+            #[cfg(test)]
+            {
+                self.prompt_scan.scanned_lines += 1;
+            }
+            let line = self.stitch_logical_line_at(min_gl + abs as i32, max_gl, view_top, maps);
+            if detect_prompt_command_byte_offset(&line.text).is_some() {
+                anchors.push(abs);
+            }
+            abs = (line.end_gl - min_gl + 1) as usize;
+        }
+        (anchors, abs)
     }
 
     fn populate_code_syntax_overrides(
@@ -1028,6 +1323,7 @@ impl AlacrittyTerminalEngine {
         history_size: usize,
         palette: &TerminalPalette,
         overrides: &mut [Vec<Option<(Hsla, bool, bool)>>],
+        white_rows: &mut [bool],
     ) {
         if self.rows == 0 || self.cols == 0 || row_maps.is_empty() {
             return;
@@ -1093,6 +1389,16 @@ impl AlacrittyTerminalEngine {
                 continue;
             };
 
+            let start = out_slice[0].start_gl;
+            let end = out_slice.last().unwrap().end_gl;
+            if self.is_windows_local_pty
+                && target.allow_conpty_white
+                && self.monochrome_output(start, end, scan_end_gl, content_end)
+            {
+                white_rows[(start.max(view_top) - view_top) as usize
+                    ..=(end.min(view_bottom) - view_top) as usize]
+                    .fill(true);
+            }
             let last_is_incomplete = out_end == logical_lines.len()
                 && out_slice.last().is_some_and(|last| {
                     last.end_gl == content_end && (last.start_gl..=last.end_gl).contains(&cursor_gl)
@@ -1114,6 +1420,41 @@ impl AlacrittyTerminalEngine {
         }
     }
 
+    fn monochrome_output(&self, start: i32, end: i32, scan_end: i32, content_end: i32) -> bool {
+        let plain_row = |gl| {
+            self.term.grid()[Line(gl)][..].iter().all(|c| {
+                matches!(
+                    c.fg,
+                    Color::Named(NamedColor::Foreground | NamedColor::White)
+                ) && c.bg == Color::Named(NamedColor::Background)
+                    && (c.flags
+                        - (Flags::WRAPLINE
+                            | Flags::WIDE_CHAR
+                            | Flags::WIDE_CHAR_SPACER
+                            | Flags::LEADING_WIDE_CHAR_SPACER))
+                        .is_empty()
+            })
+        };
+        if !(start..=end).all(plain_row) {
+            return false;
+        }
+        // If the viewport cuts off this block, inspect its remaining output before allowing white.
+        if end >= scan_end {
+            let mut gl = end + 1;
+            while gl <= content_end {
+                let next = self.stitch_logical_line_at(gl, content_end, gl, &[]);
+                if detect_prompt_command_byte_offset(&next.text).is_some() {
+                    break;
+                }
+                if !(gl..=next.end_gl).all(plain_row) {
+                    return false;
+                }
+                gl = next.end_gl + 1;
+            }
+        }
+        true
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn highlight_single_output_block(
         &mut self,
@@ -1131,11 +1472,7 @@ impl AlacrittyTerminalEngine {
         overrides: &mut [Vec<Option<(Hsla, bool, bool)>>],
     ) {
         let first_line = out_lines.first().map(|line| line.text.as_str());
-        let hint = match target {
-            CommandSyntaxTarget::Hint(h) => Some(h.as_str()),
-            CommandSyntaxTarget::FirstLineOnly => None,
-        };
-        let Some(syntax) = pack.find_syntax(hint, first_line) else {
+        let Some(syntax) = pack.find_syntax(target.hint.as_deref(), first_line) else {
             return;
         };
 
@@ -1278,7 +1615,9 @@ impl AlacrittyTerminalEngine {
             let end_rel = after
                 .find('\x07')
                 .map(|i| (i, 1))
-                .or_else(|| after.find("\x1b\\").map(|i| (i, 2)));
+                .into_iter()
+                .chain(after.find("\x1b\\").map(|i| (i, 2)))
+                .min();
             let Some((end_idx, term_len)) = end_rel else {
                 if start > 0 {
                     self.osc_tail.drain(..start);
@@ -1301,6 +1640,10 @@ impl AlacrittyTerminalEngine {
             } else if let Some(osc133) = payload.strip_prefix("133;") {
                 self.handle_osc133_marker(osc133);
             }
+        }
+        if !self.osc_tail.contains("\x1b]") {
+            let keep = usize::from(self.osc_tail.ends_with('\x1b'));
+            self.osc_tail.drain(..self.osc_tail.len() - keep);
         }
         latest_dir
     }
@@ -1590,15 +1933,15 @@ mod tests {
         let url_fg = palette.semantic_style(crate::terminal::SemanticRole::OutputUrl).0;
         let ansi_red_fg = rgb_to_hsla(palette.ansi[1], 1.0);
 
-        // Row 2: `# 常规交互式启动 https://example.com` -> comment colored + CJK wide aligned + URL underlined on top
+        // Row 2: `# 常规交互式启动 https://example.com` -> comment colored + CJK wide aligned + URL color on top
         let row2 = &snap.lines[2].text_runs;
         assert!(row2.iter().any(|r| r.text == "常" && r.wide && r.fg == comment_fg));
         assert!(
             row2.iter()
-                .any(|r| r.text.contains("https://example.com") && r.fg == url_fg && r.underline)
+                .any(|r| r.text.contains("https://example.com") && r.fg == url_fg && !r.underline)
         );
         assert_eq!(
-            engine.url_at(2, 22).as_deref(),
+            engine.link_at(2, 22).map(|m| m.url).as_deref(),
             Some("https://example.com")
         );
 
@@ -1634,6 +1977,178 @@ mod tests {
                 .iter()
                 .any(|r| r.text.contains("https://example.com") && r.fg == url_fg)
         );
+    }
+
+    #[test]
+    fn wrapped_links_hit_and_paint_the_full_visible_range() {
+        let mut engine = AlacrittyTerminalEngine::new(3, 20, 100);
+        let url = "https://git:3000/very-long-path/wiki/Example_(one)?a=1&b=2#top";
+        engine.feed_bytes(format!("中 [{url}]").as_bytes());
+        let cols = engine.cols;
+        let palette = TerminalPalette::dark();
+        let fg = palette.semantic_style(SemanticRole::OutputUrl).0;
+        for offset in [Scroll::Top, Scroll::Bottom] {
+            engine.scroll(offset);
+            let snap = engine.snapshot(&palette, true, SemanticOptions::default());
+            let top = snap.history_size - snap.display_offset;
+            let spans: Vec<_> = (0..snap.rows)
+                .filter_map(|r| {
+                    let begin = (r + top) * cols;
+                    let end = (4 + url.len()).saturating_sub(begin).min(cols);
+                    let start = 4usize.saturating_sub(begin);
+                    (start < end).then_some((r, start, end))
+                })
+                .collect();
+            for &(r, start, end) in &spans {
+                for col in start..end {
+                    let link = engine.link_at(r, col).unwrap();
+                    assert_eq!(link.url, url);
+                    assert_eq!(link.viewport_spans, spans);
+                    assert!(snap.lines[r].text_runs.iter().any(|run| {
+                        (run.start_col..run.start_col + run.col_len).contains(&col)
+                            && run.fg == fg
+                            && !run.underline
+                    }));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn osc8_respects_identity_wide_cells_native_style_and_target_scheme() {
+        let mut engine = AlacrittyTerminalEngine::new(4, 24, 100);
+        engine.feed_bytes(
+            concat!(
+                "\x1b]8;id=1;https://a.com\x07一",
+                "\x1b]8;id=2;https://a.com\x1b\\二\x1b]8;;\x07 ",
+                "\x1b[4;31m\x1b]8;;https://git:3000\x07git\x1b]8;;\x07\x1b[0m",
+            )
+            .as_bytes(),
+        );
+        let palette = TerminalPalette::dark();
+        let snap = engine.snapshot(&palette, true, SemanticOptions::default());
+        for (col, left) in [(1, 0), (3, 2)] {
+            let m = engine.link_at(0, col).unwrap();
+            assert_eq!(m.viewport_spans, [(0, left, left + 2)]);
+            assert_eq!(m.osc8_host_hint.as_deref(), Some("a.com"));
+            let run = snap.lines[0]
+                .text_runs
+                .iter()
+                .find(|r| r.start_col == left)
+                .unwrap();
+            assert_eq!(run.fg, palette.semantic_style(SemanticRole::OutputUrl).0);
+            assert!(!run.underline);
+        }
+        assert!(engine.link_at(0, 6).unwrap().osc8_host_hint.is_none());
+        assert!(
+            snap.lines[0].text_runs.iter().any(|r| r.text == "git"
+                && r.underline
+                && r.fg == rgb_to_hsla(palette.ansi[1], 1.))
+        );
+        for invalid in [
+            "file:///etc/passwd",
+            r"\\server\share",
+            "javascript:alert(1)",
+            "custom://open",
+            "http://",
+        ] {
+            engine.feed_bytes(format!("\r\x1b]8;;{invalid}\x07https://git\x1b]8;;\x07").as_bytes());
+            assert!(engine.link_at(0, 1).is_none(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn long_cat_keeps_its_prompt_and_full_log_repaints_skip_history() {
+        let opts = SemanticOptions {
+            overview_markers: false,
+            ..Default::default()
+        };
+        let palette = TerminalPalette::dark();
+        let mut engine = AlacrittyTerminalEngine::new(6, 32, 5000);
+        engine.feed_bytes(b"$ cat large.rs\r\n");
+        engine.feed_bytes("fn test() {}\r\n".repeat(1500).as_bytes());
+        let snap = engine.snapshot(&palette, true, opts);
+        assert!(
+            snap.lines[0]
+                .text_runs
+                .iter()
+                .any(|r| r.text == "fn" && r.fg != snap.foreground)
+        );
+        for n in [5_000, 30_000] {
+            let mut log = AlacrittyTerminalEngine::new(4, 20, n);
+            log.feed_bytes("line\r\n".repeat(n + 4).as_bytes());
+            log.snapshot(&palette, false, opts);
+            let scanned = log.prompt_scan.scanned_lines;
+            assert!(scanned >= n);
+            for scroll in [Scroll::Delta(2), Scroll::Bottom] {
+                log.scroll(scroll);
+                log.snapshot(&palette, false, opts);
+                assert_eq!(log.prompt_scan.scanned_lines, scanned);
+            }
+            log.feed_bytes(b"next\r\n");
+            log.snapshot(&palette, false, opts);
+            assert!(log.prompt_scan.scanned_lines - scanned <= 2);
+            log.resize(5, 24);
+            assert!(log.prompt_scan.checked.is_empty());
+        }
+    }
+
+    #[test]
+    fn conpty_white_applies_only_to_monochrome_local_reads() {
+        let palette = TerminalPalette::dark();
+        let white = rgb_to_hsla(palette.ansi[7], 1.);
+        for (local, cmd, suffix, allowed) in [
+            (false, "type a.rs", "", false),
+            (true, "type a.rs", "", true),
+            (true, "bat a.rs", "", false),
+            (true, "type a.rs", "\x1b[32mgreen", false),
+            (true, "type a.rs", "\x1b[44mbackground", false),
+            (true, "type a.rs", "\x1b[1mbold", false),
+        ] {
+            let mut engine = AlacrittyTerminalEngine::new(3, 40, 100);
+            engine.is_windows_local_pty = local;
+            engine.feed_bytes(
+                format!("C:\\src>{cmd}\r\n\x1b[37mfn main() {{}}\r\n\r\n{suffix}").as_bytes(),
+            );
+            engine.scroll(Scroll::Top);
+            let snap = engine.snapshot(&palette, false, SemanticOptions::default());
+            let run = &snap.lines[1].text_runs[0];
+            assert_eq!(run.fg != white, allowed, "{cmd} {local} {suffix:?}");
+        }
+    }
+
+    #[test]
+    fn mixed_osc_terminators_preserve_cwd_and_only_real_command_anchors() {
+        let mut e = AlacrittyTerminalEngine::new(4, 40, 100);
+        let effects = e.feed_bytes(b"\x1b]7;file://host/one\x1b\\\x1b]133;A\x07$ cat a.rs\r\n\x1b]133;C\x07fn main() {}\r\n\x1b]133;D;7\x1b\\");
+        assert!(
+            effects
+                .iter()
+                .any(|v| matches!(v, EngineSideEffect::CurrentDirChanged(d) if d == "/one"))
+        );
+        let opts = SemanticOptions::default();
+        let palette = TerminalPalette::dark();
+        assert_eq!(
+            e.snapshot(&palette, false, opts).command_blocks[0].status,
+            CommandBlockStatus::Failure(7)
+        );
+        e.feed_bytes(b"\x1b]133;A\x07plain text");
+        assert!(!e.valid_osc_prompt(e.osc133_records.back().unwrap()));
+        e.osc133_records.back_mut().unwrap().abs_start_line = usize::MAX;
+        assert!(!e.valid_osc_prompt(e.osc133_records.back().unwrap()));
+        assert_eq!(e.snapshot(&palette, false, opts).command_blocks.len(), 1);
+    }
+
+    #[test]
+    fn selecting_wide_words_and_wrapped_lines_preserves_text() {
+        let mut e = AlacrittyTerminalEngine::new(4, 12, 100);
+        e.feed_bytes("中文 path/file.txt\r\n".as_bytes());
+        e.start_selection(0, 1, 2);
+        assert_eq!(e.selected_text().as_deref(), Some("中文"));
+        e.start_selection(1, 2, 3);
+        assert_eq!(e.selected_text().as_deref(), Some("中文 path/file.txt\n"));
+        e.start_selection(0, 2, 1);
+        assert_eq!(e.selected_text(), None);
     }
 
     #[test]

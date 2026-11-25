@@ -48,6 +48,7 @@ fn run_app() -> Result<()> {
         .with_assets(gpui_kit::assets::AllAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
+            cx.set_app_identity("dev.micaterm.gpui", "Mica Term GPUI");
             register_keybindings(cx);
             register_bundled_fonts(cx);
 
@@ -55,6 +56,7 @@ fn run_app() -> Result<()> {
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 window_min_size: Some(size(px(880.0), px(560.0))),
+                app_id: Some("dev.micaterm.gpui".into()),
                 ..TitleBar::window_options()
             };
 

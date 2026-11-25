@@ -25,6 +25,19 @@ use syntect::util::LinesWithEndings;
 
 const EDITOR_SYNC_PARSE_MAX_BYTES: usize = 64 * 1024;
 const EDITOR_PARSE_DEBOUNCE: Duration = Duration::from_millis(150);
+const BUILTIN_POWERSHELL_SYNTAX: &str = include_str!("powershell.sublime-syntax");
+
+fn base_syntax_builder() -> syntect::parsing::SyntaxSetBuilder {
+    let mut builder = two_face::syntax::extra_newlines().into_builder();
+    let ps_def = SyntaxDefinition::load_from_str(
+        BUILTIN_POWERSHELL_SYNTAX,
+        true,
+        Some("PowerShell"),
+    )
+    .expect("bundled powershell.sublime-syntax must be valid");
+    builder.add(ps_def);
+    builder
+}
 
 /// Semantic code token roles shared between the Terminal Canvas and the SFTP Code Editor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -307,7 +320,7 @@ pub struct SyntaxRegistry {
 }
 
 static GLOBAL_REGISTRY: LazyLock<SyntaxRegistry> = LazyLock::new(|| {
-    let base = two_face::syntax::extra_newlines();
+    let base = base_syntax_builder().build();
     let builtin_count = base
         .syntaxes()
         .iter()
@@ -334,17 +347,13 @@ impl SyntaxRegistry {
         self.current.read().clone()
     }
 
-    /// Rebuilds the syntax set from built-in `two-face` syntaxes plus any custom files in `dir`.
+    /// Rebuilds the syntax set from built-in `two-face` + PowerShell syntaxes plus any custom files in `dir`.
     pub fn reload_from_dir(&self, dir: Option<&Path>) -> Arc<SyntaxPack> {
-        let base = two_face::syntax::extra_newlines();
-        let builtin_count = base
-            .syntaxes()
-            .iter()
-            .filter(|s| !s.hidden && s.name != "Plain Text")
-            .count();
+        let mut builder = base_syntax_builder();
+        let builtin_count = GLOBAL_REGISTRY.current().builtin_count;
 
         let mut custom_entries = Vec::new();
-        let syntax_set = if let Some(dir) = dir.filter(|d| d.is_dir()) {
+        if let Some(dir) = dir.filter(|d| d.is_dir()) {
             let mut files: Vec<PathBuf> = fs::read_dir(dir)
                 .ok()
                 .into_iter()
@@ -354,24 +363,13 @@ impl SyntaxRegistry {
                 .collect();
             files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
 
-            if files.is_empty() {
-                base
-            } else {
-                let mut builder = base.into_builder();
-                let mut any_added = false;
-                for path in files {
-                    let entry = load_single_custom_syntax(&path, &mut builder, &mut any_added);
-                    custom_entries.push(entry);
-                }
-                if any_added {
-                    builder.build()
-                } else {
-                    two_face::syntax::extra_newlines()
-                }
+            let mut any_added = false;
+            for path in files {
+                let entry = load_single_custom_syntax(&path, &mut builder, &mut any_added);
+                custom_entries.push(entry);
             }
-        } else {
-            base
-        };
+        }
+        let syntax_set = builder.build();
 
         let rev = self.next_rev.fetch_add(1, Ordering::Relaxed);
         let pack = Arc::new(SyntaxPack {
@@ -762,9 +760,9 @@ fn devops_basename_alias(basename: &str) -> Option<&'static str> {
         "makefile" | "gnumakefile" | "justfile" => Some("Makefile"),
         "cmakelists.txt" => Some("CMake"),
         "cargo.lock" | "poetry.lock" | "pipfile" => Some("toml"),
-        ".gitconfig" | ".gitmodules" | ".editorconfig" | "sshd_config" | "ssh_config" => {
-            Some("ini")
-        }
+        ".gitconfig" | ".gitmodules" | ".editorconfig" | "sshd_config" | "ssh_config"
+        | ".npmrc" | ".yarnrc" => Some("ini"),
+        "hosts" | "fstab" | "sudoers" => Some("sh"),
         "nginx.conf" | "mime.types" => Some("nginx"),
         ".env" | ".env.local" | ".env.production" | ".env.development" | ".env.example" => {
             Some("sh")
@@ -786,6 +784,8 @@ fn devops_extension_alias(lower_ext: &str) -> Option<&'static str> {
         "dockerfile" => Some("Dockerfile"),
         "mk" => Some("Makefile"),
         "plist" | "svg" | "csproj" | "props" | "targets" => Some("xml"),
+        "gql" => Some("graphql"),
+        "tfvars" => Some("tf"),
         "psql" => Some("sql"),
         _ => None,
     }
@@ -1094,6 +1094,19 @@ mod tests {
             "Cargo.toml",
             "main.rs",
             "deploy.py",
+            "setup.ps1",
+            "module.psm1",
+            "build.bat",
+            "App.vue",
+            "Widget.svelte",
+            "infra.tf",
+            "prod.tfvars",
+            "api.proto",
+            "schema.graphql",
+            "query.gql",
+            "config.fish",
+            "/etc/hosts",
+            "/etc/fstab",
             "diff",
         ] {
             assert!(
@@ -1101,6 +1114,12 @@ mod tests {
                 "expected syntax match for `{hint}`"
             );
         }
+        let ps = pack.find_syntax(Some("deploy.ps1"), None).unwrap();
+        assert_eq!(ps.name, "PowerShell");
+        let ps_spans = pack.parse_document(ps, "# comment\nGet-Content -Path $env:HOME\\a.txt\n");
+        assert!(ps_spans.iter().any(|(_, r)| *r == CodeTokenRole::Comment));
+        assert!(ps_spans.iter().any(|(_, r)| *r == CodeTokenRole::Function));
+        assert!(ps_spans.iter().any(|(_, r)| *r == CodeTokenRole::Variable));
 
         let shebang_py = pack.find_syntax(None, Some("#!/usr/bin/env python3"));
         assert!(shebang_py.is_some());

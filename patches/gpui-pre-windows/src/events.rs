@@ -323,6 +323,7 @@ impl WindowsWindowInner {
     }
 
     fn handle_destroy_msg(&self, handle: HWND) -> Option<isize> {
+        self.state.release_owned_icons();
         let callback = { self.state.callbacks.close.take() };
         // Re-enable parent window if this was a modal dialog
         if let Some(parent_hwnd) = self.parent_hwnd {
@@ -877,6 +878,8 @@ impl WindowsWindowInner {
         lparam: LPARAM,
     ) -> Option<isize> {
         let new_dpi = wparam.loword() as f32;
+        self.state
+            .refresh_icons_for_dpi(handle, wparam.loword() as u32);
 
         let is_maximized = self.state.is_maximized();
         let new_scale_factor = new_dpi / USER_DEFAULT_SCREEN_DPI as f32;
@@ -1174,17 +1177,44 @@ impl WindowsWindowInner {
         None
     }
 
-    fn handle_cursor_changed(&self, lparam: LPARAM) -> Option<isize> {
-        let had_cursor = self.state.current_cursor.get().is_some();
-
-        self.state.current_cursor.set(if lparam.0 == 0 {
+    fn handle_cursor_changed(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
+        let prev_cursor = self.state.current_cursor.get();
+        let new_cursor = if lparam.0 == 0 {
             None
         } else {
             Some(HCURSOR(lparam.0 as _))
-        });
+        };
+        self.state.current_cursor.set(new_cursor);
 
-        if had_cursor != self.state.current_cursor.get().is_some() {
-            unsafe { SetCursor(self.state.current_cursor.get()) };
+        if prev_cursor.map(|c| c.0) != new_cursor.map(|c| c.0)
+            && self.state.hovered.get()
+            && unsafe { IsWindowEnabled(handle).as_bool() }
+        {
+            let mut pt = POINT::default();
+            let in_client = unsafe {
+                GetCursorPos(&mut pt).is_ok()
+                    && WindowFromPoint(pt) == handle
+                    && SendMessageW(
+                        handle,
+                        WM_NCHITTEST,
+                        None,
+                        Some(LPARAM(
+                            ((pt.x as i16 as u16 as usize)
+                                | ((pt.y as i16 as u16 as usize) << 16))
+                                as isize,
+                        )),
+                    )
+                    .0 as u32
+                        == HTCLIENT
+            };
+            if in_client {
+                let cursor = if self.state.cursor_visible.load(Ordering::Relaxed) {
+                    new_cursor
+                } else {
+                    None
+                };
+                unsafe { SetCursor(cursor) };
+            }
         }
 
         Some(0)
@@ -1322,7 +1352,7 @@ impl WindowsWindowInner {
             return None;
         }
         match message {
-            WM_GPUI_CURSOR_STYLE_CHANGED => self.handle_cursor_changed(lparam),
+            WM_GPUI_CURSOR_STYLE_CHANGED => self.handle_cursor_changed(handle, lparam),
             WM_GPUI_FORCE_UPDATE_WINDOW => self.draw_window(handle, true),
             WM_GPUI_GPU_DEVICE_LOST => self.handle_device_lost(lparam),
             _ => unreachable!(),

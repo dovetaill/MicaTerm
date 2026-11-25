@@ -11,6 +11,13 @@ pub enum DoubleClickAction {
     Paste,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RightClickAction {
+    #[default]
+    ContextMenu,
+    SmartCopyPaste,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShortcutScope {
     Terminal,

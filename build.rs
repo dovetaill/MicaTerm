@@ -1,6 +1,7 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
@@ -10,8 +11,10 @@ fn main() {
     println!(
         "cargo:rerun-if-changed=assets/fonts/JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf"
     );
+    println!("cargo:rerun-if-changed=assets/icons/windows/mica-term-gpui.ico");
     println!("cargo:rerun-if-env-changed=HOME");
     println!("cargo:rerun-if-env-changed=LIB");
+    println!("cargo:rerun-if-env-changed=RC");
     println!("cargo:rerun-if-env-changed=XWIN_CACHE_DIR");
 
     let Ok(out_dir_raw) = env::var("OUT_DIR") else {
@@ -36,7 +39,114 @@ fn main() {
         if env::consts::OS != "windows" {
             prepare_xwin_case_shims(&out_dir, &target_arch);
         }
+        compile_windows_resources(&out_dir);
     }
+}
+
+fn compile_windows_resources(out_dir: &Path) {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let src_ico = manifest_dir.join("assets/icons/windows/mica-term-gpui.ico");
+    let dst_ico = out_dir.join("mica-term-gpui.ico");
+    fs::copy(&src_ico, &dst_ico)
+        .unwrap_or_else(|e| panic!("failed to copy `{}`: {e}", src_ico.display()));
+
+    let pkg_ver = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.2.0".to_string());
+    let mut parts = pkg_ver
+        .split(['.', '-'])
+        .filter_map(|s| s.parse::<u16>().ok());
+    let major = parts.next().unwrap_or(0);
+    let minor = parts.next().unwrap_or(2);
+    let patch = parts.next().unwrap_or(0);
+
+    let rc_content = format!(
+        r#"1 ICON "mica-term-gpui.ico"
+
+1 VERSIONINFO
+FILEVERSION {major},{minor},{patch},0
+PRODUCTVERSION {major},{minor},{patch},0
+FILEFLAGSMASK 0x3fL
+FILEFLAGS 0x0L
+FILEOS 0x40004L
+FILETYPE 0x1L
+FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "Mica Term\0"
+            VALUE "FileDescription", "Mica Term GPUI - Terminal, SSH & SFTP Workspace\0"
+            VALUE "FileVersion", "{pkg_ver}\0"
+            VALUE "InternalName", "mica-term-gpui\0"
+            VALUE "OriginalFilename", "mica-term-gpui.exe\0"
+            VALUE "ProductName", "Mica Term GPUI\0"
+            VALUE "ProductVersion", "{pkg_ver}\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END
+"#
+    );
+
+    let rc_path = out_dir.join("mica-term-gpui.rc");
+    let res_path = out_dir.join("mica-term-gpui.res");
+    fs::write(&rc_path, rc_content).expect("failed to write mica-term-gpui.rc");
+
+    let rc_bin = find_windows_rc_tool();
+    let status = Command::new(&rc_bin)
+        .current_dir(out_dir)
+        .args(["/fo", "mica-term-gpui.res", "mica-term-gpui.rc"])
+        .status()
+        .unwrap_or_else(|e| panic!("failed to execute `{}`: {e}", rc_bin.display()));
+    assert!(
+        status.success() && res_path.is_file(),
+        "resource compiler `{}` failed with status {status}",
+        rc_bin.display()
+    );
+    println!("cargo:rustc-link-arg-bins={}", res_path.display());
+}
+
+fn find_windows_rc_tool() -> PathBuf {
+    if let Some(rc_env) = env::var_os("RC").filter(|v| !v.is_empty()) {
+        return PathBuf::from(rc_env);
+    }
+
+    let names: &[&str] = if cfg!(windows) {
+        &["llvm-rc.exe", "rc.exe"]
+    } else {
+        &[
+            "llvm-rc",
+            "llvm-rc-20",
+            "llvm-rc-19",
+            "llvm-rc-18",
+            "llvm-rc-17",
+            "llvm-rc-16",
+            "rc.exe",
+        ]
+    };
+
+    if let Some(path_var) = env::var_os("PATH") {
+        for dir in env::split_paths(&path_var) {
+            for name in names {
+                let candidate = dir.join(name);
+                if candidate.is_file() {
+                    return candidate;
+                }
+            }
+        }
+    }
+
+    for ver in [20, 19, 18, 17, 16] {
+        let candidate = PathBuf::from(format!("/usr/lib/llvm-{ver}/bin/llvm-rc"));
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+
+    panic!("unable to locate llvm-rc or rc.exe for Windows icon/version resource compilation");
 }
 
 #[cfg(unix)]

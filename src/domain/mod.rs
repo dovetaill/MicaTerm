@@ -15,6 +15,6 @@ pub use models::{
     is_legacy_system_default_font, system_monospace_font_family,
 };
 pub use shortcuts::{
-    DoubleClickAction, ShortcutAction, ShortcutCategory, ShortcutChord, ShortcutConfig,
-    ShortcutScope, format_chord, tooltip,
+    DoubleClickAction, RightClickAction, ShortcutAction, ShortcutCategory, ShortcutChord,
+    ShortcutConfig, ShortcutScope, format_chord, tooltip,
 };

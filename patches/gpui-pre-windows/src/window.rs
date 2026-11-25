@@ -76,6 +76,7 @@ pub struct WindowsWindowState {
 
     pub click_state: ClickState,
     pub current_cursor: Cell<Option<HCURSOR>>,
+    pub owned_icons: Cell<(Option<HICON>, Option<HICON>)>,
     /// Shared with [`WindowsPlatformState::cursor_visible`].
     pub cursor_visible: Arc<AtomicBool>,
     pub nc_button_pressed: Cell<Option<u32>>,
@@ -182,6 +183,7 @@ impl WindowsWindowState {
             force_render_pending: Cell::new(false),
             click_state,
             current_cursor: Cell::new(current_cursor),
+            owned_icons: Cell::new((None, None)),
             cursor_visible,
             nc_button_pressed: Cell::new(nc_button_pressed),
             display: Cell::new(display),
@@ -199,6 +201,67 @@ impl WindowsWindowState {
     #[inline]
     pub(crate) fn is_fullscreen(&self) -> bool {
         self.fullscreen.get().is_some()
+    }
+
+    pub(crate) fn refresh_icons_for_dpi(&self, hwnd: HWND, dpi: u32) {
+        let load_sized = |mx, my| unsafe {
+            let cx = GetSystemMetricsForDpi(mx, dpi);
+            let cy = GetSystemMetricsForDpi(my, dpi);
+            (cx > 0 && cy > 0)
+                .then(|| {
+                    LoadImageW(
+                        Some(get_module_handle().into()),
+                        PCWSTR(1 as _),
+                        IMAGE_ICON,
+                        cx,
+                        cy,
+                        IMAGE_FLAGS(0),
+                    )
+                    .ok()
+                    .map(|h| HICON(h.0))
+                })
+                .flatten()
+        };
+        let (mut cur_big, mut cur_small) = self.owned_icons.get();
+        if let Some(big) = load_sized(SM_CXICON, SM_CYICON) {
+            unsafe {
+                SendMessageW(
+                    hwnd,
+                    WM_SETICON,
+                    Some(WPARAM(ICON_BIG as usize)),
+                    Some(LPARAM(big.0 as isize)),
+                );
+                if let Some(old) = cur_big.replace(big) {
+                    let _ = DestroyIcon(old);
+                }
+            }
+        }
+        if let Some(small) = load_sized(SM_CXSMICON, SM_CYSMICON) {
+            unsafe {
+                SendMessageW(
+                    hwnd,
+                    WM_SETICON,
+                    Some(WPARAM(ICON_SMALL as usize)),
+                    Some(LPARAM(small.0 as isize)),
+                );
+                if let Some(old) = cur_small.replace(small) {
+                    let _ = DestroyIcon(old);
+                }
+            }
+        }
+        self.owned_icons.set((cur_big, cur_small));
+    }
+
+    pub(crate) fn release_owned_icons(&self) {
+        let (big, small) = self.owned_icons.take();
+        unsafe {
+            if let Some(icon) = big {
+                let _ = DestroyIcon(icon);
+            }
+            if let Some(icon) = small {
+                let _ = DestroyIcon(icon);
+            }
+        }
     }
 
     pub(crate) fn is_maximized(&self) -> bool {
@@ -574,6 +637,8 @@ impl WindowsWindow {
         register_drag_drop(&this)?;
         set_non_rude_hwnd(hwnd, true);
         configure_dwm_dark_mode(hwnd, appearance);
+        this.state
+            .refresh_icons_for_dpi(hwnd, unsafe { GetDpiForWindow(hwnd) });
         this.state.border_offset.update(hwnd)?;
         let placement =
             retrieve_window_placement(hwnd, display, params.bounds, &this.state.border_offset)?;
@@ -1448,16 +1513,18 @@ const WINDOW_CLASS_NAME: PCWSTR = w!("Zed::Window");
 fn register_window_class(icon_handle: HICON) {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
-        let wc = WNDCLASSW {
+        let wc = WNDCLASSEXW {
+            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
             lpfnWndProc: Some(window_procedure),
             hIcon: icon_handle,
+            hIconSm: icon_handle,
             lpszClassName: PCWSTR(WINDOW_CLASS_NAME.as_ptr()),
             style: CS_HREDRAW | CS_VREDRAW,
             hInstance: get_module_handle().into(),
             hbrBackground: unsafe { CreateSolidBrush(COLORREF(0x00000000)) },
             ..Default::default()
         };
-        unsafe { RegisterClassW(&wc) };
+        unsafe { RegisterClassExW(&wc) };
     });
 }
 

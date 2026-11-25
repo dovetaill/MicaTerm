@@ -124,8 +124,25 @@ impl WorkspaceStore {
             None => default_starter_snippets(),
         };
         let recent_host_ids: Vec<String> = self.read_json(KEY_RECENT_HOSTS)?.unwrap_or_default();
-        let mut settings: AppSettings = self.read_json(KEY_SETTINGS)?.unwrap_or_default();
+        let raw = self.read_json::<serde_json::Value>(KEY_SETTINGS)?;
+        let explicit_right_click = raw
+            .as_ref()
+            .is_some_and(|v| v.get("right_click_action").is_some());
+        let mut settings: AppSettings = raw
+            .map(serde_json::from_value)
+            .transpose()?
+            .unwrap_or_default();
         let mut migrated = false;
+        if !settings.mouse_v2_migrated {
+            if !explicit_right_click
+                && settings.double_click_action == crate::domain::DoubleClickAction::Paste
+            {
+                settings.right_click_action = crate::domain::RightClickAction::SmartCopyPaste;
+                settings.double_click_action = crate::domain::DoubleClickAction::SelectWord;
+            }
+            settings.mouse_v2_migrated = true;
+            migrated = true;
+        }
         if !settings.font_migrated_sarasa {
             if is_legacy_system_default_font(&settings.font_family) {
                 settings.font_family = BUNDLED_SARASA_FONT_FAMILY.to_string();
@@ -253,6 +270,42 @@ mod tests {
     }
 
     #[test]
+    fn legacy_paste_migrates_once_and_respects_explicit_right_click() {
+        use crate::domain::RightClickAction::{ContextMenu, SmartCopyPaste};
+        let dir = std::env::temp_dir().join(format!("mica-gpui-store-{}", uuid::Uuid::new_v4()));
+        let store = WorkspaceStore::open(dir.join("workspace.redb")).unwrap();
+        for (explicit, legacy, expected) in [
+            (None, DoubleClickAction::Paste, SmartCopyPaste),
+            (Some(ContextMenu), DoubleClickAction::Paste, ContextMenu),
+            (None, DoubleClickAction::SelectWord, ContextMenu),
+        ] {
+            let mut raw = serde_json::to_value(AppSettings::default()).unwrap();
+            let fields = raw.as_object_mut().unwrap();
+            fields.remove("mouse_v2_migrated");
+            fields.remove("copy_on_select");
+            fields.remove("right_click_action");
+            if let Some(action) = explicit {
+                fields.insert("right_click_action".into(), serde_json::json!(action));
+            }
+            fields.insert("double_click_action".into(), serde_json::json!(legacy));
+            store.write_json(KEY_SETTINGS, &raw).unwrap();
+            let mut settings = store.load_snapshot().unwrap().settings;
+            assert_eq!(settings.right_click_action, expected);
+            assert!(settings.mouse_v2_migrated);
+            assert!(!settings.copy_on_select);
+            assert_eq!(
+                store.read_json(KEY_SETTINGS).unwrap(),
+                Some(settings.clone())
+            );
+            settings.right_click_action = ContextMenu;
+            store.save_settings(&settings).unwrap();
+            assert_eq!(store.load_snapshot().unwrap().settings, settings);
+        }
+        drop(store);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn store_persists_and_reloads_snapshot() {
         let dir = std::env::temp_dir().join(format!("mica-gpui-store-{}", uuid::Uuid::new_v4()));
         let paths = AppPaths::from_root(&dir).unwrap();
@@ -265,6 +318,8 @@ mod tests {
         let mut settings = AppSettings {
             font_size: 16.0,
             double_click_action: DoubleClickAction::Paste,
+            right_click_action: crate::domain::RightClickAction::SmartCopyPaste,
+            copy_on_select: true,
             ..Default::default()
         };
         let custom = ShortcutChord::try_record(&Keystroke::parse("alt-n").unwrap()).unwrap();
@@ -279,6 +334,11 @@ mod tests {
         assert_eq!(snap.hosts.nodes.len(), 1);
         assert_eq!(snap.settings.font_size, 16.0);
         assert_eq!(snap.settings.font_family, BUNDLED_SARASA_FONT_FAMILY);
+        assert_eq!(
+            snap.settings.right_click_action,
+            crate::domain::RightClickAction::SmartCopyPaste
+        );
+        assert!(snap.settings.copy_on_select);
         assert_eq!(snap.settings.double_click_action, DoubleClickAction::Paste);
         assert_eq!(
             snap.settings.shortcuts.get(ShortcutAction::NewLocalTab),

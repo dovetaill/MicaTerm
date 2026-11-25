@@ -25,11 +25,18 @@ impl Default for SemanticOptions {
 
 /// Describes whether a shell command's stdout is eligible for client-side syntax highlighting.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CommandSyntaxTarget {
-    /// Explicit filename, path, or language token hint (e.g. `"tcpx.sh"`, `"yaml"`, `"diff"`).
-    Hint(String),
-    /// Check the first output line via shebang / diff header only.
-    FirstLineOnly,
+pub struct CommandSyntaxTarget {
+    pub hint: Option<String>,
+    pub allow_conpty_white: bool,
+}
+
+impl CommandSyntaxTarget {
+    fn hint(path: &str) -> Self {
+        Self {
+            hint: Some(path.into()),
+            allow_conpty_white: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +113,11 @@ impl RowTextMap {
         Self { text, entries }
     }
 
+    pub fn byte_at_col(&self, col: usize) -> Option<usize> {
+        let i = self.entries.partition_point(|e| e.3 <= col);
+        self.entries.get(i).filter(|e| e.2 <= col).map(|e| e.0)
+    }
+
     pub fn byte_range_to_cols(&self, start_byte: usize, end_byte: usize) -> Option<(usize, usize)> {
         if start_byte >= end_byte || self.entries.is_empty() {
             return None;
@@ -137,46 +149,97 @@ pub fn detect_prompt_command_byte_offset(line: &str) -> Option<(usize, bool)> {
         return None;
     }
 
-    // Standard `user@host:dir$ `, `[root@host dir]# `, `~/proj ❯ `, `% `
-    for marker in PROMPT_MARKERS {
-        if let Some(pos) = trimmed_end.rfind(marker) {
-            let prefix = &trimmed_end[..pos];
-            if looks_like_shell_prompt_prefix(prefix, marker) {
-                let cmd_start = pos + marker.len();
-                let has_cmd = !trimmed_end[cmd_start..].trim().is_empty();
-                return Some((cmd_start, has_cmd));
+    if trimmed_end.starts_with("# ") || trimmed_end.starts_with("> ") {
+        return None;
+    }
+    let mut p = trimmed_end;
+    while p.starts_with('(') {
+        let Some((_, rest)) = p.split_once(") ") else {
+            break;
+        };
+        p = rest.trim_start();
+    }
+    let command = |rest: &str| {
+        let rest = rest.trim_start();
+        Some((trimmed_end.len() - rest.len(), !rest.is_empty()))
+    };
+    if let Some(rest) = p.strip_prefix("➜ ") {
+        let skip_token = |s: &str| s.find(char::is_whitespace).unwrap_or(s.len());
+        let dir = rest.trim_start();
+        let mut tail = dir[skip_token(dir)..].trim_start();
+        let branch = &tail[..skip_token(tail)];
+        if branch.starts_with("git:(") && branch.ends_with(')') {
+            tail = tail[branch.len()..].trim_start();
+            let status = &tail[..skip_token(tail)];
+            if matches!(status, "✗" | "✔" | "⚡" | "*") {
+                tail = &tail[status.len()..];
             }
         }
-        // Prompt at end of line with trailing space stripped (e.g. `user@host:~$`)
-        let bare = marker.trim_end();
-        if trimmed_end.ends_with(bare) {
-            let pos = trimmed_end.len() - bare.len();
-            let prefix = &trimmed_end[..pos];
-            if looks_like_shell_prompt_prefix(prefix, marker) {
-                return Some((trimmed_end.len(), false));
-            }
+        return command(tail);
+    }
+    let path = p.strip_prefix("PS ").unwrap_or(p);
+    if path.as_bytes().first().is_some_and(u8::is_ascii_alphabetic) && path.get(1..3) == Some(":\\")
+    {
+        let (dir, rest) = path.split_once('>')?;
+        if dir.contains(['<', '|', '"'])
+            || dir.ends_with(['-', '='])
+            || rest.starts_with(['=', '>'])
+        {
+            return None;
+        }
+        return command(rest);
+    }
+    let framed = ["└─", "╰─", "┗━"].iter().any(|f| p.starts_with(f));
+    if framed {
+        p = p
+            .trim_start_matches(['└', '─', '╰', '┗', '━', '-'])
+            .trim_start();
+    }
+    for (pos, ch) in p.char_indices() {
+        let Some(marker) = PROMPT_MARKERS.iter().find(|m| m.starts_with(ch)) else {
+            continue;
+        };
+        let rest = &p[pos + ch.len_utf8()..];
+        if !rest.is_empty() && !rest.starts_with(' ') {
+            continue;
+        }
+        let prefix = p[..pos].trim();
+        if ch == '>' && prefix.ends_with(['-', '=', '>']) {
+            continue;
+        }
+        if (framed && prefix.is_empty()) || looks_like_shell_prompt_prefix(prefix, marker) {
+            return command(rest);
         }
     }
     None
 }
 
-fn looks_like_shell_prompt_prefix(prefix: &str, marker: &str) -> bool {
-    let p = prefix.trim();
+fn looks_like_shell_prompt_prefix(p: &str, marker: &str) -> bool {
     if p.is_empty() {
-        return matches!(marker, "$ " | "% ");
-    }
-    if matches!(marker, "❯ " | "➜ ") {
-        return p.len() <= 96;
+        return matches!(marker, "$ " | "% " | "❯ ");
     }
     if p.len() > 96 {
         return false;
     }
-    // Common PS1 shapes: `user@host:path`, `[user@host path]`, `(venv) user@host`, `PS C:\...`
+    let identifier = p.len() <= 32
+        && p.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b));
     (p.contains('@') && (p.contains(':') || p.contains(' ') || p.ends_with(']')))
         || (p.starts_with('[') && p.ends_with(']'))
         || p.starts_with("~/")
         || p == "~"
         || p.starts_with("PS ")
+        || matches!(marker, "❯ " | "➜ ")
+        || (!p.contains(char::is_whitespace)
+            && (p.starts_with('/')
+                || p.split_once(':')
+                    .is_some_and(|(_, path)| path.starts_with(['/', '~']))))
+        || (identifier
+            && (matches!(marker, "$ " | "% ")
+                || (marker == "# "
+                    && ["bash", "sh", "zsh"].iter().any(|sh| {
+                        p == *sh || p.strip_prefix(sh).is_some_and(|s| s.starts_with('-'))
+                    }))))
 }
 
 /// Checks whether an output line strongly indicates a command failure when OSC 133 exit codes
@@ -210,9 +273,7 @@ pub fn detect_output_spans_for_row(map: &RowTextMap) -> Vec<RowColSpan> {
             continue;
         };
 
-        let role = if is_url(cleaned) {
-            Some(SemanticRole::OutputUrl)
-        } else if is_file_line_reference(cleaned) {
+        let role = if is_file_line_reference(cleaned) {
             Some(SemanticRole::OutputFileLine)
         } else if is_windows_path(cleaned) || is_unix_path(cleaned) {
             Some(SemanticRole::OutputPath)
@@ -233,6 +294,15 @@ pub fn detect_output_spans_for_row(map: &RowTextMap) -> Vec<RowColSpan> {
                 start_col: sc,
                 end_col: ec,
                 role,
+            });
+        }
+    }
+    for (start, end) in extract_http_url_byte_ranges(line) {
+        if let Some((start_col, end_col)) = map.byte_range_to_cols(start, end) {
+            out.push(RowColSpan {
+                start_col,
+                end_col,
+                role: SemanticRole::OutputUrl,
             });
         }
     }
@@ -297,21 +367,82 @@ pub fn detect_input_spans_for_prompt_row(map: &RowTextMap, cmd_start_byte: usize
     out
 }
 
-pub fn find_url_at_col(map: &RowTextMap, col: usize) -> Option<String> {
-    let line = map.text.trim_end();
-    for (tok_start, tok_end) in whitespace_token_ranges(line) {
-        let Some((s_byte, e_byte, cleaned)) = trim_punctuation(line, tok_start, tok_end) else {
-            continue;
-        };
-        if is_url(cleaned)
-            && let Some((sc, ec)) = map.byte_range_to_cols(s_byte, e_byte)
-            && col >= sc
-            && col < ec
+pub(crate) fn openable_http_url(raw: &str) -> Option<gpui_kit::http_client::Url> {
+    let (scheme, rest) = raw.split_once("://")?;
+    if !(scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
+        || raw.contains(|ch: char| ch.is_whitespace() || ch.is_control() || ch == '\\')
+    {
+        return None;
+    }
+    let authority = rest.split(['/', '?', '#']).next()?;
+    if authority.is_empty() || authority.ends_with(':') {
+        return None;
+    }
+    let url = gpui_kit::http_client::Url::parse(raw).ok()?;
+    if let gpui_kit::http_client::Host::Domain(domain) = url.host()? {
+        let name = domain.strip_suffix('.').unwrap_or(domain);
+        if name.len() > 253
+            || name.split('.').any(|label| {
+                label.is_empty()
+                    || label.len() > 63
+                    || label.starts_with('-')
+                    || label.ends_with('-')
+                    || !label
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            })
         {
-            return Some(cleaned.to_string());
+            return None;
         }
     }
-    None
+    (url.port() != Some(0)).then_some(url)
+}
+
+pub fn validate_openable_http_url(raw: &str) -> Option<String> {
+    openable_http_url(raw).map(|_| raw.to_owned())
+}
+
+pub fn extract_http_url_byte_ranges(line: &str) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut scanned = 0;
+    for (start, _) in line.match_indices(['h', 'H']) {
+        if start < scanned
+            || start
+                .checked_sub(1)
+                .is_some_and(|i| line.as_bytes()[i].is_ascii_alphanumeric())
+        {
+            continue;
+        }
+        let tail = &line[start..];
+        if !["http://", "https://"].iter().any(|s| {
+            tail.get(..s.len())
+                .is_some_and(|v| v.eq_ignore_ascii_case(s))
+        }) {
+            continue;
+        }
+        let mut depth = [0usize; 3];
+        let mut end = start;
+        for ch in tail.chars() {
+            if ch.is_whitespace() || ch.is_control() || matches!(ch, '<' | '>' | '"' | '\'' | '`') {
+                break;
+            }
+            if let Some(i) = "([{".find(ch) {
+                depth[i] += 1;
+            } else if let Some(i) = ")]}".find(ch) {
+                if depth[i] == 0 {
+                    break;
+                }
+                depth[i] -= 1;
+            }
+            end += ch.len_utf8();
+        }
+        scanned = end;
+        let url = line[start..end].trim_end_matches([',', ';', '.', '!', '?', ':']);
+        if openable_http_url(url).is_some() {
+            ranges.push((start, start + url.len()));
+        }
+    }
+    ranges
 }
 
 struct InputTok {
@@ -428,21 +559,13 @@ fn trim_punctuation(line: &str, start: usize, end: usize) -> Option<(usize, usiz
         let ch = line[..e].chars().next_back()?;
         if matches!(ch, ',' | ';' | ')' | ']' | '>' | '\'' | '"' | '`') {
             e -= ch.len_utf8();
-        } else if (ch == '.' && is_url(&line[s..e]))
-            || (ch == ':'
-                && !line[s..e].contains("://")
-                && !is_file_line_reference(&line[s..e]))
-        {
+        } else if ch == ':' && !line[s..e].contains("://") && !is_file_line_reference(&line[s..e]) {
             e -= 1;
         } else {
             break;
         }
     }
     (s < e).then_some((s, e, &line[s..e]))
-}
-
-fn is_url(tok: &str) -> bool {
-    (tok.starts_with("https://") || tok.starts_with("http://")) && tok.len() > 10
 }
 
 fn is_unix_path(tok: &str) -> bool {
@@ -544,7 +667,7 @@ pub fn extract_cwd_from_window_title(title: &str, remote_home: Option<&str>) -> 
 }
 
 /// Determines whether a command string (after the shell prompt) produces syntax-highlightable
-/// output on stdout, returning either a file/language hint or `FirstLineOnly` fallback.
+/// output on stdout, returning either a file/language hint or first-line fallback.
 pub fn detect_command_syntax_target(cmd_line: &str) -> Option<CommandSyntaxTarget> {
     let trimmed = cmd_line.trim();
     if trimmed.is_empty() {
@@ -665,6 +788,32 @@ fn evaluate_pipeline_stage(
     let cmd = cmd_unq.rsplit('/').next().unwrap_or(cmd_unq);
     let rest = &args[(idx + 1)..];
 
+    if ["type", "gc", "get-content"]
+        .iter()
+        .any(|name| cmd.eq_ignore_ascii_case(name))
+    {
+        let mut paths = Vec::new();
+        let mut args = rest.iter().map(|s| unquote_shell_token(s));
+        while let Some(arg) = args.next() {
+            match arg.to_ascii_lowercase().as_str() {
+                "-path" | "-literalpath" => paths.push(args.next()?),
+                "-tail" | "-totalcount" | "-head" | "-first" | "-last" | "-encoding"
+                | "-filter" | "-include" | "-exclude" | "-readcount" => {
+                    args.next()?;
+                }
+                _ if arg.starts_with('-') => {}
+                _ => paths.push(arg),
+            }
+        }
+        return match paths.as_slice() {
+            [file] => Some(CommandSyntaxTarget {
+                hint: Some((*file).into()),
+                allow_conpty_white: true,
+            }),
+            _ => None,
+        };
+    }
+
     match cmd {
         "cat" | "tac" | "head" | "tail" | "more" | "less" | "bat" | "batcat" => {
             let mut positional: Vec<&str> = Vec::new();
@@ -691,14 +840,12 @@ fn evaluate_pipeline_stage(
                         .or_else(|| a.strip_prefix("-l="))
                         && !lang.is_empty()
                     {
-                        return Some(CommandSyntaxTarget::Hint(lang.to_string()));
+                        return Some(CommandSyntaxTarget::hint(lang));
                     }
                     if matches!(a, "-l" | "--language")
                         && let Some(next_lang) = rest.get(j + 1)
                     {
-                        return Some(CommandSyntaxTarget::Hint(
-                            unquote_shell_token(next_lang).to_string(),
-                        ));
+                        return Some(CommandSyntaxTarget::hint(unquote_shell_token(next_lang)));
                     }
                     if matches!(a, "-n" | "-c" | "--lines" | "--bytes")
                         && let Some(next_val) = rest.get(j + 1)
@@ -718,11 +865,20 @@ fn evaluate_pipeline_stage(
                 j += 1;
             }
 
-            match positional.len() {
-                1 if positional[0] != "-" => Some(CommandSyntaxTarget::Hint(positional[0].to_string())),
-                0 | 1 => upstream
-                    .or_else(|| stdin_file.map(|f| CommandSyntaxTarget::Hint(f.to_string())))
-                    .or(Some(CommandSyntaxTarget::FirstLineOnly)),
+            let plain = !matches!(cmd, "bat" | "batcat");
+            let read = |path: Option<&str>| CommandSyntaxTarget {
+                hint: path.map(str::to_owned),
+                allow_conpty_white: plain,
+            };
+            match positional.as_slice() {
+                [file] if *file != "-" => Some(read(Some(file))),
+                [] | ["-"] => Some(match (stdin_file, upstream) {
+                    (None, Some(mut target)) => {
+                        target.allow_conpty_white &= plain;
+                        target
+                    }
+                    (path, _) => read(path),
+                }),
                 _ => None,
             }
         }
@@ -781,23 +937,26 @@ fn evaluate_pipeline_stage(
                 positional.get(1..).unwrap_or(&[])
             };
             match file_slice {
-                [single] => Some(CommandSyntaxTarget::Hint((*single).to_string())),
+                [single] => Some(CommandSyntaxTarget::hint(single)),
                 [] => stdin_file
-                    .map(|f| CommandSyntaxTarget::Hint(f.to_string()))
-                    .or(upstream),
+                    .map(|f| CommandSyntaxTarget::hint(f))
+                    .or_else(|| {
+                        upstream.map(|mut t| {
+                            t.allow_conpty_white = false;
+                            t
+                        })
+                    }),
                 _ => None,
             }
         }
-        "diff" | "colordiff" => Some(CommandSyntaxTarget::Hint("diff".to_string())),
+        "diff" | "colordiff" => Some(CommandSyntaxTarget::hint("diff")),
         "git" => {
             let sub = rest
                 .iter()
                 .map(|s| unquote_shell_token(s))
                 .find(|s| !s.starts_with('-'))?;
             match sub {
-                "diff" | "show" | "format-patch" => {
-                    Some(CommandSyntaxTarget::Hint("diff".to_string()))
-                }
+                "diff" | "show" | "format-patch" => Some(CommandSyntaxTarget::hint("diff")),
                 _ => None,
             }
         }
@@ -806,9 +965,9 @@ fn evaluate_pipeline_stage(
                 let a = unquote_shell_token(r);
                 a == "--raw-output" || (!a.starts_with("--") && a.starts_with('-') && a.contains('r'))
             });
-            (!raw_mode).then(|| CommandSyntaxTarget::Hint("json".to_string()))
+            (!raw_mode).then(|| CommandSyntaxTarget::hint("json"))
         }
-        "yq" => Some(CommandSyntaxTarget::Hint("yaml".to_string())),
+        "yq" => Some(CommandSyntaxTarget::hint("yaml")),
         "kubectl" | "helm" | "oc" => {
             let mut j = 0usize;
             while j < rest.len() {
@@ -820,20 +979,20 @@ fn evaluate_pipeline_stage(
                     && !fmt.is_empty()
                 {
                     if fmt == "yaml" || fmt == "yml" {
-                        return Some(CommandSyntaxTarget::Hint("yaml".to_string()));
+                        return Some(CommandSyntaxTarget::hint("yaml"));
                     }
                     if fmt == "json" {
-                        return Some(CommandSyntaxTarget::Hint("json".to_string()));
+                        return Some(CommandSyntaxTarget::hint("json"));
                     }
                 }
                 if matches!(a, "-o" | "--output")
                     && let Some(next_fmt) = rest.get(j + 1).map(|s| unquote_shell_token(s))
                 {
                     if next_fmt == "yaml" || next_fmt == "yml" {
-                        return Some(CommandSyntaxTarget::Hint("yaml".to_string()));
+                        return Some(CommandSyntaxTarget::hint("yaml"));
                     }
                     if next_fmt == "json" {
-                        return Some(CommandSyntaxTarget::Hint("json".to_string()));
+                        return Some(CommandSyntaxTarget::hint("json"));
                     }
                 }
                 j += 1;
@@ -845,7 +1004,7 @@ fn evaluate_pipeline_stage(
                     .find(|s| !s.starts_with('-'))
                     == Some("template")
             {
-                return Some(CommandSyntaxTarget::Hint("yaml".to_string()));
+                return Some(CommandSyntaxTarget::hint("yaml"));
             }
             None
         }
@@ -854,20 +1013,23 @@ fn evaluate_pipeline_stage(
                 .iter()
                 .map(|s| unquote_shell_token(s))
                 .find(|s| !s.starts_with('-'))?;
-            (sub == "inspect").then(|| CommandSyntaxTarget::Hint("json".to_string()))
+            (sub == "inspect").then(|| CommandSyntaxTarget::hint("json"))
         }
         "systemctl" => {
             let sub = rest
                 .iter()
                 .map(|s| unquote_shell_token(s))
                 .find(|s| !s.starts_with('-'))?;
-            (sub == "cat").then(|| CommandSyntaxTarget::Hint("ini".to_string()))
+            (sub == "cat").then(|| CommandSyntaxTarget::hint("ini"))
         }
         "crontab" => {
             let is_list = rest.iter().any(|s| unquote_shell_token(s) == "-l");
-            is_list.then(|| CommandSyntaxTarget::Hint("sh".to_string()))
+            is_list.then(|| CommandSyntaxTarget::hint("sh"))
         }
-        "curl" | "wget" => Some(CommandSyntaxTarget::FirstLineOnly),
+        "curl" | "wget" => Some(CommandSyntaxTarget {
+            hint: None,
+            allow_conpty_white: false,
+        }),
         _ => None,
     }
 }
@@ -899,6 +1061,125 @@ mod tests {
     }
 
     #[test]
+    fn prompt_offsets_point_to_the_command_across_shells() {
+        for prompt in [
+            "❯ ",
+            "➜  repo  ",
+            "➜ repo git:(main) ✗ ",
+            "➜ repo git:(dev) ✔ ",
+            "└─$ ",
+            "└─# ",
+            "╰─❯ ",
+            "(.venv) ┗━$ ",
+            "/etc/nginx# ",
+            "root:/srv# ",
+            "bash-5.2$ ",
+            "host% ",
+            r"C:\Program Files>",
+            r"PS C:\src> ",
+        ] {
+            let line = format!("{prompt}type file.rs");
+            assert_eq!(
+                detect_prompt_command_byte_offset(&line),
+                Some((prompt.len(), true)),
+                "{line}"
+            );
+        }
+        for line in ["➜  repo", "➜  repo git:(main) ✗", "└─#", "❯"] {
+            assert_eq!(
+                detect_prompt_command_byte_offset(line),
+                Some((line.len(), false))
+            );
+        }
+        for line in [
+            "# comment",
+            "> quote",
+            "foo -> bar",
+            "a => b",
+            r"C:\a>=b",
+            r"C:\a>>b",
+            r"C:\a-> b",
+            r"C:\a=> b",
+            r"C:\<tag>text",
+        ] {
+            assert_eq!(detect_prompt_command_byte_offset(line), None, "{line}");
+        }
+    }
+
+    #[test]
+    fn powershell_readers_distinguish_paths_and_option_values() {
+        for command in [
+            r#"TYPE "C:\my files\main.rs""#,
+            r#"Get-Content -Tail 20 -LiteralPath "C:\my files\main.rs" -Encoding utf8"#,
+            r#"GC -TotalCount 2 -Path "C:\my files\main.rs" -Wait"#,
+        ] {
+            let target = detect_command_syntax_target(command).unwrap();
+            assert_eq!(target.hint.as_deref(), Some(r"C:\my files\main.rs"));
+            assert!(target.allow_conpty_white);
+        }
+        for cmd in ["gc -Tail 20", "Get-Content a.rs -Path b.rs", "gc -Encoding"] {
+            assert_eq!(detect_command_syntax_target(cmd), None);
+        }
+        for cmd in [
+            "bat main.rs | head",
+            "cat main.rs | bat",
+            "cat main.rs | sed -n '1p'",
+        ] {
+            assert!(
+                !detect_command_syntax_target(cmd)
+                    .unwrap()
+                    .allow_conpty_white,
+                "{cmd}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_open_absolute_http_urls_with_valid_hosts() {
+        for url in [
+            "https://example.com",
+            "http://git:3000",
+            "HTTP://[::1]:8080/a",
+            "https://例子.测试/",
+        ] {
+            assert_eq!(validate_openable_http_url(url).as_deref(), Some(url));
+        }
+        for url in [
+            "file:///etc/passwd",
+            "ms-settings:test",
+            r"\\server\share",
+            "//host",
+            "http:///path",
+            "http://@/",
+            "https://a b",
+            "http://a\nb",
+            "http://a\u{7f}",
+            "http://[::g]",
+            "http://::1",
+            "https://a:65536",
+            "http://a:0",
+            "http://bad..host",
+            r"http://host\path",
+            " https://host",
+        ] {
+            assert!(validate_openable_http_url(url).is_none(), "{url:?}");
+        }
+        let line = r#"文档[here](HTTPS://git:3000/a?x=1&y=2#top) {"url":"http://[::1]:8080/"} https://en.wikipedia.org/wiki/Rust_(lang). myhttp://no"#;
+        let found: Vec<_> = extract_http_url_byte_ranges(line)
+            .into_iter()
+            .map(|(a, b)| &line[a..b])
+            .collect();
+        assert_eq!(
+            found,
+            [
+                "HTTPS://git:3000/a?x=1&y=2#top",
+                "http://[::1]:8080/",
+                "https://en.wikipedia.org/wiki/Rust_(lang)"
+            ]
+        );
+    }
+
+    #[test]
     fn cjk_row_map_aligns_columns_accurately() {
         // "中文: " -> '中'(0..2), '文'(2..4), ':'(4..5), ' '(5..6), then "src/main.rs:42"(6..20)
         let mut cells = vec![
@@ -918,10 +1199,7 @@ mod tests {
         assert_eq!(spans[0].end_col, 20);
         assert_eq!(spans[1].role, SemanticRole::OutputUrl);
         assert_eq!(spans[1].start_col, 21);
-        assert_eq!(
-            find_url_at_col(&map, 25).as_deref(),
-            Some("https://example.com")
-        );
+        assert_eq!(extract_http_url_byte_ranges(&map.text).len(), 1);
     }
 
     #[test]
@@ -941,31 +1219,43 @@ mod tests {
     fn detects_syntax_targets_and_skips_non_code_commands() {
         assert_eq!(
             detect_command_syntax_target("cat tcpx.sh"),
-            Some(CommandSyntaxTarget::Hint("tcpx.sh".into()))
+            Some(CommandSyntaxTarget {
+                hint: Some("tcpx.sh".into()),
+                allow_conpty_white: true
+            })
         );
         assert_eq!(
             detect_command_syntax_target("sudo -u root head -n 50 /etc/nginx/nginx.conf"),
-            Some(CommandSyntaxTarget::Hint("/etc/nginx/nginx.conf".into()))
+            Some(CommandSyntaxTarget {
+                hint: Some("/etc/nginx/nginx.conf".into()),
+                allow_conpty_white: true
+            })
         );
         assert_eq!(
             detect_command_syntax_target("cd /srv && cat deploy.py | head -n 20"),
-            Some(CommandSyntaxTarget::Hint("deploy.py".into()))
+            Some(CommandSyntaxTarget {
+                hint: Some("deploy.py".into()),
+                allow_conpty_white: true
+            })
         );
         assert_eq!(
             detect_command_syntax_target("sed -n '1,40p' Cargo.toml"),
-            Some(CommandSyntaxTarget::Hint("Cargo.toml".into()))
+            Some(CommandSyntaxTarget::hint("Cargo.toml"))
         );
         assert_eq!(
             detect_command_syntax_target("kubectl get deploy api -o yaml"),
-            Some(CommandSyntaxTarget::Hint("yaml".into()))
+            Some(CommandSyntaxTarget::hint("yaml"))
         );
         assert_eq!(
             detect_command_syntax_target("git diff HEAD~1"),
-            Some(CommandSyntaxTarget::Hint("diff".into()))
+            Some(CommandSyntaxTarget::hint("diff"))
         );
         assert_eq!(
             detect_command_syntax_target("curl -fsSL https://example.com/install"),
-            Some(CommandSyntaxTarget::FirstLineOnly)
+            Some(CommandSyntaxTarget {
+                hint: None,
+                allow_conpty_white: false
+            })
         );
 
         // Non-highlighted or redirected/numbered commands must return None
@@ -977,11 +1267,11 @@ mod tests {
         assert_eq!(detect_command_syntax_target("sed -n '1p' a.py b.py"), None);
         assert_eq!(
             detect_command_syntax_target("sed -nr '1,30p' nginx.conf"),
-            Some(CommandSyntaxTarget::Hint("nginx.conf".into()))
+            Some(CommandSyntaxTarget::hint("nginx.conf"))
         );
         assert_eq!(
             detect_command_syntax_target("sed -n -e '/中文/p' '配置.py'"),
-            Some(CommandSyntaxTarget::Hint("配置.py".into()))
+            Some(CommandSyntaxTarget::hint("配置.py"))
         );
         assert_eq!(detect_command_syntax_target("ls -la /var/log"), None);
         assert_eq!(detect_command_syntax_target("ps aux"), None);

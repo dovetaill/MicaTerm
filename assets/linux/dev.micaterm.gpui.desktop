@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Mica Term GPUI
+Comment=GPU-accelerated Terminal, SSH & SFTP Workspace
+Exec=mica-term-gpui
+Icon=dev.micaterm.gpui
+Terminal=false
+Categories=System;TerminalEmulator;Network;Development;
+StartupWMClass=dev.micaterm.gpui

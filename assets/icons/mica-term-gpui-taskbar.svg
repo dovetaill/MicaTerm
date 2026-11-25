@@ -1,0 +1,21 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="tb-bg" x1="16" y1="16" x2="240" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1A2130"/>
+      <stop offset="1" stop-color="#0C1017"/>
+    </linearGradient>
+    <linearGradient id="tb-teal" x1="60" y1="74" x2="132" y2="184" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#67E8F9"/>
+      <stop offset="0.55" stop-color="#2DD4BF"/>
+      <stop offset="1" stop-color="#06B6D4"/>
+    </linearGradient>
+    <linearGradient id="tb-amber" x1="136" y1="160" x2="200" y2="192" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FDE047"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="16" y="16" width="224" height="224" rx="48" fill="url(#tb-bg)"/>
+  <path d="M68 80L124 128L68 176" stroke="url(#tb-teal)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="136" y="160" width="64" height="32" rx="12" fill="url(#tb-amber)"/>
+</svg>

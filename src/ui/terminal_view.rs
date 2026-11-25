@@ -12,6 +12,7 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use alacritty_terminal::term::TermMode;
 use gpui_kit::assets::IconName as LucideIcon;
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _,
@@ -31,8 +32,10 @@ use gpui_kit::{
     px, size,
 };
 
+use gpui_kit::{CursorStyle, HoverListenerMode, Modifiers, StatefulInteractiveElement as _, Task};
+
 use crate::domain::{
-    BUNDLED_SARASA_FONT_FAMILY, DoubleClickAction, ShortcutAction, ShortcutConfig, ShortcutScope,
+    BUNDLED_SARASA_FONT_FAMILY, RightClickAction, ShortcutAction, ShortcutConfig, ShortcutScope,
     default_terminal_font_family, tooltip,
 };
 use crate::terminal::{
@@ -53,8 +56,44 @@ pub struct PanePreferences {
     pub dark_mode: bool,
     pub scrollback_lines: usize,
     pub semantic: SemanticOptions,
-    pub double_click_action: DoubleClickAction,
+    pub right_click_action: RightClickAction,
+    pub copy_on_select: bool,
     pub shortcuts: ShortcutConfig,
+}
+
+#[derive(Default, Clone, Copy)]
+enum LeftGesture {
+    #[default]
+    Idle,
+    Scrollbar,
+    LinkOpen,
+    Tui(Option<TermMode>),
+    Selecting {
+        origin: (usize, usize, bool),
+        copy: bool,
+    },
+}
+
+impl LeftGesture {
+    fn should_copy(self) -> bool {
+        matches!(self, Self::Selecting { copy: true, .. })
+    }
+}
+
+#[derive(Default, Clone, Copy)]
+enum RightGesture {
+    #[default]
+    Menu,
+    Smart,
+    Tui(Option<TermMode>),
+}
+
+fn link_modifier(mods: Modifiers) -> bool {
+    if cfg!(target_os = "macos") {
+        mods.platform
+    } else {
+        mods.control
+    }
 }
 
 pub struct TerminalPaneView {
@@ -68,11 +107,19 @@ pub struct TerminalPaneView {
     dark_mode: bool,
     scrollback_lines: usize,
     semantic_opts: SemanticOptions,
-    double_click_action: DoubleClickAction,
+    right_click_action: RightClickAction,
+    copy_on_select: bool,
     shortcuts: ShortcutConfig,
     marked_text: Option<String>,
-    selecting: bool,
-    dragging_scrollbar: bool,
+    left_gesture: LeftGesture,
+    right_gesture: RightGesture,
+    middle_press: Option<TermMode>,
+    hover_pointer: Option<Point<Pixels>>,
+    hover_modifiers: Modifiers,
+    search_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    drag_pointer: Option<Point<Pixels>>,
+    auto_scroll_task: Option<Task<()>>,
+    scroll_line_remainder: f32,
     last_grid_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     last_cell_size: Rc<Cell<(Pixels, Pixels)>>,
     last_cursor_cell: (usize, usize),
@@ -185,10 +232,10 @@ impl EntityInputHandler for TerminalPaneView {
         Some(0)
     }
 
-    fn paste(&mut self, item: ClipboardItem, _window: &mut Window, cx: &mut Context<Self>) {
+    fn paste(&mut self, item: ClipboardItem, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = item.text() {
             self.marked_text = None;
-            self.session.update(cx, |s, cx| s.send_paste(&text, cx));
+            self.request_paste(text, window, cx);
         }
     }
 }
@@ -197,11 +244,25 @@ impl TerminalPaneView {
     pub fn new(
         session: Entity<TerminalSessionEntity>,
         prefs: PanePreferences,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let focus_handle = cx.focus_handle();
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
 
+        cx.on_blur(&focus_handle, window, |this, window, cx| {
+            this.cancel_gestures(window.mouse_position(), cx);
+        })
+        .detach();
+        cx.observe_window_activation(window, |this, window, cx| {
+            if !window.is_window_active() {
+                this.cancel_gestures(window.mouse_position(), cx);
+                this.hover_pointer = None;
+                this.hover_modifiers = Modifiers::default();
+                cx.notify();
+            }
+        })
+        .detach();
         Self {
             session,
             is_split_member: false,
@@ -213,11 +274,19 @@ impl TerminalPaneView {
             dark_mode: prefs.dark_mode,
             scrollback_lines: prefs.scrollback_lines,
             semantic_opts: prefs.semantic,
-            double_click_action: prefs.double_click_action,
+            right_click_action: prefs.right_click_action,
             shortcuts: prefs.shortcuts,
             marked_text: None,
-            selecting: false,
-            dragging_scrollbar: false,
+            left_gesture: LeftGesture::Idle,
+            right_gesture: RightGesture::Menu,
+            middle_press: None,
+            hover_pointer: None,
+            hover_modifiers: Modifiers::default(),
+            search_bounds: Rc::new(Cell::new(None)),
+            drag_pointer: None,
+            auto_scroll_task: None,
+            scroll_line_remainder: 0.,
+            copy_on_select: prefs.copy_on_select,
             last_grid_bounds: Rc::new(Cell::new(None)),
             last_cell_size: Rc::new(Cell::new((px(8.4), px(19.0)))),
             last_cursor_cell: (0, 0),
@@ -230,7 +299,8 @@ impl TerminalPaneView {
         self.dark_mode = prefs.dark_mode;
         self.scrollback_lines = prefs.scrollback_lines;
         self.semantic_opts = prefs.semantic;
-        self.double_click_action = prefs.double_click_action;
+        self.copy_on_select = prefs.copy_on_select;
+        self.right_click_action = prefs.right_click_action;
         self.shortcuts.clone_from(&prefs.shortcuts);
         cx.notify();
     }
@@ -293,11 +363,31 @@ impl TerminalPaneView {
         }
     }
 
-    fn paste_from_clipboard(&self, cx: &mut Context<Self>) {
+    fn request_paste(&self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        let session = self.session.read(cx);
+        if text.is_empty() || !matches!(session.phase, SessionPhase::Connected) {
+            return;
+        }
+        if needs_paste_confirmation(session.mode(), &text) {
+            let target = self.session.downgrade();
+            super::modals::open_multiline_paste_confirm_dialog(
+                text,
+                window,
+                cx,
+                move |snapshot, cx| {
+                    let _ = target.update(cx, |s, cx| s.send_paste(snapshot, cx));
+                },
+            );
+        } else {
+            self.session.update(cx, |s, cx| s.send_paste(&text, cx));
+        }
+    }
+
+    fn paste_from_clipboard(&self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(item) = cx.read_from_clipboard()
             && let Some(text) = item.text()
         {
-            self.session.update(cx, |s, cx| s.send_paste(&text, cx));
+            self.request_paste(text, window, cx);
         }
     }
 
@@ -320,6 +410,183 @@ impl TerminalPaneView {
         let right_half = (raw_col - raw_col.floor()) > 0.5;
         let row = ((rel_y / ch_f).floor() as usize).min(rows.saturating_sub(1));
         (row, col, right_half)
+    }
+
+    fn press_tui(&self, ev: &MouseDownEvent, row: usize, col: usize, cx: &App) -> Option<TermMode> {
+        let session = self.session.read(cx);
+        session
+            .try_report_mouse(MouseReportKind::Press(ev.button), col, row, ev.modifiers)
+            .then(|| session.mode())
+    }
+
+    pub fn sync_modifiers(&mut self, mods: Modifiers, cx: &mut Context<Self>) {
+        if self.hover_pointer.is_some() && self.hover_modifiers != mods {
+            self.hover_modifiers = mods;
+            cx.notify();
+        }
+    }
+
+    fn grid_hit(&self, pos: Point<Pixels>, cx: &App) -> Option<(usize, usize)> {
+        let s = self.session.read(cx);
+        let bounds = self.last_grid_bounds.get()?;
+        let (rows, cols) = s.dimensions();
+        let (w, h) = self.last_cell_size.get();
+        let x = pos.x - bounds.origin.x;
+        let y = pos.y - bounds.origin.y;
+        if (s.search_open && self.search_bounds.get().is_some_and(|b| b.contains(&pos)))
+            || x < px(0.)
+            || x >= bounds.size.width.min(w * cols as f32)
+            || y < px(0.)
+            || y >= bounds.size.height.min(h * rows as f32)
+        {
+            return None;
+        }
+        let (r, c, _) = self.point_to_grid_cell(pos, rows, cols);
+        Some((r, c))
+    }
+
+    fn release_mouse(
+        &self,
+        button: MouseButton,
+        mode: TermMode,
+        pos: Point<Pixels>,
+        mods: Modifiers,
+        cx: &App,
+    ) {
+        let session = self.session.read(cx);
+        let (rows, cols) = session.dimensions();
+        let (mut row, mut col, _) = self.point_to_grid_cell(pos, rows, cols);
+        if !mode.contains(TermMode::SGR_MOUSE) {
+            row = row.min(222);
+            col = col.min(222);
+        }
+        if let Some(bytes) = crate::terminal::encode_mouse_report(
+            MouseReportKind::Release(button),
+            col,
+            row,
+            mods,
+            mode,
+        ) {
+            session.write_raw(bytes);
+        }
+    }
+
+    fn finish_gesture(&mut self, ev: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.end_gesture(
+            ev.button,
+            ev.position,
+            ev.modifiers,
+            self.copy_on_select,
+            cx,
+        );
+    }
+
+    fn end_gesture(
+        &mut self,
+        button: MouseButton,
+        pos: Point<Pixels>,
+        mods: Modifiers,
+        copy_on_select: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let mode = match button {
+            MouseButton::Left => {
+                self.auto_scroll_task = None;
+                self.drag_pointer = None;
+                let gesture = std::mem::take(&mut self.left_gesture);
+                if copy_on_select && gesture.should_copy() {
+                    self.copy_selection(cx);
+                }
+                if let LeftGesture::Tui(mode) = gesture {
+                    mode
+                } else {
+                    None
+                }
+            }
+            MouseButton::Middle => self.middle_press.take(),
+            MouseButton::Right => match std::mem::take(&mut self.right_gesture) {
+                RightGesture::Tui(mode) => mode,
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(mode) = mode {
+            self.release_mouse(button, mode, pos, mods, cx);
+        }
+    }
+
+    fn cancel_gestures(&mut self, pos: Point<Pixels>, cx: &mut Context<Self>) {
+        for button in [MouseButton::Left, MouseButton::Right, MouseButton::Middle] {
+            self.end_gesture(button, pos, self.hover_modifiers, false, cx);
+        }
+    }
+
+    fn edge_scroll_delta(&self, pos: Point<Pixels>, rows: usize) -> i32 {
+        let Some(bounds) = self.last_grid_bounds.get() else {
+            return 0;
+        };
+        let height = self.last_cell_size.get().1;
+        let y = f32::from(pos.y - bounds.origin.y) / f32::from(height);
+        if y < 0. {
+            ((-y).ceil() as i32).clamp(1, 5)
+        } else if y >= rows as f32 {
+            -((y - rows as f32).ceil() as i32).clamp(1, 5)
+        } else {
+            0
+        }
+    }
+
+    fn drag_selection(&mut self, pos: Point<Pixels>, cx: &mut Context<Self>) {
+        let (rows, cols) = self.session.read(cx).dimensions();
+        let cell = self.point_to_grid_cell(pos, rows, cols);
+        let LeftGesture::Selecting { origin, copy } = &mut self.left_gesture else {
+            return;
+        };
+        if cell != *origin || *copy {
+            *copy = true;
+            self.session
+                .update(cx, |s, cx| s.update_selection(cell.0, cell.1, cell.2, cx));
+        }
+        self.drag_pointer = Some(pos);
+        if self.edge_scroll_delta(pos, rows) == 0 {
+            self.auto_scroll_task = None;
+        } else if self.auto_scroll_task.is_none() {
+            self.auto_scroll_task = Some(cx.spawn(async move |weak, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(32))
+                        .await;
+                    let more = weak.update(cx, |this, cx| {
+                        let Some(pos) = this.drag_pointer else {
+                            return false;
+                        };
+                        let (rows, cols) = this.session.read(cx).dimensions();
+                        let delta = this.edge_scroll_delta(pos, rows);
+                        let (r, c, side) = this.point_to_grid_cell(pos, rows, cols);
+                        if delta != 0
+                            && this.session.update(cx, |s, cx| {
+                                if !s.scroll_selection(delta) {
+                                    return false;
+                                }
+                                s.update_selection(r, c, side, cx);
+                                true
+                            })
+                        {
+                            if let LeftGesture::Selecting { copy, .. } = &mut this.left_gesture {
+                                *copy = true;
+                            }
+                            true
+                        } else {
+                            this.auto_scroll_task = None;
+                            false
+                        }
+                    });
+                    if !matches!(more, Ok(true)) {
+                        break;
+                    }
+                }
+            }));
+        }
     }
 
     fn handle_key_down(
@@ -346,7 +613,7 @@ impl TerminalPaneView {
         if let Some(action) = self.shortcuts.match_action(ks, ShortcutScope::Terminal) {
             match action {
                 ShortcutAction::Copy => self.copy_selection(cx),
-                ShortcutAction::Paste => self.paste_from_clipboard(cx),
+                ShortcutAction::Paste => self.paste_from_clipboard(window, cx),
                 ShortcutAction::SelectAll => self.session.update(cx, |s, cx| s.select_all(cx)),
                 ShortcutAction::FindInTerminal => self.open_search(window, cx),
                 ShortcutAction::ClearTerminal => {
@@ -673,8 +940,14 @@ impl Render for TerminalPaneView {
             let session_prev = self.session.clone();
             let session_next = self.session.clone();
             let view_close = cx.entity().clone();
+            let bounds = self.search_bounds.clone();
             Some(
                 h_flex()
+                    .child(
+                        canvas(move |b, _, _| bounds.set(Some(b)), |_, _, _, _| {})
+                            .absolute()
+                            .inset_0(),
+                    )
                     .absolute()
                     .occlude()
                     .top_2()
@@ -777,7 +1050,7 @@ impl Render for TerminalPaneView {
         let bg_hsla = snapshot.background;
 
         let session_ctx_copy = self.session.clone();
-        let session_ctx_paste = self.session.clone();
+        let view_paste = cx.entity();
         let session_ctx_all = self.session.clone();
         let session_ctx_prev_blk = self.session.clone();
         let session_ctx_next_blk = self.session.clone();
@@ -794,6 +1067,24 @@ impl Render for TerminalPaneView {
             cx.theme().transparent
         };
 
+        let hover_cell = self
+            .hover_pointer
+            .filter(|_| window.is_window_hovered() && window.is_window_active())
+            .and_then(|p| self.grid_hit(p, cx));
+        let active_hover_link = hover_cell.and_then(|(r, c)| self.session.read(cx).link_at(r, c));
+        let activated = link_modifier(self.hover_modifiers);
+        let host_hint = active_hover_link
+            .as_ref()
+            .and_then(|link| link.osc8_host_hint.clone());
+        let cursor = if activated && active_hover_link.is_some() {
+            CursorStyle::PointingHand
+        } else if hover_cell.is_none()
+            || (snapshot.mode.intersects(TermMode::MOUSE_MODE) && !self.hover_modifiers.shift)
+        {
+            CursorStyle::Arrow
+        } else {
+            CursorStyle::IBeam
+        };
         let terminal_canvas = div()
             .id(SharedString::from(format!(
                 "term-canvas-{}",
@@ -803,151 +1094,144 @@ impl Render for TerminalPaneView {
             .key_context("TerminalPane")
             .on_key_down(cx.listener(Self::handle_key_down))
             .size_full()
+            .cursor(cursor)
+            .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
+            .on_hover(cx.listener(|this, inside: &bool, window, cx| {
+                this.hover_pointer = inside.then(|| window.mouse_position());
+                this.hover_modifiers = window.modifiers();
+                cx.notify();
+            }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
                     this.focus_handle.focus(window, cx);
                     cx.emit(TerminalPaneEvent::Activate);
-                    // Check if clicking right-edge overview ruler / scrollbar track (last 12px)
-                    if let Some(bounds) = this.last_grid_bounds.get() {
-                        let right_edge = f32::from(bounds.origin.x + bounds.size.width) + 10.0;
-                        if f32::from(ev.position.x) >= right_edge - 12.0 {
-                            let rel_y = (f32::from(ev.position.y) - f32::from(bounds.origin.y))
-                                / f32::from(bounds.size.height).max(1.0);
-                            this.dragging_scrollbar = true;
-                            this.session
-                                .update(cx, |s, cx| s.scroll_to_ratio(rel_y, cx));
-                            return;
-                        }
-                    }
-
-                    let (row, col, _) = this.point_to_grid_cell(ev.position, snap_rows, snap_cols);
-
-                    // Ctrl+Click (macOS Cmd+Click) opens highlighted URL in system browser
-                    let link_mod = if cfg!(target_os = "macos") {
-                        ev.modifiers.platform
-                    } else {
-                        ev.modifiers.control
-                    };
-                    if link_mod
-                        && let Some(url) = this.session.read(cx).url_at(row, col)
+                    if let Some(bounds) = this.last_grid_bounds.get()
+                        && ev.position.x >= bounds.right()
+                        && ev.position.x < bounds.right() + px(12.)
                     {
-                        cx.open_url(&url);
+                        this.left_gesture = LeftGesture::Scrollbar;
+                        let ratio = f32::from(ev.position.y - bounds.origin.y)
+                            / f32::from(bounds.size.height);
+                        this.session
+                            .update(cx, |s, cx| s.scroll_to_ratio(ratio, cx));
                         return;
                     }
-
-                    if this.session.read(cx).try_report_mouse(
-                        MouseReportKind::Press(MouseButton::Left),
-                        col,
-                        row,
-                        ev.modifiers,
-                    ) {
+                    let Some((row, col)) = this.grid_hit(ev.position, cx) else {
                         return;
+                    };
+                    let session = this.session.read(cx);
+                    if link_modifier(ev.modifiers)
+                        && let Some(link) = session.link_at(row, col)
+                    {
+                        this.left_gesture = LeftGesture::LinkOpen;
+                        cx.open_url(&link.url);
+                    } else if !ev.modifiers.shift && session.mode().intersects(TermMode::MOUSE_MODE)
+                    {
+                        this.left_gesture = LeftGesture::Tui(this.press_tui(ev, row, col, cx));
+                    } else {
+                        let origin = this.point_to_grid_cell(ev.position, snap_rows, snap_cols);
+                        this.left_gesture = LeftGesture::Selecting {
+                            origin,
+                            copy: ev.click_count >= 2,
+                        };
+                        this.session
+                            .update(cx, |s, cx| s.begin_selection(row, col, ev.click_count, cx));
                     }
-                    if this.double_click_action == DoubleClickAction::Paste && ev.click_count >= 2 {
-                        this.selecting = false;
-                        this.session.update(cx, |s, cx| s.clear_selection(cx));
-                        if ev.click_count == 2 {
-                            this.paste_from_clipboard(cx);
-                        }
-                        return;
-                    }
-                    this.selecting = true;
-                    this.session.update(cx, |s, cx| {
-                        s.begin_selection(row, col, ev.click_count.max(1), cx);
-                    });
                 }),
             )
             .on_mouse_down(
                 MouseButton::Right,
-                cx.listener(|this, _, window, cx| {
+                cx.listener(|this, ev: &MouseDownEvent, window, cx| {
                     this.focus_handle.focus(window, cx);
                     cx.emit(TerminalPaneEvent::Activate);
+                    this.right_gesture = RightGesture::Menu;
+                    if ev.modifiers.shift {
+                        return;
+                    }
+                    let Some((row, col)) = this.grid_hit(ev.position, cx) else {
+                        return;
+                    };
+                    let session = this.session.read(cx);
+                    if session.mode().intersects(TermMode::MOUSE_MODE) {
+                        this.right_gesture = RightGesture::Tui(this.press_tui(ev, row, col, cx));
+                    } else if this.right_click_action == RightClickAction::SmartCopyPaste {
+                        this.right_gesture = RightGesture::Smart;
+                        if let Some(text) = session.selected_text() {
+                            cx.write_to_clipboard(ClipboardItem::new_string(text));
+                            this.session.update(cx, |s, cx| s.clear_selection(cx));
+                        } else {
+                            this.paste_from_clipboard(window, cx);
+                        }
+                    } else {
+                        return;
+                    }
+                    cx.stop_propagation();
                 }),
             )
             .on_mouse_down(
                 MouseButton::Middle,
-                cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
+                cx.listener(|this, ev: &MouseDownEvent, window, cx| {
                     this.focus_handle.focus(window, cx);
                     cx.emit(TerminalPaneEvent::Activate);
-                    let (row, col, _) = this.point_to_grid_cell(ev.position, snap_rows, snap_cols);
-                    if this.session.read(cx).try_report_mouse(
-                        MouseReportKind::Press(MouseButton::Middle),
-                        col,
-                        row,
-                        ev.modifiers,
-                    ) {
+                    let Some((row, col)) = this.grid_hit(ev.position, cx) else {
                         return;
-                    }
-                    this.paste_from_clipboard(cx);
-                }),
-            )
-            .on_mouse_up(
-                MouseButton::Middle,
-                cx.listener(move |this, ev: &MouseUpEvent, _, cx| {
-                    let (row, col, _) = this.point_to_grid_cell(ev.position, snap_rows, snap_cols);
-                    let _ = this.session.read(cx).try_report_mouse(
-                        MouseReportKind::Release(MouseButton::Middle),
-                        col,
-                        row,
-                        ev.modifiers,
-                    );
-                }),
-            )
-            .on_mouse_move(cx.listener(move |this, ev: &MouseMoveEvent, _, cx| {
-                if this.dragging_scrollbar {
-                    if ev.pressed_button == Some(MouseButton::Left) {
-                        if let Some(bounds) = this.last_grid_bounds.get() {
-                            let rel_y = (f32::from(ev.position.y) - f32::from(bounds.origin.y))
-                                / f32::from(bounds.size.height).max(1.0);
-                            this.session
-                                .update(cx, |s, cx| s.scroll_to_ratio(rel_y, cx));
-                        }
+                    };
+                    let session = this.session.read(cx);
+                    if !ev.modifiers.shift && session.mode().intersects(TermMode::MOUSE_MODE) {
+                        this.middle_press = this.press_tui(ev, row, col, cx);
                     } else {
-                        this.dragging_scrollbar = false;
+                        this.paste_from_clipboard(window, cx);
+                    }
+                }),
+            )
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::finish_gesture))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(Self::finish_gesture))
+            .on_mouse_up(MouseButton::Right, cx.listener(Self::finish_gesture))
+            .on_mouse_up_out(MouseButton::Right, cx.listener(Self::finish_gesture))
+            .on_mouse_up(MouseButton::Middle, cx.listener(Self::finish_gesture))
+            .on_mouse_up_out(MouseButton::Middle, cx.listener(Self::finish_gesture))
+            .on_mouse_move(cx.listener(move |this, ev: &MouseMoveEvent, _, cx| {
+                let cell = this.grid_hit(ev.position, cx);
+                let previous = this.hover_pointer.and_then(|p| this.grid_hit(p, cx));
+                if cell != previous || ev.modifiers != this.hover_modifiers { cx.notify(); }
+                this.hover_pointer = Some(ev.position);
+                this.hover_modifiers = ev.modifiers;
+                if ev.pressed_button == Some(MouseButton::Left)
+                    && matches!(this.left_gesture, LeftGesture::Scrollbar)
+                {
+                    if let Some(bounds) = this.last_grid_bounds.get() {
+                        let ratio = f32::from(ev.position.y - bounds.origin.y)
+                            / f32::from(bounds.size.height);
+                        this.session
+                            .update(cx, |s, cx| s.scroll_to_ratio(ratio, cx));
                     }
                     return;
                 }
-
-                let (row, col, right_half) =
-                    this.point_to_grid_cell(ev.position, snap_rows, snap_cols);
-                if let Some(btn) = ev.pressed_button {
-                    if this.session.read(cx).try_report_mouse(
-                        MouseReportKind::Drag(btn),
-                        col,
-                        row,
-                        ev.modifiers,
-                    ) {
-                        return;
+                let Some((row, col)) = cell else {
+                    return;
+                };
+                let kind = match ev.pressed_button {
+                    None => MouseReportKind::Move,
+                    Some(MouseButton::Left)
+                        if matches!(this.left_gesture, LeftGesture::Tui(Some(_))) =>
+                    {
+                        MouseReportKind::Drag(MouseButton::Left)
                     }
-                    if btn == MouseButton::Left && this.selecting {
-                        this.session.update(cx, |s, cx| {
-                            s.update_selection(row, col, right_half, cx);
-                        });
+                    Some(MouseButton::Right)
+                        if matches!(this.right_gesture, RightGesture::Tui(Some(_))) =>
+                    {
+                        MouseReportKind::Drag(MouseButton::Right)
                     }
-                } else {
-                    let _ = this.session.read(cx).try_report_mouse(
-                        MouseReportKind::Move,
-                        col,
-                        row,
-                        ev.modifiers,
-                    );
-                }
+                    Some(MouseButton::Middle) if this.middle_press.is_some() => {
+                        MouseReportKind::Drag(MouseButton::Middle)
+                    }
+                    _ => return,
+                };
+                this.session
+                    .read(cx)
+                    .try_report_mouse(kind, col, row, ev.modifiers);
             }))
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(move |this, ev: &MouseUpEvent, _, cx| {
-                    this.dragging_scrollbar = false;
-                    this.selecting = false;
-                    let (row, col, _) = this.point_to_grid_cell(ev.position, snap_rows, snap_cols);
-                    let _ = this.session.read(cx).try_report_mouse(
-                        MouseReportKind::Release(MouseButton::Left),
-                        col,
-                        row,
-                        ev.modifiers,
-                    );
-                }),
-            )
             .on_scroll(cx.listener(move |this, ev: &ScrollEvent, _, cx| {
                 let raw_lines = match ev.delta {
                     ScrollDelta::Lines(pt) => pt.y * 3.0,
@@ -956,7 +1240,7 @@ impl Render for TerminalPaneView {
                         f32::from(pt.y) / ch
                     }
                 };
-                if raw_lines.abs() < 0.01 {
+                if raw_lines == 0.0 {
                     return;
                 }
                 if ev.modifiers.control {
@@ -981,17 +1265,23 @@ impl Render for TerminalPaneView {
                     return;
                 }
 
-                let lines = if raw_lines > 0.0 {
-                    (raw_lines.ceil() as i32).max(1)
-                } else {
-                    (raw_lines.floor() as i32).min(-1)
+                let lines = match ev.delta {
+                    ScrollDelta::Pixels(_) => {
+                        take_pixel_lines(&mut this.scroll_line_remainder, raw_lines)
+                    }
+                    ScrollDelta::Lines(_) => {
+                        this.scroll_line_remainder = 0.;
+                        (raw_lines.abs().ceil() * raw_lines.signum()) as i32
+                    }
                 };
-                this.session.update(cx, |s, cx| s.scroll_lines(lines, cx));
+                if lines != 0 {
+                    this.session.update(cx, |s, cx| s.scroll_lines(lines, cx));
+                }
                 cx.stop_propagation();
             }))
             .context_menu(move |menu, _, _| {
                 let s_copy = session_ctx_copy.clone();
-                let s_paste = session_ctx_paste.clone();
+                let pane_paste = view_paste.clone();
                 let s_all = session_ctx_all.clone();
                 let s_pblk = session_ctx_prev_blk.clone();
                 let s_nblk = session_ctx_next_blk.clone();
@@ -1010,12 +1300,8 @@ impl Render for TerminalPaneView {
                                 }
                             }),
                     )
-                    .item(PopupMenuItem::new("粘贴").on_click(move |_, _, cx| {
-                        if let Some(item) = cx.read_from_clipboard()
-                            && let Some(text) = item.text()
-                        {
-                            s_paste.update(cx, |s, cx| s.send_paste(&text, cx));
-                        }
+                    .item(PopupMenuItem::new("粘贴").on_click(move |_, window, cx| {
+                        pane_paste.update(cx, |p, cx| p.paste_from_clipboard(window, cx));
                     }))
                     .item(PopupMenuItem::new("全选").on_click(move |_, _, cx| {
                         s_all.update(cx, |s, cx| s.select_all(cx));
@@ -1131,6 +1417,18 @@ impl Render for TerminalPaneView {
                           (inner_bounds, cell_w, cell_h, font_size, base_font, snapshot),
                           window,
                           cx| {
+                        let pane = view_for_ime.clone();
+                        window.on_mouse_event(move |ev: &MouseMoveEvent, phase, _, cx| {
+                            if phase.capture()
+                                && ev.pressed_button == Some(MouseButton::Left)
+                                && matches!(
+                                    pane.read(cx).left_gesture,
+                                    LeftGesture::Selecting { .. }
+                                )
+                            {
+                                pane.update(cx, |p, cx| p.drag_selection(ev.position, cx));
+                            }
+                        });
                         // Register OS InputHandler for Chinese/CJK IME support & candidate popup positioning
                         window.handle_input(
                             &focus_for_ime,
@@ -1398,6 +1696,24 @@ impl Render for TerminalPaneView {
                             }
                         }
 
+                        if let Some(link) = active_hover_link {
+                            let fg = palette_for_paint
+                                .semantic_style(crate::terminal::SemanticRole::OutputUrl)
+                                .0;
+                            let thickness = px(if activated { 1.5 } else { 1.0 });
+                            for (row, sc, ec) in link.viewport_spans {
+                                window.paint_quad(fill(
+                                    Bounds {
+                                        origin: point(
+                                            origin_x + cell_w * sc as f32,
+                                            origin_y + cell_h * (row + 1) as f32 - thickness,
+                                        ),
+                                        size: size(cell_w * (ec - sc) as f32, thickness),
+                                    },
+                                    fg.opacity(if activated { 0.95 } else { 0.45 }),
+                                ));
+                            }
+                        }
                         // 8. Right Overview Ruler Markers + Scrollback Thumb
                         let track_h = f32::from(outer_bounds.size.height) - 8.0;
                         let right_x =
@@ -1452,10 +1768,41 @@ impl Render for TerminalPaneView {
                 el.border_t_2().border_color(split_border_color)
             })
             .child(terminal_canvas)
+            .when_some(host_hint, |el, host| {
+                el.child(
+                    div()
+                        .absolute()
+                        .bottom_2()
+                        .left_3()
+                        .px_2()
+                        .py_0p5()
+                        .rounded(px(5.0))
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .bg(cx.theme().popover)
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!("打开 {host}")),
+                )
+            })
             .children(split_close_badge)
             .children(search_bar)
             .children(phase_overlay)
     }
+}
+
+fn needs_paste_confirmation(mode: TermMode, text: &str) -> bool {
+    !mode.contains(TermMode::BRACKETED_PASTE) && text.contains(['\r', '\n'])
+}
+
+fn take_pixel_lines(remainder: &mut f32, delta: f32) -> i32 {
+    if *remainder * delta < 0. {
+        *remainder = 0.;
+    }
+    *remainder += delta;
+    let whole = remainder.trunc();
+    *remainder -= whole;
+    whole as i32
 }
 
 fn resolve_mono_font(family: &str) -> Font {
@@ -1509,6 +1856,39 @@ fn resolve_mono_font(family: &str) -> Font {
 mod tests {
     use super::*;
     use crate::domain::BUNDLED_MAPLE_FONT_FAMILY;
+
+    #[test]
+    fn paste_guard_includes_trailing_returns_and_preserves_bracketed_paste() {
+        use super::{TermMode, needs_paste_confirmation};
+        for text in ["cmd\r", "cmd\n", "a\r\nb"] {
+            assert!(needs_paste_confirmation(TermMode::empty(), text));
+            assert!(!needs_paste_confirmation(TermMode::BRACKETED_PASTE, text));
+        }
+        assert!(!needs_paste_confirmation(TermMode::empty(), "cmd"));
+    }
+
+    #[test]
+    fn copies_only_completed_local_selections_and_accumulates_pixel_scroll() {
+        use super::{LeftGesture, take_pixel_lines};
+        let origin = (0, 0, false);
+        assert!(LeftGesture::Selecting { origin, copy: true }.should_copy());
+        for gesture in [
+            LeftGesture::Idle,
+            LeftGesture::LinkOpen,
+            LeftGesture::Scrollbar,
+            LeftGesture::Tui(None),
+            LeftGesture::Selecting {
+                origin,
+                copy: false,
+            },
+        ] {
+            assert!(!gesture.should_copy());
+        }
+        let mut remainder = 0.;
+        for (delta, lines) in [(0.25, 0), (0.5, 0), (0.5, 1), (-0.75, 0), (-0.25, -1)] {
+            assert_eq!(take_pixel_lines(&mut remainder, delta), lines);
+        }
+    }
 
     #[test]
     fn terminal_fonts_keep_grid_ligatures_off_and_sarasa_first() {

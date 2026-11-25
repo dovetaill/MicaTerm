@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::domain::credentials::{CredentialStore, host_secret_key, keychain_secret_key};
-use crate::domain::shortcuts::{DoubleClickAction, ShortcutConfig};
+use crate::domain::shortcuts::{DoubleClickAction, RightClickAction, ShortcutConfig};
 
 pub const BUNDLED_SARASA_FONT_FAMILY: &str = "Sarasa Term SC Nerd";
 pub const BUNDLED_MAPLE_FONT_FAMILY: &str = "JetBrains Maple Mono";
@@ -37,6 +37,12 @@ pub struct AppSettings {
     #[serde(default)]
     pub double_click_action: DoubleClickAction,
     #[serde(default)]
+    pub right_click_action: RightClickAction,
+    #[serde(default)]
+    pub copy_on_select: bool,
+    #[serde(default)]
+    pub mouse_v2_migrated: bool,
+    #[serde(default)]
     pub shortcuts: ShortcutConfig,
     #[serde(default)]
     pub font_migrated_sarasa: bool,
@@ -59,6 +65,9 @@ impl Default for AppSettings {
             code_highlighting: true,
             overview_markers: true,
             double_click_action: DoubleClickAction::SelectWord,
+            right_click_action: RightClickAction::ContextMenu,
+            copy_on_select: false,
+            mouse_v2_migrated: true,
             shortcuts: ShortcutConfig::default(),
             font_migrated_sarasa: true,
             typography_v2_migrated: true,

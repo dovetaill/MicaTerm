@@ -85,8 +85,8 @@ if [[ -d "${HOME}/.cargo/bin" ]]; then
     export PATH="${HOME}/.cargo/bin:${PATH}"
 fi
 
-# Prefer installed LLVM bin directory (e.g. /usr/lib/llvm-19/bin) when unversioned clang-cl is absent
-if ! command -v clang-cl >/dev/null 2>&1 || ! command -v llvm-lib >/dev/null 2>&1; then
+# Prefer installed LLVM bin directory (e.g. /usr/lib/llvm-19/bin) when unversioned clang-cl / llvm-rc is absent
+if ! command -v clang-cl >/dev/null 2>&1 || ! command -v llvm-lib >/dev/null 2>&1 || ! command -v llvm-rc >/dev/null 2>&1; then
     for llvm_dir in /usr/lib/llvm-20/bin /usr/lib/llvm-19/bin /usr/lib/llvm-18/bin /usr/lib/llvm-17/bin /usr/lib/llvm-16/bin; do
         if [[ -x "${llvm_dir}/clang-cl" ]]; then
             export PATH="${llvm_dir}:${PATH}"
@@ -95,8 +95,8 @@ if ! command -v clang-cl >/dev/null 2>&1 || ! command -v llvm-lib >/dev/null 2>&
     done
 fi
 
-# Fallback shim directory if only versioned clang-19 / lld-link-19 wrappers exist in /usr/bin
-if ! command -v clang-cl >/dev/null 2>&1 || ! command -v lld-link >/dev/null 2>&1 || ! command -v llvm-lib >/dev/null 2>&1; then
+# Fallback shim directory if only versioned clang-19 / lld-link-19 / llvm-rc-19 wrappers exist in /usr/bin
+if ! command -v clang-cl >/dev/null 2>&1 || ! command -v lld-link >/dev/null 2>&1 || ! command -v llvm-lib >/dev/null 2>&1 || ! command -v llvm-rc >/dev/null 2>&1; then
     TOOL_SHIM_DIR="${ROOT_DIR}/target/cargo-xwin-tools"
     mkdir -p "${TOOL_SHIM_DIR}"
     for ver in 20 19 18 17 16; do
@@ -114,6 +114,7 @@ command -v cargo >/dev/null 2>&1 || err "cargo not found on PATH"
 command -v cargo-xwin >/dev/null 2>&1 || err "cargo-xwin not found (install via: cargo install cargo-xwin)"
 command -v clang-cl >/dev/null 2>&1 || err "clang-cl not found (install clang / llvm)"
 command -v lld-link >/dev/null 2>&1 || err "lld-link not found (install lld / llvm)"
+command -v llvm-rc >/dev/null 2>&1 || err "llvm-rc not found (install llvm)"
 
 if command -v rustup >/dev/null 2>&1; then
     if ! rustup target list --installed | grep -qx "${TARGET}"; then
@@ -124,6 +125,9 @@ fi
 
 # 2. Prepare writable XWIN_CACHE_DIR reusing cached Windows CRT/SDK without dangling tool symlinks
 DEFAULT_XWIN_CACHE="${XWIN_CACHE_DIR:-${HOME}/.cache/cargo-xwin}"
+if [[ ! -d "${DEFAULT_XWIN_CACHE}/xwin" && -d "/root/.cache/cargo-xwin/xwin" ]]; then
+    DEFAULT_XWIN_CACHE="/root/.cache/cargo-xwin"
+fi
 if [[ -d "${DEFAULT_XWIN_CACHE}/xwin" ]]; then
     if [[ ! -w "${DEFAULT_XWIN_CACHE}" ]] || { [[ -L "${DEFAULT_XWIN_CACHE}/clang-cl" ]] && [[ ! -e "${DEFAULT_XWIN_CACHE}/clang-cl" ]]; }; then
         LOCAL_XWIN_CACHE="${ROOT_DIR}/target/xwin-cache"
@@ -195,6 +199,10 @@ fi
 
 if [[ -f "${ROOT_DIR}/README.md" ]]; then
     cp -f "${ROOT_DIR}/README.md" "${STAGE_DIR}/README.md"
+fi
+
+if [[ -f "${ROOT_DIR}/assets/icons/windows/mica-term-gpui.ico" ]]; then
+    cp -f "${ROOT_DIR}/assets/icons/windows/mica-term-gpui.ico" "${STAGE_DIR}/mica-term-gpui.ico"
 fi
 
 for font_dir in SarasaTermSCNerd JetBrainsMapleMono; do

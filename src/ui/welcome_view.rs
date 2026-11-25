@@ -17,6 +17,7 @@ use gpui_kit::{
     prelude::FluentBuilder as _, px,
 };
 
+use crate::ui::brand::brand_app_icon_element;
 use crate::ui::theme::{macos_env_badge_colors, macos_inset_group, macos_squircle_badge};
 
 type WindowActionFn = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -264,12 +265,7 @@ impl RenderOnce for WelcomeView {
                         h_flex()
                             .gap_3p5()
                             .items_center()
-                            .child(macos_squircle_badge(
-                                LucideIcon::Terminal,
-                                cx.theme().primary,
-                                46.0,
-                                11.5,
-                            ))
+                            .child(brand_app_icon_element(48.0))
                             .child(
                                 v_flex()
                                     .gap_0p5()

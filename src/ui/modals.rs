@@ -24,10 +24,10 @@ use gpui_kit::{
 };
 
 use crate::domain::{
-    BUNDLED_MAPLE_FONT_FAMILY, BUNDLED_SARASA_FONT_FAMILY, DoubleClickAction, HostNode,
-    HostNodeKind, KeychainEntry, KeychainKind, SecretPayload, ShortcutAction, ShortcutCategory,
-    ShortcutChord, ShortcutConfig, SnippetItem, SshAuthConfig, SshHostConfig, SshProxyConfig,
-    format_chord, system_monospace_font_family,
+    BUNDLED_MAPLE_FONT_FAMILY, BUNDLED_SARASA_FONT_FAMILY, HostNode, HostNodeKind, KeychainEntry,
+    KeychainKind, RightClickAction, SecretPayload, ShortcutAction, ShortcutCategory, ShortcutChord,
+    ShortcutConfig, SnippetItem, SshAuthConfig, SshHostConfig, SshProxyConfig, format_chord,
+    system_monospace_font_family,
 };
 use crate::logging::{open_directory_in_file_manager, read_recent_logs};
 use crate::storage::AppPaths;
@@ -91,6 +91,51 @@ pub fn open_confirm_dialog(
                             }),
                     ),
             )
+    });
+}
+
+pub fn open_multiline_paste_confirm_dialog(
+    text: String,
+    window: &mut Window,
+    cx: &mut App,
+    on_confirm: impl Fn(&str, &mut App) + 'static,
+) {
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+    let line_vec: Vec<&str> = normalized.lines().collect();
+    let line_count = line_vec.len().max(1);
+    let title = if line_count == 1 {
+        "粘贴含换行的命令（将立即执行）？".to_string()
+    } else {
+        format!("粘贴 {line_count} 行文本？")
+    };
+    let preview = line_vec.into_iter().take(6).collect::<Vec<_>>().join("\n");
+    let confirm = Rc::new(move |cx: &mut App| on_confirm(&text, cx));
+    window.open_alert_dialog(cx, move |dialog, _, cx| {
+        let confirm = confirm.clone();
+        dialog
+            .confirm()
+            .title(title.clone())
+            .ok_text("确认粘贴")
+            .cancel_text("取消")
+            .child(
+                div()
+                    .text_sm()
+                    .child("当前终端未开启括号粘贴保护，换行可能立即执行命令。"),
+            )
+            .child(
+                div()
+                    .font_family(BUNDLED_SARASA_FONT_FAMILY)
+                    .text_xs()
+                    .p_2()
+                    .overflow_hidden()
+                    .max_h(px(144.))
+                    .bg(cx.theme().muted)
+                    .child(preview.clone()),
+            )
+            .on_ok(move |_, _, cx| {
+                confirm(cx);
+                true
+            })
     });
 }
 
@@ -1772,6 +1817,7 @@ pub fn open_settings_modal(
         let ws_fminus = workspace.clone();
         let ws_fplus = workspace.clone();
         let ws_follow = workspace.clone();
+        let ws_copy_on_select = workspace.clone();
         let ws_cmd_blocks = workspace.clone();
         let ws_sem_hl = workspace.clone();
         let ws_code_hl = workspace.clone();
@@ -1992,19 +2038,29 @@ pub fn open_settings_modal(
                             .child(
                                 h_flex().px_3p5().py_2p5().border_t_1().border_color(cx.theme().border)
                                     .justify_between().items_center()
-                                    .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("终端左键双击动作"))
+                                    .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("终端右键动作"))
                                     .child(h_flex().gap_1().children([
-                                        ("double-click-word", DoubleClickAction::SelectWord, "选中单词"),
-                                        ("double-click-paste", DoubleClickAction::Paste, "粘贴剪贴板"),
+                                        ("right-click-menu", RightClickAction::ContextMenu, "弹出菜单"),
+                                        ("right-click-smart", RightClickAction::SmartCopyPaste, "智能复制粘贴"),
                                     ].into_iter().map(|(id, action, label)| {
                                         let ws = workspace.clone();
                                         Button::new(id).secondary().xsmall().tab_stop(false)
-                                            .selected(cur.double_click_action == action).label(label)
+                                            .selected(cur.right_click_action == action).label(label)
                                             .on_click(move |_, window, cx| {
-                                                ws.update(cx, |ws, cx| ws.set_double_click_action(action, cx));
+                                                ws.update(cx, |ws, cx| ws.set_right_click_action(action, cx));
                                                 window.refresh();
                                             })
                                     }))),
+                            )
+                            .child(
+                                h_flex().px_3p5().py_2p5().border_t_1().border_color(cx.theme().border)
+                                    .justify_between().items_center()
+                                    .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("选中文本自动复制"))
+                                    .child(Switch::new("copy-on-select").checked(cur.copy_on_select)
+                                        .on_change(move |enabled, window, cx| {
+                                            ws_copy_on_select.update(cx, |ws, cx| ws.set_copy_on_select(*enabled, cx));
+                                            window.refresh();
+                                        })),
                             )
                             .child(
                                 h_flex()

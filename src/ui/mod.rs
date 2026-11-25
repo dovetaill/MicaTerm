@@ -1,3 +1,4 @@
+pub mod brand;
 pub mod fonts;
 pub mod modals;
 pub mod sftp_panel;
