@@ -211,7 +211,7 @@ unsafe extern "system" fn monitor_enum_proc(
     BOOL(1)
 }
 
-fn get_monitor_info(hmonitor: HMONITOR) -> anyhow::Result<MONITORINFOEXW> {
+pub(crate) fn get_monitor_info(hmonitor: HMONITOR) -> anyhow::Result<MONITORINFOEXW> {
     let mut monitor_info: MONITORINFOEXW = unsafe { std::mem::zeroed() };
     monitor_info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
     let status = unsafe {

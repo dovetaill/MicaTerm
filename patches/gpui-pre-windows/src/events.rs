@@ -30,6 +30,7 @@ pub(crate) const WM_GPUI_GPU_DEVICE_LOST: u32 = WM_USER + 7;
 pub(crate) const WM_GPUI_DISPLAYS_CHANGED: u32 = WM_USER + 10;
 
 const SIZE_MOVE_LOOP_TIMER_ID: usize = 1;
+const RESIZE_HITS: std::ops::RangeInclusive<u32> = HTSIZEFIRST..=HTSIZELAST;
 
 /// Coordinates window draws on the UI thread. Owned by the platform and
 /// shared with every window (like `WindowsPlatformState::cursor_visible`),
@@ -94,14 +95,13 @@ impl WindowsWindowInner {
             // So, let's eagerly activate the window.
             WM_MOUSEACTIVATE => Some(MA_ACTIVATE as isize),
             WM_ACTIVATE => self.handle_activate_msg(wparam),
-            WM_CREATE => self.handle_create_msg(handle),
             WM_MOVE => self.handle_move_msg(handle, lparam),
             WM_SIZE => self.handle_size_msg(wparam, lparam),
             WM_GETMINMAXINFO => self.handle_get_min_max_info_msg(lparam),
             WM_ENTERSIZEMOVE | WM_ENTERMENULOOP => self.handle_size_move_loop(handle),
             WM_EXITSIZEMOVE | WM_EXITMENULOOP => self.handle_size_move_loop_exit(handle),
             WM_TIMER => self.handle_timer_msg(handle, wparam),
-            WM_NCCALCSIZE => self.handle_calc_client_size(handle, wparam, lparam),
+            WM_NCCALCSIZE => self.handle_calc_client_size(wparam, lparam),
             WM_DPICHANGED => self.handle_dpi_changed_msg(handle, wparam, lparam),
             WM_DISPLAYCHANGE => self.handle_display_change_msg(handle),
             WM_NCHITTEST => self.handle_hit_test_msg(handle, lparam),
@@ -114,6 +114,11 @@ impl WindowsWindowInner {
             // Treat double click as a second single click, since we track the double clicks ourselves.
             // If you don't interact with any elements, this will fall through to the windows default
             // behavior of toggling whether the window is maximized.
+            WM_NCLBUTTONDBLCLK | WM_NCLBUTTONDOWN | WM_NCLBUTTONUP
+                if self.hide_title_bar && RESIZE_HITS.contains(&(wparam.0 as u32)) =>
+            {
+                None
+            }
             WM_NCLBUTTONDBLCLK | WM_NCLBUTTONDOWN => {
                 self.handle_nc_mouse_down_msg(handle, MouseButton::Left, wparam, lparam)
             }
@@ -206,14 +211,30 @@ impl WindowsWindowInner {
     fn handle_get_min_max_info_msg(&self, lparam: LPARAM) -> Option<isize> {
         let min_size = self.state.min_size?;
         let scale_factor = self.state.scale_factor.get();
-        let boarder_offset = &self.state.border_offset;
+        let border = &self.state.border_offset;
 
         unsafe {
             let minmax_info = &mut *(lparam.0 as *mut MINMAXINFO);
-            minmax_info.ptMinTrackSize.x = min_size.width.scale(scale_factor).as_f32() as i32
-                + boarder_offset.width_offset.get();
-            minmax_info.ptMinTrackSize.y = min_size.height.scale(scale_factor).as_f32() as i32
-                + boarder_offset.height_offset.get();
+            minmax_info.ptMinTrackSize.x =
+                min_size.width.scale(scale_factor).as_f32() as i32 + border.width_offset.get();
+            minmax_info.ptMinTrackSize.y =
+                min_size.height.scale(scale_factor).as_f32() as i32 + border.height_offset.get();
+        }
+        Some(0)
+    }
+
+    fn handle_calc_client_size(&self, wparam: WPARAM, lparam: LPARAM) -> Option<isize> {
+        if !self.hide_title_bar {
+            return None;
+        }
+        if wparam.0 != 0 && self.state.is_maximized() {
+            let params = lparam.0 as *mut NCCALCSIZE_PARAMS;
+            let rect = unsafe { &mut (*params).rgrc[0] };
+            let monitor = unsafe { MonitorFromRect(rect, MONITOR_DEFAULTTONEAREST) };
+            let info = get_monitor_info(monitor)
+                .context("getting work area for maximized window")
+                .log_err()?;
+            *rect = info.monitorInfo.rcWork;
         }
         Some(0)
     }
@@ -773,33 +794,6 @@ impl WindowsWindowInner {
         }
     }
 
-    fn handle_calc_client_size(
-        &self,
-        handle: HWND,
-        wparam: WPARAM,
-        lparam: LPARAM,
-    ) -> Option<isize> {
-        if !self.hide_title_bar || self.state.is_fullscreen() || wparam.0 == 0 {
-            return None;
-        }
-
-        unsafe {
-            let params = lparam.0 as *mut NCCALCSIZE_PARAMS;
-            let window_rect = (*params).rgrc[0];
-            let result = DefWindowProcW(handle, WM_NCCALCSIZE, wparam, lparam);
-            let dpi = GetDpiForWindow(handle);
-            (*params).rgrc[0] = adjust_custom_titlebar_client_rect(
-                (*params).rgrc[0],
-                window_rect,
-                self.state.is_maximized(),
-                get_frame_thicknessx(dpi),
-                GetSystemMetricsForDpi(SM_CXBORDER, dpi),
-                GetSystemMetricsForDpi(SM_CYBORDER, dpi),
-            );
-            Some(result.0 as isize)
-        }
-    }
-
     fn handle_activate_msg(self: &Rc<Self>, wparam: WPARAM) -> Option<isize> {
         let activated = wparam.loword() > 0;
 
@@ -866,15 +860,6 @@ impl WindowsWindowInner {
         Some(lresult.0)
     }
 
-    fn handle_create_msg(&self, handle: HWND) -> Option<isize> {
-        if self.hide_title_bar {
-            notify_frame_changed(handle);
-            Some(0)
-        } else {
-            None
-        }
-    }
-
     fn handle_dpi_changed_msg(
         &self,
         handle: HWND,
@@ -888,64 +873,51 @@ impl WindowsWindowInner {
         let is_maximized = self.state.is_maximized();
         let new_scale_factor = new_dpi / USER_DEFAULT_SCREEN_DPI as f32;
         self.state.scale_factor.set(new_scale_factor);
-        self.state.border_offset.update(handle).log_err();
-
         self.state
             .direct_manipulation
             .set_scale_factor(new_scale_factor);
 
+        let mut rect = unsafe { *(lparam.0 as *const RECT) };
+        let mut flags = SWP_NOZORDER | SWP_NOACTIVATE;
+        if is_maximized || self.state.is_fullscreen() {
+            let monitor = unsafe { MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST) };
+            let info = get_monitor_info(monitor)
+                .context("getting destination monitor after DPI change")
+                .log_err()?
+                .monitorInfo;
+            rect = if is_maximized {
+                info.rcWork
+            } else {
+                info.rcMonitor
+            };
+            flags |= SWP_FRAMECHANGED;
+        }
+        unsafe {
+            SetWindowPos(
+                handle,
+                None,
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+                flags,
+            )
+        }
+        .context("setting window bounds after DPI change")
+        .log_err()?;
+        self.update_border_offset().log_err();
         if is_maximized {
-            // Get the monitor and its work area at the new DPI
-            let monitor = unsafe { MonitorFromWindow(handle, MONITOR_DEFAULTTONEAREST) };
-            let mut monitor_info: MONITORINFO = unsafe { std::mem::zeroed() };
-            monitor_info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
-            if unsafe { GetMonitorInfoW(monitor, &mut monitor_info) }.as_bool() {
-                let work_area = monitor_info.rcWork;
-                let width = work_area.right - work_area.left;
-                let height = work_area.bottom - work_area.top;
-
-                // Update the window size to match the new monitor work area
-                // This will trigger WM_SIZE which will handle the size change
-                unsafe {
-                    SetWindowPos(
-                        handle,
-                        None,
-                        work_area.left,
-                        work_area.top,
-                        width,
-                        height,
-                        SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-                    )
-                    .context("unable to set maximized window position after dpi has changed")
-                    .log_err();
-                }
-
-                // SetWindowPos may not send WM_SIZE for maximized windows in some cases,
-                // so we manually update the size to ensure proper rendering
-                let device_size = size(DevicePixels(width), DevicePixels(height));
-                self.handle_size_change(device_size, new_scale_factor, true);
-            }
-        } else {
-            // For non-maximized windows, use the suggested RECT from the system
-            let rect = unsafe { &*(lparam.0 as *const RECT) };
-            let width = rect.right - rect.left;
-            let height = rect.bottom - rect.top;
-            // this will emit `WM_SIZE` and `WM_MOVE` right here
-            // even before this function returns
-            // the new size is handled in `WM_SIZE`
-            unsafe {
-                SetWindowPos(
-                    handle,
-                    None,
-                    rect.left,
-                    rect.top,
-                    width,
-                    height,
-                    SWP_NOZORDER | SWP_NOACTIVATE,
-                )
-                .context("unable to set window position after dpi has changed")
-                .log_err();
-            }
+            // A DPI change need not send WM_SIZE. Use the applied client size for the swap chain.
+            let mut client = RECT::default();
+            unsafe { GetClientRect(handle, &mut client) }.log_err()?;
+            self.handle_size_change(
+                size(DevicePixels(client.right), DevicePixels(client.bottom)),
+                new_scale_factor,
+                true,
+            );
+        }
+        if self.state.display.get().scale_factor() != new_scale_factor {
+            return self.handle_display_change_msg(handle);
         }
 
         Some(0)
@@ -975,6 +947,23 @@ impl WindowsWindowInner {
             return None;
         }
 
+        if self.hide_title_bar && self.is_resizable && !self.state.is_maximized() {
+            let mut rect = RECT::default();
+            unsafe { GetWindowRect(handle, &mut rect) }.log_err()?;
+            let cursor = POINT {
+                x: lparam.signed_loword().into(),
+                y: lparam.signed_hiword().into(),
+            };
+            let dpi = unsafe { GetDpiForWindow(handle) };
+            let padding = unsafe { GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi) };
+            let frame_x = unsafe { GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) } + padding;
+            let frame_y = unsafe { GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi) } + padding;
+            let hit = resize_hit_test(rect, cursor, frame_x, frame_y, dpi);
+            if hit != HTCLIENT {
+                return Some(hit as isize);
+            }
+        }
+
         let callback = self.state.callbacks.hit_test_window_control.take();
         let drag_area = if let Some(mut callback) = callback {
             let area = callback();
@@ -997,41 +986,7 @@ impl WindowsWindowInner {
             None
         };
 
-        if !self.hide_title_bar {
-            // If the OS draws the title bar, we don't need to handle hit test messages.
-            return drag_area;
-        }
-
-        let dpi = unsafe { GetDpiForWindow(handle) };
-        // We do not use the OS title bar, so the default `DefWindowProcW` will only register a 1px edge for resizes
-        // We need to calculate the frame thickness ourselves and do the hit test manually.
-        let frame_y = get_frame_thicknessx(dpi);
-        let mut cursor_point = POINT {
-            x: lparam.signed_loword().into(),
-            y: lparam.signed_hiword().into(),
-        };
-
-        unsafe { ScreenToClient(handle, &mut cursor_point).ok().log_err() };
-        if self.is_resizable
-            && !self.state.is_maximized()
-            && 0 <= cursor_point.y
-            && cursor_point.y <= frame_y
-        {
-            return Some(if cursor_point.x <= 0 {
-                HTTOPLEFT
-            } else {
-                let mut client_rect = RECT::default();
-                unsafe { GetClientRect(handle, &mut client_rect) }.log_err()?;
-                // The right edge of a client RECT is exclusive.
-                if client_rect.right - 1 <= cursor_point.x {
-                    HTTOPRIGHT
-                } else {
-                    HTTOP
-                }
-            } as _);
-        }
-
-        drag_area
+        drag_area.or(self.hide_title_bar.then_some(HTCLIENT as isize))
     }
 
     fn handle_nc_mouse_move_msg(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
@@ -1222,17 +1177,7 @@ impl WindowsWindowInner {
 
     fn handle_set_cursor(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
         if unsafe { !IsWindowEnabled(handle).as_bool() }
-            || matches!(
-                lparam.loword() as u32,
-                HTLEFT
-                    | HTRIGHT
-                    | HTTOP
-                    | HTTOPLEFT
-                    | HTTOPRIGHT
-                    | HTBOTTOM
-                    | HTBOTTOMLEFT
-                    | HTBOTTOMRIGHT
-            )
+            || RESIZE_HITS.contains(&(lparam.loword() as u32))
         {
             return None;
         }
@@ -1255,10 +1200,13 @@ impl WindowsWindowInner {
     ) -> Option<isize> {
         if wparam.0 != 0 {
             self.state.click_state.system_update(wparam.0);
-            self.state.border_offset.update(handle).log_err();
+            self.update_border_offset().log_err();
             // system settings may emit a window message which wants to take the refcell self.state, so drop it
 
             self.system_settings().update(wparam.0);
+            if wparam.0 == SPI_SETWORKAREA.0 as usize {
+                return self.handle_display_change_msg(handle);
+            }
         } else {
             self.handle_system_theme_changed(handle, lparam)?;
         };
@@ -1275,9 +1223,6 @@ impl WindowsWindowInner {
         {
             log::info!("System settings changed: {}", parameter_string);
             if parameter_string.as_str() == "ImmersiveColorSet" {
-                if self.hide_title_bar {
-                    suppress_dwm_window_border(handle);
-                }
                 let new_appearance = system_appearance()
                     .context("unable to get system appearance when handling ImmersiveColorSet")
                     .log_err()?;
@@ -1836,123 +1781,84 @@ pub(crate) fn current_capslock() -> Capslock {
     Capslock { on }
 }
 
-fn adjust_custom_titlebar_client_rect(
-    client_rect: RECT,
-    window_rect: RECT,
-    is_maximized: bool,
-    top_frame_thickness: i32,
-    border_x: i32,
-    border_y: i32,
-) -> RECT {
-    if is_maximized {
-        RECT {
-            top: window_rect.top + top_frame_thickness,
-            ..client_rect
-        }
-    } else {
-        RECT {
-            left: (client_rect.left - border_x).max(window_rect.left),
-            top: window_rect.top,
-            right: (client_rect.right + border_x).min(window_rect.right),
-            bottom: (client_rect.bottom + border_y).min(window_rect.bottom),
-        }
+fn resize_hit_test(rect: RECT, cursor: POINT, frame_x: i32, frame_y: i32, dpi: u32) -> u32 {
+    if !(rect.left..rect.right).contains(&cursor.x) || !(rect.top..rect.bottom).contains(&cursor.y)
+    {
+        return HTNOWHERE;
     }
-}
-
-// there is some additional non-visible space when talking about window
-// borders on Windows:
-// - SM_CXSIZEFRAME: The resize handle.
-// - SM_CXPADDEDBORDER: Additional border space that isn't part of the resize handle.
-fn get_frame_thicknessx(dpi: u32) -> i32 {
-    let resize_frame_thickness = unsafe { GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) };
-    let padding_thickness = unsafe { GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi) };
-    resize_frame_thickness + padding_thickness
-}
-
-fn notify_frame_changed(handle: HWND) {
-    unsafe {
-        SetWindowPos(
-            handle,
-            None,
-            0,
-            0,
-            0,
-            0,
-            SWP_FRAMECHANGED
-                | SWP_NOACTIVATE
-                | SWP_NOCOPYBITS
-                | SWP_NOMOVE
-                | SWP_NOOWNERZORDER
-                | SWP_NOREPOSITION
-                | SWP_NOSENDCHANGING
-                | SWP_NOSIZE
-                | SWP_NOZORDER,
-        )
-        .log_err();
+    let horizontal = if cursor.x < rect.left + frame_x {
+        HTLEFT
+    } else if cursor.x >= rect.right - frame_x {
+        HTRIGHT
+    } else {
+        HTCLIENT
+    };
+    let vertical = if cursor.y < rect.top + frame_y {
+        HTTOP
+    } else if cursor.y >= rect.bottom - frame_y {
+        HTBOTTOM
+    } else {
+        HTCLIENT
+    };
+    match (horizontal, vertical) {
+        (HTLEFT, HTTOP) => HTTOPLEFT,
+        (HTRIGHT, HTTOP) => HTTOPRIGHT,
+        (HTLEFT, HTBOTTOM) => HTBOTTOMLEFT,
+        (HTRIGHT, HTBOTTOM) => HTBOTTOMRIGHT,
+        // The right scrollbar thumb ends two logical pixels short of the window edge.
+        (HTRIGHT, HTCLIENT)
+            if rect.right - cursor.x > (2 * dpi / USER_DEFAULT_SCREEN_DPI) as i32 =>
+        {
+            HTCLIENT
+        }
+        (side, HTCLIENT) => side,
+        (_, edge) => edge,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{RECT, adjust_custom_titlebar_client_rect};
-
-    const WINDOW: RECT = RECT {
-        left: 100,
-        top: 50,
-        right: 900,
-        bottom: 650,
+    use super::resize_hit_test;
+    use windows::Win32::{
+        Foundation::{POINT, RECT},
+        UI::WindowsAndMessaging::*,
     };
 
     #[test]
-    fn resizable_window_keeps_transparent_resize_frame_at_96_and_192_dpi() {
-        for (frame, border, remaining_frame) in [(8, 1, 7), (16, 2, 14)] {
-            let client = RECT {
-                left: WINDOW.left + frame,
-                top: WINDOW.top + frame,
-                right: WINDOW.right - frame,
-                bottom: WINDOW.bottom - frame,
-            };
-            assert_eq!(
-                adjust_custom_titlebar_client_rect(client, WINDOW, false, frame, border, border),
-                RECT {
-                    left: WINDOW.left + remaining_frame,
-                    top: WINDOW.top,
-                    right: WINDOW.right - remaining_frame,
-                    bottom: WINDOW.bottom - remaining_frame,
-                }
-            );
+    fn resize_edges_and_corners_leave_the_scrollbar_in_the_client() {
+        let rect = RECT {
+            left: -1200,
+            top: -400,
+            right: -400,
+            bottom: 200,
+        };
+        for (dpi, frame_x, frame_y, right_grip) in [
+            (96, 8, 7, 2),
+            (120, 10, 9, 2),
+            (144, 12, 11, 3),
+            (192, 16, 14, 4),
+        ] {
+            let hit = |x, y| resize_hit_test(rect, POINT { x, y }, frame_x, frame_y, dpi);
+            let left = rect.left + frame_x - 1;
+            let right = rect.right - frame_x;
+            let top = rect.top + frame_y - 1;
+            let bottom = rect.bottom - frame_y;
+            assert_eq!(hit(left, top), HTTOPLEFT);
+            assert_eq!(hit(right, top), HTTOPRIGHT);
+            assert_eq!(hit(left, bottom), HTBOTTOMLEFT);
+            assert_eq!(hit(right, bottom), HTBOTTOMRIGHT);
+            assert_eq!(hit(left + 1, top), HTTOP);
+            assert_eq!(hit(right - 1, bottom), HTBOTTOM);
+            assert_eq!(hit(left, top + 1), HTLEFT);
+            assert_eq!(hit(left + 1, top + 1), HTCLIENT);
+            assert_eq!(hit(rect.right - right_grip, bottom - 1), HTRIGHT);
+            assert_eq!(hit(rect.right - right_grip - 1, bottom - 1), HTCLIENT);
+            assert_eq!(hit(right, top + 1), HTCLIENT);
+            assert_eq!(hit(rect.right - 1, rect.bottom - 1), HTBOTTOMRIGHT);
+            assert_eq!(hit(rect.right, bottom), HTNOWHERE);
+            assert_eq!(hit(left, rect.bottom), HTNOWHERE);
+            assert_eq!(hit(rect.left - 1, top), HTNOWHERE);
+            assert_eq!(hit(right, rect.top - 1), HTNOWHERE);
         }
-    }
-
-    #[test]
-    fn maximized_window_stays_within_monitor_work_area() {
-        let window = RECT {
-            left: -1928,
-            top: 32,
-            right: 8,
-            bottom: 1088,
-        };
-        let work_area = RECT {
-            left: -1920,
-            top: 40,
-            right: 0,
-            bottom: 1080,
-        };
-        let client = RECT {
-            top: 64,
-            ..work_area
-        };
-        assert_eq!(
-            adjust_custom_titlebar_client_rect(client, window, true, 8, 1, 1),
-            work_area
-        );
-    }
-
-    #[test]
-    fn non_resizable_client_stays_within_window() {
-        assert_eq!(
-            adjust_custom_titlebar_client_rect(WINDOW, WINDOW, false, 8, 1, 1),
-            WINDOW
-        );
     }
 }

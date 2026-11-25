@@ -287,14 +287,14 @@ impl WindowsWindowState {
                 .log_err();
             placement
         };
-        (
-            calculate_client_rect(
-                placement.rcNormalPosition,
-                &self.border_offset,
-                self.scale_factor.get(),
-            ),
-            placement.showCmd == SW_SHOWMAXIMIZED.0 as u32,
-        )
+        let display = self.display.get();
+        let mut bounds = calculate_client_rect(
+            placement.rcNormalPosition,
+            &self.border_offset,
+            self.scale_factor.get(),
+        );
+        bounds.origin += placement_workspace_offset(self.hwnd, display);
+        (bounds, placement.showCmd == SW_SHOWMAXIMIZED.0 as u32)
     }
 
     fn window_bounds(&self) -> WindowBounds {
@@ -425,9 +425,6 @@ impl WindowsWindowInner {
                     )
                 }
                 .log_err();
-                if !this.state.is_fullscreen() && this.hide_title_bar {
-                    suppress_dwm_window_border(this.hwnd);
-                }
             })
             .detach();
     }
@@ -562,6 +559,10 @@ impl WindowsWindow {
         } else {
             let mut dwstyle = WS_SYSMENU;
 
+            if hide_title_bar && params.kind == WindowKind::Normal {
+                // Keep native minimize/restore transitions; WM_NCCALCSIZE removes the caption.
+                dwstyle |= WS_CAPTION;
+            }
             if params.is_resizable {
                 dwstyle |= WS_THICKFRAME | WS_MAXIMIZEBOX;
             }
@@ -638,14 +639,48 @@ impl WindowsWindow {
         let this = this.unwrap();
 
         register_drag_drop(&this)?;
+        let this = Self(this);
         set_non_rude_hwnd(hwnd, true);
         configure_dwm_dark_mode(hwnd, appearance);
         if hide_title_bar {
-            suppress_dwm_window_border(hwnd);
+            if windows_build_number().is_some_and(|build| build >= 22000) {
+                if params.kind == WindowKind::Normal {
+                    // A one-pixel top frame preserves the native shadow and rounded corners.
+                    let margins = MARGINS {
+                        cyTopHeight: 1,
+                        ..Default::default()
+                    };
+                    unsafe { DwmExtendFrameIntoClientArea(hwnd, &margins) }
+                        .context("enabling DWM shadow for custom title bar")
+                        .log_err();
+                }
+                unsafe {
+                    DwmSetWindowAttribute(
+                        hwnd,
+                        DWMWA_BORDER_COLOR,
+                        &DWMWA_COLOR_NONE as *const _ as _,
+                        std::mem::size_of_val(&DWMWA_COLOR_NONE) as u32,
+                    )
+                }
+                .context("suppressing DWM border for custom title bar")
+                .log_err();
+            }
+            unsafe {
+                SetWindowPos(
+                    hwnd,
+                    None,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                )
+            }
+            .context("applying custom window frame before initial placement")?;
         }
         this.state
             .refresh_icons_for_dpi(hwnd, unsafe { GetDpiForWindow(hwnd) });
-        this.state.border_offset.update(hwnd)?;
+        this.update_border_offset()?;
         let placement =
             retrieve_window_placement(hwnd, display, params.bounds, &this.state.border_offset)?;
         if params.show {
@@ -661,7 +696,7 @@ impl WindowsWindow {
             }));
         }
 
-        Ok(Self(this))
+        Ok(this)
     }
 }
 
@@ -1481,8 +1516,13 @@ pub(crate) struct WindowBorderOffset {
     pub(crate) height_offset: Cell<i32>,
 }
 
-impl WindowBorderOffset {
-    pub(crate) fn update(&self, hwnd: HWND) -> anyhow::Result<()> {
+impl WindowsWindowInner {
+    pub(crate) fn update_border_offset(&self) -> anyhow::Result<()> {
+        // The custom frame has zero insets, including in the saved normal placement.
+        if self.hide_title_bar {
+            return Ok(());
+        }
+        let hwnd = self.hwnd;
         let window_rect = unsafe {
             let mut rect = std::mem::zeroed();
             GetWindowRect(hwnd, &mut rect)?;
@@ -1493,9 +1533,12 @@ impl WindowBorderOffset {
             GetClientRect(hwnd, &mut rect)?;
             rect
         };
-        self.width_offset
+        let border = &self.state.border_offset;
+        border
+            .width_offset
             .set((window_rect.right - window_rect.left) - (client_rect.right - client_rect.left));
-        self.height_offset
+        border
+            .height_offset
             .set((window_rect.bottom - window_rect.top) - (client_rect.bottom - client_rect.top));
         Ok(())
     }
@@ -1667,6 +1710,17 @@ fn calculate_client_rect(
     }
 }
 
+fn placement_workspace_offset(hwnd: HWND, display: WindowsDisplay) -> Point<Pixels> {
+    // WINDOWPLACEMENT uses screen coordinates for tool windows and workspace coordinates otherwise.
+    if WINDOW_EX_STYLE(unsafe { get_window_long(hwnd, GWL_EXSTYLE) } as u32)
+        .contains(WS_EX_TOOLWINDOW)
+    {
+        Point::default()
+    } else {
+        display.visible_bounds().origin - display.bounds().origin
+    }
+}
+
 fn retrieve_window_placement(
     hwnd: HWND,
     display: WindowsDisplay,
@@ -1679,7 +1733,7 @@ fn retrieve_window_placement(
     };
     unsafe { GetWindowPlacement(hwnd, &mut placement)? };
     // the bounds may be not inside the display
-    let bounds = if display.check_given_bounds(initial_bounds) {
+    let mut bounds = if display.check_given_bounds(initial_bounds) {
         initial_bounds
     } else {
         display.default_bounds()
@@ -1691,6 +1745,7 @@ fn retrieve_window_placement(
     // monitor Windows picked by default, which can have a different DPI than `display`
     // and would otherwise throw off the physical position (e.g. leaving the window
     // partially off-screen when moved to a monitor with a different scale factor).
+    bounds.origin -= placement_workspace_offset(hwnd, display);
     let bounds = bounds.to_device_pixels(display.scale_factor());
     placement.rcNormalPosition = calculate_window_rect(bounds, border_offset);
     Ok(placement)
@@ -1770,6 +1825,80 @@ mod tests {
     use super::ClickState;
     use gpui::{DevicePixels, MouseButton, point};
     use std::time::Duration;
+
+    #[test]
+    fn custom_titlebar_hwnd_has_no_nonclient_insets() {
+        use super::*;
+
+        let platform = Rc::new(WindowsPlatform::new(false).unwrap());
+        Application::with_platform(platform).run(|cx| {
+            let options = WindowOptions {
+                titlebar: Some(TitlebarOptions {
+                    appears_transparent: true,
+                    ..Default::default()
+                }),
+                focus: false,
+                show: false,
+                ..Default::default()
+            };
+            cx.open_window(options, |window, cx| {
+                let raw = rwh::HasWindowHandle::window_handle(window)
+                    .unwrap()
+                    .as_raw();
+                let rwh::RawWindowHandle::Win32(raw) = raw else {
+                    unreachable!()
+                };
+                let hwnd = HWND(raw.hwnd.get() as _);
+                let mut info = WINDOWINFO {
+                    cbSize: size_of::<WINDOWINFO>() as u32,
+                    ..Default::default()
+                };
+                unsafe { GetWindowInfo(hwnd, &mut info) }.unwrap();
+                assert!(info.dwStyle.contains(WS_OVERLAPPEDWINDOW));
+                assert!(info.rcWindow.right > info.rcWindow.left);
+                assert_eq!(info.rcClient, info.rcWindow);
+
+                let inner = window_from_hwnd(hwnd).unwrap();
+                let state = &inner.state;
+                let (saved, maximized) = state.calculate_window_bounds();
+                assert!(!maximized);
+                let saved_rect = calculate_window_rect(
+                    saved.to_device_pixels(state.scale_factor.get()),
+                    &state.border_offset,
+                );
+                assert_eq!(saved_rect, info.rcWindow);
+                let placement = retrieve_window_placement(
+                    hwnd,
+                    state.display.get(),
+                    saved,
+                    &state.border_offset,
+                )
+                .unwrap();
+                let mut actual = WINDOWPLACEMENT {
+                    length: size_of::<WINDOWPLACEMENT>() as u32,
+                    ..Default::default()
+                };
+                unsafe { GetWindowPlacement(hwnd, &mut actual) }.unwrap();
+                assert_eq!(placement.rcNormalPosition, actual.rcNormalPosition);
+
+                // Creation exercises the NCCALCSIZE_PARAMS form; query the plain RECT form too.
+                let mut rect = info.rcWindow;
+                let result = unsafe {
+                    SendMessageW(
+                        hwnd,
+                        WM_NCCALCSIZE,
+                        None,
+                        Some(LPARAM(&raw mut rect as isize)),
+                    )
+                };
+                assert_eq!(result.0, 0);
+                assert_eq!(rect, info.rcWindow);
+                cx.new(|_| EmptyView)
+            })
+            .unwrap();
+            cx.quit();
+        });
+    }
 
     #[test]
     fn test_double_click_interval() {

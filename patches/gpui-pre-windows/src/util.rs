@@ -142,20 +142,6 @@ pub(crate) fn windows_build_number() -> Option<u32> {
     Some(version.dwBuildNumber)
 }
 
-pub(crate) fn suppress_dwm_window_border(hwnd: HWND) {
-    if windows_build_number().is_some_and(|build| build >= 22000) {
-        unsafe {
-            DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_BORDER_COLOR,
-                &DWMWA_COLOR_NONE as *const _ as _,
-                size_of::<u32>() as u32,
-            )
-        }
-        .log_err();
-    }
-}
-
 /// This function is used to configure the dark mode for the window built-in title bar.
 pub(crate) fn configure_dwm_dark_mode(hwnd: HWND, appearance: WindowAppearance) {
     let dark_mode_enabled: BOOL = match appearance {

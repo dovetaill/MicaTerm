@@ -1,83 +1,51 @@
-# Windows 窗口激活态左/右/下系统主题色边框去除方案
+# Windows 主窗口的强调色细线与自绘窗口边框
 
-## 1. 问题现象与截图核验
+## `e5d0858` 为什么仍有三条线
 
-根据实测反馈与截图（`1432 × 859` 原图像素级采样）：
-- 当系统开启 Windows「在标题栏和窗口边框上显示强调色（Show accent color on title bars and window borders）」且 **Mica Term GPUI 主窗口处于激活/选中态** 时：
-  - **左边缘**（`x = 85, y = 43..=838`）、**右边缘**（`x = 1406, y = 43..=838`）、**下边缘**（`y = 838, x = 85..=1406`）各出现 **1px 系统主题强调色实线**（截图中为 `RGB(197, 75, 183)` 偏红品红色）；
-  - **上边缘**（`y = 42`）无该强调色线，直接从 `y = 43` 进入自绘深色 `TitleBar`（`RGB(40, 40, 43)`），形成突兀的「左、右、下三边亮色包边」。
-- 排查 `src/ui/*` 与 `gpui-component 0.10.0`（`window_border.rs` 在 Windows `Decorations::Server` 下为无边框透明容器）确认：**应用 UI 层未绘制任何外框或读取系统强调色**，该线条 100% 来自 `patches/gpui-pre-windows` 的 Win32 / DWM 非客户区边框渲染。
+开启「在标题栏和窗口边框上显示强调色」后，`e5d0858` 发布包的激活主窗在左、右、下各有一条 1px 线。1432 × 859 截图中，三条线都是 `RGB(197, 75, 183)`。用户在 Windows 实机确认，改用当前工作区的四边客户区实现后，这三条线已消失。
 
----
+主入口使用 `TitleBar::window_options()` 创建普通顶层窗口。工作区铺满客户区并绘制不透明背景。终端、SFTP 和标签页各自绘制内部控件。Windows 后端默认使用 `WS_EX_NOREDIRECTIONBITMAP` 和 DirectComposition，交换链按客户区大小绘制，根 visual 直接承载交换链。上述路径没有按系统强调色描画主窗口外框。
 
-## 2. 精确根因定位
+| `e5d0858` 的路径 | 对实机现象的解释 |
+| --- | --- |
+| 普通窗口的 `WM_NCCALCSIZE(TRUE)` | `DefWindowProcW` 先按 `WS_THICKFRAME` 收缩客户区。补丁恢复整个顶边，却只按 `SM_CXBORDER/SM_CYBORDER` 向左、右、下扩一小段。以默认 96 DPI 的 8px 框架和 1px 基本边框为例，三边各剩 7px 非客户区。旧单测还明确断言应剩 7px。 |
+| `WM_NCCALCSIZE(FALSE)` | 创建时可能收到这个形式，参数直接指向 `RECT`。旧处理交给默认窗口过程，同一窗口有两套客户区算法。 |
+| 右上角缩放 | 上游用 `2 * frame_x` 推算横向偏移，`e5d0858` 改用客户区的 `right - 1`。两种写法都依赖旧的非客户区布局，现由统一的八向缩放命中处理。 |
 
-问题由 `patches/gpui-pre-windows` 中两处底层窗口机制叠加导致：
+`e5d0858` 还修正了构建号查询。共享的 `util::windows_build_number()` 在调用 `RtlGetVersion` 前将 `dwOSVersionInfoSize` 设为结构体大小。DWM 边框色（22000）、系统背景材质（22621）和窗口合成属性（17763）各自用该查询判断支持的构建号。 [微软 RtlGetVersion 说明](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-rtlgetversion)
 
-1. **未抑制 Windows 11+ DWM 窗口外框色（`DWMWA_BORDER_COLOR`）**
-   - 位置：[window.rs](file:///home/wwwroot/mica-term-gpui/patches/gpui-pre-windows/src/window.rs#L639)、[util.rs](file:///home/wwwroot/mica-term-gpui/patches/gpui-pre-windows/src/util.rs#L134-L148)、[events.rs](file:///home/wwwroot/mica-term-gpui/patches/gpui-pre-windows/src/events.rs#L1277-L1290)
-   - 现状：主窗口通过 `TitleBar::window_options()` 开启 `hide_title_bar = true`（`appears_transparent = true`），样式为 `WS_SYSMENU | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX`。初始化与系统主题变更时仅设置了 `DWMWA_USE_IMMERSIVE_DARK_MODE`，未对自定义标题栏窗口设置 `DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE`（`0xFFFFFFFE`），导致 Windows 11 DWM 在激活态按系统默认策略绘制强调色边框。
+## 现在的窗口行为
 
-2. **`WM_NCCALCSIZE` 仅消除了顶部非客户区，左/右/下仍残留 1px 可见非客户区边框（Windows 10 / RDP / 无 `WS_CAPTION` 路径）**
-   - 位置：[events.rs](file:///home/wwwroot/mica-term-gpui/patches/gpui-pre-windows/src/events.rs#L776-L797)
-   - 现状：`handle_calc_client_size` 先调用 `DefWindowProcW(handle, WM_NCCALCSIZE, wparam, lparam)`，使 `rgrc[0]` 四周向内收缩 `SM_CXSIZEFRAME + SM_CXPADDEDBORDER`（96 DPI 下为 `8px` = 外侧 `7px` 透明缩放热区 + 内侧 `1px` `SM_CXBORDER`/`SM_CYBORDER` 可见非客户区边框），随后**仅将 `rgrc[0].top` 还原为 `saved_top`**。
-   - 结果：顶部可见非客户区厚度变为 `0px`（无顶边线），但左、右、下仍保留那 `1px` 可见非客户区边框环；在 Windows 10（不支持 `DWMWA_BORDER_COLOR`）以及无 `WS_CAPTION` / 远程桌面（RDP）合成路径下，系统会在该 `1px` 环内绘制激活态系统强调色。
+- 自绘标题栏窗口在普通态以及所有 `WM_NCCALCSIZE(FALSE)` 消息中保留建议矩形并返回 0，得到 `rcClient == rcWindow`。最大化时，`WM_NCCALCSIZE(TRUE)` 用 `MonitorFromRect` 从建议矩形确定目标屏，将客户区设为该屏的 `rcWork`。工作区查询失败会记录错误并交回默认窗口过程。 [微软 WM_NCCALCSIZE 说明](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-nccalcsize)
+- 普通自绘主窗保留完整的 `WS_OVERLAPPEDWINDOW`（含 `WS_CAPTION`），以支持原生最小化／还原动画和 Aero Snap。自绘标题栏窗口都在首次显示前用 `SetWindowPos(..., SWP_FRAMECHANGED | ...)` 应用框架。 [微软自定义框架说明](https://learn.microsoft.com/en-us/windows/win32/dwm/customframe)
+- 创建自绘标题栏窗口时只判断一次 `build >= 22000`。Windows 11+ 的普通主窗用 `DwmExtendFrameIntoClientArea(cyTopHeight = 1)` 保留阴影与圆角，同一版本分支下的所有自绘标题栏窗口均设置 `DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE`。Windows 10 跳过这两项 DWM 调用，由客户区覆盖四边。 [微软 DWM 属性定义](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute)
+- 边框色按 `HWND` 设置，`DWMWA_COLOR_DEFAULT` 显式恢复系统默认色。退出全屏在原句柄上恢复 `GWL_STYLE`，`ImmersiveColorSet` 广播通知应用重新读取外观。微软没有记载其中任一操作会重置边框色，因此 Windows 11+ 仅在创建自绘窗口时写入该属性。深浅色变化时仍更新 `DWMWA_USE_IMMERSIVE_DARK_MODE`。 [微软 DwmSetWindowAttribute 说明](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/nf-dwmapi-dwmsetwindowattribute) · [窗口样式](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowlongptrw) · [设置变更通知](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-settingchange)
+- 普通可缩放的自绘窗口用带符号的屏幕坐标做 `WM_NCHITTEST`。上、下、左和四角使用当前 DPI 的缩放框架及附加边距。右边中段只保留最外侧 2 个逻辑像素（换算后向下取整），给滚动条留出点击区域。四角优先，窗口内其余位置走 GPUI 标题栏拖动／按钮命中或 `HTCLIENT`，矩形外返回 `HTNOWHERE`。缩放区的光标和左键消息由系统处理。最大化、全屏和固定大小窗口跳过自绘缩放命中。
+- `WM_GETMINMAXINFO` 只写 `ptMinTrackSize`，系统管理 `ptMaxSize` 和 `ptMaxPosition`。`WM_DPICHANGED` 对普通窗口应用建议矩形。最大化与全屏时用建议矩形选取目标屏，分别使用 `rcWork` 和 `rcMonitor`。设置位置成功后，最大化的渲染尺寸取自实际客户区。 [微软 WM_DPICHANGED 说明](https://learn.microsoft.com/en-us/windows/win32/hidpi/wm-dpichanged)
+- **保存与还原**。自绘框架的 `WindowBorderOffset` 恒为零，最小跟踪尺寸以及客户区与外窗的换算都使用这个值。`calculate_window_bounds` 和 `retrieve_window_placement` 在屏幕与工作区坐标之间反向换算，处理任务栏在上方或左侧产生的原点差。工具窗口遵循 Win32 的屏幕坐标约定。 [微软 WINDOWPLACEMENT 定义](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-windowplacement)
 
----
+## 验证
 
-## 3. 修改方案设计（最小完整改动）
+Linux 的 `cargo test --locked --offline` 运行应用测试。Windows 补丁由目标平台条件编译，在 Linux 上使用以下两条命令分别检查主程序和补丁测试目标。
 
-仅修改平台补丁层 `patches/gpui-pre-windows/src/` 下 3 个文件，零新增配置项、零 UI 层侵入，同时完整保留外侧透明缩放热区、最大化工作区对齐、Aero Snap 与终端右侧滚动条点击体验。
+```sh
+cargo xwin check --target x86_64-pc-windows-msvc --locked --offline
+cargo xwin check --target x86_64-pc-windows-msvc -p gpui-pre-windows --lib --tests --locked --offline
+```
 
-### 3.1 [util.rs](file:///home/wwwroot/mica-term-gpui/patches/gpui-pre-windows/src/util.rs)：统一系统构建号查询与 DWM 边框抑制入口
+本次 Linux 应用测试通过 55 项，上述两个 Windows 目标均通过离线类型检查。补丁单元测试覆盖 96、120、144、192 DPI 下的八向缩放命中、右侧滚动条与缩放热区的相邻像素边界、矩形排他上界及负坐标副屏场景。
 
-1. 提取单一事实源 `pub(crate) fn windows_build_number() -> Option<u32>`：
-   - 统一封装 `windows::Wdk::System::SystemServices::RtlGetVersion`（正确初始化 `dwOSVersionInfoSize`），供 `util.rs` 与 `window.rs` 复用，消除多处手写版本检测重复代码。
-2. 新增 `pub(crate) fn suppress_dwm_window_border(hwnd: HWND)`：
-   - 仅当 `windows_build_number().is_some_and(|build| build >= 22000)`（Windows 11 Build 22000+）时调用：
-     `DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &DWMWA_COLOR_NONE, size_of::<u32>())`，并使用 `.log_err()` 记录真实异常（不在 Windows 10 上盲调产生 `E_INVALIDARG` 噪音，也不静默吞掉 Windows 11+ 的意外失败）。
+Windows 桌面测试 `custom_titlebar_hwnd_has_no_nonclient_insets` 通过正常 GPUI 入口创建隐藏主窗。它用 `GetWindowInfo` 在同一屏幕坐标系比较真实 `rcClient` 和 `rcWindow`，核对保存与还原位置的双向换算，并向 HWND 发送普通 `RECT` 形式的消息。本机仅交叉检查了这个测试。带交互桌面和 Direct3D 的 Windows 机器可执行以下命令。
 
-### 3.2 [window.rs](file:///home/wwwroot/mica-term-gpui/patches/gpui-pre-windows/src/window.rs)：窗口创建、退出全屏同步抑制边框并复用版本检测
+```sh
+cargo test -p gpui-pre-windows --lib --locked --offline custom_titlebar_hwnd_has_no_nonclient_insets
+```
 
-1. 在 `WindowsWindow::new`（紧随 `configure_dwm_dark_mode(hwnd, appearance)` 之后、`border_offset.update(hwnd)` 之前）：
-   - 若 `hide_title_bar` 为 `true`，调用 `suppress_dwm_window_border(hwnd)`。
-2. 在 `WindowsWindowInner::toggle_fullscreen` 退出全屏恢复 `GWL_STYLE` 后：
-   - 若 `!this.state.is_fullscreen() && this.hide_title_bar`，调用 `suppress_dwm_window_border(this.hwnd)`，确保样式重置后边框不会回退。
-3. 将 `dwm_set_window_composition_attribute`（`>= 22621`）与 `set_window_composition_attribute`（`>= 17763`）改为复用 `util::windows_build_number()`。
+以下是 Windows 10 和 Windows 11 的桌面回归用例。已有实机反馈覆盖清理前的三边细线，删除两处重复设置后的全屏与主题切换尚未在 Windows 桌面复测。
 
-### 3.3 [events.rs](file:///home/wwwroot/mica-term-gpui/patches/gpui-pre-windows/src/events.rs)：`WM_NCCALCSIZE` 吞并左/右/下可见 1px 边框 + 顶角命中对称修正 + 主题消息同步
-
-1. 提取纯函数 `adjust_custom_titlebar_client_rect` 并在 `handle_calc_client_size` 中调用：
-   - 保存 `DefWindowProcW` 调用前的原始窗口矩形 `window_rect = (*params).rgrc[0]`；
-   - 调用 `DefWindowProcW(handle, WM_NCCALCSIZE, wparam, lparam)` 获取默认客户区矩形 `client_rect`；
-   - 按窗口当前 DPI（`GetDpiForWindow(handle)`）读取系统物理边框宽度 `border_x = GetSystemMetricsForDpi(SM_CXBORDER, dpi)`、`border_y = GetSystemMetricsForDpi(SM_CYBORDER, dpi)`；
-   - **最大化态（`is_maximized == true`）**：保持左、右、下等于 `DefWindowProcW` 计算出的显示器工作区边界，仅将 `top` 设为 `window_rect.top + get_frame_thicknessx(dpi)`，防止跨显示器溢出；
-   - **常规窗口态（`is_maximized == false`）**：
-     - `top = window_rect.top`
-     - `left = (client_rect.left - border_x).max(window_rect.left)`
-     - `right = (client_rect.right + border_x).min(window_rect.right)`
-     - `bottom = (client_rect.bottom + border_y).min(window_rect.bottom)`
-     - 几何效果：常规可缩放窗口的客户区向外精确扩展 `1` 逻辑像素（96 DPI 为 `1px`、200% DPI 为 `2px`），与 `DWMWA_EXTENDED_FRAME_BOUNDS` 完全齐平，彻底覆盖左/右/下可见边框环，同时保留外侧 `frame - border`（96 DPI 为 `7px`）原生透明缩放热区；不可缩放窗口因 `max/min` 夹紧不会越过 `window_rect`。
-   - `WindowBorderOffset::update` 本身基于实时 `GetWindowRect - GetClientRect` 差值计算，自动适配新偏移无需硬编码改动。
-2. 修正 `handle_hit_test_msg` 右上角缩放热区计算（[events.rs](file:///home/wwwroot/mica-term-gpui/patches/gpui-pre-windows/src/events.rs#L1021-L1030)）：
-   - 原逻辑 `right - 2 * frame_x <= cursor_point.x` 隐含假设左右非客户区总宽恒等于 `2 * frame_x`；当左右各缩减 `border_x` 后，改为基于 `GetClientRect(handle, &mut client_rect)` 判定 `client_rect.right - 1 <= cursor_point.x`，与左上角 `cursor_point.x <= 0` 完全对称（均为客户区内 `1px` + 客户区外 `frame_x - border_x`，总宽恰为 `frame_x`）。
-3. 在 `handle_system_theme_changed` 处理 `"ImmersiveColorSet"` 时：
-   - 若 `self.hide_title_bar` 为 `true`，无论深浅色枚举是否改变（用户在保持深色模式时单独开关或修改系统强调色也会广播 `"ImmersiveColorSet"`），均调用 `suppress_dwm_window_border(handle)`。
-
----
-
-## 4. 质量约束与验证清单
-
-### 4.1 反过度防御编码约束
-- **最小完整改动**：仅改动上述 3 个文件，禁止新增配置开关、包装类型、定时器或 `WM_NCPAINT` / `WM_NCACTIVATE` 投机钩子。
-- **单一事实源**：系统版本号读取统一走 `util::windows_build_number()`，DWM 边框抑制统一走 `util::suppress_dwm_window_border()`。
-- **严禁静默吞错与冗余防御**：禁止写无意义的 `let _ = DwmSetWindowAttribute(...)` 或多处重复状态缓存；通过版本前置判断区分平台能力边界，调用结果统一走 `.log_err()`。
-
-### 4.2 自动化测试与交叉编译验收
-1. **纯逻辑单元测试**：为 `adjust_custom_titlebar_client_rect` 编写单元测试（支持在 Linux 主机与 Windows 目标下运行或独立校验），覆盖：
-   - 96 DPI / 192 DPI（200% 缩放）常规可缩放窗口左/右/下精确外扩 `border_x`/`border_y` 且保留外侧透明缩放边；
-   - 最大化窗口保持工作区边界不外扩；
-   - 无边框/不可缩放窗口（`client_rect == window_rect`）不越界。
-2. **双平台编译与测试检查**：
-   - Linux 本机：`cargo test --offline` 全量测试通过；
-   - Windows 交叉目标：`cargo xwin check --target x86_64-pc-windows-msvc --offline`（含 `gpui-pre-windows` 平台补丁与测试目标）零错误、零警告通过。
+| 桌面操作 | 验收点 |
+| --- | --- |
+| 选择与应用背景反差明显的强调色，启用标题栏／边框强调色及系统阴影。在同一窗口激活、失焦、重新激活，切换强调色和浅／深色，再进入并退出全屏 | 每次切换后检查四条直边和顶部第一行，均应无强调色实线。Windows 11 另验普通窗口的阴影与圆角。 |
+| 在 100%、150%、200% 缩放下拖动四边和四角，再实际点击、拖动终端与 SFTP 右侧滚动条 | 八个方向使用相应的缩放光标并改变窗口尺寸，右边中段越过最外侧热区即由控件接收点击，最大化后最右列也可点。 |
+| 从自绘标题栏拖到屏幕顶端和侧边，双击还原，点击标题栏按钮及任务栏图标最小化／还原 | Snap 分屏、最大化、还原正常。系统开启动画时有原生过渡，Windows 11 上另验最大化按钮的 Snap 布局。 |
+| 在分辨率、DPI 不同且有负坐标的双屏间移动，分别最大化、跨屏、还原、全屏再退出。在系统支持时把任务栏放到顶边或左边 | 最大化四边对齐目标屏工作区，相邻屏无溢出，任务栏可用，全屏占目标显示器。还原位置和尺寸无逐次偏移。 |
