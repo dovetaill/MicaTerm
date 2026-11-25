@@ -48,6 +48,12 @@ fn field_block(label: &'static str, control: impl IntoElement, cx: &App) -> gpui
         .child(control)
 }
 
+/// Reserves vertical room inside `Dialog`'s `overflow_hidden` / `overflow_y_scrollbar` body
+/// (`pl/pr = 16px`, `pt/pb = 0px`) so `gpui-component`'s 3px outer focus ring is not clipped.
+fn dialog_body() -> gpui_kit::Div {
+    v_flex().py_1()
+}
+
 pub fn open_confirm_dialog(
     title: impl Into<SharedString>,
     message: impl Into<SharedString>,
@@ -168,7 +174,7 @@ pub fn open_simple_name_dialog(
         dialog
             .title(title)
             .w(px(400.0))
-            .child(v_flex().gap_3().child(field_block(label, Input::new(&input).small(), cx)))
+            .child(dialog_body().gap_3().child(field_block(label, Input::new(&input).small(), cx)))
             .footer(
                 DialogFooter::new()
                     .child(
@@ -286,7 +292,7 @@ pub fn open_remote_editor_dialog(
             .title(title_str.clone())
             .w(px(760.0))
             .child(
-                v_flex()
+                dialog_body()
                     .gap_2()
                     .child(
                         h_flex()
@@ -407,13 +413,11 @@ pub fn open_remote_editor_dialog(
                             ),
                     )
                     .child(
-                        div().h(px(420.0)).child(
-                            Editor::new(&editor)
-                                .h(px(412.0))
-                                .readonly(saving.get())
-                                .font_family(editor_font.clone())
-                                .text_size(px(editor_px)),
-                        ),
+                        Editor::new(&editor)
+                            .h(px(412.0))
+                            .readonly(saving.get())
+                            .font_family(editor_font.clone())
+                            .text_size(px(editor_px)),
                     ),
             )
             .footer(
@@ -1023,7 +1027,7 @@ pub fn open_ssh_host_modal(
             })
             .w(px(540.0))
             .child(
-                v_flex()
+                dialog_body()
                     .gap_3()
                     .children(cur_err.map(|msg| {
                         div()
@@ -1333,7 +1337,7 @@ pub fn open_keychain_modal(
             })
             .w(px(460.0))
             .child(
-                v_flex()
+                dialog_body()
                     .gap_3()
                     .child(
                         macos_segmented_track(cx)
@@ -1479,7 +1483,7 @@ pub fn open_snippet_modal(
             })
             .w(px(460.0))
             .child(
-                v_flex()
+                dialog_body()
                     .gap_3()
                     .child(field_block("片段名称", Input::new(&title_in).small(), cx))
                     .child(field_block("分组标签", Input::new(&group_in).small(), cx))
@@ -1796,7 +1800,8 @@ pub fn open_settings_modal(
                         })
                 }),
         );
-        let dialog = dialog.title("偏好设置").w(px(600.0)).child(tabs).footer(
+        let body = dialog_body().gap_2().child(tabs);
+        let dialog = dialog.title("偏好设置").w(px(600.0)).footer(
             DialogFooter::new().child(
                 Button::new("settings-done")
                     .primary()
@@ -1810,7 +1815,7 @@ pub fn open_settings_modal(
             ),
         );
         if shortcuts_page.get() {
-            return dialog.child(recorder.clone());
+            return dialog.child(body.child(recorder.clone()));
         }
         let cur = workspace.read(cx).settings.clone();
         let ws_dark = workspace.clone();
@@ -1859,7 +1864,7 @@ pub fn open_settings_modal(
                 })
         });
 
-        dialog.child(
+        dialog.child(body.child(
             v_flex()
                 .gap_3()
                 .max_h(px(440.0))
@@ -2399,7 +2404,7 @@ pub fn open_settings_modal(
                                     .child(format!("运行与崩溃日志：{logs_dir_display}")),
                             ),
                     ),
-            )
+        ))
     });
 }
 
@@ -2423,7 +2428,7 @@ pub fn open_logs_modal(paths: AppPaths, window: &mut Window, cx: &mut App) {
             .title("运行与崩溃诊断日志")
             .w(px(680.0))
             .child(
-                v_flex()
+                dialog_body()
                     .gap_2p5()
                     .child(
                         macos_inset_group(cx)
