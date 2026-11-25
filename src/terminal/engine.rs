@@ -38,7 +38,7 @@ use crate::terminal::semantic::{
 };
 
 const MAX_OSC133_RECORDS: usize = 512;
-const MAX_SYNTAX_BLOCK_LINES: usize = 8_000;
+const MAX_SYNTAX_BLOCK_LINES: usize = 32_000;
 const MAX_SYNTAX_LINE_BYTES: usize = 2_048;
 
 #[derive(Debug, Clone)]
@@ -147,6 +147,21 @@ struct Osc133Record {
     status: CommandBlockStatus,
 }
 
+struct CachedLogicalLineSpans {
+    hash: u64,
+    end_gl: i32,
+    segments: Vec<(i32, usize, usize)>,
+    spans: Vec<(Range<usize>, CodeTokenRole)>,
+}
+
+struct CachedBlockCover {
+    covered_scan_end_gl: i32,
+    out_start_gl: i32,
+    out_end_gl: i32,
+    conpty_white: bool,
+    tail_spans: Option<(i32, i32, Vec<(i32, usize, usize)>, Vec<(Range<usize>, CodeTokenRole)>)>,
+}
+
 struct BlockSyntaxCache {
     dirty_generation: u64,
     syntax_revision: u64,
@@ -154,8 +169,9 @@ struct BlockSyntaxCache {
     prompt_gl: i32,
     prompt_cmd: String,
     syntax_name: String,
-    completed_spans: Vec<(u64, Vec<(Range<usize>, CodeTokenRole)>)>,
+    completed_spans: Vec<CachedLogicalLineSpans>,
     checkpoint: (ParseState, ScopeStack),
+    cover: Option<CachedBlockCover>,
 }
 
 struct StitchedLogicalLine {
@@ -289,6 +305,19 @@ impl AlacrittyTerminalEngine {
     }
 
     fn advance_grid(&mut self, chunk: &[u8]) {
+        let step_cap = if chunk.contains(&0x1b) {
+            (self.scrollback_limit.saturating_sub(1) / self.rows.max(1)).max(1)
+        } else {
+            self.scrollback_limit
+                .saturating_sub(self.rows.saturating_add(1))
+                .max(1)
+        };
+        for sub in chunk.chunks(step_cap) {
+            self.advance_grid_step(sub);
+        }
+    }
+
+    fn advance_grid_step(&mut self, chunk: &[u8]) {
         let history = self.term.grid().history_size();
         // Grid scrolling rotates row allocations. Locate the former last history row
         // when the history length alone cannot tell us how many rows were evicted.
@@ -397,10 +426,14 @@ impl AlacrittyTerminalEngine {
             Box::new((anchor_grid_line + 1)..(self.rows as i32))
         };
 
+        let max_gl = (self.rows as i32) - 1;
         for gl in search_range {
-            let line_str = self.extract_plain_grid_line(Line(gl));
-            if let Some((_, has_cmd)) = detect_prompt_command_byte_offset(&line_str)
-                && has_cmd
+            if gl > -history && self.row_has_wrapline(Line(gl - 1)) {
+                continue;
+            }
+            let line = self.stitch_logical_line_at(gl, max_gl, 0, &[]);
+            if !self.is_inside_osc133_output(gl, history as usize)
+                && let Some((_, true)) = detect_prompt_command_byte_offset(&line.text)
             {
                 let desired_top = (gl - 1).clamp(-history, 0);
                 let desired_offset = (-desired_top).max(0);
@@ -719,8 +752,9 @@ impl AlacrittyTerminalEngine {
                         stitched = self.logical_text_map(lines);
                         &stitched
                     };
-                    let spans = if let Some((cmd_byte, true)) =
-                        detect_prompt_command_byte_offset(&map.text)
+                    let spans = if !self.is_inside_osc133_output(start, history_size)
+                        && let Some((cmd_byte, true)) =
+                            detect_prompt_command_byte_offset(&map.text)
                     {
                         detect_input_spans_for_prompt_row(map, cmd_byte)
                     } else {
@@ -1000,6 +1034,33 @@ impl AlacrittyTerminalEngine {
         )
     }
 
+    fn osc_record_has_syntax_target(&self, record: &Osc133Record) -> bool {
+        let grid = self.term.grid();
+        let gl = record.abs_start_line as i32 - grid.history_size() as i32;
+        let line = self.stitch_logical_line_at(gl, grid.bottommost_line().0, gl, &[]);
+        detect_prompt_command_byte_offset(&line.text)
+            .filter(|&(_, has_cmd)| has_cmd)
+            .and_then(|(off, _)| detect_command_syntax_target(&line.text[off..]))
+            .is_some()
+    }
+
+    fn is_inside_osc133_output(&self, gl: i32, history_size: usize) -> bool {
+        if self.osc133_records.is_empty() {
+            return false;
+        }
+        let abs = (gl + history_size as i32).max(0) as usize;
+        let cursor_abs = self.current_abs_cursor_line();
+        self.osc133_records.iter().any(|rec| {
+            if abs <= rec.abs_start_line || !self.valid_osc_prompt(rec) {
+                return false;
+            }
+            if let Some(end_abs) = rec.abs_end_line {
+                return abs <= end_abs;
+            }
+            abs <= cursor_abs && self.osc_record_has_syntax_target(rec)
+        })
+    }
+
     fn compute_visible_command_blocks(
         &self,
         row_maps: &[RowTextMap],
@@ -1048,9 +1109,23 @@ impl AlacrittyTerminalEngine {
         }
 
         // Universal prompt-heuristic command blocks (works on any unconfigured remote SSH server!)
+        let view_top = -(display_offset as i32);
+        let min_gl = -(history_size as i32);
+        let max_gl = (self.rows as i32) - 1;
         let mut prompts: Vec<(usize, bool)> = Vec::new();
         for (r, map) in row_maps.iter().enumerate() {
-            if let Some((_, has_cmd)) = detect_prompt_command_byte_offset(&map.text) {
+            let gl = view_top + r as i32;
+            if gl > min_gl && self.row_has_wrapline(Line(gl - 1)) {
+                continue;
+            }
+            let stitched;
+            let text = if gl < max_gl && self.row_has_wrapline(Line(gl)) {
+                stitched = self.stitch_logical_line_at(gl, max_gl, view_top, row_maps);
+                stitched.text.as_str()
+            } else {
+                map.text.as_str()
+            };
+            if let Some((_, has_cmd)) = detect_prompt_command_byte_offset(text) {
                 prompts.push((r, has_cmd));
             }
         }
@@ -1134,38 +1209,47 @@ impl AlacrittyTerminalEngine {
         }
 
         // Scan buffer lines for search matches and fallback prompt/error overview ticks
-        let start_gl = -(history_size as i32);
-        let end_gl = self.rows as i32;
-        for gl in start_gl..end_gl {
-            let line_str = self.extract_plain_grid_line(Line(gl));
-            if line_str.trim().is_empty() {
-                continue;
-            }
-            let abs_idx = (gl + history_size as i32).max(0) as usize;
-            let ratio = (abs_idx as f32 / total_lines as f32).clamp(0.0, 1.0);
-
-            if let Some(search) = &self.row_search {
-                let c = search.find_iter(&line_str).count();
-                if c > 0 {
-                    match_count += c;
-                    markers.push(OverviewMarker {
-                        ratio_from_top: ratio,
-                        kind: OverviewMarkerKind::SearchMatch,
-                    });
+        if !has_osc133 || self.row_search.is_some() {
+            let start_gl = -(history_size as i32);
+            let end_gl = self.rows as i32;
+            for gl in start_gl..end_gl {
+                let line_str = self.extract_plain_grid_line(Line(gl));
+                if line_str.trim().is_empty() {
+                    continue;
                 }
-            }
+                let abs_idx = (gl + history_size as i32).max(0) as usize;
+                let ratio = (abs_idx as f32 / total_lines as f32).clamp(0.0, 1.0);
 
-            if !has_osc133 {
-                if line_has_error_signature(&line_str) {
-                    markers.push(OverviewMarker {
-                        ratio_from_top: ratio,
-                        kind: OverviewMarkerKind::CommandFailure,
-                    });
-                } else if let Some((_, true)) = detect_prompt_command_byte_offset(&line_str) {
-                    markers.push(OverviewMarker {
-                        ratio_from_top: ratio,
-                        kind: OverviewMarkerKind::CommandSuccess,
-                    });
+                if let Some(search) = &self.row_search {
+                    let c = search.find_iter(&line_str).count();
+                    if c > 0 {
+                        match_count += c;
+                        markers.push(OverviewMarker {
+                            ratio_from_top: ratio,
+                            kind: OverviewMarkerKind::SearchMatch,
+                        });
+                    }
+                }
+
+                if !has_osc133 && (gl == start_gl || !self.row_has_wrapline(Line(gl - 1))) {
+                    let stitched;
+                    let check_str = if gl + 1 < end_gl && self.row_has_wrapline(Line(gl)) {
+                        stitched = self.stitch_logical_line_at(gl, end_gl - 1, 0, &[]);
+                        stitched.text.as_str()
+                    } else {
+                        line_str.as_str()
+                    };
+                    if line_has_error_signature(check_str) {
+                        markers.push(OverviewMarker {
+                            ratio_from_top: ratio,
+                            kind: OverviewMarkerKind::CommandFailure,
+                        });
+                    } else if let Some((_, true)) = detect_prompt_command_byte_offset(check_str) {
+                        markers.push(OverviewMarker {
+                            ratio_from_top: ratio,
+                            kind: OverviewMarkerKind::CommandSuccess,
+                        });
+                    }
                 }
             }
         }
@@ -1287,8 +1371,11 @@ impl AlacrittyTerminalEngine {
             self.prompt_scan.checked.end = end;
         }
         let end = self.prompt_scan.anchors.partition_point(|&a| a <= top_abs);
+        let history_size = (-min_history_gl).max(0) as usize;
         self.prompt_scan.anchors[..end]
-            .last()
+            .iter()
+            .rev()
+            .find(|&&a| !self.is_inside_osc133_output(min_history_gl + a as i32, history_size))
             .map_or(view_top, |a| min_history_gl + *a as i32)
     }
 
@@ -1343,6 +1430,63 @@ impl AlacrittyTerminalEngine {
 
         let scan_start_gl =
             self.find_enclosing_prompt_start(view_top, min_history_gl, max_screen_gl, row_maps);
+        let pack = SyntaxRegistry::global().current();
+
+        if let Some(cache) = self.block_syntax_cache.as_ref()
+            && cache.dirty_generation == self.dirty_generation
+            && cache.syntax_revision == pack.revision
+            && cache.cols == self.cols
+            && cache.prompt_gl == scan_start_gl
+            && let Some(cover) = cache.cover.as_ref()
+            && scan_end_gl <= cover.covered_scan_end_gl
+        {
+            if cover.conpty_white
+                && cover.out_end_gl >= view_top
+                && cover.out_start_gl <= view_bottom
+            {
+                white_rows[(cover.out_start_gl.max(view_top) - view_top) as usize
+                    ..=(cover.out_end_gl.min(view_bottom) - view_top) as usize]
+                    .fill(true);
+            }
+            let first_vis = cache
+                .completed_spans
+                .partition_point(|entry| entry.end_gl < view_top);
+            for entry in &cache.completed_spans[first_vis..] {
+                if entry
+                    .segments
+                    .first()
+                    .is_some_and(|&(s_gl, _, _)| s_gl > view_bottom)
+                {
+                    break;
+                }
+                project_segments_spans_to_viewport(
+                    &entry.segments,
+                    &entry.spans,
+                    view_top,
+                    view_bottom,
+                    self.cols,
+                    row_maps,
+                    palette,
+                    overrides,
+                );
+            }
+            if let Some((t_start, t_end, ref segs, ref spans)) = cover.tail_spans
+                && t_end >= view_top
+                && t_start <= view_bottom
+            {
+                project_segments_spans_to_viewport(
+                    segs,
+                    spans,
+                    view_top,
+                    view_bottom,
+                    self.cols,
+                    row_maps,
+                    palette,
+                    overrides,
+                );
+            }
+            return;
+        }
 
         let mut logical_lines: Vec<StitchedLogicalLine> = Vec::new();
         let mut gl = scan_start_gl;
@@ -1354,9 +1498,20 @@ impl AlacrittyTerminalEngine {
             }
         }
 
-        let pack = SyntaxRegistry::global().current();
+        let cmd_block_count = logical_lines
+            .iter()
+            .filter(|l| {
+                !self.is_inside_osc133_output(l.start_gl, history_size)
+                    && matches!(detect_prompt_command_byte_offset(&l.text), Some((_, true)))
+            })
+            .count();
+
         let mut idx = 0usize;
         while idx < logical_lines.len() {
+            if self.is_inside_osc133_output(logical_lines[idx].start_gl, history_size) {
+                idx += 1;
+                continue;
+            }
             let Some((cmd_byte, has_cmd)) =
                 detect_prompt_command_byte_offset(&logical_lines[idx].text)
             else {
@@ -1368,7 +1523,8 @@ impl AlacrittyTerminalEngine {
             idx += 1;
             let out_start = idx;
             while idx < logical_lines.len()
-                && detect_prompt_command_byte_offset(&logical_lines[idx].text).is_none()
+                && (self.is_inside_osc133_output(logical_lines[idx].start_gl, history_size)
+                    || detect_prompt_command_byte_offset(&logical_lines[idx].text).is_none())
             {
                 idx += 1;
             }
@@ -1391,10 +1547,10 @@ impl AlacrittyTerminalEngine {
 
             let start = out_slice[0].start_gl;
             let end = out_slice.last().unwrap().end_gl;
-            if self.is_windows_local_pty
+            let conpty_white = self.is_windows_local_pty
                 && target.allow_conpty_white
-                && self.monochrome_output(start, end, scan_end_gl, content_end)
-            {
+                && self.monochrome_output(start, end, scan_end_gl, content_end);
+            if conpty_white {
                 white_rows[(start.max(view_top) - view_top) as usize
                     ..=(end.min(view_bottom) - view_top) as usize]
                     .fill(true);
@@ -1403,6 +1559,9 @@ impl AlacrittyTerminalEngine {
                 && out_slice.last().is_some_and(|last| {
                     last.end_gl == content_end && (last.start_gl..=last.end_gl).contains(&cursor_gl)
                 });
+            let sole_cover_end = (cmd_block_count == 1
+                && logical_lines[prompt_idx].start_gl == scan_start_gl)
+                .then_some((scan_end_gl, start, end, conpty_white));
             self.highlight_single_output_block(
                 logical_lines[prompt_idx].start_gl,
                 prompt_cmd,
@@ -1410,6 +1569,7 @@ impl AlacrittyTerminalEngine {
                 out_slice,
                 last_is_incomplete,
                 out_end + 1 >= logical_lines.len(),
+                sole_cover_end,
                 view_top,
                 view_bottom,
                 row_maps,
@@ -1464,6 +1624,7 @@ impl AlacrittyTerminalEngine {
         out_lines: &[StitchedLogicalLine],
         last_is_incomplete: bool,
         keep_checkpoint: bool,
+        sole_cover: Option<(i32, i32, i32, bool)>,
         view_top: i32,
         view_bottom: i32,
         row_maps: &[RowTextMap],
@@ -1494,10 +1655,13 @@ impl AlacrittyTerminalEngine {
                 && c.cols == self.cols
                 && c.prompt_cmd == prompt_cmd
                 && c.syntax_name == syntax.name
-                && (same_grid || (c.completed_spans.len() <= completed_count
-                    && c.completed_spans.iter().zip(out_lines).enumerate().all(|(i, ((hash, _), line))| {
-                        *hash == hash_line_sample(i, &line.text)
-                    })))
+                && (same_grid
+                    || (c.completed_spans.len() <= completed_count
+                        && c.completed_spans
+                            .iter()
+                            .zip(out_lines)
+                            .enumerate()
+                            .all(|(i, (entry, line))| entry.hash == hash_line_sample(i, &line.text))))
         });
 
         if !can_reuse {
@@ -1512,33 +1676,43 @@ impl AlacrittyTerminalEngine {
             syntax_name: syntax.name.clone(),
             completed_spans: Vec::with_capacity(completed_count.min(256)),
             checkpoint: (ParseState::new(syntax), ScopeStack::new()),
+            cover: None,
         });
         cache.dirty_generation = self.dirty_generation;
         cache.prompt_gl = prompt_gl;
+        cache.cover = None;
 
         let mut scope_cache = HashMap::new();
 
         let mut line_buf = String::new();
         for line_idx in cache.completed_spans.len()..completed_count {
-            let line_text = &out_lines[line_idx].text;
-            if line_text.len() > MAX_SYNTAX_LINE_BYTES {
+            let line = &out_lines[line_idx];
+            if line.text.len() > MAX_SYNTAX_LINE_BYTES {
                 break;
             }
             line_buf.clear();
-            line_buf.push_str(line_text);
+            line_buf.push_str(&line.text);
             line_buf.push('\n');
             let (parser, scopes) = &mut cache.checkpoint;
             let spans = pack.parse_line_spans(parser, scopes, &mut scope_cache, &line_buf);
-            cache.completed_spans.push((hash_line_sample(line_idx, line_text), spans));
+            cache.completed_spans.push(CachedLogicalLineSpans {
+                hash: hash_line_sample(line_idx, &line.text),
+                end_gl: line.end_gl,
+                segments: line.segments.clone(),
+                spans,
+            });
+        }
+        for (entry, line) in cache.completed_spans.iter_mut().zip(out_lines) {
+            entry.end_gl = line.end_gl;
+            entry.segments.clone_from(&line.segments);
         }
 
         // Speculatively parse the in-progress streaming tail line without mutating checkpoint
+        let mut cached_tail = None;
         if last_is_incomplete
             && cache.completed_spans.len() == completed_count
             && completed_count < MAX_SYNTAX_BLOCK_LINES
             && let Some(tail_line) = out_lines.get(completed_count)
-            && tail_line.end_gl >= view_top
-            && tail_line.start_gl <= view_bottom
             && tail_line.text.len() <= MAX_SYNTAX_LINE_BYTES
         {
             let (mut tmp_parser, mut tmp_scopes) = cache.checkpoint.clone();
@@ -1551,15 +1725,41 @@ impl AlacrittyTerminalEngine {
             project_stitched_spans_to_viewport(
                 tail_line, &spans, view_top, view_bottom, self.cols, row_maps, palette, overrides,
             );
+            cached_tail = Some((
+                tail_line.start_gl,
+                tail_line.end_gl,
+                tail_line.segments.clone(),
+                spans,
+            ));
+        }
+
+        if let Some((covered_scan_end_gl, out_start_gl, out_end_gl, conpty_white)) = sole_cover {
+            cache.cover = Some(CachedBlockCover {
+                covered_scan_end_gl,
+                out_start_gl,
+                out_end_gl,
+                conpty_white,
+                tail_spans: cached_tail,
+            });
         }
 
         // Project visible logical lines' byte spans back onto viewport physical columns
-        for (stitched, (_, spans)) in out_lines.iter().take(completed_count).zip(&cache.completed_spans) {
+        for (stitched, entry) in out_lines
+            .iter()
+            .take(completed_count)
+            .zip(&cache.completed_spans)
+        {
             project_stitched_spans_to_viewport(
-                stitched, spans, view_top, view_bottom, self.cols, row_maps, palette, overrides,
+                stitched,
+                &entry.spans,
+                view_top,
+                view_bottom,
+                self.cols,
+                row_maps,
+                palette,
+                overrides,
             );
         }
-
     }
 
     fn row_text_cells(&self, grid_line: Line) -> impl Iterator<Item = (usize, usize, char)> + '_ {
@@ -1718,8 +1918,34 @@ fn project_stitched_spans_to_viewport(
     if spans.is_empty() || stitched.end_gl < view_top || stitched.start_gl > view_bottom {
         return;
     }
+    project_segments_spans_to_viewport(
+        &stitched.segments,
+        spans,
+        view_top,
+        view_bottom,
+        cols,
+        row_maps,
+        palette,
+        overrides,
+    );
+}
 
-    for &(seg_gl, seg_b_start, seg_b_end) in &stitched.segments {
+#[allow(clippy::too_many_arguments)]
+fn project_segments_spans_to_viewport(
+    segments: &[(i32, usize, usize)],
+    spans: &[(Range<usize>, CodeTokenRole)],
+    view_top: i32,
+    view_bottom: i32,
+    cols: usize,
+    row_maps: &[RowTextMap],
+    palette: &TerminalPalette,
+    overrides: &mut [Vec<Option<(Hsla, bool, bool)>>],
+) {
+    if spans.is_empty() {
+        return;
+    }
+
+    for &(seg_gl, seg_b_start, seg_b_end) in segments {
         if seg_gl < view_top || seg_gl > view_bottom || seg_b_start >= seg_b_end {
             continue;
         }
@@ -2272,5 +2498,137 @@ mod tests {
         assert!(all_runs.iter().any(|r| r.text == "行" && r.fg == comment_fg));
         assert!(all_runs.iter().any(|r| r.text.contains("return") && r.fg == keyword_fg));
         assert!(all_runs.iter().any(|r| r.text.contains("\"ok\"") && r.fg == string_fg));
+    }
+
+    #[test]
+    fn long_shell_script_with_regex_brackets_keeps_highlighting_to_the_end() {
+        let mut engine = AlacrittyTerminalEngine::new(24, 100, 5_000);
+        let palette = TerminalPalette::dark();
+        let opts = SemanticOptions::default();
+
+        engine.feed_bytes(b"root@debian:~# cat tcpx.sh\r\n");
+        engine.feed_bytes(b"#!/usr/bin/env bash\r\n");
+        for i in 0..600 {
+            engine.feed_bytes(format!("echo \"header {i}\"\r\n").as_bytes());
+        }
+        let installcloud = concat!(
+            "# 安装官方 Cloud 内核\r\n",
+            "installcloud() {\r\n",
+            "        pre_install_check || return 1\r\n",
+            "        if [[ \"${OS_ID}\" == \"ubuntu\" ]]; then\r\n",
+            "                read -e -p \"是否同时安装配套 Headers? [y/N]: \" u_ans\r\n",
+            "                [[ \"$u_ans\" =~ ^[yY]$ ]] && u_hdr=\"linux-headers-virtual\"\r\n",
+            "                apt-get update >/dev/null 2>&1\r\n",
+            "                if apt-get install -y linux-image-virtual $u_hdr; then\r\n",
+            "                        return 0\r\n",
+            "                fi\r\n",
+            "        fi\r\n",
+            "}\r\n",
+        );
+        engine.feed_bytes(installcloud.as_bytes());
+        for i in 0..600 {
+            engine.feed_bytes(
+                format!("if [[ \"$OS_ARCH\" == \"x86_64\" ]]; then local v_{i}=\"ok\"; fi\r\n")
+                    .as_bytes(),
+            );
+        }
+        engine.feed_bytes(b"root@debian:~# ");
+
+        let snap = engine.snapshot(&palette, true, opts);
+        let keyword_fg = palette.code_token_style(CodeTokenRole::Keyword).0;
+        let string_fg = palette.code_token_style(CodeTokenRole::String).0;
+
+        // Bottom half of the long `.sh` file must still have keyword & string highlighting,
+        // and no false command-block divider inside the script output.
+        let tail_runs: Vec<&TerminalStyledRun> = snap.lines[..23]
+            .iter()
+            .flat_map(|l| &l.text_runs)
+            .collect();
+        assert!(tail_runs.iter().any(|r| r.text.contains("if") && r.fg == keyword_fg));
+        assert!(tail_runs.iter().any(|r| r.text.contains("then") && r.fg == keyword_fg));
+        assert!(tail_runs.iter().any(|r| r.text.contains("\"x86_64\"") && r.fg == string_fg));
+        assert!(snap.command_blocks.is_empty());
+
+        // Scroll directly onto `installcloud()` (~600 lines up) and confirm there is no fake
+        // command-block divider on `[[ "$u_ans" =~ ^[yY]$ ]]`, while lines below it stay colored.
+        engine.scroll(Scroll::Delta(605));
+        let mid_snap = engine.snapshot(&palette, true, opts);
+        assert!(mid_snap.command_blocks.is_empty());
+        let mid_runs: Vec<&TerminalStyledRun> = mid_snap
+            .lines
+            .iter()
+            .flat_map(|l| &l.text_runs)
+            .collect();
+        assert!(mid_runs.iter().any(|r| r.text.contains("installcloud")));
+        assert!(
+            mid_runs
+                .iter()
+                .any(|r| r.text.contains("\"linux-headers-virtual\"") && r.fg == string_fg)
+        );
+        assert!(mid_runs.iter().any(|r| r.text.contains("return") && r.fg == keyword_fg));
+    }
+
+    #[test]
+    fn over_8000_lines_soft_wrap_continuations_and_osc133_echoed_prompts_stay_intact() {
+        let palette = TerminalPalette::dark();
+        let opts = SemanticOptions::default();
+        let keyword_fg = palette.code_token_style(CodeTokenRole::Keyword).0;
+
+        // 1. > 8,000 lines (`MAX_SYNTAX_BLOCK_LINES = 32_000`) with 10,000 scrollback
+        let mut huge = AlacrittyTerminalEngine::new(10, 80, 10_000);
+        huge.feed_bytes(b"root@debian:~# cat huge.sh\r\n");
+        huge.feed_bytes("if true; then return 0; fi\r\n".repeat(8_200).as_bytes());
+        let snap = huge.snapshot(&palette, true, opts);
+        assert!(
+            snap.lines[0]
+                .text_runs
+                .iter()
+                .any(|r| r.text.contains("if") && r.fg == keyword_fg)
+        );
+        // Scroll up via cached cover fast-path and verify colors remain intact
+        huge.scroll(Scroll::Delta(4_000));
+        let scrolled = huge.snapshot(&palette, true, opts);
+        assert!(
+            scrolled.lines[0]
+                .text_runs
+                .iter()
+                .any(|r| r.text.contains("if") && r.fg == keyword_fg)
+        );
+
+        // 2. Narrow 16-col soft-wrap continuation starting with `$ ls"` must not create fake dividers
+        let mut narrow = AlacrittyTerminalEngine::new(6, 16, 100);
+        narrow.feed_bytes(b"$ cat a.sh\r\necho \"1234567890$ ls\"\r\nif true; then\r\nfi\r\n");
+        let n_snap = narrow.snapshot(&palette, true, opts);
+        assert_eq!(n_snap.command_blocks.len(), 1);
+        assert_eq!(n_snap.command_blocks[0].start_row, 0);
+
+        // 3. OSC 133 confirmed output containing `$ make` keeps `cat` highlighting & full-history SGR resets
+        let mut osc = AlacrittyTerminalEngine::new(8, 60, 100);
+        for i in 0..110 {
+            osc.feed_bytes(format!("pad {i}\r\n").as_bytes());
+        }
+        osc.feed_bytes(
+            b"\x1b]133;A\x07$ cat build.sh\r\n\x1b]133;C\x07#!/bin/sh\r\n$ make\r\nif true; then exit 1; fi\r\n\x1b]133;D;7\x07\x1b]133;A\x07$ ",
+        );
+        osc.feed_bytes("\x1b[0m".repeat(60).as_bytes());
+        let o_snap = osc.snapshot(&palette, true, opts);
+        assert_eq!(o_snap.command_blocks.len(), 1);
+        assert_eq!(
+            o_snap.command_blocks[0].status,
+            CommandBlockStatus::Failure(7)
+        );
+        let input_cmd_fg = palette.semantic_style(SemanticRole::InputCommand).0;
+        assert!(
+            o_snap.lines[5]
+                .text_runs
+                .iter()
+                .all(|r| r.fg != input_cmd_fg)
+        );
+        assert!(
+            o_snap.lines[6]
+                .text_runs
+                .iter()
+                .any(|r| r.text.contains("if") && r.fg == keyword_fg)
+        );
     }
 }

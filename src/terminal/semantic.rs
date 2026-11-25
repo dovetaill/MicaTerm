@@ -144,19 +144,27 @@ const COMPOUND_COMMANDS: &[&str] = &[
 /// Returns the byte index in `row.text` right after a recognized shell prompt marker (if any),
 /// along with whether a non-empty command follows on the same line.
 pub fn detect_prompt_command_byte_offset(line: &str) -> Option<(usize, bool)> {
+    if line.starts_with(char::is_whitespace) {
+        return None;
+    }
     let trimmed_end = line.trim_end();
-    if trimmed_end.is_empty() {
+    if trimmed_end.is_empty() || trimmed_end.starts_with(['#', '>']) {
         return None;
     }
 
-    if trimmed_end.starts_with("# ") || trimmed_end.starts_with("> ") {
-        return None;
-    }
     let mut p = trimmed_end;
-    while p.starts_with('(') {
-        let Some((_, rest)) = p.split_once(") ") else {
+    while let Some(after_open) = p.strip_prefix('(') {
+        let Some((env_name, rest)) = after_open.split_once(") ") else {
             break;
         };
+        if env_name.is_empty()
+            || env_name.len() > 64
+            || !env_name
+                .chars()
+                .all(|c| c.is_alphanumeric() || "._-:+/".contains(c))
+        {
+            break;
+        }
         p = rest.trim_start();
     }
     let command = |rest: &str| {
@@ -177,12 +185,14 @@ pub fn detect_prompt_command_byte_offset(line: &str) -> Option<(usize, bool)> {
         }
         return command(tail);
     }
+    let is_ps_drive = p.starts_with("PS ");
     let path = p.strip_prefix("PS ").unwrap_or(p);
     if path.as_bytes().first().is_some_and(u8::is_ascii_alphabetic) && path.get(1..3) == Some(":\\")
     {
         let (dir, rest) = path.split_once('>')?;
         if dir.contains(['<', '|', '"'])
             || dir.ends_with(['-', '='])
+            || (!is_ps_drive && dir.ends_with(char::is_whitespace))
             || rest.starts_with(['=', '>'])
         {
             return None;
@@ -203,43 +213,133 @@ pub fn detect_prompt_command_byte_offset(line: &str) -> Option<(usize, bool)> {
         if !rest.is_empty() && !rest.starts_with(' ') {
             continue;
         }
-        let prefix = p[..pos].trim();
+        let raw_prefix = &p[..pos];
+        let prefix = raw_prefix.trim();
         if ch == '>' && prefix.ends_with(['-', '=', '>']) {
             continue;
         }
-        if (framed && prefix.is_empty()) || looks_like_shell_prompt_prefix(prefix, marker) {
+        if (framed && prefix.is_empty()) || looks_like_shell_prompt_prefix(raw_prefix, marker) {
             return command(rest);
         }
     }
     None
 }
 
-fn looks_like_shell_prompt_prefix(p: &str, marker: &str) -> bool {
+fn is_prompt_ident(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 32
+        && !s.starts_with('-')
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+}
+
+fn looks_like_user_at_host_prompt(s: &str) -> bool {
+    let Some((user, rest)) = s.split_once('@') else {
+        return false;
+    };
+    if !is_prompt_ident(user) || rest.is_empty() {
+        return false;
+    }
+    let host_end = rest
+        .find(|c: char| c == ':' || c.is_whitespace())
+        .unwrap_or(rest.len());
+    let host = &rest[..host_end];
+    if !is_prompt_ident(host) {
+        return false;
+    }
+    let tail = &rest[host_end..];
+    if tail.is_empty() {
+        return true;
+    }
+    if let Some(after_colon) = tail.strip_prefix(':') {
+        let path = after_colon.trim_start();
+        return path == "~"
+            || path.starts_with("~/")
+            || (path.starts_with('/') && !path.starts_with("//"));
+    }
+    let cwd = tail.trim_start();
+    !cwd.is_empty() && !cwd.starts_with('-') && !cwd.contains('@')
+}
+
+fn looks_like_bracketed_host_or_path(inner: &str) -> bool {
+    (inner == "~"
+        || inner.starts_with("~/")
+        || (inner.starts_with('/') && !inner.starts_with("//")))
+        && !inner.contains(char::is_whitespace)
+}
+
+fn looks_like_shell_prompt_prefix(raw_prefix: &str, marker: &str) -> bool {
+    let p = raw_prefix.trim();
     if p.is_empty() {
         return matches!(marker, "$ " | "% " | "❯ ");
     }
-    if p.len() > 96 {
+    if p.len() > 96
+        || p.contains(['"', '\'', '`', '$', ';', '|', '&', '<', '>'])
+        || p.contains("://")
+    {
         return false;
     }
-    let identifier = p.len() <= 32
-        && p.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b));
-    (p.contains('@') && (p.contains(':') || p.contains(' ') || p.ends_with(']')))
-        || (p.starts_with('[') && p.ends_with(']'))
-        || p.starts_with("~/")
-        || p == "~"
-        || p.starts_with("PS ")
-        || matches!(marker, "❯ " | "➜ ")
-        || (!p.contains(char::is_whitespace)
-            && (p.starts_with('/')
-                || p.split_once(':')
-                    .is_some_and(|(_, path)| path.starts_with(['/', '~']))))
-        || (identifier
-            && (matches!(marker, "$ " | "% ")
-                || (marker == "# "
-                    && ["bash", "sh", "zsh"].iter().any(|sh| {
-                        p == *sh || p.strip_prefix(sh).is_some_and(|s| s.starts_with('-'))
-                    }))))
+    if marker == "> " {
+        return p == "PS" || p.starts_with("PS ");
+    }
+    if matches!(marker, "❯ " | "➜ ") {
+        return !p.contains('=');
+    }
+
+    let attached = !raw_prefix.ends_with(char::is_whitespace);
+
+    if let Some(inner) = p.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+        return !inner.is_empty()
+            && !inner.starts_with(char::is_whitespace)
+            && !inner.ends_with(char::is_whitespace)
+            && !inner.contains(['[', ']'])
+            && (looks_like_user_at_host_prompt(inner)
+                || (attached && looks_like_bracketed_host_or_path(inner)));
+    }
+
+    if looks_like_user_at_host_prompt(p) {
+        let has_cwd = p.contains(':') || p.contains(char::is_whitespace);
+        return marker != "# " || attached || has_cwd;
+    }
+
+    if !p.contains(['=', ' ', '\t']) {
+        if (p == "~" || p.starts_with("~/")) && (attached || matches!(marker, "$ " | "% ")) {
+            return true;
+        }
+        if attached && p.starts_with('/') && !p.starts_with("//") {
+            return true;
+        }
+        if attached
+            && let Some((lhs, path)) = p.split_once(':')
+            && is_prompt_ident(lhs)
+            && (path == "~"
+                || path.starts_with("~/")
+                || (path.starts_with('/') && !path.starts_with("//")))
+        {
+            return true;
+        }
+    }
+
+    if attached {
+        let sh_name = p.strip_prefix('-').unwrap_or(p);
+        let is_shell_name = ["bash", "sh", "zsh"].iter().any(|sh| {
+            sh_name == *sh
+                || sh_name
+                    .strip_prefix(sh)
+                    .is_some_and(|rest| rest.starts_with('-') && is_prompt_ident(&rest[1..]))
+        });
+        if is_shell_name {
+            return true;
+        }
+        if is_prompt_ident(p)
+            && p.bytes().any(|b| b.is_ascii_alphabetic())
+            && matches!(marker, "$ " | "% ")
+        {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Checks whether an output line strongly indicates a command failure when OSC 133 exit codes
@@ -1075,6 +1175,12 @@ mod tests {
             "root:/srv# ",
             "bash-5.2$ ",
             "host% ",
+            "~/dir $ ",
+            "root@host repo # ",
+            "user@MacBook My Project % ",
+            "user@host:~/release=v2$ ",
+            "mica-term-gpui ❯ ",
+            r"(数据分析) PS C:\src> ",
             r"C:\Program Files>",
             r"PS C:\src> ",
         ] {
@@ -1101,6 +1207,26 @@ mod tests {
             r"C:\a-> b",
             r"C:\a=> b",
             r"C:\<tag>text",
+            r#"                [[ "$u_ans" =~ ^[yY]$ ]] && u_hdr="linux-headers-virtual""#,
+            r#"[[ "$u_ans" =~ ^[yY]$ ]] && u_hdr="linux-headers-virtual""#,
+            "[ -f /etc/debian_version ] # 检查系统",
+            "[Unit] # systemd section",
+            "/sbin/ldconfig > /dev/null 2>&1",
+            "/sbin/ldconfig # 刷新动态库",
+            "~/install.sh > install.log",
+            "~/install.sh # 执行安装",
+            "PATH=/usr/local/bin:/usr/bin # 设置环境变量",
+            "https://deb.debian.org/debian # 软件源",
+            "ssh root@1.2.3.4 # 远程登录",
+            "git clone git@github.com:org/repo # 克隆仓库",
+            r#"EMAIL="admin@example.com" # 管理员邮箱"#,
+            "admin@example.com # 联系邮箱",
+            "count % 2",
+            "100% done",
+            r"C:\Tools\tool.exe > result.txt",
+            "(cd /tmp && ls) $ foo",
+            "@@ -42,6 +42,8 @@ if count > 0 {",
+            "### 章节标题 # 说明",
         ] {
             assert_eq!(detect_prompt_command_byte_offset(line), None, "{line}");
         }
