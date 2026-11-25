@@ -425,6 +425,9 @@ impl WindowsWindowInner {
                     )
                 }
                 .log_err();
+                if !this.state.is_fullscreen() && this.hide_title_bar {
+                    suppress_dwm_window_border(this.hwnd);
+                }
             })
             .detach();
     }
@@ -637,6 +640,9 @@ impl WindowsWindow {
         register_drag_drop(&this)?;
         set_non_rude_hwnd(hwnd, true);
         configure_dwm_dark_mode(hwnd, appearance);
+        if hide_title_bar {
+            suppress_dwm_window_border(hwnd);
+        }
         this.state
             .refresh_icons_for_dpi(hwnd, unsafe { GetDpiForWindow(hwnd) });
         this.state.border_offset.update(hwnd)?;
@@ -1691,34 +1697,21 @@ fn retrieve_window_placement(
 }
 
 fn dwm_set_window_composition_attribute(hwnd: HWND, backdrop_type: u32) {
-    let mut version = unsafe { std::mem::zeroed() };
-    let status = unsafe { windows::Wdk::System::SystemServices::RtlGetVersion(&mut version) };
-
-    // DWMWA_SYSTEMBACKDROP_TYPE is available only on version 22621 or later
-    // using SetWindowCompositionAttributeType as a fallback
-    if !status.is_ok() || version.dwBuildNumber < 22621 {
-        return;
-    }
-
-    unsafe {
-        let result = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_SYSTEMBACKDROP_TYPE,
-            &backdrop_type as *const _ as *const _,
-            std::mem::size_of_val(&backdrop_type) as u32,
-        );
-
-        if !result.is_ok() {
-            return;
+    if windows_build_number().is_some_and(|build| build >= 22621) {
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_SYSTEMBACKDROP_TYPE,
+                &backdrop_type as *const _ as *const _,
+                std::mem::size_of_val(&backdrop_type) as u32,
+            )
         }
+        .log_err();
     }
 }
 
 fn set_window_composition_attribute(hwnd: HWND, color: Option<Color>, state: u32) {
-    let mut version = unsafe { std::mem::zeroed() };
-    let status = unsafe { windows::Wdk::System::SystemServices::RtlGetVersion(&mut version) };
-
-    if !status.is_ok() || version.dwBuildNumber < 17763 {
+    if windows_build_number().is_none_or(|build| build < 17763) {
         return;
     }
 

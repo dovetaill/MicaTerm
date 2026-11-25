@@ -7,8 +7,11 @@ use windows::{
         Color,
         ViewManagement::{UIColorType, UISettings},
     },
+    Wdk::System::SystemServices::RtlGetVersion,
     Win32::{
-        Foundation::*, Graphics::Dwm::*, System::LibraryLoader::LoadLibraryA,
+        Foundation::*,
+        Graphics::Dwm::*,
+        System::{LibraryLoader::LoadLibraryA, SystemInformation::OSVERSIONINFOW},
         UI::WindowsAndMessaging::*,
     },
     core::{BOOL, PCSTR},
@@ -128,6 +131,29 @@ pub(crate) fn load_cursor(style: CursorStyle) -> Option<HCURSOR> {
             .into()
         })),
     )
+}
+
+pub(crate) fn windows_build_number() -> Option<u32> {
+    let mut version = OSVERSIONINFOW {
+        dwOSVersionInfoSize: size_of::<OSVERSIONINFOW>() as u32,
+        ..Default::default()
+    };
+    unsafe { RtlGetVersion(&mut version) }.ok().log_err()?;
+    Some(version.dwBuildNumber)
+}
+
+pub(crate) fn suppress_dwm_window_border(hwnd: HWND) {
+    if windows_build_number().is_some_and(|build| build >= 22000) {
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_BORDER_COLOR,
+                &DWMWA_COLOR_NONE as *const _ as _,
+                size_of::<u32>() as u32,
+            )
+        }
+        .log_err();
+    }
 }
 
 /// This function is used to configure the dark mode for the window built-in title bar.

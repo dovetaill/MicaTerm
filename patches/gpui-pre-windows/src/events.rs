@@ -785,13 +785,17 @@ impl WindowsWindowInner {
 
         unsafe {
             let params = lparam.0 as *mut NCCALCSIZE_PARAMS;
-            let saved_top = (*params).rgrc[0].top;
+            let window_rect = (*params).rgrc[0];
             let result = DefWindowProcW(handle, WM_NCCALCSIZE, wparam, lparam);
-            (*params).rgrc[0].top = saved_top;
-            if self.state.is_maximized() {
-                let dpi = GetDpiForWindow(handle);
-                (*params).rgrc[0].top += get_frame_thicknessx(dpi);
-            }
+            let dpi = GetDpiForWindow(handle);
+            (*params).rgrc[0] = adjust_custom_titlebar_client_rect(
+                (*params).rgrc[0],
+                window_rect,
+                self.state.is_maximized(),
+                get_frame_thicknessx(dpi),
+                GetSystemMetricsForDpi(SM_CXBORDER, dpi),
+                GetSystemMetricsForDpi(SM_CYBORDER, dpi),
+            );
             Some(result.0 as isize)
         }
     }
@@ -1002,7 +1006,6 @@ impl WindowsWindowInner {
         // We do not use the OS title bar, so the default `DefWindowProcW` will only register a 1px edge for resizes
         // We need to calculate the frame thickness ourselves and do the hit test manually.
         let frame_y = get_frame_thicknessx(dpi);
-        let frame_x = get_frame_thicknessy(dpi);
         let mut cursor_point = POINT {
             x: lparam.signed_loword().into(),
             y: lparam.signed_hiword().into(),
@@ -1014,16 +1017,13 @@ impl WindowsWindowInner {
             && 0 <= cursor_point.y
             && cursor_point.y <= frame_y
         {
-            // x-axis actually goes from -frame_x to 0
             return Some(if cursor_point.x <= 0 {
                 HTTOPLEFT
             } else {
-                let mut rect = Default::default();
-                unsafe { GetWindowRect(handle, &mut rect) }.log_err();
-                // right and bottom bounds of RECT are exclusive, thus `-1`
-                let right = rect.right - rect.left - 1;
-                // the bounds include the padding frames, so accommodate for both of them
-                if right - 2 * frame_x <= cursor_point.x {
+                let mut client_rect = RECT::default();
+                unsafe { GetClientRect(handle, &mut client_rect) }.log_err()?;
+                // The right edge of a client RECT is exclusive.
+                if client_rect.right - 1 <= cursor_point.x {
                     HTTOPRIGHT
                 } else {
                     HTTOP
@@ -1275,6 +1275,9 @@ impl WindowsWindowInner {
         {
             log::info!("System settings changed: {}", parameter_string);
             if parameter_string.as_str() == "ImmersiveColorSet" {
+                if self.hide_title_bar {
+                    suppress_dwm_window_border(handle);
+                }
                 let new_appearance = system_appearance()
                     .context("unable to get system appearance when handling ImmersiveColorSet")
                     .log_err()?;
@@ -1833,18 +1836,35 @@ pub(crate) fn current_capslock() -> Capslock {
     Capslock { on }
 }
 
+fn adjust_custom_titlebar_client_rect(
+    client_rect: RECT,
+    window_rect: RECT,
+    is_maximized: bool,
+    top_frame_thickness: i32,
+    border_x: i32,
+    border_y: i32,
+) -> RECT {
+    if is_maximized {
+        RECT {
+            top: window_rect.top + top_frame_thickness,
+            ..client_rect
+        }
+    } else {
+        RECT {
+            left: (client_rect.left - border_x).max(window_rect.left),
+            top: window_rect.top,
+            right: (client_rect.right + border_x).min(window_rect.right),
+            bottom: (client_rect.bottom + border_y).min(window_rect.bottom),
+        }
+    }
+}
+
 // there is some additional non-visible space when talking about window
 // borders on Windows:
 // - SM_CXSIZEFRAME: The resize handle.
 // - SM_CXPADDEDBORDER: Additional border space that isn't part of the resize handle.
 fn get_frame_thicknessx(dpi: u32) -> i32 {
     let resize_frame_thickness = unsafe { GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) };
-    let padding_thickness = unsafe { GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi) };
-    resize_frame_thickness + padding_thickness
-}
-
-fn get_frame_thicknessy(dpi: u32) -> i32 {
-    let resize_frame_thickness = unsafe { GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi) };
     let padding_thickness = unsafe { GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi) };
     resize_frame_thickness + padding_thickness
 }
@@ -1869,5 +1889,70 @@ fn notify_frame_changed(handle: HWND) {
                 | SWP_NOZORDER,
         )
         .log_err();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RECT, adjust_custom_titlebar_client_rect};
+
+    const WINDOW: RECT = RECT {
+        left: 100,
+        top: 50,
+        right: 900,
+        bottom: 650,
+    };
+
+    #[test]
+    fn resizable_window_keeps_transparent_resize_frame_at_96_and_192_dpi() {
+        for (frame, border, remaining_frame) in [(8, 1, 7), (16, 2, 14)] {
+            let client = RECT {
+                left: WINDOW.left + frame,
+                top: WINDOW.top + frame,
+                right: WINDOW.right - frame,
+                bottom: WINDOW.bottom - frame,
+            };
+            assert_eq!(
+                adjust_custom_titlebar_client_rect(client, WINDOW, false, frame, border, border),
+                RECT {
+                    left: WINDOW.left + remaining_frame,
+                    top: WINDOW.top,
+                    right: WINDOW.right - remaining_frame,
+                    bottom: WINDOW.bottom - remaining_frame,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn maximized_window_stays_within_monitor_work_area() {
+        let window = RECT {
+            left: -1928,
+            top: 32,
+            right: 8,
+            bottom: 1088,
+        };
+        let work_area = RECT {
+            left: -1920,
+            top: 40,
+            right: 0,
+            bottom: 1080,
+        };
+        let client = RECT {
+            top: 64,
+            ..work_area
+        };
+        assert_eq!(
+            adjust_custom_titlebar_client_rect(client, window, true, 8, 1, 1),
+            work_area
+        );
+    }
+
+    #[test]
+    fn non_resizable_client_stays_within_window() {
+        assert_eq!(
+            adjust_custom_titlebar_client_rect(WINDOW, WINDOW, false, 8, 1, 1),
+            WINDOW
+        );
     }
 }
