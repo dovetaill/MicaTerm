@@ -1,6 +1,6 @@
 //! macOS Finder / Termius style Source List Sidebar:
 //! Recessed `NSSegmentedControl` (`主机 / 片段 / 密钥`), Spotlight search input,
-//! dedicated collapse button, and squircle-badged asset rows.
+//! dedicated collapse button, and asset rows with line icons.
 
 use gpui_kit::assets::IconName as LucideIcon;
 use gpui_kit::component::{
@@ -255,8 +255,6 @@ impl RenderOnce for LeftSidebar {
         v_flex()
             .size_full()
             .bg(cx.theme().sidebar)
-            .border_r_1()
-            .border_color(cx.theme().sidebar_border)
             .child(header)
             .child(
                 div().px_2p5().pb_2().child(
@@ -337,7 +335,10 @@ fn render_host_row(
             )
             .into_any_element()
     } else {
-        macos_squircle_badge(LucideIcon::Server, cx.theme().primary, 26.0, 6.5).into_any_element()
+        Icon::new(LucideIcon::Server)
+            .size(px(16.0))
+            .text_color(cx.theme().sidebar_foreground)
+            .into_any_element()
     };
 
     let env_pill = (!row.env_badge.is_empty()).then(|| {
@@ -491,7 +492,7 @@ fn render_host_row(
                                 .child(
                                     div()
                                         .truncate()
-                                        .text_xs()
+                                        .text_sm()
                                         .font_weight(if is_folder {
                                             FontWeight::SEMIBOLD
                                         } else {
@@ -662,7 +663,11 @@ fn render_snippet_row(
                 .flex_1()
                 .gap_2()
                 .items_center()
-                .child(macos_squircle_badge(LucideIcon::Code, purple, 26.0, 6.5))
+                .child(
+                    Icon::new(LucideIcon::Code)
+                        .size(px(16.0))
+                        .text_color(purple),
+                )
                 .child(
                     v_flex()
                         .min_w_0()
@@ -670,7 +675,7 @@ fn render_snippet_row(
                         .child(
                             div()
                                 .truncate()
-                                .text_xs()
+                                .text_sm()
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(cx.theme().foreground)
                                 .child(snip.title),
@@ -802,7 +807,7 @@ fn render_key_row(
                 .flex_1()
                 .gap_2()
                 .items_center()
-                .child(macos_squircle_badge(icon, tint, 26.0, 6.5))
+                .child(Icon::new(icon).size(px(16.0)).text_color(tint))
                 .child(
                     v_flex()
                         .min_w_0()
@@ -810,7 +815,7 @@ fn render_key_row(
                         .child(
                             div()
                                 .truncate()
-                                .text_xs()
+                                .text_sm()
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(cx.theme().foreground)
                                 .child(entry.name),

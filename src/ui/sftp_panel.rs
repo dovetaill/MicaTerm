@@ -6,17 +6,18 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::assets::IconName as LucideIcon;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _,
+    ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
     menu::{ContextMenuExt as _, PopupMenuItem},
+    notification::Notification,
     scroll::ScrollableElement as _,
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext as _, ClipboardItem, Context, Entity, EventEmitter, Focusable as _,
-    FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
+    AnyElement, App, AppContext as _, ClipboardItem, Context, Entity, EventEmitter, FontWeight,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
     StatefulInteractiveElement as _, Styled as _, Window, div, px, relative,
 };
 use tokio::sync::mpsc;
@@ -28,18 +29,34 @@ use crate::sftp::{
 use crate::ui::modals::{open_confirm_dialog, open_remote_editor_dialog, open_simple_name_dialog};
 use crate::ui::theme::macos_squircle_badge;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SftpBindingKey {
+    pub session_id: String,
+    pub conn_epoch: u64,
+}
+
+#[derive(Clone)]
+pub struct SftpTarget {
+    pub binding: SftpBindingKey,
+    pub dir: String,
+    pub session_label: String,
+}
+
 pub enum SftpPanelEvent {
+    Navigated {
+        binding: SftpBindingKey,
+        path: String,
+    },
     FollowChanged(bool),
     CloseRequested,
 }
 
 pub struct SftpPanelView {
+    target: Option<SftpTarget>,
     service: Option<SftpService>,
-    bound_session_label: String,
-    pub current_path: String,
+    nav_seq: u64,
     pub follow_cwd: bool,
     pub panel_visible: bool,
-    needs_load_when_shown: bool,
     pub loading: bool,
     pub error_message: Option<String>,
     pub entries: Vec<RemoteEntry>,
@@ -64,12 +81,11 @@ impl SftpPanelView {
         tokio_handle: tokio::runtime::Handle,
     ) -> Self {
         Self {
+            target: None,
+            nav_seq: 0,
             service: None,
-            bound_session_label: String::new(),
-            current_path: "/".to_string(),
             follow_cwd,
             panel_visible,
-            needs_load_when_shown: false,
             loading: false,
             error_message: None,
             entries: Vec::new(),
@@ -88,23 +104,22 @@ impl SftpPanelView {
         self.editor_font_size = size;
     }
 
-    pub fn has_active_transfers(&self) -> bool {
+    pub fn active_transfer_count(&self) -> usize {
         self.transfers
             .iter()
-            .any(|t| matches!(t.status, TransferStatus::Running))
+            .filter(|t| matches!(t.status, TransferStatus::Running))
+            .count()
     }
 
     pub fn set_panel_visible(
         &mut self,
         visible: bool,
-        window: Option<&mut Window>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.panel_visible = visible;
-        if visible && self.needs_load_when_shown && self.service.is_some() {
-            self.needs_load_when_shown = false;
-            let p = self.current_path.clone();
-            self.navigate_to(p, window, cx);
+        if visible && self.service.is_some() {
+            self.load_directory(Some(window), cx);
         } else {
             cx.notify();
         }
@@ -112,52 +127,43 @@ impl SftpPanelView {
 
     pub fn bind_session(
         &mut self,
-        label: String,
-        service: Option<SftpService>,
-        initial_dir: Option<String>,
+        binding: Option<(SftpService, SftpTarget)>,
         window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
-        self.bound_session_label = label;
-        self.service = service;
-        self.error_message = None;
-        self.selected_path = None;
-        if self.service.is_none() {
-            self.entries.clear();
-            self.loading = false;
-            self.needs_load_when_shown = false;
-            cx.notify();
+        if let (Some(cur), Some((_, next))) = (&mut self.target, &binding)
+            && cur.binding == next.binding
+        {
+            if cur.session_label != next.session_label {
+                cur.session_label = next.session_label.clone();
+                cx.notify();
+            }
             return;
         }
-        let dir = initial_dir
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "/".to_string());
-        if self.panel_visible {
-            self.needs_load_when_shown = false;
-            self.navigate_to(dir, window, cx);
-        } else {
-            self.current_path = dir;
-            self.entries.clear();
-            self.needs_load_when_shown = true;
-            cx.notify();
-        }
+        (self.service, self.target) = binding.unzip();
+        self.load_directory(window, cx);
     }
 
-    pub fn on_terminal_cwd_changed(
-        &mut self,
-        new_cwd: String,
-        window: Option<&mut Window>,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.follow_cwd || self.service.is_none() || new_cwd == self.current_path {
-            return;
-        }
-        if self.panel_visible {
-            self.navigate_to(new_cwd, window, cx);
-        } else {
-            self.current_path = new_cwd;
-            self.needs_load_when_shown = true;
-        }
+    pub fn current_path(&self) -> &str {
+        self.target.as_ref().map_or("", |t| &t.dir)
+    }
+
+    fn operation_target(&self) -> Option<(SftpService, SftpTarget)> {
+        self.service.clone().zip(self.target.clone())
+    }
+
+    fn shows_target(&self, target: &SftpTarget) -> bool {
+        self.target
+            .as_ref()
+            .is_some_and(|t| t.binding == target.binding && t.dir == target.dir)
+    }
+
+    fn begin_listing(&mut self) {
+        self.nav_seq += 1;
+        self.entries.clear();
+        self.selected_path = None;
+        self.error_message = None;
+        self.loading = self.panel_visible && self.target.is_some();
     }
 
     pub fn navigate_to(
@@ -166,56 +172,77 @@ impl SftpPanelView {
         window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
-        let Some(service) = self.service.clone() else {
-            return;
-        };
-        let normalized = if path.trim().is_empty() {
-            "/".to_string()
-        } else {
-            path.trim().to_string()
-        };
-        self.current_path = normalized.clone();
-        self.loading = true;
-        self.error_message = None;
-
-        if let (Some(win), Some(input)) = (window, self.path_input.clone()) {
-            let p = normalized.clone();
-            input.update(cx, |st, cx| st.set_value(p, win, cx));
+        if let Some(target) = &mut self.target {
+            target.dir = path.clone();
+            let binding = target.binding.clone();
+            cx.emit(SftpPanelEvent::Navigated { binding, path });
+            self.load_directory(window, cx);
         }
+    }
 
-        let rt = self.tokio_handle.clone();
-        cx.spawn(async move |weak, cx| {
-            let res = rt
-                .spawn(async move { service.list_dir(&normalized).await })
-                .await;
-            let _ = weak.update(cx, |this, cx| {
-                this.loading = false;
-                match res {
-                    Ok(Ok(items)) => {
-                        this.entries = items;
-                        this.error_message = None;
+    fn load_directory(&mut self, window: Option<&mut Window>, cx: &mut Context<Self>) {
+        self.begin_listing();
+        if let Some(window) = window {
+            if let Some(input) = &self.path_input {
+                input.update(cx, |input, cx| {
+                    input.set_value(self.current_path().to_owned(), window, cx)
+                });
+            }
+        } else {
+            self.path_input = None;
+        }
+        if self.panel_visible
+            && let Some((service, target)) = self.operation_target()
+        {
+            let seq = self.nav_seq;
+            let listing = self
+                .tokio_handle
+                .spawn(async move { service.list_dir(&target.dir).await });
+            cx.spawn(async move |weak, cx| {
+                let result = listing.await.map_err(anyhow::Error::from).and_then(|r| r);
+                let _ = weak.update(cx, |this, cx| {
+                    if let Some(event) = this.finish_listing(target.binding, seq, result) {
+                        cx.emit(event);
                     }
-                    Ok(Err(err)) => {
-                        this.error_message = Some(format!("{err:#}"));
-                    }
-                    Err(join_err) => {
-                        this.error_message = Some(join_err.to_string());
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
         cx.notify();
     }
 
-    pub fn refresh(&mut self, cx: &mut Context<Self>) {
-        let path = self.current_path.clone();
-        self.navigate_to(path, None, cx);
+    fn finish_listing(
+        &mut self,
+        binding: SftpBindingKey,
+        seq: u64,
+        result: anyhow::Result<Vec<RemoteEntry>>,
+    ) -> Option<SftpPanelEvent> {
+        if self.target.as_ref().map(|t| &t.binding) != Some(&binding) || self.nav_seq != seq {
+            return None;
+        }
+        self.loading = false;
+        match result {
+            Ok(entries) => {
+                self.entries = entries;
+                Some(SftpPanelEvent::Navigated {
+                    binding,
+                    path: self.current_path().to_owned(),
+                })
+            }
+            Err(err) => {
+                self.error_message = Some(format!("{err:#}"));
+                None
+            }
+        }
+    }
+
+    fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.load_directory(None, cx);
     }
 
     pub fn go_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(parent) = parent_remote_path(&self.current_path) {
+        if let Some(parent) = parent_remote_path(self.current_path()) {
             self.navigate_to(parent, Some(window), cx);
         }
     }
@@ -226,15 +253,9 @@ impl SftpPanelView {
         cx: &mut Context<Self>,
     ) -> Entity<InputState> {
         if let Some(existing) = &self.path_input {
-            if existing.read(cx).value().as_ref() != self.current_path
-                && !existing.read(cx).focus_handle(cx).is_focused(window)
-            {
-                let cur = self.current_path.clone();
-                existing.update(cx, |st, cx| st.set_value(cur, window, cx));
-            }
             return existing.clone();
         }
-        let initial = self.current_path.clone();
+        let initial = self.current_path().to_owned();
         let input = cx.new(|cx| {
             let mut st = InputState::new(window, cx).placeholder("/远程路径");
             st.set_value(initial, window, cx);
@@ -242,8 +263,17 @@ impl SftpPanelView {
         });
         cx.subscribe_in(&input, window, |this, state, ev, window, cx| {
             if matches!(ev, InputEvent::PressEnter { .. }) {
-                let target = state.read(cx).value().to_string();
-                this.navigate_to(target, Some(window), cx);
+                let value = state.read(cx).value();
+                let target = value.trim();
+                this.navigate_to(
+                    if target.is_empty() {
+                        "/".into()
+                    } else {
+                        target.into()
+                    },
+                    Some(window),
+                    cx,
+                );
             }
         })
         .detach();
@@ -252,10 +282,9 @@ impl SftpPanelView {
     }
 
     fn trigger_upload(&mut self, cx: &mut Context<Self>) {
-        let Some(service) = self.service.clone() else {
+        let Some((service, target)) = self.operation_target() else {
             return;
         };
-        let target_dir = self.current_path.clone();
         let rt = self.tokio_handle.clone();
 
         cx.spawn(async move |weak, cx| {
@@ -270,7 +299,7 @@ impl SftpPanelView {
             for handle in files {
                 let local_path = handle.path().to_path_buf();
                 let file_name = handle.file_name();
-                let remote_path = join_remote_path(&target_dir, &file_name);
+                let remote_path = join_remote_path(&target.dir, &file_name);
                 let tid = uuid::Uuid::new_v4().to_string();
 
                 let _ = weak.update(cx, |this, cx| {
@@ -278,6 +307,7 @@ impl SftpPanelView {
                         0,
                         TransferRecord {
                             id: tid.clone(),
+                            session_label: target.session_label.clone(),
                             direction: TransferDirection::Upload,
                             file_name: file_name.clone(),
                             bytes_done: 0,
@@ -331,6 +361,7 @@ impl SftpPanelView {
                 let _ = prog_task.await;
 
                 let _ = weak.update(cx, |this, cx| {
+                    let succeeded = matches!(res, Ok(Ok(_)));
                     if let Some(rec) = this.transfers.iter_mut().find(|r| r.id == tid) {
                         match res {
                             Ok(Ok(bytes)) => {
@@ -339,14 +370,16 @@ impl SftpPanelView {
                                 rec.status = TransferStatus::Completed;
                             }
                             Ok(Err(err)) => {
-                                rec.status = TransferStatus::Failed(err.to_string());
+                                rec.status = TransferStatus::Failed(format!("{err:#}"));
                             }
                             Err(err) => {
-                                rec.status = TransferStatus::Failed(err.to_string());
+                                rec.status = TransferStatus::Failed(format!("{err:#}"));
                             }
                         }
                     }
-                    this.refresh(cx);
+                    if succeeded && this.shows_target(&target) {
+                        this.refresh(cx);
+                    }
                     cx.notify();
                 });
             }
@@ -355,7 +388,7 @@ impl SftpPanelView {
     }
 
     fn trigger_download(&mut self, entry: RemoteEntry, cx: &mut Context<Self>) {
-        let Some(service) = self.service.clone() else {
+        let Some((service, target)) = self.operation_target() else {
             return;
         };
         let default_dir = self.downloads_dir.clone();
@@ -381,6 +414,7 @@ impl SftpPanelView {
                     0,
                     TransferRecord {
                         id: tid.clone(),
+                        session_label: target.session_label.clone(),
                         direction: TransferDirection::Download,
                         file_name: fname,
                         bytes_done: 0,
@@ -441,10 +475,10 @@ impl SftpPanelView {
                             rec.status = TransferStatus::Completed;
                         }
                         Ok(Err(err)) => {
-                            rec.status = TransferStatus::Failed(err.to_string());
+                            rec.status = TransferStatus::Failed(format!("{err:#}"));
                         }
                         Err(err) => {
-                            rec.status = TransferStatus::Failed(err.to_string());
+                            rec.status = TransferStatus::Failed(format!("{err:#}"));
                         }
                     }
                 }
@@ -454,75 +488,95 @@ impl SftpPanelView {
         .detach();
     }
 
+    fn run_file_operation(
+        &mut self,
+        target: SftpTarget,
+        op: impl Future<Output = anyhow::Result<()>> + Send + 'static,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let task = self.tokio_handle.spawn(op);
+        cx.spawn_in(window, async move |weak, cx| {
+            let result = task.await.map_err(anyhow::Error::from).and_then(|r| r);
+            let _ = weak.update_in(cx, |this, window, cx| {
+                this.finish_file_operation(&target, result, window, cx);
+            });
+        })
+        .detach();
+    }
+
+    fn finish_file_operation(
+        &mut self,
+        target: &SftpTarget,
+        result: anyhow::Result<()>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match result {
+            Ok(()) if self.shows_target(target) => self.load_directory(Some(window), cx),
+            Ok(()) => {}
+            Err(err) if self.panel_visible && self.shows_target(target) => {
+                self.error_message = Some(format!("{err:#}"));
+                cx.notify();
+            }
+            Err(err) => window.push_notification(
+                Notification::error(format!(
+                    "{} · {}：{err:#}",
+                    target.session_label, target.dir
+                )),
+                cx,
+            ),
+        }
+    }
+
     fn prompt_mkdir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(service) = self.service.clone() else {
+        let Some((service, target)) = self.operation_target() else {
             return;
         };
-        let base_dir = self.current_path.clone();
-        let rt = self.tokio_handle.clone();
-        let panel = cx.entity().clone();
-
+        let panel = cx.entity();
         open_simple_name_dialog(
             "新建远程文件夹",
             "文件夹名称",
             "",
             window,
             cx,
-            move |folder_name, _, cx| {
-                let full_path = join_remote_path(&base_dir, &folder_name);
-                let svc = service.clone();
-                let rt_inner = rt.clone();
-                panel.update(cx, |_, cx| {
-                    cx.spawn(async move |weak, cx| {
-                        let res = rt_inner.spawn(async move { svc.mkdir(&full_path).await }).await;
-                        let _ = weak.update(cx, |this, cx| {
-                            if let Ok(Err(err)) = res {
-                                this.error_message = Some(format!("{err:#}"));
-                            }
-                            this.refresh(cx);
-                            cx.notify();
-                        });
-                    })
-                    .detach();
+            move |name, window, cx| {
+                let path = join_remote_path(&target.dir, &name);
+                let service = service.clone();
+                panel.update(cx, |this, cx| {
+                    this.run_file_operation(
+                        target.clone(),
+                        async move { service.mkdir(&path).await },
+                        window,
+                        cx,
+                    )
                 });
             },
         );
     }
 
     fn prompt_rename(&mut self, entry: RemoteEntry, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(service) = self.service.clone() else {
+        let Some((service, target)) = self.operation_target() else {
             return;
         };
-        let parent_dir = parent_remote_path(&entry.path).unwrap_or_else(|| "/".to_string());
-        let old_path = entry.path.clone();
-        let rt = self.tokio_handle.clone();
-        let panel = cx.entity().clone();
-
+        let panel = cx.entity();
         open_simple_name_dialog(
             "重命名远程条目",
             "新名称",
             &entry.name,
             window,
             cx,
-            move |new_name, _, cx| {
-                let new_path = join_remote_path(&parent_dir, &new_name);
-                let svc = service.clone();
-                let from = old_path.clone();
-                let rt_inner = rt.clone();
-                panel.update(cx, |_, cx| {
-                    cx.spawn(async move |weak, cx| {
-                        let res = rt_inner
-                            .spawn(async move { svc.rename(&from, &new_path).await })
-                            .await;
-                        let _ = weak.update(cx, |this, cx| {
-                            if let Ok(Err(err)) = res {
-                                this.error_message = Some(format!("{err:#}"));
-                            }
-                            this.refresh(cx);
-                            cx.notify();
-                        });
-                    })
-                    .detach();
+            move |name, window, cx| {
+                let from = entry.path.clone();
+                let to = join_remote_path(&target.dir, &name);
+                let service = service.clone();
+                panel.update(cx, |this, cx| {
+                    this.run_file_operation(
+                        target.clone(),
+                        async move { service.rename(&from, &to).await },
+                        window,
+                        cx,
+                    )
                 });
             },
         );
@@ -534,7 +588,10 @@ impl SftpPanelView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let panel = cx.entity().clone();
+        let Some((service, target)) = self.operation_target() else {
+            return;
+        };
+        let panel = cx.entity();
         let kind_label = if entry.kind.is_dir() {
             "远程目录"
         } else if entry.kind == RemoteEntryKind::Symlink {
@@ -542,39 +599,30 @@ impl SftpPanelView {
         } else {
             "远程文件"
         };
-        let msg = format!("确定要永久删除{kind_label} `{}` 吗？此操作无法撤销。", entry.path);
+        let msg = format!(
+            "确定要永久删除 {} 上的{kind_label} `{}` 吗？此操作无法撤销。",
+            target.session_label, entry.path
+        );
         open_confirm_dialog(
             format!("删除{kind_label}"),
             msg,
             "确认删除",
             window,
             cx,
-            move |_, cx| {
-                panel.update(cx, |this, cx| this.delete_entry(entry.clone(), cx));
+            move |window, cx| {
+                let service = service.clone();
+                let path = entry.path.clone();
+                let is_dir = entry.kind.is_dir();
+                panel.update(cx, |this, cx| {
+                    this.run_file_operation(
+                        target.clone(),
+                        async move { service.remove(&path, is_dir).await },
+                        window,
+                        cx,
+                    )
+                });
             },
         );
-    }
-
-    fn delete_entry(&mut self, entry: RemoteEntry, cx: &mut Context<Self>) {
-        let Some(service) = self.service.clone() else {
-            return;
-        };
-        let rt = self.tokio_handle.clone();
-        let path = entry.path.clone();
-        let is_real_dir = entry.kind.is_dir();
-        cx.spawn(async move |weak, cx| {
-            let res = rt
-                .spawn(async move { service.remove(&path, is_real_dir).await })
-                .await;
-            let _ = weak.update(cx, |this, cx| {
-                if let Ok(Err(err)) = res {
-                    this.error_message = Some(format!("{err:#}"));
-                }
-                this.refresh(cx);
-                cx.notify();
-            });
-        })
-        .detach();
     }
 
     fn open_remote_file_editor(
@@ -583,65 +631,50 @@ impl SftpPanelView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(service) = self.service.clone() else {
+        let Some((service, target)) = self.operation_target() else {
             return;
         };
+        let read_path = entry.path.clone();
         let rt = self.tokio_handle.clone();
-        let path = entry.path.clone();
-        let file_name = entry.name.clone();
-        let ed_font_family = self.editor_font_family.clone();
-        let ed_font_size = self.editor_font_size;
-        let win_handle = window.window_handle();
-
-        cx.spawn(async move |weak, cx| {
-            let svc_read = service.clone();
-            let path_read = path.clone();
-            let res = rt
-                .spawn(async move { svc_read.read_text(&path_read).await })
-                .await;
-
-            match res {
-                Ok(Ok(content)) => {
-                    let _ = cx.update_window(win_handle, |_, window, cx| {
-                        let svc_save = service.clone();
-                        let path_save = path.clone();
-                        let rt_save = rt.clone();
-                        let weak_panel = weak.clone();
-                        open_remote_editor_dialog(
-                            &file_name,
-                            &path,
-                            &content,
-                            &ed_font_family,
-                            ed_font_size,
-                            window,
-                            cx,
-                            move |updated_text, cx| {
-                                let s = svc_save.clone();
-                                let p = path_save.clone();
-                                let write = rt_save.spawn(async move { s.write_text(&p, updated_text).await });
-                                let panel = weak_panel.clone();
-                                cx.spawn(async move |cx| {
-                                    write.await??;
-                                    let _ = panel.update(cx, |this, cx| this.refresh(cx));
-                                    Ok(())
-                                })
-                            },
-                        );
-                    });
-                }
-                Ok(Err(err)) => {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.error_message = Some(format!("{err:#}"));
-                        cx.notify();
-                    });
-                }
-                Err(err) => {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.error_message = Some(err.to_string());
-                        cx.notify();
-                    });
-                }
-            }
+        let read_service = service.clone();
+        let read = rt.spawn(async move { read_service.read_text(&read_path).await });
+        let family = self.editor_font_family.clone();
+        let size = self.editor_font_size;
+        cx.spawn_in(window, async move |weak, cx| {
+            let result = read.await.map_err(anyhow::Error::from).and_then(|r| r);
+            let _ = weak.update_in(cx, |this, window, cx| {
+                let content = match result {
+                    Ok(content) if this.shows_target(&target) => content,
+                    Ok(_) => return,
+                    Err(err) => return this.finish_file_operation(&target, Err(err), window, cx),
+                };
+                let panel = cx.weak_entity();
+                open_remote_editor_dialog(
+                    &entry.name,
+                    &format!("{} · {}", target.session_label, entry.path),
+                    &content,
+                    &family,
+                    size,
+                    window,
+                    cx,
+                    move |text, cx| {
+                        let target = target.clone();
+                        let service = service.clone();
+                        let path = entry.path.clone();
+                        let write = rt.spawn(async move { service.write_text(&path, text).await });
+                        let panel = panel.clone();
+                        cx.spawn(async move |cx| {
+                            write.await??;
+                            let _ = panel.update(cx, |this, cx| {
+                                if this.shows_target(&target) {
+                                    this.refresh(cx);
+                                }
+                            });
+                            Ok(())
+                        })
+                    },
+                );
+            });
         })
         .detach();
     }
@@ -651,6 +684,7 @@ impl SftpPanelView {
 fn render_sftp_entry_row(
     panel_ent: Entity<SftpPanelView>,
     entry: RemoteEntry,
+    nav_seq: u64,
     is_sel: bool,
     cx: &App,
 ) -> AnyElement {
@@ -666,16 +700,33 @@ fn render_sftp_entry_row(
 
     let folder_tint = cx.theme().cyan;
 
-    let p_click = panel_ent.clone();
-    let entry_click = entry.clone();
-    let p_ctx_open = panel_ent.clone();
-    let p_ctx_dl = panel_ent.clone();
-    let p_ctx_rename = panel_ent.clone();
-    let p_ctx_del = panel_ent.clone();
-    let e1 = entry.clone();
-    let e2 = entry.clone();
-    let e3 = entry.clone();
-    let e4 = entry.clone();
+    // A context menu can outlive the directory rows that opened it.
+    let with_row = {
+        let entry = entry.clone();
+        move |window: &mut Window,
+              cx: &mut App,
+              action: fn(
+            &mut SftpPanelView,
+            RemoteEntry,
+            &mut Window,
+            &mut Context<SftpPanelView>,
+        )| {
+            panel_ent.update(cx, |panel, cx| {
+                if panel.nav_seq == nav_seq {
+                    action(panel, entry.clone(), window, cx);
+                }
+            });
+        }
+    };
+    let enter =
+        |p: &mut SftpPanelView, e: RemoteEntry, w: &mut Window, cx: &mut Context<SftpPanelView>| {
+            p.navigate_to(e.path, Some(w), cx)
+        };
+    let download = |p: &mut SftpPanelView, e, _: &mut Window, cx: &mut Context<SftpPanelView>| {
+        p.trigger_download(e, cx)
+    };
+    let click_row = with_row.clone();
+    let menu_row = with_row.clone();
     let copy_path = entry.path.clone();
 
     h_flex()
@@ -700,78 +751,66 @@ fn render_sftp_entry_row(
             }
         })
         .on_click(move |ev, window, cx| {
-            p_click.update(cx, |this, cx| {
-                this.selected_path = Some(entry_click.path.clone());
-                if ev.click_count() >= 2 {
-                    if entry_click.is_navigable_dir() {
-                        this.navigate_to(entry_click.path.clone(), Some(window), cx);
+            if ev.click_count() >= 2 {
+                click_row(
+                    window,
+                    cx,
+                    if nav_dir {
+                        enter
                     } else {
-                        this.open_remote_file_editor(entry_click.clone(), window, cx);
-                    }
-                } else {
+                        SftpPanelView::open_remote_file_editor
+                    },
+                );
+            } else {
+                click_row(window, cx, |panel, entry, _, cx| {
+                    panel.selected_path = Some(entry.path);
                     cx.notify();
-                }
-            });
+                });
+            }
         })
         .context_menu(move |menu, _, _| {
-            let po = p_ctx_open.clone();
-            let eo = e1.clone();
-            let pd = p_ctx_dl.clone();
-            let ed = e2.clone();
-            let pr = p_ctx_rename.clone();
-            let er = e3.clone();
-            let pdel = p_ctx_del.clone();
-            let edel = e4.clone();
-            let cp = copy_path.clone();
-
+            let open = menu_row.clone();
+            let dl = menu_row.clone();
+            let rename = menu_row.clone();
+            let delete = menu_row.clone();
+            let path = copy_path.clone();
             let menu = if nav_dir {
                 menu.item(
                     PopupMenuItem::new("进入目录")
                         .icon(LucideIcon::FolderOpen)
-                        .on_click(move |_, window, cx| {
-                            po.update(cx, |this, cx| {
-                                this.navigate_to(eo.path.clone(), Some(window), cx)
-                            });
-                        }),
+                        .on_click(move |_, window, cx| open(window, cx, enter)),
                 )
             } else {
                 menu.item(
                     PopupMenuItem::new("在线编辑文本")
                         .icon(LucideIcon::FileText)
                         .on_click(move |_, window, cx| {
-                            po.update(cx, |this, cx| {
-                                this.open_remote_file_editor(eo.clone(), window, cx)
-                            });
+                            open(window, cx, SftpPanelView::open_remote_file_editor)
                         }),
                 )
                 .item(
                     PopupMenuItem::new("下载到本地")
                         .icon(LucideIcon::Download)
-                        .on_click(move |_, _, cx| {
-                            pd.update(cx, |this, cx| this.trigger_download(ed.clone(), cx));
-                        }),
+                        .on_click(move |_, window, cx| dl(window, cx, download)),
                 )
             };
-
             menu.item(
                 PopupMenuItem::new("复制远程路径")
                     .icon(LucideIcon::Copy)
                     .on_click(move |_, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(cp.clone()));
+                        cx.write_to_clipboard(ClipboardItem::new_string(path.clone()))
                     }),
             )
             .item(
                 PopupMenuItem::new("重命名")
                     .icon(LucideIcon::Pencil)
                     .on_click(move |_, window, cx| {
-                        pr.update(cx, |this, cx| this.prompt_rename(er.clone(), window, cx));
+                        rename(window, cx, SftpPanelView::prompt_rename)
                     }),
             )
             .separator()
             .item(PopupMenuItem::new("删除").on_click(move |_, window, cx| {
-                pdel.update(cx, |this, cx| {
-                    this.confirm_delete_entry(edel.clone(), window, cx)
-                });
+                delete(window, cx, SftpPanelView::confirm_delete_entry)
             }))
         })
         .child(
@@ -815,8 +854,6 @@ fn render_sftp_entry_row(
                 ),
         )
         .children((!nav_dir).then(|| {
-            let pdl = panel_ent;
-            let edl = entry.clone();
             Button::new(SharedString::from(format!("dl-btn-{}", entry.path)))
                 .tab_stop(false)
                 .ghost()
@@ -824,9 +861,9 @@ fn render_sftp_entry_row(
                 .compact()
                 .icon(LucideIcon::Download)
                 .tooltip("下载文件")
-                .on_click(move |_, _, cx| {
+                .on_click(move |_, window, cx| {
                     cx.stop_propagation();
-                    pdl.update(cx, |this, cx| this.trigger_download(edl.clone(), cx));
+                    with_row(window, cx, download);
                 })
         }))
         .into_any_element()
@@ -835,14 +872,13 @@ fn render_sftp_entry_row(
 impl Render for SftpPanelView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let connected = self.service.is_some();
-        let can_up = connected && parent_remote_path(&self.current_path).is_some();
+        let can_up = connected && parent_remote_path(self.current_path()).is_some();
         let path_input = self.ensure_path_input(window, cx);
         let follow = self.follow_cwd;
-        let session_badge = if connected {
-            self.bound_session_label.clone()
-        } else {
-            "未绑定 SSH 会话".to_string()
-        };
+        let session_badge = self
+            .target
+            .as_ref()
+            .map_or("未绑定 SSH 会话", |t| &t.session_label);
 
         let view_up = cx.entity().clone();
         let view_refresh = cx.entity().clone();
@@ -877,6 +913,8 @@ impl Render for SftpPanelView {
                 .text_color(cx.theme().muted_foreground)
                 .child("正在读取远程目录...")
                 .into_any_element()
+        } else if self.error_message.is_some() && self.entries.is_empty() {
+            div().into_any_element()
         } else if self.entries.is_empty() {
             div()
                 .py_8()
@@ -894,7 +932,7 @@ impl Render for SftpPanelView {
                 .cloned()
                 .map(|entry| {
                     let is_sel = selected.as_deref() == Some(entry.path.as_str());
-                    render_sftp_entry_row(panel_ent.clone(), entry, is_sel, cx)
+                    render_sftp_entry_row(panel_ent.clone(), entry, self.nav_seq, is_sel, cx)
                 })
                 .collect();
             v_flex().gap_0p5().children(rows).into_any_element()
@@ -903,8 +941,6 @@ impl Render for SftpPanelView {
         v_flex()
             .size_full()
             .bg(cx.theme().sidebar)
-            .border_l_1()
-            .border_color(cx.theme().sidebar_border)
             .child(
                 v_flex()
                     .px_3()
@@ -958,9 +994,8 @@ impl Render for SftpPanelView {
                                             .icon(LucideIcon::Link)
                                             .tooltip("跟随终端当前目录")
                                             .on_click(cx.listener(|this, _, _, cx| {
-                                                this.follow_cwd = !this.follow_cwd;
                                                 cx.emit(SftpPanelEvent::FollowChanged(
-                                                    this.follow_cwd,
+                                                    !this.follow_cwd,
                                                 ));
                                                 cx.notify();
                                             })),
@@ -1157,7 +1192,10 @@ impl Render for SftpPanelView {
                                                                 .truncate()
                                                                 .text_xs()
                                                                 .text_color(cx.theme().foreground)
-                                                                .child(tr.file_name.clone()),
+                                                                .child(format!(
+                                                                    "{} · {}",
+                                                                    tr.session_label, tr.file_name
+                                                                )),
                                                         ),
                                                 )
                                                 .child(
@@ -1189,5 +1227,150 @@ impl Render for SftpPanelView {
                         ),
                     )
             }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn panel() -> SftpPanelView {
+        SftpPanelView::new(
+            true,
+            true,
+            String::new(),
+            14.,
+            PathBuf::new(),
+            tokio::runtime::Handle::current(),
+        )
+    }
+
+    fn target(id: &str, epoch: u64, path: &str) -> SftpTarget {
+        SftpTarget {
+            binding: SftpBindingKey {
+                session_id: id.into(),
+                conn_epoch: epoch,
+            },
+            dir: path.into(),
+            session_label: "同名 SSH".into(),
+        }
+    }
+
+    fn file(name: &str) -> RemoteEntry {
+        RemoteEntry {
+            name: name.into(),
+            path: format!("/{name}"),
+            kind: RemoteEntryKind::File,
+            points_to_dir: false,
+            size_bytes: None,
+            modified_unix: None,
+            permissions: String::new(),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn detached_path_inputs_and_file_errors_follow_the_originating_directory() {
+        gpui_kit::platform::headless()
+            .with_assets(gpui_kit::assets::AllAssets)
+            .run(|cx| {
+                gpui_kit::init(cx);
+                let (window, view) =
+                    gpui_kit::open_window(Default::default(), cx, |_, cx| cx.new(|_| panel()))
+                        .unwrap();
+                window
+                    .update(cx, |_, window, cx| {
+                        view.update(cx, |p, cx| {
+                            let a = target("A", 1, "/documents");
+                            p.target = Some(a.clone());
+                            p.load_directory(Some(window), cx);
+                            let seq = p.nav_seq;
+                            let input = p.ensure_path_input(window, cx);
+                            assert_eq!(input.read(cx).value().as_str(), "/documents");
+                            p.finish_file_operation(
+                                &a,
+                                Err(anyhow::anyhow!("mkdir: permission denied")),
+                                window,
+                                cx,
+                            );
+                            assert_eq!(p.nav_seq, seq);
+                            p.finish_listing(a.binding.clone(), seq, Ok(vec![]));
+                            assert_eq!(
+                                p.error_message.as_deref(),
+                                Some("mkdir: permission denied")
+                            );
+
+                            p.navigate_to("/elsewhere".into(), None, cx);
+                            assert!(p.path_input.is_none());
+                            let new_input = p.ensure_path_input(window, cx);
+                            assert_ne!(new_input, input);
+                            assert_eq!(new_input.read(cx).value().as_str(), "/elsewhere");
+                            let seq = p.nav_seq;
+                            p.finish_file_operation(&a, Ok(()), window, cx);
+                            assert_eq!(p.nav_seq, seq);
+                            p.bind_session(None, Some(window), cx);
+                            assert!(new_input.read(cx).value().is_empty());
+                            assert!(p.current_path().is_empty() && !p.loading);
+                        })
+                    })
+                    .unwrap();
+                cx.spawn(async |cx| cx.update(|cx| cx.quit())).detach();
+            });
+    }
+
+    #[tokio::test]
+    async fn slow_listings_cannot_replace_another_tab_directory_or_connection() {
+        let mut p = panel();
+        let a = target("A", 1, "/home");
+        p.target = Some(a.clone());
+        p.begin_listing();
+        let slow = p.nav_seq;
+        p.entries.push(file("old"));
+        p.selected_path = Some("/old".into());
+        let b = target("B", 1, "/home");
+        p.target = Some(b.clone());
+        p.begin_listing();
+        assert!(p.entries.is_empty() && p.selected_path.is_none() && p.loading);
+        assert!(!p.shows_target(&a));
+        let ready = p.finish_listing(b.binding.clone(), p.nav_seq, Ok(vec![file("B-only")]));
+        assert!(
+            matches!(ready, Some(SftpPanelEvent::Navigated { binding, path }) if binding == b.binding && path == "/home")
+        );
+        assert!(
+            p.finish_listing(a.binding.clone(), slow, Ok(vec![file("late-A")]))
+                .is_none()
+        );
+        assert_eq!(p.entries, [file("B-only")]);
+
+        let denied = target("A", 2, "/private");
+        p.target = Some(denied.clone());
+        p.begin_listing();
+        let pending = p.nav_seq;
+        assert!(p.finish_listing(a.binding, pending, Ok(vec![])).is_none());
+        assert!(p.loading);
+        assert!(
+            p.finish_listing(
+                denied.binding.clone(),
+                pending,
+                Err(anyhow::anyhow!("permission denied"))
+            )
+            .is_none()
+        );
+        assert_eq!(p.error_message.as_deref(), Some("permission denied"));
+        assert!(
+            p.finish_listing(denied.binding.clone(), slow, Ok(vec![file("late")]))
+                .is_none()
+        );
+        assert_eq!(p.error_message.as_deref(), Some("permission denied"));
+        assert!(!p.loading && p.entries.is_empty());
+
+        p.target = None;
+        p.begin_listing();
+        assert_eq!(p.current_path(), "");
+        assert!(
+            p.finish_listing(denied.binding, pending, Ok(vec![file("late")]))
+                .is_none()
+        );
+        assert!(!p.loading && p.entries.is_empty() && p.error_message.is_none());
     }
 }

@@ -40,7 +40,7 @@ use crate::terminal::{
     MouseReportKind, RenderCursorShape, SemanticOptions, TerminalPalette, TerminalSessionEntity,
     session::SessionPhase,
 };
-use crate::ui::fonts::TerminalFont;
+use crate::ui::fonts::{TerminalFont, installed_font_names};
 use crate::ui::theme::macos_squircle_badge;
 
 pub enum TerminalPaneEvent {
@@ -271,7 +271,7 @@ impl TerminalPaneView {
             focus_handle,
             search_input: None,
             terminal_font: TerminalFont::resolve(&prefs.font_family, palette.dark, || {
-                cx.text_system().all_font_names()
+                installed_font_names(cx)
             }),
             default_font_size: prefs.default_font_size,
             palette,
@@ -299,7 +299,7 @@ impl TerminalPaneView {
     pub fn sync_preferences(&mut self, prefs: &PanePreferences, cx: &mut Context<Self>) {
         self.palette = TerminalPalette::for_theme_id(&prefs.theme_id, prefs.dark_mode);
         self.terminal_font = TerminalFont::resolve(&prefs.font_family, self.palette.dark, || {
-            cx.text_system().all_font_names()
+            installed_font_names(cx)
         });
         self.default_font_size = prefs.default_font_size;
         self.scrollback_lines = prefs.scrollback_lines;
@@ -1074,12 +1074,6 @@ impl Render for TerminalPaneView {
         let scrollback_ctx = self.scrollback_lines;
         let has_sel = self.session.read(cx).selected_text().is_some();
 
-        let split_border_color = if self.is_split_member && self.is_active_pane {
-            cx.theme().primary.opacity(0.45)
-        } else {
-            cx.theme().transparent
-        };
-
         let hover_cell = self
             .hover_pointer
             .filter(|_| window.is_window_hovered() && window.is_window_active())
@@ -1118,7 +1112,6 @@ impl Render for TerminalPaneView {
                 MouseButton::Left,
                 cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
                     this.focus_handle.focus(window, cx);
-                    cx.emit(TerminalPaneEvent::Activate);
                     if let Some(bounds) = this.last_grid_bounds.get()
                         && ev.position.x >= bounds.right()
                         && ev.position.x < bounds.right() + px(12.)
@@ -1157,7 +1150,6 @@ impl Render for TerminalPaneView {
                 MouseButton::Right,
                 cx.listener(|this, ev: &MouseDownEvent, window, cx| {
                     this.focus_handle.focus(window, cx);
-                    cx.emit(TerminalPaneEvent::Activate);
                     this.right_gesture = RightGesture::Menu;
                     if ev.modifiers.shift {
                         return;
@@ -1186,7 +1178,6 @@ impl Render for TerminalPaneView {
                 MouseButton::Middle,
                 cx.listener(|this, ev: &MouseDownEvent, window, cx| {
                     this.focus_handle.focus(window, cx);
-                    cx.emit(TerminalPaneEvent::Activate);
                     let Some((row, col)) = this.grid_hit(ev.position, cx) else {
                         return;
                     };
@@ -1761,10 +1752,23 @@ impl Render for TerminalPaneView {
             .size_full()
             .overflow_hidden()
             .bg(bg_hsla)
-            .when(self.is_split_member, |el| {
-                el.border_t_2().border_color(split_border_color)
+            .when(self.is_split_member && !self.is_active_pane, |el| {
+                el.capture_any_mouse_down(
+                    cx.listener(|_, _, _, cx| cx.emit(TerminalPaneEvent::Activate)),
+                )
             })
             .child(terminal_canvas)
+            .when(self.is_split_member && self.is_active_pane, |el| {
+                el.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .h(px(1.5))
+                        .bg(cx.theme().primary),
+                )
+            })
             .when_some(host_hint, |el, host| {
                 el.child(
                     div()

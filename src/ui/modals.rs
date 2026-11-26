@@ -8,7 +8,8 @@ use gpui_kit::assets::IconName as LucideIcon;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
-    dialog::DialogFooter,
+    dialog::{DialogContent, DialogFooter},
+    select::{Select, SelectEvent, SelectState},
     notification::Notification,
     h_flex,
     input::{Editor, EditorState, Input, InputEvent, InputState, Textarea, TextareaState},
@@ -28,13 +29,12 @@ use crate::domain::{
     BUNDLED_SARASA_FONT_FAMILY, HostNode, HostNodeKind, KeychainEntry,
     KeychainKind, RightClickAction, SecretPayload, ShortcutAction, ShortcutCategory, ShortcutChord,
     ShortcutConfig, SnippetItem, SshAuthConfig, SshHostConfig, SshProxyConfig, format_chord,
-    system_monospace_font_family,
 };
 use crate::logging::{open_directory_in_file_manager, read_recent_logs};
 use crate::storage::AppPaths;
 use crate::syntax::SyntaxRegistry;
 use crate::terminal::{TerminalPalette, colors::rgb_to_hsla};
-use crate::ui::fonts::{TERMINAL_FONT_PRESETS, TerminalFont};
+use crate::ui::fonts::{TerminalFont, font_choices, installed_font_names};
 use crate::ui::theme::{macos_hex, macos_inset_group, macos_segmented_track};
 use crate::ui::theme_catalog::{ThemeCategory, ThemeRegistry, ThemeSpec};
 use crate::ui::workspace::MicaWorkspace;
@@ -262,8 +262,10 @@ pub fn open_remote_editor_dialog(
         .filter_map(|e| e.syntax_name.clone())
         .collect();
     let editor_font = TerminalFont::resolve(font_family, cx.theme().mode.is_dark(), || {
-        cx.text_system().all_font_names()
-    }).font.family;
+        installed_font_names(cx)
+    })
+    .font
+    .family;
     let editor_px = font_size.clamp(11.0, 24.0);
     let title_str = format!("编辑远程文件 · {file_name}");
     let path_str = remote_path.to_string();
@@ -1731,34 +1733,29 @@ impl Render for ShortcutRecorder {
                             })),
                     ),
             )
-            .child(
-                v_flex()
-                    .gap_2()
-                    .max_h(px(420.0))
-                    .w_full()
-                    .min_w_0()
-                    .pr_1()
-                    .overflow_y_scrollbar()
-                    .children(ShortcutCategory::ALL.into_iter().map(|category| {
-                        macos_inset_group(cx)
-                            .flex_shrink_0()
-                            .child(
-                                div()
-                                    .px_3()
-                                    .py_2()
-                                    .text_xs()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(category.label()),
-                            )
-                            .children(
-                                ShortcutAction::ALL
-                                    .iter()
-                                    .copied()
-                                    .filter(|a| a.category() == category)
-                                    .map(|action| self.row(action, shortcuts, cx)),
-                            )
-                    })),
-            )
+            .child(v_flex().gap_2().w_full().min_w_0().children(
+                ShortcutCategory::ALL.into_iter().map(|category| {
+                    v_flex()
+                        .w_full()
+                        .min_w_0()
+                        .flex_shrink_0()
+                        .child(
+                            div()
+                                .px_3()
+                                .py_2()
+                                .text_xs()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(category.label()),
+                        )
+                        .children(
+                            ShortcutAction::ALL
+                                .iter()
+                                .copied()
+                                .filter(|a| a.category() == category)
+                                .map(|action| self.row(action, shortcuts, cx)),
+                        )
+                }),
+            ))
     }
 }
 
@@ -1780,260 +1777,91 @@ enum ThemeModeFilter {
 fn render_theme_preview_card(
     spec: &ThemeSpec,
     is_active_now: bool,
-    is_saved_dark: bool,
-    is_saved_light: bool,
+    is_saved: bool,
     workspace: Entity<MicaWorkspace>,
     cx: &App,
 ) -> AnyElement {
-    let tid = spec.id.clone();
-    let titlebar_c = macos_hex(spec.titlebar_bg, 1.0);
-    let sidebar_c = macos_hex(spec.sidebar_bg, 1.0);
-    let term_bg_c = macos_hex(spec.term_bg, 1.0);
-    let term_fg_c = macos_hex(spec.term_fg, 1.0);
-    let surface_c = macos_hex(spec.surface_bg, 1.0);
-    let muted_c = macos_hex(spec.muted_fg, 1.0);
-    let accent_c = macos_hex(spec.accent, 1.0);
-    let cursor_c = macos_hex(spec.cursor, 1.0);
-    let divider_c = macos_hex(if spec.dark { 0xFFFFFF } else { 0x000000 }, 0.09);
-
-    let dot_red = macos_hex(spec.ansi[1], 1.0);
-    let dot_yellow = macos_hex(spec.ansi[3], 1.0);
-    let dot_green = macos_hex(spec.ansi[2], 1.0);
-    let prompt_cyan = macos_hex(spec.ansi[6], 1.0);
-    let cmd_blue = macos_hex(spec.ansi[4], 1.0);
-
-    let swatch_colors = [
-        spec.ansi[1],
-        spec.ansi[2],
-        spec.ansi[3],
-        spec.ansi[4],
-        spec.ansi[5],
-        spec.ansi[6],
-        spec.accent,
-        spec.ansi[13],
-    ];
-
-    let status_pill = if is_active_now {
-        Some(("当前生效", cx.theme().primary.opacity(0.18), cx.theme().primary))
-    } else if is_saved_dark {
-        Some((
-            "深色预设",
-            cx.theme().secondary,
-            cx.theme().muted_foreground,
-        ))
-    } else if is_saved_light {
-        Some((
-            "浅色预设",
-            cx.theme().secondary,
-            cx.theme().muted_foreground,
-        ))
-    } else {
-        None
-    };
-
-    let tid_key = tid.clone();
-    let ws_key = workspace.clone();
-
+    let id = spec.id.clone();
+    let key_id = id.clone();
+    let key_ws = workspace.clone();
+    let fg = macos_hex(spec.term_fg, 1.0);
     v_flex()
-        .id(SharedString::from(format!("theme-card-{}", spec.id)))
+        .id(SharedString::from(format!("theme-card-{id}")))
         .tab_stop(true)
-        .flex_1()
-        .min_w(px(0.0))
-        .rounded(px(9.0))
-        .overflow_hidden()
+        .w(px(130.0))
+        .flex_shrink_0()
+        .gap_1()
         .cursor_pointer()
-        .border_1()
-        .border_color(if is_active_now {
-            cx.theme().primary
-        } else {
-            cx.theme().border
-        })
-        .bg(if is_active_now {
-            cx.theme().list_active
-        } else {
-            cx.theme().group_box
-        })
-        .hover(|s| {
-            if is_active_now {
-                s
-            } else {
-                s.border_color(cx.theme().primary.opacity(0.55))
-            }
-        })
-        .on_key_down(move |ev: &KeyDownEvent, window, cx| {
-            if matches!(ev.keystroke.key.as_str(), "enter" | "space") {
+        .on_key_down(move |event: &KeyDownEvent, window, cx| {
+            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                 cx.stop_propagation();
-                ws_key.update(cx, |ws, cx| ws.select_theme(&tid_key, window, cx));
+                key_ws.update(cx, |ws, cx| ws.select_theme(&key_id, window, cx));
                 window.refresh();
             }
         })
         .on_click(move |_, window, cx| {
-            workspace.update(cx, |ws, cx| ws.select_theme(&tid, window, cx));
+            workspace.update(cx, |ws, cx| ws.select_theme(&id, window, cx));
             window.refresh();
         })
         .child(
-            // Mini Rex/Termius window + terminal canvas preview
             v_flex()
-                .h(px(62.0))
-                .w_full()
-                .border_b_1()
-                .border_color(divider_c)
+                .h(px(68.0))
+                .px_2p5()
+                .py_2()
+                .justify_between()
+                .rounded(px(8.0))
+                .border_2()
+                .border_color(if is_saved {
+                    cx.theme().primary
+                } else {
+                    cx.theme().border
+                })
+                .bg(macos_hex(spec.term_bg, 1.0))
+                .text_color(fg)
                 .child(
                     h_flex()
-                        .h(px(15.0))
-                        .px_2()
-                        .gap_1()
                         .items_center()
-                        .bg(titlebar_c)
-                        .border_b_1()
-                        .border_color(divider_c)
-                        .child(div().w(px(5.0)).h(px(5.0)).rounded_full().bg(dot_red))
-                        .child(div().w(px(5.0)).h(px(5.0)).rounded_full().bg(dot_yellow))
-                        .child(div().w(px(5.0)).h(px(5.0)).rounded_full().bg(dot_green))
+                        .gap_1()
+                        .child(div().flex_1().text_lg().child("Aa"))
                         .child(
                             div()
-                                .ml_1p5()
-                                .w(px(36.0))
-                                .h(px(8.0))
                                 .rounded(px(3.0))
-                                .bg(surface_c),
-                        ),
+                                .px_1()
+                                .text_xs()
+                                .font_family(cx.theme().mono_font_family.clone())
+                                .bg(macos_hex(spec.selection, 0.32))
+                                .child("~/"),
+                        )
+                        .child(div().w(px(6.0)).h(px(14.0)).bg(macos_hex(spec.cursor, 1.0))),
                 )
                 .child(
                     h_flex()
-                        .flex_1()
-                        .w_full()
-                        .child(
-                            v_flex()
-                                .w(px(46.0))
-                                .h_full()
-                                .px_1p5()
-                                .py_1p5()
-                                .gap_1()
-                                .bg(sidebar_c)
-                                .border_r_1()
-                                .border_color(divider_c)
-                                .child(
-                                    div()
-                                        .w_full()
-                                        .h(px(6.0))
-                                        .rounded(px(2.5))
-                                        .bg(accent_c.opacity(0.35)),
-                                )
-                                .child(
-                                    div()
-                                        .w(px(26.0))
-                                        .h(px(5.0))
-                                        .rounded(px(2.5))
-                                        .bg(muted_c.opacity(0.32)),
-                                )
-                                .child(
-                                    div()
-                                        .w(px(30.0))
-                                        .h(px(5.0))
-                                        .rounded(px(2.5))
-                                        .bg(muted_c.opacity(0.22)),
-                                ),
-                        )
-                        .child(
-                            v_flex()
-                                .flex_1()
-                                .h_full()
-                                .px_2()
-                                .py_1()
-                                .justify_between()
-                                .bg(term_bg_c)
-                                .child(
-                                    h_flex()
-                                        .gap_1()
-                                        .items_center()
-                                        .text_xs()
-                                        .font_family(cx.theme().mono_font_family.clone())
-                                        .child(div().text_color(prompt_cyan).child("~"))
-                                        .child(div().text_color(accent_c).child("❯"))
-                                        .child(div().text_color(cmd_blue).child("ssh"))
-                                        .child(div().text_color(term_fg_c).child("prod-01"))
-                                        .child(
-                                            div()
-                                                .w(px(5.5))
-                                                .h(px(10.5))
-                                                .rounded(px(1.5))
-                                                .bg(cursor_c),
-                                        ),
-                                )
-                                .child(
-                                    h_flex().gap_1().items_center().children(
-                                        swatch_colors.into_iter().map(|hex| {
-                                            div()
-                                                .w(px(11.0))
-                                                .h(px(5.5))
-                                                .rounded(px(2.0))
-                                                .bg(macos_hex(hex, 1.0))
-                                        }),
-                                    ),
-                                ),
-                        ),
+                        .gap_1()
+                        .children(spec.ansi[..7].iter().map(|&color| {
+                            div()
+                                .size(px(10.0))
+                                .rounded_full()
+                                .bg(macos_hex(color, 1.0))
+                        })),
                 ),
         )
         .child(
-            v_flex()
-                .px_2p5()
-                .py_2()
-                .gap_0p5()
-                .child(
-                    h_flex()
-                        .justify_between()
-                        .items_center()
-                        .gap_1p5()
-                        .child(
-                            h_flex()
-                                .min_w_0()
-                                .flex_1()
-                                .gap_1p5()
-                                .items_center()
-                                .child(
-                                    div()
-                                        .truncate()
-                                        .text_xs()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(cx.theme().foreground)
-                                        .child(spec.name.clone()),
-                                )
-                                .child(
-                                    div()
-                                        .flex_shrink_0()
-                                        .px_1p5()
-                                        .rounded(px(4.0))
-                                        .bg(cx.theme().secondary)
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(spec.badge.clone()),
-                                ),
-                        )
-                        .children(status_pill.map(|(txt, bg, fg)| {
-                            div()
-                                .flex_shrink_0()
-                                .px_1p5()
-                                .rounded(px(4.0))
-                                .bg(bg)
-                                .text_xs()
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(fg)
-                                .child(txt)
-                        })),
-                )
-                .child(
-                    div()
-                        .truncate()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(format!(
-                            "{} · {}",
-                            if spec.dark { "深色" } else { "浅色" },
-                            spec.subtitle
-                        )),
-                ),
+            div()
+                .truncate()
+                .text_xs()
+                .font_weight(if is_saved {
+                    FontWeight::SEMIBOLD
+                } else {
+                    FontWeight::NORMAL
+                })
+                .child(spec.name.clone()),
         )
+        .children(is_active_now.then(|| {
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child("当前生效")
+        }))
         .into_any_element()
 }
 
@@ -2083,46 +1911,67 @@ pub fn open_settings_modal_at(
             .detach();
         });
     }
-    let font_in = cx.new(|cx| {
-        let mut s = InputState::new(window, cx).placeholder(BUNDLED_SARASA_FONT_FAMILY);
-        s.set_value(init_settings.font_family.clone(), window, cx);
-        s
+    let selected_family =
+        TerminalFont::resolve(&init_settings.font_family, init_settings.dark_mode, || {
+            installed_font_names(cx)
+        })
+        .font
+        .family;
+    let fonts = font_choices(&selected_family, cx);
+    let font_select = cx.new(|cx| {
+        let mut state = SelectState::new(fonts, None, window, cx).searchable(true);
+        state.set_selected_value(&selected_family, window, cx);
+        state
     });
     workspace.update(cx, |_, cx| {
-        cx.subscribe_in(&font_in, window, |ws, state, ev, window, cx| {
-            match ev {
-                InputEvent::Change => window.refresh(),
-                InputEvent::Blur | InputEvent::PressEnter { .. } => {
-                    ws.set_font_family(state.read(cx).value().to_string(), cx);
-                }
-                _ => {}
+        cx.subscribe_in(&font_select, window, |ws, _, event, window, cx| {
+            if let SelectEvent::Confirm(Some(family)) = event {
+                ws.set_font_family(family.to_string(), cx);
+                window.refresh();
             }
         })
         .detach();
     });
 
-    window.open_dialog(cx, move |dialog, window, cx| {
-        let ws_apply_font = workspace.clone();
-        let f_in = font_in.clone();
-        let tabs = macos_segmented_track(cx).track_focus(&tabs_focus).children(
-            [
-                ("settings-themes-tab", "外观与主题", SettingsTab::Themes),
-                ("settings-general-tab", "通用与终端", SettingsTab::General),
-                ("settings-shortcuts-tab", "快捷键", SettingsTab::Shortcuts),
-            ]
-            .into_iter()
-            .map(|(id, label, tab_kind)| {
+    let settings_content = move |content: DialogContent, window: &mut Window, cx: &mut App| {
+        let pages = [
+            (SettingsTab::Themes, "外观与主题", LucideIcon::Palette),
+            (SettingsTab::General, "通用与终端", LucideIcon::Terminal),
+            (SettingsTab::Shortcuts, "快捷键", LucideIcon::Keyboard),
+        ];
+        let current = active_page.get();
+        let tabs = v_flex()
+            .w(px(192.))
+            .h_full()
+            .flex_shrink_0()
+            .p_3()
+            .gap_1()
+            .bg(cx.theme().sidebar)
+            .border_r_1()
+            .border_color(cx.theme().border)
+            .track_focus(&tabs_focus)
+            .child(
+                div()
+                    .px_2()
+                    .py_3()
+                    .text_sm()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("偏好设置"),
+            )
+            .children(pages.map(|(tab, label, icon)| {
                 let page = active_page.clone();
                 let focus = tabs_focus.clone();
                 let recorder = recorder.clone();
-                Button::new(id)
+                Button::new(("settings-page", tab as usize))
                     .ghost()
                     .small()
-                    .flex_1()
+                    .w_full()
+                    .justify_start()
+                    .icon(icon)
                     .label(label)
-                    .selected(page.get() == tab_kind)
+                    .selected(current == tab)
                     .on_click(move |_, window, cx| {
-                        page.set(tab_kind);
+                        page.set(tab);
                         recorder.update(cx, |r, cx| {
                             r.recording_action = None;
                             cx.notify();
@@ -2130,24 +1979,40 @@ pub fn open_settings_modal_at(
                         focus.focus(window, cx);
                         window.refresh();
                     })
-            }),
-        );
-        let body = dialog_body().gap_2p5().child(tabs);
-        let dialog = dialog.title("偏好设置").w(px(690.0)).footer(
-            DialogFooter::new().child(
-                Button::new("settings-done")
-                    .primary()
-                    .small()
-                    .label("完成")
-                    .on_click(move |_, window, cx| {
-                        let fam = f_in.read(cx).value().to_string();
-                        ws_apply_font.update(cx, |ws, cx| ws.set_font_family(fam, cx));
-                        window.close_dialog(cx);
-                    }),
-            ),
-        );
-        match active_page.get() {
-            SettingsTab::Shortcuts => return dialog.child(body.child(recorder.clone())),
+            }));
+        let title = match current {
+            SettingsTab::Themes => "外观与主题",
+            SettingsTab::General => "通用与终端",
+            SettingsTab::Shortcuts => "快捷键",
+        };
+        let right = v_flex()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .overflow_y_scrollbar()
+            .id(("settings-scroll", current as usize))
+            .px_6()
+            .py_5()
+            .gap_3()
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .text_lg()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(title),
+            );
+        let page = |page: AnyElement| {
+            content.size_full().min_h_0().child(
+                h_flex()
+                    .size_full()
+                    .min_h_0()
+                    .items_start()
+                    .child(tabs)
+                    .child(right.child(page)),
+            )
+        };
+        match current {
+            SettingsTab::Shortcuts => return page(recorder.clone().into_any_element()),
             SettingsTab::Themes => {
                 let cur = workspace.read(cx).settings.clone();
                 let pack = ThemeRegistry::global().current();
@@ -2196,37 +2061,50 @@ pub fn open_settings_modal_at(
                     })
                     .collect();
 
-                let mut grid_rows: Vec<AnyElement> = Vec::new();
-                for pair in filtered.chunks(2) {
-                    let first = render_theme_preview_card(
-                        pair[0],
-                        pair[0].id == active_id,
-                        pair[0].id == dark_spec.id,
-                        pair[0].id == light_spec.id,
-                        workspace.clone(),
-                        cx,
-                    );
-                    let second = if let Some(sec) = pair.get(1) {
-                        render_theme_preview_card(
-                            sec,
-                            sec.id == active_id,
-                            sec.id == dark_spec.id,
-                            sec.id == light_spec.id,
-                            workspace.clone(),
-                            cx,
-                        )
-                    } else {
-                        div().flex_1().min_w(px(0.0)).into_any_element()
-                    };
-                    grid_rows.push(
-                        h_flex()
-                            .w_full()
-                            .min_w_0()
-                            .gap_2p5()
-                            .child(first)
-                            .child(second)
-                            .into_any_element(),
-                    );
+                let mut swatches = Vec::new();
+                for (dark, label) in [(false, "浅色模式"), (true, "深色模式")] {
+                    let cards: Vec<_> = filtered
+                        .iter()
+                        .filter(|s| s.dark == dark)
+                        .map(|spec| {
+                            render_theme_preview_card(
+                                spec,
+                                spec.id == active_id,
+                                spec.id == dark_spec.id || spec.id == light_spec.id,
+                                workspace.clone(),
+                                cx,
+                            )
+                        })
+                        .collect();
+                    if !cards.is_empty() {
+                        let section_label = if dark == cur.dark_mode {
+                            format!("{label} — 当前生效")
+                        } else {
+                            label.to_string()
+                        };
+                        swatches.push(
+                            v_flex()
+                                .w_full()
+                                .min_w_0()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .child(section_label),
+                                )
+                                .child(
+                                    h_flex()
+                                        .w_full()
+                                        .overflow_x_scrollbar()
+                                        .id(("theme-swatches", dark as usize))
+                                        .items_start()
+                                        .gap_2()
+                                        .pb_2()
+                                        .children(cards),
+                                ),
+                        );
+                    }
                 }
 
                 let ws_mode_dark = workspace.clone();
@@ -2256,17 +2134,13 @@ pub fn open_settings_modal_at(
                     ));
                 }
 
-                return dialog.child(
-                    body.child(
+                return page(
                         v_flex()
                             .gap_2p5()
-                            .max_h(px(480.0))
                             .w_full()
                             .min_w_0()
-                            .pr_1()
-                            .overflow_y_scrollbar()
                             .child(
-                                macos_inset_group(cx)
+                                v_flex().w_full().min_w_0()
                                     .flex_shrink_0()
                                     .child(
                                         h_flex()
@@ -2375,7 +2249,7 @@ pub fn open_settings_modal_at(
                                                                 cx.theme().muted_foreground,
                                                             )
                                                             .child(
-                                                                "Superlogical Rex 风格：顶栏、侧边栏、卡片与编辑器与终端浑然一体",
+                                                                "让顶栏与侧边栏使用当前终端主题的配色",
                                                             ),
                                                     ),
                                             )
@@ -2469,8 +2343,8 @@ pub fn open_settings_modal_at(
                                         ),
                                     ),
                             )
-                            .child(if grid_rows.is_empty() {
-                                macos_inset_group(cx)
+                            .child(if swatches.is_empty() {
+                                v_flex().w_full().min_w_0()
                                     .flex_shrink_0()
                                     .py_8()
                                     .items_center()
@@ -2487,11 +2361,11 @@ pub fn open_settings_modal_at(
                                     .min_w_0()
                                     .flex_shrink_0()
                                     .gap_2p5()
-                                    .children(grid_rows)
+                                    .children(swatches)
                                     .into_any_element()
                             })
                             .child(
-                                macos_inset_group(cx)
+                                v_flex().w_full().min_w_0()
                                     .flex_shrink_0()
                                     .px_3p5()
                                     .py_2p5()
@@ -2662,8 +2536,7 @@ pub fn open_settings_modal_at(
                                                     )
                                             }))
                                     })),
-                            ),
-                    ),
+                            ).into_any_element(),
                 );
             }
             SettingsTab::General => {}
@@ -2681,54 +2554,16 @@ pub fn open_settings_modal_at(
         let ws_syn_import = workspace.clone();
         let ws_syn_reload = workspace.clone();
         let syn_pack = SyntaxRegistry::global().current();
-        let sys_mono = system_monospace_font_family();
-        let sys_preset_family = if TERMINAL_FONT_PRESETS
-            .iter()
-            .any(|p| p.family.eq_ignore_ascii_case(sys_mono))
-        {
-            "Consolas"
-        } else {
-            sys_mono
-        };
         let palette = TerminalPalette::for_theme_id(cur.active_theme_id(), cur.dark_mode);
-        let preview_font = TerminalFont::resolve(&font_in.read(cx).value(), palette.dark, || {
-            cx.text_system().all_font_names()
-        });
+        let preview_font =
+            TerminalFont::resolve(&cur.font_family, palette.dark, || installed_font_names(cx));
         let preview = terminal_font_preview(&preview_font, cur.font_size, &palette, window, cx);
-        let font_presets = TERMINAL_FONT_PRESETS
-            .iter()
-            .map(|p| (p.family, SharedString::from(p.label)))
-            .chain(std::iter::once((
-                sys_preset_family,
-                format!("系统等宽 ({sys_preset_family})").into(),
-            )))
-            .enumerate()
-            .map(|(index, (family, label))| {
-                let input = font_in.clone();
-                let ws = workspace.clone();
-                Button::new(("font-preset", index))
-                    .font_family(family)
-                    .secondary()
-                    .xsmall()
-                    .selected(preview_font.font.family == family)
-                    .label(label)
-                    .on_click(move |_, window, cx| {
-                        input.update(cx, |st, cx| st.set_value(family, window, cx));
-                        ws.update(cx, |ws, cx| ws.set_font_family(family.to_string(), cx));
-                        window.refresh();
-                    })
-            });
 
-        dialog.child(body.child(
+        page(
             v_flex()
-                .gap_3()
-                .max_h(px(440.0))
-                .w_full()
-                .min_w_0()
-                .pr_1()
-                .overflow_y_scrollbar()
+                .w_full().min_w_0().gap_3()
                 .child(
-                    macos_inset_group(cx)
+                    v_flex().w_full().min_w_0()
                         .flex_shrink_0()
                         .child(
                                 h_flex()
@@ -2752,7 +2587,7 @@ pub fn open_settings_modal_at(
                                                 div()
                                                     .text_xs()
                                                     .text_color(cx.theme().muted_foreground)
-                                                    .child("同步切换 macOS 窗口材质与终端配色"),
+                                                    .child("同步切换窗口外观与终端深浅配色"),
                                             ),
                                     )
                                     .child(
@@ -2829,12 +2664,10 @@ pub fn open_settings_modal_at(
                                     .gap_2()
                                     .border_t_1()
                                     .border_color(cx.theme().border)
-                                    .child(field_block(
-                                        "终端等宽字体族（中文与图标自动回退内置更纱黑体）",
-                                        Input::new(&font_in).small(),
-                                        cx,
-                                    ))
-                                    .child(h_flex().min_w_0().flex_wrap().gap_1p5().children(font_presets))
+                                    .child(h_flex().items_center().justify_between().gap_2()
+                                        .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("终端等宽字体"))
+                                        .child(Select::new(&font_select).small().w(px(260.)).menu_width(px(300.))
+                                            .accessibility_label("终端等宽字体").search_placeholder("搜索字体")))
                                     .child(preview),
                             )
                             .child(
@@ -2874,7 +2707,7 @@ pub fn open_settings_modal_at(
                             ),
                     )
                     .child(
-                        macos_inset_group(cx)
+                        v_flex().w_full().min_w_0()
                             .flex_shrink_0()
                             .child(
                                 h_flex()
@@ -3067,7 +2900,7 @@ pub fn open_settings_modal_at(
                                             .checked(cur.follow_sftp_cwd)
                                             .on_change(move |val, window, cx| {
                                                 ws_follow.update(cx, |ws, cx| {
-                                                    ws.set_follow_sftp_cwd(*val, cx)
+                                                    ws.set_follow_sftp_cwd(*val, Some(window), cx)
                                                 });
                                                 window.refresh();
                                             }),
@@ -3075,7 +2908,7 @@ pub fn open_settings_modal_at(
                             ),
                     )
                     .child(
-                        macos_inset_group(cx)
+                        v_flex().w_full().min_w_0()
                             .flex_shrink_0()
                             .px_3p5()
                             .py_2p5()
@@ -3231,7 +3064,7 @@ pub fn open_settings_modal_at(
                             ),
                     )
                     .child(
-                        macos_inset_group(cx)
+                        v_flex().w_full().min_w_0()
                             .flex_shrink_0()
                             .child(
                                 h_flex()
@@ -3352,8 +3185,16 @@ pub fn open_settings_modal_at(
                                             .child(format!("运行与崩溃日志：{logs_dir_display}")),
                                     )
                             })),
-                    ),
-        ))
+                    ).into_any_element())
+    };
+    window.open_dialog(cx, move |dialog, _, _| {
+        dialog
+            .centered()
+            .w(px(880.0))
+            .p_0()
+            .h(px(580.0))
+            .overflow_hidden()
+            .content(settings_content.clone())
     });
 }
 
@@ -3365,14 +3206,21 @@ fn terminal_font_preview(
     cx: &App,
 ) -> impl IntoElement {
     let metrics = font.measure(size, window.text_system());
-    let height = metrics.cell_h * 2.0;
+    let height = metrics.cell_h * 3.0;
+    let caption = format!(
+        "{}  ·  {size:.0} px  ·  单元格 {:.1} × {:.1} px",
+        font.font.family,
+        f32::from(metrics.cell_w),
+        f32::from(metrics.cell_h)
+    );
     let regular_font = font.font.clone();
     let mut bold_font = regular_font.clone();
     bold_font.weight = font.tuning.bold_weight;
     let fg = rgb_to_hsla(palette.foreground, 1.0);
     let prompt = rgb_to_hsla(palette.ansi[2], 1.0);
     let path_fg = rgb_to_hsla(palette.ansi[6], 1.0);
-    div()
+    v_flex()
+        .gap_1()
         .w_full()
         .min_w_0()
         .px_2p5()
@@ -3383,15 +3231,25 @@ fn terminal_font_preview(
         .overflow_hidden()
         .bg(rgb_to_hsla(palette.background, 1.0))
         .child(
+            div()
+                .w_full()
+                .truncate()
+                .text_xs()
+                .text_color(fg)
+                .child(caption),
+        )
+        .child(
             canvas(
                 |_, _, _| (),
                 move |bounds, (), window, cx| {
                     for (row, col, sample, wide, bold, color) in [
                         (0, 0, "mica@prod", false, true, prompt),
-                        (0, 10, "~", false, false, path_fg),
-                        (0, 12, "| 0O 1lI {} [] != ->", false, false, fg),
-                        (1, 0, "中文等宽对齐", true, false, fg),
-                        (1, 12, "| 200 OK  1234567890", false, false, fg),
+                        (0, 9, ":~/src", false, false, path_fg),
+                        (0, 15, "$ ls -lh", false, false, fg),
+                        (1, 0, "0O 1lI {} []", false, false, fg),
+                        (1, 12, "│ != -> 1234567890", false, false, fg),
+                        (2, 0, "中文等宽对齐", true, false, fg),
+                        (2, 12, "│ grid ─┬─┘", false, false, path_fg),
                     ] {
                         let run = TextRun {
                             len: sample.len(),

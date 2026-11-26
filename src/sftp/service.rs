@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Local, TimeZone};
 use russh::client;
 use russh_sftp::client::SftpSession;
+use russh_sftp::client::error::Error as SftpError;
 use russh_sftp::protocol::FilePermissions;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex as AsyncMutex;
@@ -16,6 +17,19 @@ use crate::ssh::client::SshClientHandler;
 
 const MAX_REMOTE_EDIT_BYTES: u64 = 2 * 1024 * 1024;
 const STREAM_CHUNK_BYTES: usize = 64 * 1024;
+
+fn channel_failed(err: &SftpError) -> bool {
+    match err {
+        SftpError::IO(_) | SftpError::Timeout => true,
+        // russh-sftp 2.4 reports closed request channels through UnexpectedBehavior.
+        SftpError::UnexpectedBehavior(reason) => {
+            matches!(reason.as_str(), "session closed" | "sender dropped")
+                || reason.starts_with("SendError: ")
+                || reason.starts_with("RecvError: ")
+        }
+        _ => false,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoteEntryKind {
@@ -84,6 +98,7 @@ pub enum TransferStatus {
 #[derive(Debug, Clone)]
 pub struct TransferRecord {
     pub id: String,
+    pub session_label: String,
     pub direction: TransferDirection,
     pub file_name: String,
     pub bytes_done: u64,
@@ -141,40 +156,41 @@ impl SftpService {
         Ok(fresh)
     }
 
-    async fn invalidate_cached_sftp(&self) {
+    async fn reopen_sftp(&self, failed: &Arc<SftpSession>) -> Result<Arc<SftpSession>> {
         let mut guard = self.cached_session.lock().await;
+        if let Some(session) = guard.as_ref()
+            && !Arc::ptr_eq(session, failed)
+        {
+            return Ok(session.clone());
+        }
         *guard = None;
+        let fresh = self.create_new_sftp().await?;
+        *guard = Some(fresh.clone());
+        Ok(fresh)
     }
 
     pub async fn canonicalize(&self, path: &str) -> Result<String> {
         let sftp = self.get_or_open_sftp().await?;
-        match sftp.canonicalize(path).await {
-            Ok(resolved) => Ok(resolved),
-            Err(_) => {
-                self.invalidate_cached_sftp().await;
-                let sftp = self.get_or_open_sftp().await?;
-                sftp.canonicalize(path)
-                    .await
-                    .with_context(|| format!("解析远程路径 `{path}` 失败"))
+        let result = match sftp.canonicalize(path).await {
+            Err(err) if channel_failed(&err) => {
+                self.reopen_sftp(&sftp).await?.canonicalize(path).await
             }
-        }
+            result => result,
+        };
+        result.with_context(|| format!("解析远程路径 `{path}` 失败"))
     }
 
     pub async fn list_dir(&self, dir_path: &str) -> Result<Vec<RemoteEntry>> {
-        let sftp = self.get_or_open_sftp().await?;
+        let mut sftp = self.get_or_open_sftp().await?;
         let read_dir = match sftp.read_dir(dir_path).await {
-            Ok(rd) => rd,
-            Err(_) => {
-                self.invalidate_cached_sftp().await;
-                let fresh = self.get_or_open_sftp().await?;
-                fresh
-                    .read_dir(dir_path)
-                    .await
-                    .with_context(|| format!("读取远程目录 `{dir_path}` 失败"))?
+            Err(err) if channel_failed(&err) => {
+                sftp = self.reopen_sftp(&sftp).await?;
+                sftp.read_dir(dir_path).await
             }
-        };
+            result => result,
+        }
+        .with_context(|| format!("读取远程目录 `{dir_path}` 失败"))?;
 
-        let sftp_for_stat = self.get_or_open_sftp().await?;
         let mut items = Vec::new();
         for entry in read_dir {
             let name = entry.file_name();
@@ -196,7 +212,7 @@ impl SftpService {
             let mut points_to_dir = false;
             let mut size_bytes = meta.size;
             if kind == RemoteEntryKind::Symlink
-                && let Ok(target_meta) = sftp_for_stat.metadata(&full_path).await
+                && let Ok(target_meta) = sftp.metadata(&full_path).await
             {
                 points_to_dir = target_meta.is_dir();
                 if !points_to_dir {
@@ -421,6 +437,33 @@ pub fn format_bytes(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_transport_failures_reopen_the_subchannel() {
+        use russh_sftp::protocol::{Status, StatusCode};
+        for status_code in [
+            StatusCode::NoSuchFile,
+            StatusCode::PermissionDenied,
+            StatusCode::Failure,
+        ] {
+            assert!(!channel_failed(&SftpError::Status(Status {
+                id: 1,
+                status_code,
+                error_message: "server rejected request".into(),
+                language_tag: String::new(),
+            })));
+        }
+        assert!(!channel_failed(&SftpError::UnexpectedPacket));
+        assert!(!channel_failed(&SftpError::Limited("packet limit".into())));
+        assert!(!channel_failed(&SftpError::UnexpectedBehavior(
+            "no file".into()
+        )));
+        assert!(channel_failed(&SftpError::IO("broken pipe".into())));
+        assert!(channel_failed(&SftpError::Timeout));
+        assert!(channel_failed(&SftpError::UnexpectedBehavior(
+            "session closed".into()
+        )));
+    }
 
     #[test]
     fn remote_path_helpers_work() {

@@ -33,8 +33,9 @@ use crate::terminal::semantic::{
     CommandBlockStatus, CommandSyntaxTarget, OverviewMarker, OverviewMarkerKind, RowTextMap,
     SemanticOptions, SemanticRole, VisibleCommandBlock, detect_command_syntax_target,
     detect_input_spans_for_prompt_row, detect_output_spans_for_row,
-    detect_prompt_command_byte_offset, extract_cwd_from_window_title, extract_http_url_byte_ranges,
-    line_has_error_signature, openable_http_url, validate_openable_http_url,
+    detect_prompt_command_byte_offset, extract_cwd_from_prompt_line, extract_cwd_from_window_title,
+    extract_http_url_byte_ranges, line_has_error_signature, openable_http_url,
+    validate_openable_http_url,
 };
 
 const MAX_OSC133_RECORDS: usize = 512;
@@ -294,6 +295,18 @@ impl AlacrittyTerminalEngine {
             }
         }
 
+        if detected_cwd.is_none() && !self.mode().contains(TermMode::ALT_SCREEN) {
+            let row = self.term.grid().cursor.point.line;
+            if !self.row_has_wrapline(row) {
+                let start = *self.logical_rows(row.0).start();
+                let line = if start == row.0 {
+                    self.extract_plain_grid_line(row)
+                } else {
+                    self.stitch_logical_line_at(start, row.0, row.0, &[]).text
+                };
+                detected_cwd = extract_cwd_from_prompt_line(&line, self.remote_home_dir.as_deref());
+            }
+        }
         if let Some(cwd) = detected_cwd
             && self.last_cwd.as_deref() != Some(cwd.as_str())
         {
@@ -2007,6 +2020,53 @@ fn percent_decode(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prompt_cwd_uses_the_live_cursor_after_osc_and_title() {
+        let mut engine = AlacrittyTerminalEngine::new(4, 60, 100);
+        let mut cwd = |bytes: &[u8]| {
+            engine
+                .feed_bytes(bytes)
+                .into_iter()
+                .find_map(|effect| match effect {
+                    EngineSideEffect::CurrentDirChanged(path) => Some(path),
+                    _ => None,
+                })
+        };
+        assert_eq!(cwd(b"root@box:/etc# ").as_deref(), Some("/etc"));
+        assert_eq!(cwd(b"ls"), None);
+        assert_eq!(cwd(b"\r\nroot@box:/old# \r\noutput"), None);
+        assert_eq!(
+            cwd(b"\r\nroot@box:/new# \x1b]2;user@box:/title\x07").as_deref(),
+            Some("/title")
+        );
+        assert_eq!(
+            cwd(b"\x1b]7;file://box/osc\x07\x1b]2;user@box:/title\x07").as_deref(),
+            Some("/osc")
+        );
+        assert_eq!(
+            cwd(b"\x1b]1337;CurrentDir=/explicit\x07").as_deref(),
+            Some("/explicit")
+        );
+        assert_eq!(cwd(b"\x1b[?1049h\x1b[Hroot@box:/tui# "), None);
+        assert_eq!(
+            cwd(b"\x1b[?1049l\r\nroot@box:/live# ").as_deref(),
+            Some("/live")
+        );
+        assert_eq!(cwd(b" "), None);
+
+        let mut narrow = AlacrittyTerminalEngine::new(5, 12, 100);
+        let effects = narrow.feed_bytes(b"root@box:/long/directory# ");
+        assert!(effects.iter().any(
+            |e| matches!(e, EngineSideEffect::CurrentDirChanged(dir) if dir == "/long/directory")
+        ));
+        let effects = narrow.feed_bytes(b"\r\nprinted textroot@box:/fake# ");
+        assert!(
+            !effects
+                .iter()
+                .any(|e| matches!(e, EngineSideEffect::CurrentDirChanged(_)))
+        );
+    }
 
     #[test]
     fn engine_renders_ansi_text_and_parses_osc7() {

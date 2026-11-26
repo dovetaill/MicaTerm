@@ -37,7 +37,7 @@ use crate::ui::modals::{
     SshHostModalInit, open_confirm_dialog, open_keychain_modal, open_settings_modal,
     open_simple_name_dialog, open_snippet_modal, open_ssh_host_modal,
 };
-use crate::ui::sftp_panel::{SftpPanelEvent, SftpPanelView};
+use crate::ui::sftp_panel::{SftpBindingKey, SftpPanelEvent, SftpPanelView, SftpTarget};
 use crate::ui::sidebar::{LeftSidebar, SidebarSection};
 use crate::ui::terminal_view::{PanePreferences, TerminalPaneEvent, TerminalPaneView};
 use crate::ui::theme::apply_workspace_theme;
@@ -285,9 +285,21 @@ impl MicaWorkspace {
             window,
             |this, _, event, window, cx| match event {
                 SftpPanelEvent::FollowChanged(follow) => {
-                    this.settings.follow_sftp_cwd = *follow;
-                    let _ = this.store.save_settings(&this.settings);
-                    cx.notify();
+                    this.set_follow_sftp_cwd(*follow, Some(window), cx);
+                }
+                SftpPanelEvent::Navigated { binding, path } => {
+                    let session = this
+                        .tabs
+                        .iter()
+                        .flat_map(WorkspaceTab::panes)
+                        .map(|p| p.read(cx).session.clone())
+                        .find(|s| {
+                            let s = s.read(cx);
+                            s.id == binding.session_id && s.conn_epoch == binding.conn_epoch
+                        });
+                    if let Some(session) = session {
+                        session.update(cx, |s, _| s.remember_sftp_directory(path.clone()));
+                    }
                 }
                 SftpPanelEvent::CloseRequested => this.toggle_sftp_panel(window, cx),
             },
@@ -354,10 +366,7 @@ impl MicaWorkspace {
         let visible = self.settings.show_sftp_panel;
         let _ = self.store.save_settings(&self.settings);
         self.sftp_panel
-            .update(cx, |p, cx| p.set_panel_visible(visible, Some(window), cx));
-        if visible {
-            self.sync_sftp_binding(Some(window), cx);
-        }
+            .update(cx, |p, cx| p.set_panel_visible(visible, window, cx));
         self.focus_active_pane(window, cx);
         cx.notify();
     }
@@ -695,13 +704,21 @@ impl MicaWorkspace {
         cx.notify();
     }
 
-    pub fn set_follow_sftp_cwd(&mut self, follow: bool, cx: &mut Context<Self>) {
+    pub fn set_follow_sftp_cwd(
+        &mut self,
+        follow: bool,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
         self.settings.follow_sftp_cwd = follow;
         let _ = self.store.save_settings(&self.settings);
         self.sftp_panel.update(cx, |p, cx| {
             p.follow_cwd = follow;
             cx.notify();
         });
+        if follow {
+            self.follow_active_shell_directory(window, cx);
+        }
         cx.notify();
     }
 
@@ -766,30 +783,37 @@ impl MicaWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<TerminalPaneView> {
-        cx.subscribe(&session, move |this, session_ent, event, cx| match event {
-            SessionEntityEvent::TitleChanged(new_title) => {
-                for tab in &mut this.tabs {
-                    if tab
-                        .active_pane()
-                        .is_some_and(|p| p.read(cx).session == session_ent)
-                    {
-                        tab.title = new_title.clone();
+        cx.subscribe_in(
+            &session,
+            window,
+            move |this, session_ent, event, window, cx| match event {
+                SessionEntityEvent::TitleChanged(new_title) => {
+                    for tab in &mut this.tabs {
+                        if tab
+                            .active_pane()
+                            .is_some_and(|p| &p.read(cx).session == session_ent)
+                        {
+                            tab.title = new_title.clone();
+                        }
+                    }
+                    if this.is_active_session(session_ent, cx) {
+                        this.sync_sftp_binding(Some(window), cx);
+                    }
+                    cx.notify();
+                }
+                SessionEntityEvent::PhaseChanged => {
+                    if this.is_active_session(session_ent, cx) {
+                        this.sync_sftp_binding(Some(window), cx);
+                    }
+                    cx.notify();
+                }
+                SessionEntityEvent::RemoteCwdChanged => {
+                    if this.settings.follow_sftp_cwd && this.is_active_session(session_ent, cx) {
+                        this.follow_active_shell_directory(Some(window), cx);
                     }
                 }
-                cx.notify();
-            }
-            SessionEntityEvent::RemoteConnected { .. } | SessionEntityEvent::PhaseChanged => {
-                this.sync_sftp_binding(None, cx);
-                cx.notify();
-            }
-            SessionEntityEvent::RemoteCwdChanged(new_cwd) => {
-                if this.is_active_session(&session_ent, cx) {
-                    let cwd = new_cwd.clone();
-                    this.sftp_panel
-                        .update(cx, |p, cx| p.on_terminal_cwd_changed(cwd, None, cx));
-                }
-            }
-        })
+            },
+        )
         .detach();
 
         let prefs = self.current_pane_preferences();
@@ -826,6 +850,7 @@ impl MicaWorkspace {
             .iter_mut()
             .find(|tab| tab.active_pane != *pane && tab.panes().contains(pane))
         {
+            tab.title = pane.read(cx).session.read(cx).title.clone();
             tab.active_pane = pane.clone();
             tab.refresh_split_flags(cx);
             self.sync_sftp_binding(window, cx);
@@ -854,6 +879,7 @@ impl MicaWorkspace {
             && let Some(next_pane) = tab.panes().pop()
         {
             next_pane.focus_handle(cx).focus(window, cx);
+            tab.title = next_pane.read(cx).session.read(cx).title.clone();
             tab.active_pane = next_pane;
         }
         tab.refresh_split_flags(cx);
@@ -1048,6 +1074,7 @@ impl MicaWorkspace {
             if let Some(target) = tab.active_pane()
                 && tab.root.split_target(&target, axis, pane.clone())
             {
+                tab.title = pane.read(cx).session.read(cx).title.clone();
                 tab.active_pane = pane;
                 tab.refresh_split_flags(cx);
             }
@@ -1143,24 +1170,45 @@ impl MicaWorkspace {
     }
 
     fn sync_sftp_binding(&mut self, window: Option<&mut Window>, cx: &mut Context<Self>) {
-        let active_session = self
+        let target = self
             .active_tab()
             .and_then(WorkspaceTab::active_pane)
-            .map(|p| p.read(cx).session.clone());
-
-        let (label, svc, cwd) = if let Some(sess) = active_session {
-            let s = sess.read(cx);
-            (
-                s.title.clone(),
-                s.sftp_service(),
-                s.remote_cwd().map(ToString::to_string),
-            )
-        } else {
-            (String::new(), None, None)
-        };
-
+            .and_then(|p| {
+                let s = p.read(cx).session.read(cx);
+                Some((
+                    s.sftp_service()?,
+                    SftpTarget {
+                        binding: SftpBindingKey {
+                            session_id: s.id.clone(),
+                            conn_epoch: s.conn_epoch,
+                        },
+                        session_label: s.title.clone(),
+                        dir: s.sftp_directory(self.settings.follow_sftp_cwd)?.to_owned(),
+                    },
+                ))
+            });
         self.sftp_panel
-            .update(cx, |panel, cx| panel.bind_session(label, svc, cwd, window, cx));
+            .update(cx, |p, cx| p.bind_session(target, window, cx));
+    }
+
+    fn follow_active_shell_directory(&self, window: Option<&mut Window>, cx: &mut Context<Self>) {
+        let Some(pane) = self.active_tab().and_then(WorkspaceTab::active_pane) else {
+            return;
+        };
+        let Some(dir) = pane
+            .read(cx)
+            .session
+            .read(cx)
+            .remote_cwd()
+            .map(str::to_owned)
+        else {
+            return;
+        };
+        self.sftp_panel.update(cx, |p, cx| {
+            if p.current_path() != dir {
+                p.navigate_to(dir, window, cx);
+            }
+        });
     }
 
     fn record_recent_host(&mut self, host_id: &str) {
@@ -1649,7 +1697,7 @@ impl MicaWorkspace {
             .id(SharedString::from(format!("ws-tab-{tid}")))
             .flex_shrink_0()
             .max_w(px(210.0))
-            .h(px(27.0))
+            .h(px(30.0))
             .pl_2p5()
             .pr_1p5()
             .gap_1p5()
@@ -1806,8 +1854,9 @@ impl MicaWorkspace {
             theme_pack.resolve(&self.settings.dark_theme, true).name
         };
         let has_active_tab = self.active_tab_id.is_some();
-        let sftp_busy = self.sftp_panel.read(cx).has_active_transfers();
-        let shortcut_tooltip = |label: &str, action| tooltip(label, self.settings.shortcuts.get(action).as_ref());
+        let transfers = self.sftp_panel.read(cx).active_transfer_count();
+        let shortcut_tooltip =
+            |label: &str, action| tooltip(label, self.settings.shortcuts.get(action).as_ref());
         let app_paths = self.paths.clone();
         let paths_for_logs = self.paths.clone();
 
@@ -1818,7 +1867,8 @@ impl MicaWorkspace {
             .collect();
 
         TitleBar::new()
-            .h(px(38.0))
+            .h(px(40.0))
+            .border_b_0()
             .bg(cx.theme().title_bar)
             .child(
                 h_flex()
@@ -1883,11 +1933,8 @@ impl MicaWorkspace {
                     }))
                     .child(
                         h_flex()
-                            .p(px(1.5))
                             .gap_0p5()
                             .items_center()
-                            .rounded(px(6.5))
-                            .bg(cx.theme().secondary.opacity(0.65))
                             .on_mouse_down(MouseButton::Left, |_, window, _| {
                                 window.prevent_default();
                             })
@@ -1993,14 +2040,20 @@ impl MicaWorkspace {
                             .xsmall()
                             .compact()
                             .selected(show_sftp)
-                            .loading(sftp_busy)
                             .icon(if show_sftp {
                                 LucideIcon::PanelRightClose
                             } else {
                                 LucideIcon::PanelRightOpen
                             })
-                            .label("SFTP")
-                            .tooltip(shortcut_tooltip("切换右侧 SFTP 检查器", ShortcutAction::ToggleSftpPanel))
+                            .label(if transfers > 0 {
+                                format!("SFTP · {transfers}")
+                            } else {
+                                "SFTP".into()
+                            })
+                            .tooltip(shortcut_tooltip(
+                                "切换右侧 SFTP 检查器",
+                                ShortcutAction::ToggleSftpPanel,
+                            ))
                             .on_click(move |_, window, cx| {
                                 ws_sftp.update(cx, |ws, cx| ws.toggle_sftp_panel(window, cx));
                             }),
@@ -2165,9 +2218,21 @@ impl Render for MicaWorkspace {
             .track_focus(&self.focus_handle)
             .capture_key_down(cx.listener(Self::handle_capture_key_down))
             .size_full()
-            .bg(cx.theme().background)
+            .bg(cx.theme().title_bar)
             .text_color(cx.theme().foreground)
             .child(title_bar)
-            .child(body)
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .mx(px(6.0))
+                    .mb(px(6.0))
+                    .rounded(px(8.0))
+                    .overflow_hidden()
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().background)
+                    .child(body),
+            )
     }
 }

@@ -46,11 +46,7 @@ pub enum SessionPhase {
 #[derive(Clone)]
 pub enum SessionEntityEvent {
     TitleChanged(String),
-    RemoteConnected {
-        sftp: SftpService,
-        initial_dir: String,
-    },
-    RemoteCwdChanged(String),
+    RemoteCwdChanged,
     PhaseChanged,
 }
 
@@ -71,7 +67,11 @@ pub struct TerminalSessionEntity {
     engine: AlacrittyTerminalEngine,
     backend: ActiveBackend,
     sftp: Option<SftpService>,
+    pub conn_epoch: u64,
     remote_cwd: Option<String>,
+    sftp_cwd: Option<String>,
+    remote_cwd_seq: u64,
+    sftp_synced_cwd_seq: u64,
     tokio_handle: tokio::runtime::Handle,
 }
 
@@ -96,7 +96,11 @@ impl TerminalSessionEntity {
             engine: AlacrittyTerminalEngine::new(28, 100, scrollback_lines),
             backend: ActiveBackend::None,
             sftp: None,
+            conn_epoch: 0,
             remote_cwd: None,
+            sftp_cwd: None,
+            remote_cwd_seq: 0,
+            sftp_synced_cwd_seq: 0,
             tokio_handle,
         };
         this.engine.is_windows_local_pty = cfg!(target_os = "windows");
@@ -127,7 +131,11 @@ impl TerminalSessionEntity {
             engine: AlacrittyTerminalEngine::new(28, 100, scrollback_lines),
             backend: ActiveBackend::None,
             sftp: None,
+            conn_epoch: 0,
             remote_cwd: None,
+            sftp_cwd: None,
+            remote_cwd_seq: 0,
+            sftp_synced_cwd_seq: 0,
             tokio_handle,
         };
         this.start_backend(cx);
@@ -150,6 +158,19 @@ impl TerminalSessionEntity {
         self.remote_cwd.as_deref()
     }
 
+    pub fn sftp_directory(&self, follow: bool) -> Option<&str> {
+        if follow && self.remote_cwd_seq != self.sftp_synced_cwd_seq {
+            self.remote_cwd()
+        } else {
+            self.sftp_cwd.as_deref().or(self.remote_cwd())
+        }
+    }
+
+    pub fn remember_sftp_directory(&mut self, path: String) {
+        self.sftp_cwd = Some(path);
+        self.sftp_synced_cwd_seq = self.remote_cwd_seq;
+    }
+
     pub fn endpoint_subtitle(&self) -> String {
         match &self.kind {
             SessionKind::LocalShell => "本地 Shell".to_string(),
@@ -165,7 +186,11 @@ impl TerminalSessionEntity {
         self.engine.is_windows_local_pty = cfg!(target_os = "windows") && !self.is_ssh();
         self.sftp = None;
         self.remote_cwd = None;
+        self.sftp_cwd = None;
+        self.remote_cwd_seq = 0;
+        self.sftp_synced_cwd_seq = 0;
         self.start_backend(cx);
+        cx.emit(SessionEntityEvent::PhaseChanged);
         cx.notify();
     }
 
@@ -186,6 +211,7 @@ impl TerminalSessionEntity {
     }
 
     fn start_backend(&mut self, cx: &mut Context<Self>) {
+        self.conn_epoch += 1;
         let (rows, cols) = self.engine.dimensions();
         match self.kind.clone() {
             SessionKind::LocalShell => {
@@ -227,6 +253,7 @@ impl TerminalSessionEntity {
         cx: &mut Context<Self>,
     ) {
         let shared_rx = Arc::new(Mutex::new(Vec::<LocalPtyEvent>::new()));
+        let epoch = self.conn_epoch;
         let collector = Arc::clone(&shared_rx);
         let (wake_tx, mut wake_rx) = smol_wakeup_channel();
 
@@ -248,6 +275,9 @@ impl TerminalSessionEntity {
                     continue;
                 }
                 let alive = weak.update(cx, |this, cx| {
+                    if this.conn_epoch != epoch {
+                        return false;
+                    }
                     for ev in batch {
                         match ev {
                             LocalPtyEvent::Output(bytes) => {
@@ -265,8 +295,9 @@ impl TerminalSessionEntity {
                         }
                     }
                     cx.notify();
+                    true
                 });
-                if alive.is_err() {
+                if !matches!(alive, Ok(true)) {
                     break;
                 }
             }
@@ -280,6 +311,7 @@ impl TerminalSessionEntity {
         cx: &mut Context<Self>,
     ) {
         let shared_rx = Arc::new(Mutex::new(Vec::<SshSessionEvent>::new()));
+        let epoch = self.conn_epoch;
         let collector = Arc::clone(&shared_rx);
         let (wake_tx, mut wake_rx) = smol_wakeup_channel();
 
@@ -301,6 +333,9 @@ impl TerminalSessionEntity {
                     continue;
                 }
                 let alive = weak.update(cx, |this, cx| {
+                    if this.conn_epoch != epoch {
+                        return false;
+                    }
                     for ev in batch {
                         match ev {
                             SshSessionEvent::Step(step) => {
@@ -325,9 +360,9 @@ impl TerminalSessionEntity {
                                 tracing::info!(session_id = %this.id, initial_dir = %initial_dir, "SSH 终端会话已进入 Connected 状态");
                                 this.phase = SessionPhase::Connected;
                                 this.engine.set_remote_home_dir(home_dir);
-                                this.sftp = Some(sftp.clone());
-                                this.remote_cwd = Some(initial_dir.clone());
-                                cx.emit(SessionEntityEvent::RemoteConnected { sftp, initial_dir });
+                                this.sftp = Some(sftp);
+                                this.remote_cwd = Some(initial_dir);
+                                this.remote_cwd_seq += 1;
                                 cx.emit(SessionEntityEvent::PhaseChanged);
                             }
                             SshSessionEvent::Output(bytes) => {
@@ -348,8 +383,9 @@ impl TerminalSessionEntity {
                         }
                     }
                     cx.notify();
+                    true
                 });
-                if alive.is_err() {
+                if !matches!(alive, Ok(true)) {
                     break;
                 }
             }
@@ -373,8 +409,11 @@ impl TerminalSessionEntity {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
                 }
                 EngineSideEffect::CurrentDirChanged(dir) => {
-                    self.remote_cwd = Some(dir.clone());
-                    cx.emit(SessionEntityEvent::RemoteCwdChanged(dir));
+                    if self.remote_cwd.as_ref() != Some(&dir) {
+                        self.remote_cwd = Some(dir);
+                        self.remote_cwd_seq += 1;
+                        cx.emit(SessionEntityEvent::RemoteCwdChanged);
+                    }
                 }
                 EngineSideEffect::Bell => {}
             }
@@ -620,5 +659,44 @@ struct WakeupReceiver {
 impl WakeupReceiver {
     async fn recv(&mut self) -> Result<(), ()> {
         self.rx.recv().await.ok_or(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn returning_to_a_session_keeps_manual_browsing_until_its_shell_moves() {
+        let session = |id: &str| TerminalSessionEntity {
+            id: id.into(),
+            title: "同名 SSH".into(),
+            kind: SessionKind::LocalShell,
+            phase: SessionPhase::Disconnected(None),
+            font_size: 14.,
+            search_open: false,
+            search_query: String::new(),
+            engine: AlacrittyTerminalEngine::new(4, 30, 100),
+            backend: ActiveBackend::None,
+            sftp: None,
+            conn_epoch: 1,
+            remote_cwd: Some("/home".into()),
+            remote_cwd_seq: 1,
+            sftp_cwd: None,
+            sftp_synced_cwd_seq: 0,
+            tokio_handle: tokio::runtime::Handle::current(),
+        };
+        let mut a = session("A");
+        let mut b = session("B");
+        assert_eq!(a.sftp_directory(true), Some("/home"));
+        a.remember_sftp_directory("/manual/a".into());
+        b.remember_sftp_directory("/manual/b".into());
+        assert_eq!(b.sftp_directory(true), Some("/manual/b"));
+        assert_eq!(a.sftp_directory(true), Some("/manual/a"));
+        a.remote_cwd = Some("/latest".into());
+        a.remote_cwd_seq += 1;
+        assert_eq!(a.sftp_directory(false), Some("/manual/a"));
+        assert_eq!(a.sftp_directory(true), Some("/latest"));
+        assert_eq!(b.sftp_directory(true), Some("/manual/b"));
     }
 }

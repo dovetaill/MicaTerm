@@ -18,7 +18,7 @@ use gpui_kit::{
 };
 
 use crate::ui::brand::brand_app_icon_element;
-use crate::ui::theme::{macos_env_badge_colors, macos_inset_group, macos_squircle_badge};
+use crate::ui::theme::{macos_env_badge_colors, macos_inset_group};
 
 type WindowActionFn = Rc<dyn Fn(&mut Window, &mut App)>;
 type HostConnectFn = Rc<dyn Fn(&str, &mut Window, &mut App)>;
@@ -83,7 +83,7 @@ fn render_action_card(
                         .flex_1()
                         .gap_3p5()
                         .items_center()
-                        .child(macos_squircle_badge(icon, tint, 38.0, 9.5))
+                        .child(Icon::new(icon).size(px(22.)).text_color(tint))
                         .child(
                             v_flex()
                                 .min_w_0()
@@ -156,12 +156,11 @@ fn render_quick_host_row(
                 .flex_1()
                 .gap_3()
                 .items_center()
-                .child(macos_squircle_badge(
-                    LucideIcon::Server,
-                    cx.theme().primary,
-                    30.0,
-                    7.5,
-                ))
+                .child(
+                    Icon::new(LucideIcon::Server)
+                        .size(px(16.))
+                        .text_color(cx.theme().muted_foreground),
+                )
                 .child(
                     v_flex()
                         .min_w_0()
@@ -211,7 +210,7 @@ impl RenderOnce for WelcomeView {
             LucideIcon::Terminal,
             cx.theme().primary,
             "本地终端",
-            "启动本机 Shell，内置更纱黑体与 OSC 133 命令块",
+            "打开本机默认 Shell",
             self.on_open_local,
             cx,
         );
@@ -220,7 +219,7 @@ impl RenderOnce for WelcomeView {
             LucideIcon::Server,
             cx.theme().success,
             "新建 SSH 连接",
-            "支持密码、密钥库、跳板机与实时 SFTP 文件浏览",
+            "连接远程主机并浏览文件",
             self.on_new_ssh,
             cx,
         );
@@ -245,7 +244,7 @@ impl RenderOnce for WelcomeView {
                 .enumerate()
                 .map(|(idx, item)| render_quick_host_row(item, idx > 0, on_connect.clone(), cx))
                 .collect();
-            macos_inset_group(cx).children(rows).into_any_element()
+            v_flex().children(rows).into_any_element()
         };
 
         div()
@@ -257,10 +256,10 @@ impl RenderOnce for WelcomeView {
             .child(
                 v_flex()
                     .w_full()
-                    .max_w(px(680.0))
+                    .max_w(px(720.0))
                     .px_8()
-                    .py_12()
-                    .gap_7()
+                    .py(px(56.0))
+                    .gap_8()
                     .child(
                         h_flex()
                             .gap_3p5()
@@ -280,9 +279,7 @@ impl RenderOnce for WelcomeView {
                                         div()
                                             .text_xs()
                                             .text_color(cx.theme().muted_foreground)
-                                            .child(
-                                                "轻量流畅、GPU 加速的本地终端与远程 SSH / SFTP 工作台",
-                                            ),
+                                            .child("本地终端与远程 SSH 工作区"),
                                     ),
                             ),
                     )

@@ -766,6 +766,45 @@ pub fn extract_cwd_from_window_title(title: &str, remote_home: Option<&str>) -> 
     None
 }
 
+pub fn extract_cwd_from_prompt_line(line: &str, remote_home: Option<&str>) -> Option<String> {
+    let (end, false) = detect_prompt_command_byte_offset(line)? else {
+        return None;
+    };
+    let mut prompt = line[..end].trim_end();
+    while prompt.starts_with('(') {
+        prompt = prompt.split_once(") ")?.1.trim_start();
+    }
+    let path = if let Some(rest) = prompt.strip_prefix("➜ ") {
+        rest.split_whitespace().next()?
+    } else {
+        let prefix = prompt.strip_suffix(['$', '#', '%', '❯'])?.trim_end();
+        let prefix = prefix
+            .strip_prefix('[')
+            .and_then(|s| s.strip_suffix(']'))
+            .unwrap_or(prefix);
+        if prefix.starts_with(['/', '~']) {
+            prefix
+        } else {
+            let split = prefix.find(|c: char| c == ':' || c.is_whitespace())?;
+            let (host, tail) = prefix.split_at(split);
+            if !(looks_like_user_at_host_prompt(host)
+                || (is_prompt_ident(host) && tail.starts_with(':')))
+            {
+                return None;
+            }
+            tail.strip_prefix(':').unwrap_or(tail).trim_start()
+        }
+    };
+    if path.starts_with('/') && !path.starts_with("//") {
+        Some(path.to_owned())
+    } else if path == "~" {
+        remote_home.map(str::to_owned)
+    } else {
+        let rel = path.strip_prefix("~/")?;
+        Some(format!("{}/{rel}", remote_home?.trim_end_matches('/')))
+    }
+}
+
 /// Determines whether a command string (after the shell prompt) produces syntax-highlightable
 /// output on stdout, returning either a file/language hint or first-line fallback.
 pub fn detect_command_syntax_target(cmd_line: &str) -> Option<CommandSyntaxTarget> {
@@ -1326,6 +1365,41 @@ mod tests {
         assert_eq!(spans[1].role, SemanticRole::OutputUrl);
         assert_eq!(spans[1].start_col, 21);
         assert_eq!(extract_http_url_byte_ranges(&map.text).len(), 1);
+    }
+
+    #[test]
+    fn idle_prompts_only_report_unambiguous_remote_directories() {
+        let home = Some("/home/mei");
+        for (line, expected) in [
+            ("root@host:/var/log# ", "/var/log"),
+            ("mei@host:~/src$ ", "/home/mei/src"),
+            ("(venv) mei@host:~$ ", "/home/mei"),
+            ("[root@host /srv/www]# ", "/srv/www"),
+            ("[/etc]$ ", "/etc"),
+            ("/srv/app% ", "/srv/app"),
+            ("mei@host:/a:b c$ ", "/a:b c"),
+            ("➜  ~/src git:(main)", "/home/mei/src"),
+        ] {
+            assert_eq!(
+                extract_cwd_from_prompt_line(line, home).as_deref(),
+                Some(expected),
+                "{line}"
+            );
+        }
+        for line in [
+            "mei@host:~/src$ cd /tmp",
+            "output: /tmp",
+            "[root@host basename]#",
+            "missing /etc ❯",
+            "PS C:\\src>",
+            "# comment",
+            " /etc$",
+            "//server$",
+        ] {
+            assert_eq!(extract_cwd_from_prompt_line(line, home), None, "{line}");
+        }
+        assert_eq!(extract_cwd_from_prompt_line("u@h:~#", None), None);
+        assert_eq!(extract_cwd_from_prompt_line("u@h:~/src$", None), None);
     }
 
     #[test]

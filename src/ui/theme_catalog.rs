@@ -729,9 +729,9 @@ fn assemble_imported_spec(
     let sel = selection.unwrap_or(accent);
     let (sidebar_bg, titlebar_bg, surface_bg, muted_fg) = if dark {
         (
-            mix_hex(term_bg, 0x000000, 0.18),
-            mix_hex(term_bg, 0x000000, 0.30),
-            mix_hex(term_bg, 0xFFFFFF, 0.065),
+            mix_hex(term_bg, 0xFFFFFF, 0.06),
+            mix_hex(term_bg, 0xFFFFFF, 0.06),
+            term_bg,
             mix_hex(term_fg, term_bg, 0.44),
         )
     } else {
@@ -818,11 +818,11 @@ fn builtin_rex_obsidian() -> ThemeSpec {
         "Rex",
         ThemeCategory::Signature,
         true,
-        0x111216,
+        0x12141A,
         0xE6E9F2,
-        0x16181E,
-        0x0D0E12,
-        0x1C1F27,
+        0x1E2025,
+        0x1E2025,
+        0x12141A,
         0x8A91A6,
         0x6E7BF2,
         0x7C86FF,
@@ -844,8 +844,8 @@ fn builtin_rex_daylight() -> ThemeSpec {
         false,
         0xFAFAFC,
         0x181A20,
-        0xF1F3F8,
-        0xE9ECF4,
+        0xECEEF2,
+        0xECEEF2,
         0xFFFFFF,
         0x646B7D,
         0x4F46E5,

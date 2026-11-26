@@ -22,7 +22,7 @@ use serde_json::json;
 use crate::domain::AppSettings;
 use crate::ui::fonts::BUNDLED_MAPLE_FONT_FAMILY;
 use crate::ui::theme_catalog::{
-    ThemeRegistry, ThemeSpec, contrasting_ink, ensure_readable_fg, mix_hex,
+    ThemeRegistry, ThemeSpec, contrasting_ink, ensure_readable_fg, mix_hex, relative_luminance,
 };
 
 #[inline]
@@ -79,7 +79,6 @@ pub fn apply_theme_specs(
     let hl_theme = build_editor_highlight_theme(syntax_spec);
 
     Theme::update(cx, |theme| {
-        theme.font_family = SharedString::from(BUNDLED_MAPLE_FONT_FAMILY);
         theme.mono_font_family = SharedString::from(BUNDLED_MAPLE_FONT_FAMILY);
         theme.radius = px(7.0);
         theme.radius_lg = px(11.0);
@@ -109,67 +108,54 @@ pub fn apply_theme_specs(
         let magenta_hex = ensure_readable_fg(chrome.ansi[5], chrome.ui_bg, dark, 3.0);
         let cyan_hex = ensure_readable_fg(chrome.ansi[6], chrome.ui_bg, dark, 3.0);
 
-        let secondary_bg = if dark {
-            mix_hex(chrome.surface_bg, 0xFFFFFF, 0.065)
+        let shell = if dark {
+            chrome.sidebar_bg
         } else {
-            mix_hex(chrome.sidebar_bg, 0x000000, 0.055)
+            chrome.titlebar_bg
         };
-        let secondary_hover = if dark {
-            mix_hex(secondary_bg, 0xFFFFFF, 0.08)
-        } else {
-            mix_hex(secondary_bg, 0x000000, 0.06)
-        };
-        let secondary_active = if dark {
-            mix_hex(secondary_bg, 0xFFFFFF, 0.14)
-        } else {
-            mix_hex(secondary_bg, 0x000000, 0.11)
-        };
-
-        let popover_bg = if dark {
-            mix_hex(chrome.surface_bg, 0xFFFFFF, 0.03)
+        let surface = if dark {
+            chrome.ui_bg
         } else {
             chrome.surface_bg
         };
-        let segmented_track_bg = if dark {
-            mix_hex(chrome.sidebar_bg, 0x000000, 0.28)
+        // The same secondary text appears on both the shell and the canvas.
+        let contrast_bg = if (relative_luminance(shell) > relative_luminance(surface)) == dark {
+            shell
         } else {
-            mix_hex(chrome.sidebar_bg, 0x000000, 0.065)
+            surface
         };
-        let active_tab_bg = if dark {
-            mix_hex(chrome.surface_bg, 0xFFFFFF, 0.08)
-        } else {
-            0xFFFFFF
-        };
+        let secondary_bg = shell;
+        let secondary_hover = mix_hex(shell, pole, 0.06);
+        let secondary_active = mix_hex(shell, pole, 0.11);
 
-        theme.background = macos_hex(chrome.ui_bg, 1.0);
+        theme.background = macos_hex(surface, 1.0);
         theme.foreground = macos_hex(chrome.term_fg, 1.0);
-        theme.muted = macos_hex(chrome.sidebar_bg, 1.0);
+        theme.muted = macos_hex(shell, 1.0);
         theme.muted_foreground = macos_hex(
-            ensure_readable_fg(chrome.muted_fg, chrome.ui_bg, dark, 2.8),
+            ensure_readable_fg(chrome.muted_fg, contrast_bg, dark, 4.5),
             1.0,
         );
 
-        theme.title_bar = macos_hex(chrome.titlebar_bg, 1.0);
-        theme.title_bar_border = macos_hex(pole, if dark { 0.08 } else { 0.085 });
-
-        theme.sidebar = macos_hex(chrome.sidebar_bg, 1.0);
+        theme.title_bar = macos_hex(shell, 1.0);
+        theme.title_bar_border = theme.transparent;
+        theme.sidebar = theme.title_bar;
         theme.sidebar_foreground = macos_hex(chrome.term_fg, 1.0);
-        theme.sidebar_border = macos_hex(pole, if dark { 0.075 } else { 0.085 });
+        theme.border = macos_hex(pole, if dark { 0.14 } else { 0.15 });
+        theme.sidebar_border = theme.border;
         theme.sidebar_accent = macos_hex(accent, if dark { 0.20 } else { 0.14 });
         theme.sidebar_accent_foreground = if dark {
             macos_hex(0xFFFFFF, 1.0)
         } else {
-            macos_hex(ensure_readable_fg(accent, chrome.sidebar_bg, false, 3.5), 1.0)
+            macos_hex(ensure_readable_fg(accent, shell, false, 3.5), 1.0)
         };
         theme.sidebar_primary = macos_hex(accent, 1.0);
         theme.sidebar_primary_foreground = primary_fg;
 
-        theme.popover = macos_hex(popover_bg, 1.0);
+        theme.popover = theme.background;
         theme.popover_foreground = macos_hex(chrome.term_fg, 1.0);
-        theme.group_box = macos_hex(chrome.surface_bg, 1.0);
+        theme.group_box = theme.background;
         theme.group_box_foreground = macos_hex(chrome.term_fg, 1.0);
 
-        theme.border = macos_hex(pole, if dark { 0.10 } else { 0.095 });
         theme.input = macos_hex(pole, if dark { 0.135 } else { 0.125 });
         theme.ring = macos_hex(accent, if dark { 0.50 } else { 0.42 });
         theme.caret = macos_hex(accent, 1.0);
@@ -207,15 +193,15 @@ pub fn apply_theme_specs(
             macos_hex(ensure_readable_fg(accent, chrome.ui_bg, false, 3.5), 1.0)
         };
 
-        theme.colors.list = macos_hex(chrome.sidebar_bg, 1.0);
+        theme.colors.list = theme.sidebar;
         theme.list_active = macos_hex(accent, if dark { 0.22 } else { 0.15 });
         theme.list_active_border = macos_hex(accent, if dark { 0.42 } else { 0.32 });
         theme.list_hover = macos_hex(pole, if dark { 0.055 } else { 0.048 });
 
-        theme.tab_bar = macos_hex(chrome.titlebar_bg, 1.0);
-        theme.tab_bar_segmented = macos_hex(segmented_track_bg, 1.0);
+        theme.tab_bar = theme.title_bar;
+        theme.tab_bar_segmented = macos_hex(pole, 0.06);
         theme.tab = macos_hex(inv_pole, 0.0);
-        theme.tab_active = macos_hex(active_tab_bg, 1.0);
+        theme.tab_active = theme.background;
         theme.tab_foreground = theme.muted_foreground;
         theme.tab_active_foreground = macos_hex(chrome.term_fg, 1.0);
 

@@ -331,7 +331,13 @@ async fn run_ssh_session(
         .context("启动远程 Shell 失败")?;
 
     let sftp = SftpService::from_ssh_handle(Arc::clone(&handle));
-    let home_dir = sftp.canonicalize(".").await.ok();
+    let home_dir = match sftp.canonicalize(".").await {
+        Ok(home) => Some(home),
+        Err(err) => {
+            tracing::warn!(host = %config.host, error = %format!("{err:#}"), "无法获取 SFTP 主目录");
+            None
+        }
+    };
     let initial_dir = if !config.default_remote_dir.is_empty() {
         config.default_remote_dir.clone()
     } else {
