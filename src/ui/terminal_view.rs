@@ -820,11 +820,16 @@ impl TerminalPaneView {
                 Some(
                     div()
                         .absolute()
-                        .occlude()
                         .bottom_4()
+                        .left_4()
                         .right_4()
+                        .flex()
+                        .justify_end()
                         .child(
                             h_flex()
+                                .occlude()
+                                .min_w_0()
+                                .max_w(px(460.0))
                                 .px_3p5()
                                 .py_2()
                                 .gap_3()
@@ -835,12 +840,15 @@ impl TerminalPaneView {
                                 .bg(cx.theme().popover)
                                 .child(
                                     div()
+                                        .min_w_0()
+                                        .truncate()
                                         .text_xs()
                                         .text_color(cx.theme().muted_foreground)
                                         .child(text),
                                 )
                                 .child(
                                     Button::new("reconnect-session")
+                                        .flex_shrink_0()
                                         .primary()
                                         .xsmall()
                                         .icon(LucideIcon::RotateCcw)

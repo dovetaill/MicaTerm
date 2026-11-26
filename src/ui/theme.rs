@@ -397,6 +397,8 @@ pub fn macos_env_badge_colors(tag: &str, cx: &App) -> (Hsla, Hsla) {
 /// Elevated Inset Grouped container (System Settings & Rex / Termius cards) driven by active theme.
 pub fn macos_inset_group(cx: &App) -> Div {
     v_flex()
+        .w_full()
+        .min_w_0()
         .rounded(px(10.0))
         .border_1()
         .border_color(cx.theme().border)

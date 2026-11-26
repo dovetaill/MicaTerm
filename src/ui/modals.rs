@@ -55,7 +55,7 @@ fn field_block(label: &'static str, control: impl IntoElement, cx: &App) -> gpui
 /// Reserves vertical room inside `Dialog`'s `overflow_hidden` / `overflow_y_scrollbar` body
 /// (`pl/pr = 16px`, `pt/pb = 0px`) so `gpui-component`'s 3px outer focus ring is not clipped.
 fn dialog_body() -> gpui_kit::Div {
-    v_flex().py_1()
+    v_flex().w_full().min_w_0().py_1()
 }
 
 pub fn open_confirm_dialog(
@@ -312,6 +312,7 @@ pub fn open_remote_editor_dialog(
                             )
                             .child(
                                 Button::new("remote-editor-lang-picker")
+                                    .flex_shrink_0()
                                     .secondary()
                                     .xsmall()
                                     .icon(LucideIcon::Code)
@@ -1631,9 +1632,10 @@ impl ShortcutRecorder {
             .items_center()
             .border_t_1()
             .border_color(cx.theme().border)
-            .child(div().flex_1().text_sm().child(action.label()))
+            .child(div().min_w_0().flex_1().text_sm().child(action.label()))
             .child(
                 Button::new(("record-shortcut", action as usize))
+                    .flex_shrink_0()
                     .small()
                     .secondary()
                     .tab_stop(false)
@@ -1651,6 +1653,7 @@ impl ShortcutRecorder {
             .when(chord.is_some() && !recording, |row| {
                 row.child(
                     Button::new(("clear-shortcut", action as usize))
+                        .flex_shrink_0()
                         .ghost()
                         .xsmall()
                         .compact()
@@ -1663,6 +1666,7 @@ impl ShortcutRecorder {
             .when(shortcuts.is_customized(action), |row| {
                 row.child(
                     Button::new(("reset-shortcut", action as usize))
+                        .flex_shrink_0()
                         .ghost()
                         .xsmall()
                         .compact()
@@ -1704,6 +1708,7 @@ impl Render for ShortcutRecorder {
                     .items_center()
                     .child(
                         div()
+                            .min_w_0()
                             .flex_1()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
@@ -1711,6 +1716,7 @@ impl Render for ShortcutRecorder {
                     )
                     .child(
                         Button::new("reset-all-shortcuts")
+                            .flex_shrink_0()
                             .secondary()
                             .small()
                             .tab_stop(false)
@@ -1729,6 +1735,9 @@ impl Render for ShortcutRecorder {
                 v_flex()
                     .gap_2()
                     .max_h(px(420.0))
+                    .w_full()
+                    .min_w_0()
+                    .pr_1()
                     .overflow_y_scrollbar()
                     .children(ShortcutCategory::ALL.into_iter().map(|category| {
                         macos_inset_group(cx)
@@ -2150,6 +2159,10 @@ pub fn open_settings_modal_at(
                     light_spec.id.clone()
                 };
 
+                let short_theme_name = |name: &str| match name.char_indices().nth(12) {
+                    Some((end, _)) => format!("{}…", &name[..end]),
+                    None => name.to_string(),
+                };
                 let total_cnt = pack.themes.len();
                 let dark_cnt = pack.themes.iter().filter(|t| t.dark).count();
                 let light_cnt = total_cnt.saturating_sub(dark_cnt);
@@ -2205,7 +2218,15 @@ pub fn open_settings_modal_at(
                     } else {
                         div().flex_1().min_w(px(0.0)).into_any_element()
                     };
-                    grid_rows.push(h_flex().gap_2p5().child(first).child(second).into_any_element());
+                    grid_rows.push(
+                        h_flex()
+                            .w_full()
+                            .min_w_0()
+                            .gap_2p5()
+                            .child(first)
+                            .child(second)
+                            .into_any_element(),
+                    );
                 }
 
                 let ws_mode_dark = workspace.clone();
@@ -2240,6 +2261,9 @@ pub fn open_settings_modal_at(
                         v_flex()
                             .gap_2p5()
                             .max_h(px(480.0))
+                            .w_full()
+                            .min_w_0()
+                            .pr_1()
                             .overflow_y_scrollbar()
                             .child(
                                 macos_inset_group(cx)
@@ -2275,6 +2299,8 @@ pub fn open_settings_modal_at(
                                             )
                                             .child(
                                                 h_flex()
+                                                    .flex_shrink_0()
+                                                    .items_center()
                                                     .gap_1p5()
                                                     .child(
                                                         Button::new("slot-dark-btn")
@@ -2284,7 +2310,7 @@ pub fn open_settings_modal_at(
                                                             .selected(cur.dark_mode)
                                                             .label(format!(
                                                                 "深色 · {}",
-                                                                dark_spec.name
+                                                                short_theme_name(&dark_spec.name)
                                                             ))
                                                             .on_click(move |_, window, cx| {
                                                                 ws_mode_dark.update(
@@ -2306,7 +2332,7 @@ pub fn open_settings_modal_at(
                                                             .selected(!cur.dark_mode)
                                                             .label(format!(
                                                                 "浅色 · {}",
-                                                                light_spec.name
+                                                                short_theme_name(&light_spec.name)
                                                             ))
                                                             .on_click(move |_, window, cx| {
                                                                 ws_mode_light.update(
@@ -2330,8 +2356,11 @@ pub fn open_settings_modal_at(
                                             .border_color(cx.theme().border)
                                             .justify_between()
                                             .items_center()
+                                            .gap_2()
                                             .child(
                                                 v_flex()
+                                                    .min_w_0()
+                                                    .flex_1()
                                                     .child(
                                                         div()
                                                             .text_sm()
@@ -2351,7 +2380,7 @@ pub fn open_settings_modal_at(
                                                     ),
                                             )
                                             .child(
-                                                Switch::new("settings-tint-ui-theme")
+                                                Switch::new("settings-tint-ui-theme").flex_shrink_0()
                                                     .checked(cur.tint_ui_with_theme)
                                                     .on_change(move |val, window, cx| {
                                                         ws_tint.update(cx, |ws, cx| {
@@ -2373,7 +2402,7 @@ pub fn open_settings_modal_at(
                                             .gap_2()
                                             .items_center()
                                             .child(
-                                                div().flex_1().child(
+                                                div().min_w_0().flex_1().child(
                                                     Input::new(&theme_search_in)
                                                         .small()
                                                         .prefix(
@@ -2387,7 +2416,7 @@ pub fn open_settings_modal_at(
                                                 ),
                                             )
                                             .child(
-                                                h_flex().gap_1().children(
+                                                h_flex().flex_shrink_0().gap_1().children(
                                                     [
                                                         (
                                                             "tm-all",
@@ -2454,6 +2483,8 @@ pub fn open_settings_modal_at(
                                     .into_any_element()
                             } else {
                                 v_flex()
+                                    .w_full()
+                                    .min_w_0()
                                     .flex_shrink_0()
                                     .gap_2p5()
                                     .children(grid_rows)
@@ -2472,6 +2503,8 @@ pub fn open_settings_modal_at(
                                             .gap_2()
                                             .child(
                                                 v_flex()
+                                                    .min_w_0()
+                                                    .flex_1()
                                                     .gap_0p5()
                                                     .child(
                                                         div()
@@ -2495,6 +2528,8 @@ pub fn open_settings_modal_at(
                                             )
                                             .child(
                                                 h_flex()
+                                                    .flex_shrink_0()
+                                                    .items_center()
                                                     .gap_1p5()
                                                     .child(
                                                         Button::new("settings-import-theme")
@@ -2611,6 +2646,7 @@ pub fn open_settings_modal_at(
                                                             "rm-theme-{}",
                                                             entry.file_name
                                                         )))
+                                                        .flex_shrink_0()
                                                         .ghost()
                                                         .xsmall()
                                                         .compact()
@@ -2687,6 +2723,9 @@ pub fn open_settings_modal_at(
             v_flex()
                 .gap_3()
                 .max_h(px(440.0))
+                .w_full()
+                .min_w_0()
+                .pr_1()
                 .overflow_y_scrollbar()
                 .child(
                     macos_inset_group(cx)
@@ -2697,8 +2736,11 @@ pub fn open_settings_modal_at(
                                     .py_2p5()
                                     .justify_between()
                                     .items_center()
+                                    .gap_2()
                                     .child(
                                         v_flex()
+                                            .min_w_0()
+                                            .flex_1()
                                             .child(
                                                 div()
                                                     .text_sm()
@@ -2714,7 +2756,7 @@ pub fn open_settings_modal_at(
                                             ),
                                     )
                                     .child(
-                                        Switch::new("settings-dark-mode")
+                                        Switch::new("settings-dark-mode").flex_shrink_0()
                                             .checked(cur.dark_mode)
                                             .on_change(move |val, window, cx| {
                                                 ws_dark.update(cx, |ws, cx| {
@@ -2732,8 +2774,11 @@ pub fn open_settings_modal_at(
                                     .border_color(cx.theme().border)
                                     .justify_between()
                                     .items_center()
+                                    .gap_2()
                                     .child(
                                         div()
+                                            .min_w_0()
+                                            .flex_1()
                                             .text_sm()
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(cx.theme().foreground)
@@ -2741,6 +2786,7 @@ pub fn open_settings_modal_at(
                                     )
                                     .child(
                                         h_flex()
+                                            .flex_shrink_0()
                                             .gap_2()
                                             .items_center()
                                             .child(
@@ -2799,14 +2845,17 @@ pub fn open_settings_modal_at(
                                     .border_color(cx.theme().border)
                                     .justify_between()
                                     .items_center()
+                                    .gap_2()
                                     .child(
                                         div()
+                                            .min_w_0()
+                                            .flex_1()
                                             .text_sm()
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(cx.theme().foreground)
                                             .child("回滚缓存行数"),
                                     )
-                                    .child(h_flex().gap_1().children(
+                                    .child(h_flex().flex_shrink_0().gap_1().children(
                                         [1500usize, 5000, 10000, 30000].into_iter().map(|lines| {
                                             let ws_sb = workspace.clone();
                                             Button::new(SharedString::from(format!("sb-{lines}")))
@@ -2833,8 +2882,11 @@ pub fn open_settings_modal_at(
                                     .py_2p5()
                                     .justify_between()
                                     .items_center()
+                                    .gap_2()
                                     .child(
                                         v_flex()
+                                            .min_w_0()
+                                            .flex_1()
                                             .child(
                                                 div()
                                                     .text_sm()
@@ -2850,7 +2902,7 @@ pub fn open_settings_modal_at(
                                             ),
                                     )
                                     .child(
-                                        Switch::new("settings-command-blocks")
+                                        Switch::new("settings-command-blocks").flex_shrink_0()
                                             .checked(cur.command_blocks)
                                             .on_change(move |val, window, cx| {
                                                 ws_cmd_blocks.update(cx, |ws, cx| {
@@ -2862,9 +2914,9 @@ pub fn open_settings_modal_at(
                             )
                             .child(
                                 h_flex().px_3p5().py_2p5().border_t_1().border_color(cx.theme().border)
-                                    .justify_between().items_center()
-                                    .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("终端右键动作"))
-                                    .child(h_flex().gap_1().children([
+                                    .justify_between().items_center().gap_2()
+                                    .child(div().min_w_0().flex_1().text_sm().font_weight(FontWeight::MEDIUM).child("终端右键动作"))
+                                    .child(h_flex().flex_shrink_0().gap_1().children([
                                         ("right-click-menu", RightClickAction::ContextMenu, "弹出菜单"),
                                         ("right-click-smart", RightClickAction::SmartCopyPaste, "智能复制粘贴"),
                                     ].into_iter().map(|(id, action, label)| {
@@ -2879,9 +2931,9 @@ pub fn open_settings_modal_at(
                             )
                             .child(
                                 h_flex().px_3p5().py_2p5().border_t_1().border_color(cx.theme().border)
-                                    .justify_between().items_center()
-                                    .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("选中文本自动复制"))
-                                    .child(Switch::new("copy-on-select").checked(cur.copy_on_select)
+                                    .justify_between().items_center().gap_2()
+                                    .child(div().min_w_0().flex_1().text_sm().font_weight(FontWeight::MEDIUM).child("选中文本自动复制"))
+                                    .child(Switch::new("copy-on-select").flex_shrink_0().checked(cur.copy_on_select)
                                         .on_change(move |enabled, window, cx| {
                                             ws_copy_on_select.update(cx, |ws, cx| ws.set_copy_on_select(*enabled, cx));
                                             window.refresh();
@@ -2895,8 +2947,11 @@ pub fn open_settings_modal_at(
                                     .border_color(cx.theme().border)
                                     .justify_between()
                                     .items_center()
+                                    .gap_2()
                                     .child(
                                         v_flex()
+                                            .min_w_0()
+                                            .flex_1()
                                             .child(
                                                 div()
                                                     .text_sm()
@@ -2912,7 +2967,7 @@ pub fn open_settings_modal_at(
                                             ),
                                     )
                                     .child(
-                                        Switch::new("settings-semantic-hl")
+                                        Switch::new("settings-semantic-hl").flex_shrink_0()
                                             .checked(cur.semantic_highlighting)
                                             .on_change(move |val, window, cx| {
                                                 ws_sem_hl.update(cx, |ws, cx| {
@@ -2930,8 +2985,11 @@ pub fn open_settings_modal_at(
                                     .border_color(cx.theme().border)
                                     .justify_between()
                                     .items_center()
+                                    .gap_2()
                                     .child(
                                         v_flex()
+                                            .min_w_0()
+                                            .flex_1()
                                             .child(
                                                 div()
                                                     .text_sm()
@@ -2947,7 +3005,7 @@ pub fn open_settings_modal_at(
                                             ),
                                     )
                                     .child(
-                                        Switch::new("settings-code-hl")
+                                        Switch::new("settings-code-hl").flex_shrink_0()
                                             .checked(cur.code_highlighting)
                                             .on_change(move |val, window, cx| {
                                                 ws_code_hl.update(cx, |ws, cx| {
@@ -2965,15 +3023,18 @@ pub fn open_settings_modal_at(
                                     .border_color(cx.theme().border)
                                     .justify_between()
                                     .items_center()
+                                    .gap_2()
                                     .child(
                                         div()
+                                            .min_w_0()
+                                            .flex_1()
                                             .text_sm()
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(cx.theme().foreground)
                                             .child("滚动条全局概览标记"),
                                     )
                                     .child(
-                                        Switch::new("settings-overview-markers")
+                                        Switch::new("settings-overview-markers").flex_shrink_0()
                                             .checked(cur.overview_markers)
                                             .on_change(move |val, window, cx| {
                                                 ws_overview.update(cx, |ws, cx| {
@@ -2991,15 +3052,18 @@ pub fn open_settings_modal_at(
                                     .border_color(cx.theme().border)
                                     .justify_between()
                                     .items_center()
+                                    .gap_2()
                                     .child(
                                         div()
+                                            .min_w_0()
+                                            .flex_1()
                                             .text_sm()
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(cx.theme().foreground)
                                             .child("SFTP 默认跟随终端目录"),
                                     )
                                     .child(
-                                        Switch::new("settings-follow-cwd")
+                                        Switch::new("settings-follow-cwd").flex_shrink_0()
                                             .checked(cur.follow_sftp_cwd)
                                             .on_change(move |val, window, cx| {
                                                 ws_follow.update(cx, |ws, cx| {
@@ -3023,6 +3087,8 @@ pub fn open_settings_modal_at(
                                     .gap_2()
                                     .child(
                                         v_flex()
+                                            .min_w_0()
+                                            .flex_1()
                                             .gap_0p5()
                                             .child(
                                                 div()
@@ -3044,6 +3110,8 @@ pub fn open_settings_modal_at(
                                     )
                                     .child(
                                         h_flex()
+                                            .flex_shrink_0()
+                                            .items_center()
                                             .gap_1p5()
                                             .child(
                                                 Button::new("settings-import-syntax")
@@ -3144,6 +3212,7 @@ pub fn open_settings_modal_at(
                                                         "rm-syn-{}",
                                                         entry.file_name
                                                     )))
+                                                    .flex_shrink_0()
                                                     .ghost()
                                                     .xsmall()
                                                     .compact()
@@ -3384,6 +3453,8 @@ pub fn open_logs_modal(paths: AppPaths, window: &mut Window, cx: &mut App) {
                             .gap_0p5()
                             .child(
                                 div()
+                                    .w_full()
+                                    .min_w_0()
                                     .truncate()
                                     .text_xs()
                                     .font_weight(FontWeight::MEDIUM)

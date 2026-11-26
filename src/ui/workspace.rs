@@ -34,8 +34,8 @@ use crate::terminal::{
     session::{SessionEntityEvent, SessionPhase},
 };
 use crate::ui::modals::{
-    SettingsTab, SshHostModalInit, open_confirm_dialog, open_keychain_modal, open_settings_modal,
-    open_settings_modal_at, open_simple_name_dialog, open_snippet_modal, open_ssh_host_modal,
+    SshHostModalInit, open_confirm_dialog, open_keychain_modal, open_settings_modal,
+    open_simple_name_dialog, open_snippet_modal, open_ssh_host_modal,
 };
 use crate::ui::sftp_panel::{SftpPanelEvent, SftpPanelView};
 use crate::ui::sidebar::{LeftSidebar, SidebarSection};
@@ -1793,7 +1793,6 @@ impl MicaWorkspace {
         let ws_split_h = ws_ent.clone();
         let ws_split_v = ws_ent.clone();
         let ws_sftp = ws_ent.clone();
-        let ws_palette = ws_ent.clone();
         let ws_theme = ws_ent.clone();
         let ws_settings = ws_ent.clone();
 
@@ -1801,9 +1800,6 @@ impl MicaWorkspace {
         let show_sftp = self.settings.show_sftp_panel;
         let dark_mode = self.settings.dark_mode;
         let theme_pack = ThemeRegistry::global().current();
-        let active_theme_name = theme_pack
-            .resolve(self.settings.active_theme_id(), dark_mode)
-            .name;
         let alt_theme_name = if dark_mode {
             theme_pack.resolve(&self.settings.light_theme, false).name
         } else {
@@ -1813,7 +1809,6 @@ impl MicaWorkspace {
         let sftp_busy = self.sftp_panel.read(cx).has_active_transfers();
         let shortcut_tooltip = |label: &str, action| tooltip(label, self.settings.shortcuts.get(action).as_ref());
         let app_paths = self.paths.clone();
-        let app_paths_palette = self.paths.clone();
         let paths_for_logs = self.paths.clone();
 
         let tab_elements: Vec<AnyElement> = self
@@ -2008,27 +2003,6 @@ impl MicaWorkspace {
                             .tooltip(shortcut_tooltip("切换右侧 SFTP 检查器", ShortcutAction::ToggleSftpPanel))
                             .on_click(move |_, window, cx| {
                                 ws_sftp.update(cx, |ws, cx| ws.toggle_sftp_panel(window, cx));
-                            }),
-                    )
-                    .child(
-                        Button::new("open-theme-gallery-btn")
-                            .tab_stop(false)
-                            .ghost()
-                            .xsmall()
-                            .compact()
-                            .icon(LucideIcon::Palette)
-                            .tooltip(format!(
-                                "当前主题：{active_theme_name}（点击切换 {} 款精选配色）",
-                                theme_pack.themes.len()
-                            ))
-                            .on_click(move |_, window, cx| {
-                                open_settings_modal_at(
-                                    ws_palette.clone(),
-                                    app_paths_palette.clone(),
-                                    SettingsTab::Themes,
-                                    window,
-                                    cx,
-                                );
                             }),
                     )
                     .child(

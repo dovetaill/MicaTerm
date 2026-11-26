@@ -1105,7 +1105,7 @@ impl Render for SftpPanelView {
                             ),
                     )
                     .child(
-                        div().overflow_y_scrollbar().child(
+                        div().w_full().min_w_0().overflow_y_scrollbar().child(
                             v_flex()
                                 .gap_1p5()
                                 .children(self.transfers.iter().take(6).map(|tr| {
@@ -1162,6 +1162,9 @@ impl Render for SftpPanelView {
                                                 )
                                                 .child(
                                                     div()
+                                                        .flex_shrink_0()
+                                                        .max_w(px(180.0))
+                                                        .truncate()
                                                         .text_xs()
                                                         .text_color(cx.theme().muted_foreground)
                                                         .child(status_text),
