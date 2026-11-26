@@ -30,6 +30,8 @@ fn default_light_theme() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppSettings {
     pub dark_mode: bool,
+    #[serde(default)]
+    pub debug_logging: bool,
     #[serde(default = "default_dark_theme")]
     pub dark_theme: String,
     #[serde(default = "default_light_theme")]
@@ -80,6 +82,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             dark_mode: true,
+            debug_logging: false,
             dark_theme: default_dark_theme(),
             light_theme: default_light_theme(),
             tint_ui_with_theme: true,

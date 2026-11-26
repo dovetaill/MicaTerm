@@ -253,6 +253,7 @@ mod tests {
             legacy["font_size"] = size.into();
             legacy.as_object_mut().unwrap().remove("double_click_action");
             legacy.as_object_mut().unwrap().remove("shortcuts");
+            legacy.as_object_mut().unwrap().remove("debug_logging");
             store.write_json(KEY_SETTINGS, &legacy).unwrap();
 
             let settings = store.load_snapshot().unwrap().settings;
@@ -260,6 +261,7 @@ mod tests {
             assert!(settings.typography_v2_migrated);
             assert_eq!(settings.double_click_action, DoubleClickAction::SelectWord);
             assert_eq!(settings.shortcuts, ShortcutConfig::default());
+            assert!(!settings.debug_logging);
             assert_eq!(store.read_json(KEY_SETTINGS).unwrap(), Some(settings));
         }
         let settings = AppSettings {
@@ -313,6 +315,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("mica-gpui-store-{}", uuid::Uuid::new_v4()));
         let paths = AppPaths::from_root(&dir).unwrap();
         let store = WorkspaceStore::open(&paths.db_path).unwrap();
+        assert!(!store.load_snapshot().unwrap().settings.debug_logging);
 
         let mut tree = HostTree::default();
         tree.upsert(HostNode::new_folder("Dev", None));
@@ -323,6 +326,7 @@ mod tests {
             double_click_action: DoubleClickAction::Paste,
             right_click_action: crate::domain::RightClickAction::SmartCopyPaste,
             copy_on_select: true,
+            debug_logging: true,
             ..Default::default()
         };
         let custom = ShortcutChord::try_record(&Keystroke::parse("alt-n").unwrap()).unwrap();
@@ -342,6 +346,7 @@ mod tests {
             crate::domain::RightClickAction::SmartCopyPaste
         );
         assert!(snap.settings.copy_on_select);
+        assert!(snap.settings.debug_logging);
         assert_eq!(snap.settings.double_click_action, DoubleClickAction::Paste);
         assert_eq!(
             snap.settings.shortcuts.get(ShortcutAction::NewLocalTab),

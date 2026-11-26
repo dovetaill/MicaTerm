@@ -6,14 +6,15 @@ use gpui_kit::{AppContext as _, Bounds, WindowBounds, WindowOptions, px, size};
 
 use mica_term_gpui::domain::build_default_credential_store;
 use mica_term_gpui::logging::{
-    init_logging_and_crash_handlers, maybe_attach_console_from_env, show_fatal_startup_error,
+    init_logging_and_crash_handlers, maybe_attach_console_from_env, set_debug_logging,
+    show_fatal_startup_error,
 };
 use mica_term_gpui::storage::{AppPaths, WorkspaceStore};
 use mica_term_gpui::ui::{MicaWorkspace, register_bundled_fonts, register_keybindings};
 
 fn main() -> Result<()> {
-    maybe_attach_console_from_env();
-    if let Err(err) = run_app() {
+    let console = maybe_attach_console_from_env();
+    if let Err(err) = run_app(console) {
         tracing::error!(error = ?err, "Mica Term 启动或运行异常退出");
         show_fatal_startup_error("Mica Term 启动失败", &format!("{err:#}"));
         return Err(err);
@@ -21,9 +22,9 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_app() -> Result<()> {
+fn run_app(console: bool) -> Result<()> {
     let paths = AppPaths::resolve()?;
-    init_logging_and_crash_handlers(&paths);
+    init_logging_and_crash_handlers(&paths, console)?;
     tracing::info!(
         root_dir = %paths.root_dir.display(),
         runtime_log = %paths.runtime_log_path.display(),
@@ -42,6 +43,12 @@ fn run_app() -> Result<()> {
 
     let store = WorkspaceStore::open(&paths.db_path)?;
     let snapshot = store.load_snapshot().context("加载工作区失败")?;
+    if !console
+        && snapshot.settings.debug_logging
+        && let Err(err) = set_debug_logging(true)
+    {
+        tracing::error!(error = %err, "启用已保存的调试日志设置失败");
+    }
     let credentials = build_default_credential_store(&paths.secrets_dir);
 
     gpui_kit::application()

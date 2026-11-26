@@ -3062,9 +3062,10 @@ pub fn open_settings_modal_at(
                                                     .secondary()
                                                     .xsmall()
                                                     .label("打开目录")
-                                                    .on_click(move |_, _, _| {
-                                                        let _ = std::fs::create_dir_all(&syn_dir_open);
-                                                        let _ = open_directory_in_file_manager(&syn_dir_open);
+                                                    .on_click(move |_, window, cx| {
+                                                        if let Err(err) = open_directory_in_file_manager(&syn_dir_open) {
+                                                            window.push_notification(Notification::error(err), cx);
+                                                        }
                                                     })
                                             })
                                             .child(
@@ -3163,66 +3164,125 @@ pub fn open_settings_modal_at(
                     .child(
                         macos_inset_group(cx)
                             .flex_shrink_0()
-                            .px_3p5()
-                            .py_2p5()
-                            .gap_1p5()
                             .child(
                                 h_flex()
+                                    .px_3p5()
+                                    .py_2p5()
                                     .justify_between()
                                     .items_center()
+                                    .gap_2()
                                     .child(
-                                        div()
-                                            .text_xs()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(cx.theme().foreground)
-                                            .child("Mica Term GPUI v0.2.0 · 运行与诊断日志"),
+                                        v_flex()
+                                            .min_w_0()
+                                            .flex_1()
+                                            .gap_0p5()
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .text_color(cx.theme().foreground)
+                                                    .child("开启调试日志"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child("默认关闭；开启后在顶栏显示「日志」按钮，并展开运行与诊断日志面板"),
+                                            ),
                                     )
+                                    .child({
+                                        let ws = workspace.clone();
+                                        Switch::new("settings-debug-logging")
+                                            .flex_shrink_0()
+                                            .accessibility_label("开启调试日志")
+                                            .checked(cur.debug_logging)
+                                            .on_change(move |enabled, window, cx| {
+                                                if let Err(err) = ws.update(cx, |ws, cx| ws.set_debug_logging(*enabled, cx)) {
+                                                    window.push_notification(Notification::error(format!("更新调试日志设置失败：{err:#}")), cx);
+                                                }
+                                                window.refresh();
+                                            })
+                                    }),
+                            )
+                            .children(cur.debug_logging.then(|| {
+                                v_flex()
+                                    .w_full()
+                                    .min_w_0()
+                                    .px_3p5()
+                                    .py_2p5()
+                                    .gap_1p5()
+                                    .border_t_1()
+                                    .border_color(cx.theme().border)
                                     .child(
                                         h_flex()
-                                            .gap_1p5()
-                                            .child({
-                                                let paths_open = paths.clone();
-                                                Button::new("settings-open-logs-dir")
-                                                    .secondary()
-                                                    .xsmall()
-                                                    .label("打开日志目录")
-                                                    .on_click(move |_, _, _| {
-                                                        let _ = open_directory_in_file_manager(
-                                                            &paths_open.logs_dir,
-                                                        );
+                                            .w_full()
+                                            .min_w_0()
+                                            .justify_between()
+                                            .items_center()
+                                            .gap_2()
+                                            .child(
+                                                div()
+                                                    .min_w_0()
+                                                    .flex_1()
+                                                    .truncate()
+                                                    .text_xs()
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .text_color(cx.theme().foreground)
+                                                    .child("Mica Term GPUI v0.2.0 · 运行与诊断日志"),
+                                            )
+                                            .child(
+                                                h_flex()
+                                                    .flex_shrink_0()
+                                                    .items_center()
+                                                    .gap_1p5()
+                                                    .child({
+                                                        let paths_open = paths.clone();
+                                                        Button::new("settings-open-logs-dir")
+                                                            .secondary()
+                                                            .xsmall()
+                                                            .label("打开日志目录")
+                                                            .on_click(move |_, window, cx| {
+                                                                if let Err(err) = open_directory_in_file_manager(&paths_open.logs_dir) {
+                                                                    window.push_notification(Notification::error(err), cx);
+                                                                }
+                                                            })
                                                     })
-                                            })
-                                            .child({
-                                                let paths_view = paths.clone();
-                                                Button::new("settings-view-logs")
-                                                    .secondary()
-                                                    .xsmall()
-                                                    .label("查看运行日志")
-                                                    .on_click(move |_, window, cx| {
-                                                        window.close_dialog(cx);
-                                                        open_logs_modal(
-                                                            paths_view.clone(),
-                                                            window,
-                                                            cx,
-                                                        );
-                                                    })
-                                            }),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(format!("数据与凭据目录：{data_dir_display}")),
-                            )
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(format!("运行与崩溃日志：{logs_dir_display}")),
-                            ),
+                                                    .child({
+                                                        let paths_view = paths.clone();
+                                                        Button::new("settings-view-logs")
+                                                            .secondary()
+                                                            .xsmall()
+                                                            .label("查看运行日志")
+                                                            .on_click(move |_, window, cx| {
+                                                                window.close_dialog(cx);
+                                                                open_logs_modal(
+                                                                    paths_view.clone(),
+                                                                    window,
+                                                                    cx,
+                                                                );
+                                                            })
+                                                    }),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .min_w_0()
+                                            .truncate()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(format!("数据与凭据目录：{data_dir_display}")),
+                                    )
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .min_w_0()
+                                            .truncate()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(format!("运行与崩溃日志：{logs_dir_display}")),
+                                    )
+                            })),
                     ),
         ))
     });
@@ -3369,8 +3429,10 @@ pub fn open_logs_modal(paths: AppPaths, window: &mut Window, cx: &mut App) {
                             .secondary()
                             .small()
                             .label("打开日志目录")
-                            .on_click(move |_, _, _| {
-                                let _ = open_directory_in_file_manager(&paths_dir.logs_dir);
+                            .on_click(move |_, window, cx| {
+                                if let Err(err) = open_directory_in_file_manager(&paths_dir.logs_dir) {
+                                    window.push_notification(Notification::error(err), cx);
+                                }
                             }),
                     )
                     .child(

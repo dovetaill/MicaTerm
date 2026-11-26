@@ -19,7 +19,7 @@ use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable as _, FontWeight,
     InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton,
     ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window,
-    div, px,
+    div, prelude::FluentBuilder as _, px,
 };
 
 use crate::domain::{
@@ -559,6 +559,21 @@ impl MicaWorkspace {
         let _ = self.store.save_settings(&self.settings);
         self.propagate_pane_preferences(cx);
         cx.notify();
+    }
+
+    pub fn set_debug_logging(
+        &mut self,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
+        if self.settings.debug_logging == enabled {
+            return Ok(());
+        }
+        crate::logging::set_debug_logging(enabled)?;
+        self.settings.debug_logging = enabled;
+        self.store.save_settings(&self.settings)?;
+        cx.notify();
+        Ok(())
     }
 
     pub fn set_command_blocks(&mut self, enabled: bool, cx: &mut Context<Self>) {
@@ -2038,7 +2053,7 @@ impl MicaWorkspace {
                                 });
                             }),
                     )
-                    .child(
+                    .when(self.settings.debug_logging, |bar| bar.child(
                         Button::new("open-logs-btn")
                             .tab_stop(false)
                             .ghost()
@@ -2054,7 +2069,7 @@ impl MicaWorkspace {
                                     cx,
                                 );
                             }),
-                    )
+                    ))
                     .child(
                         Button::new("open-settings-btn")
                             .tab_stop(false)

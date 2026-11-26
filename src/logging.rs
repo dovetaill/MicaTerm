@@ -1,4 +1,4 @@
-//! Persistent runtime file logging, Windows console attachment, panic hook, and native SEH crash diagnostics.
+//! Runtime diagnostics, Windows console attachment, and always-on crash reporting.
 
 use std::backtrace::Backtrace;
 use std::env;
@@ -7,85 +7,63 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::panic;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use anyhow::{Context as _, Result};
 use chrono::Local;
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use tracing_subscriber::EnvFilter;
 
 use crate::storage::AppPaths;
 
 const MAX_LOG_FILE_BYTES: u64 = 5 * 1024 * 1024;
+static RUNTIME_LOG: OnceLock<RuntimeLog> = OnceLock::new();
 
-static SHARED_LOG_FILE: OnceLock<Arc<Mutex<File>>> = OnceLock::new();
-static LOG_PATHS: OnceLock<(PathBuf, PathBuf)> = OnceLock::new();
-
-#[derive(Clone)]
-struct DualLogMakeWriter {
-    file: Option<Arc<Mutex<File>>>,
+struct RuntimeLog {
+    path: PathBuf,
+    console: bool,
+    enabled: AtomicBool,
+    file: RwLock<Option<File>>,
 }
 
-struct DualLogWriter {
-    file: Option<Arc<Mutex<File>>>,
-}
-
-impl Write for DualLogWriter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let _ = io::stderr().write_all(buf);
-        if let Some(ref shared) = self.file {
-            let mut guard = shared.lock();
-            let _ = guard.write_all(buf);
-            let _ = guard.flush();
-        }
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        let _ = io::stderr().flush();
-        if let Some(ref shared) = self.file {
-            let mut guard = shared.lock();
-            let _ = guard.flush();
-        }
-        Ok(())
-    }
-}
-
-impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for DualLogMakeWriter {
-    type Writer = DualLogWriter;
-
-    fn make_writer(&'a self) -> Self::Writer {
-        DualLogWriter {
-            file: self.file.clone(),
+impl RuntimeLog {
+    fn new(path: PathBuf, console: bool) -> Self {
+        Self {
+            path,
+            console,
+            enabled: AtomicBool::new(false),
+            file: RwLock::new(None),
         }
     }
-}
 
-/// Attaches or allocates a Win32 console window when `--console` CLI flag or `MICA_TERM_CONSOLE=1` is set.
-pub fn maybe_attach_console_from_env() {
-    let want_console = env::args().any(|a| a == "--console" || a == "-v")
-        || env::var_os("MICA_TERM_CONSOLE").is_some_and(|v| v != "0" && !v.is_empty());
+    fn configure(&self, requested: bool) -> Result<()> {
+        let enabled = requested || self.console;
+        let mut guard = self.file.write();
+        if !enabled {
+            *guard = None;
+            self.enabled.store(false, Ordering::Release);
+            return Ok(());
+        }
 
-    #[cfg(target_os = "windows")]
-    if want_console {
-        win_diag::attach_or_alloc_console();
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    let _ = want_console;
-}
-
-/// Initializes persistent file logging (`logs/mica-term.log`), Rust panic hook (`logs/crash.log`),
-/// and Windows SEH / CRT `SIGABRT` crash handlers.
-pub fn init_logging_and_crash_handlers(paths: &AppPaths) {
-    let _ = fs::create_dir_all(&paths.logs_dir);
-    rotate_if_oversized(&paths.runtime_log_path);
-
-    let file_arc = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&paths.runtime_log_path)
-        .ok()
-        .map(|mut f| {
+        if guard.is_none() {
+            if let Some(parent) = self.path.parent() {
+                fs::create_dir_all(parent).with_context(|| {
+                    format!("创建运行日志目录失败：{}", parent.display())
+                })?;
+            }
+            if let Ok(meta) = fs::metadata(&self.path)
+                && meta.len() > MAX_LOG_FILE_BYTES
+            {
+                let prev = self.path.with_file_name("mica-term.prev.log");
+                let _ = fs::remove_file(&prev);
+                let _ = fs::rename(&self.path, &prev);
+            }
+            let mut f = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)
+                .with_context(|| format!("打开运行日志失败：{}", self.path.display()))?;
             let now = Local::now().format("%Y-%m-%d %H:%M:%S%.3f %:z");
             let _ = writeln!(
                 f,
@@ -93,53 +71,104 @@ pub fn init_logging_and_crash_handlers(paths: &AppPaths) {
             );
             let _ = writeln!(
                 f,
-                "[{}] Mica Term GPUI v{} starting | os={} arch={} pid={} | data_dir={}",
+                "[{}] Mica Term GPUI v{} runtime log enabled | os={} arch={} pid={}",
                 now,
                 env!("CARGO_PKG_VERSION"),
                 env::consts::OS,
                 env::consts::ARCH,
                 std::process::id(),
-                paths.root_dir.display()
             );
             let _ = f.flush();
-            Arc::new(Mutex::new(f))
-        });
-
-    if let Some(ref arc) = file_arc {
-        let _ = SHARED_LOG_FILE.set(Arc::clone(arc));
+            *guard = Some(f);
+        }
+        self.enabled.store(true, Ordering::Release);
+        Ok(())
     }
-    let _ = LOG_PATHS.set((paths.runtime_log_path.clone(), paths.crash_log_path.clone()));
+}
 
+impl Write for &RuntimeLog {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        // Best-effort stderr output: Windows GUI subsystem processes without `--console`
+        // have no attached console handle, which must not fail tracing writers.
+        let _ = io::stderr().write_all(buf);
+        if self.enabled.load(Ordering::Acquire)
+            && let Some(mut file) = self.file.read().as_ref()
+        {
+            let _ = file.write_all(buf);
+            let _ = file.flush();
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        let _ = io::stderr().flush();
+        if self.enabled.load(Ordering::Acquire)
+            && let Some(mut file) = self.file.read().as_ref()
+        {
+            let _ = file.flush();
+        }
+        Ok(())
+    }
+}
+
+/// Attaches or allocates a Win32 console window when `--console` / `-v` or `MICA_TERM_CONSOLE=1` is set.
+pub fn maybe_attach_console_from_env() -> bool {
+    let console = env::args_os().any(|a| a == "--console" || a == "-v")
+        || env::var_os("MICA_TERM_CONSOLE").is_some_and(|v| v != "0" && !v.is_empty());
+    #[cfg(target_os = "windows")]
+    if console {
+        win_diag::attach_or_alloc_console();
+    }
+    console
+}
+
+pub fn init_logging_and_crash_handlers(paths: &AppPaths, console: bool) -> Result<()> {
+    install_panic_hook(paths.crash_log_path.clone());
+    #[cfg(target_os = "windows")]
+    win_diag::install_native_crash_handlers(&paths.crash_log_path);
+
+    RUNTIME_LOG
+        .set(RuntimeLog::new(paths.runtime_log_path.clone(), console))
+        .map_err(|_| anyhow::anyhow!("运行日志已经初始化"))?;
+    let log = RUNTIME_LOG
+        .get()
+        .expect("runtime logger was just initialized");
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         EnvFilter::new("info,mica_term_gpui=debug,gpui=warn,gpui_pre_windows=info,russh=info")
     });
-
-    let _ = tracing_subscriber::fmt()
+    tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_ansi(false)
         .with_target(true)
         .with_thread_ids(true)
-        .with_writer(DualLogMakeWriter { file: file_arc })
-        .try_init();
-
-    install_panic_hook();
-
-    #[cfg(target_os = "windows")]
-    win_diag::install_native_crash_handlers(&paths.crash_log_path);
-}
-
-fn rotate_if_oversized(log_path: &Path) {
-    if let Ok(meta) = fs::metadata(log_path)
-        && meta.len() > MAX_LOG_FILE_BYTES
-    {
-        let prev = log_path.with_file_name("mica-term.prev.log");
-        let _ = fs::remove_file(&prev);
-        let _ = fs::rename(log_path, prev);
+        .with_writer(move || log)
+        .try_init()
+        .map_err(|err| anyhow::anyhow!("初始化日志输出失败：{err}"))?;
+    if console && let Err(err) = set_debug_logging(false) {
+        tracing::error!(error = %err, "无法启用控制台的运行日志文件");
     }
+    Ok(())
 }
 
-fn install_panic_hook() {
-    panic::set_hook(Box::new(|panic_info| {
+pub fn set_debug_logging(requested: bool) -> Result<()> {
+    let log = RUNTIME_LOG.get().context("运行日志尚未初始化")?;
+    log.configure(requested)?;
+    if requested || log.console {
+        tracing::info!(
+            debug_logging = requested,
+            console = log.console,
+            version = env!("CARGO_PKG_VERSION"),
+            pid = std::process::id(),
+            os = env::consts::OS,
+            arch = env::consts::ARCH,
+            "运行调试日志已开启"
+        );
+    }
+    Ok(())
+}
+
+fn install_panic_hook(crash_path: PathBuf) {
+    panic::set_hook(Box::new(move |panic_info| {
         let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f %:z");
         let thread = std::thread::current();
         let thread_name = thread.name().unwrap_or("unnamed");
@@ -177,33 +206,33 @@ fn install_panic_hook() {
         let _ = io::stderr().write_all(report.as_bytes());
         let _ = io::stderr().flush();
 
-        let crash_path_display = if let Some((runtime_path, crash_path)) = LOG_PATHS.get() {
-            if let Ok(mut cf) = OpenOptions::new().create(true).append(true).open(crash_path) {
-                let _ = cf.write_all(report.as_bytes());
-                let _ = cf.sync_all();
-            }
-            if let Some(shared) = SHARED_LOG_FILE.get()
-                && let Some(mut rf) = shared.try_lock()
-            {
-                let _ = rf.write_all(report.as_bytes());
-                let _ = rf.sync_all();
-            } else if let Ok(mut rf) = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(runtime_path)
-            {
-                let _ = rf.write_all(report.as_bytes());
-                let _ = rf.sync_all();
-            }
-            crash_path.display().to_string()
-        } else {
-            "mica-term-data/logs/crash.log".to_string()
+        if let Some(parent) = crash_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let crash_result = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&crash_path)
+            .and_then(|mut file| {
+                file.write_all(report.as_bytes())?;
+                file.sync_all()
+            });
+        let crash_status = match crash_result {
+            Ok(()) => format!("完整堆栈已写入日志文件：\n{}", crash_path.display()),
+            Err(err) => format!("写入崩溃日志失败：{}：{err}", crash_path.display()),
         };
+        if let Some(log) = RUNTIME_LOG.get()
+            && let Some(guard) = log.file.try_read()
+            && let Some(mut file) = guard.as_ref()
+        {
+            let _ = file.write_all(report.as_bytes());
+            let _ = file.sync_all();
+        }
 
         show_fatal_startup_error(
             "Mica Term 发生未捕获异常 (Panic)",
             &format!(
-                "程序遇到严重错误并即将退出：\n\n位置：{location}\n原因：{payload}\n\n完整堆栈已写入日志文件：\n{crash_path_display}"
+                "程序遇到严重错误并即将退出：\n\n位置：{location}\n原因：{payload}\n\n{crash_status}"
             ),
         );
     }));
@@ -218,31 +247,29 @@ pub fn show_fatal_startup_error(title: &str, message: &str) {
 
 /// Reads recent `crash.log` (if present) and the tail of `mica-term.log` up to `max_bytes` for UI display.
 pub fn read_recent_logs(paths: &AppPaths, max_bytes: usize) -> String {
-    let mut out = String::new();
-    let _ = writeln_str(
-        &mut out,
-        &format!(
-            "# 日志目录: {}\n# 运行日志: {}\n# 崩溃日志: {}\n",
-            paths.logs_dir.display(),
-            paths.runtime_log_path.display(),
-            paths.crash_log_path.display()
-        ),
+    let mut out = format!(
+        "# 日志目录: {}\n# 运行日志: {}\n# 崩溃日志: {}\n\n",
+        paths.logs_dir.display(),
+        paths.runtime_log_path.display(),
+        paths.crash_log_path.display()
     );
-
-    if paths.crash_log_path.exists() {
-        let crash_tail = read_file_tail_lossy(&paths.crash_log_path, max_bytes / 3);
-        if !crash_tail.trim().is_empty() {
-            out.push_str("=== 最近崩溃记录 (crash.log) ===\n");
-            out.push_str(&crash_tail);
-            if !out.ends_with('\n') {
-                out.push('\n');
-            }
+    let tail = |path: &Path, cap| match read_file_tail_lossy(path, cap) {
+        Ok(text) => text,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(err) => format!("读取日志失败：{}：{err}\n", path.display()),
+    };
+    let crash_tail = tail(&paths.crash_log_path, max_bytes / 3);
+    if !crash_tail.trim().is_empty() {
+        out.push_str("=== 最近崩溃记录 (crash.log) ===\n");
+        out.push_str(&crash_tail);
+        if !out.ends_with('\n') {
             out.push('\n');
         }
+        out.push('\n');
     }
 
     out.push_str("=== 最近运行日志 (mica-term.log) ===\n");
-    let runtime_tail = read_file_tail_lossy(&paths.runtime_log_path, max_bytes);
+    let runtime_tail = tail(&paths.runtime_log_path, max_bytes);
     if runtime_tail.trim().is_empty() {
         out.push_str("（暂无日志内容）\n");
     } else {
@@ -251,44 +278,30 @@ pub fn read_recent_logs(paths: &AppPaths, max_bytes: usize) -> String {
     out
 }
 
-fn writeln_str(buf: &mut String, s: &str) -> Result<(), ()> {
-    buf.push_str(s);
-    buf.push('\n');
-    Ok(())
-}
-
-fn read_file_tail_lossy(path: &Path, max_bytes: usize) -> String {
-    let Ok(mut f) = File::open(path) else {
-        return String::new();
-    };
-    let Ok(meta) = f.metadata() else {
-        return String::new();
-    };
-    let len = meta.len();
+fn read_file_tail_lossy(path: &Path, max_bytes: usize) -> io::Result<String> {
+    let mut f = File::open(path)?;
+    let len = f.metadata()?.len();
     let cap = max_bytes.max(1024) as u64;
     let mut prefix = String::new();
     if len > cap {
-        let _ = f.seek(SeekFrom::Start(len - cap));
+        f.seek(SeekFrom::Start(len - cap))?;
         prefix = format!("... (已省略前 {} KB 日志) ...\n", (len - cap) / 1024);
     }
     let mut bytes = Vec::new();
-    let _ = f.read_to_end(&mut bytes);
+    f.read_to_end(&mut bytes)?;
     let text = String::from_utf8_lossy(&bytes);
     if prefix.is_empty() {
-        text.into_owned()
+        Ok(text.into_owned())
     } else {
         // Align to next newline so UTF-8 / line boundaries look clean
-        let aligned = text
-            .find('\n')
-            .map(|idx| &text[idx + 1..])
-            .unwrap_or(&text);
-        format!("{prefix}{aligned}")
+        let aligned = text.find('\n').map(|idx| &text[idx + 1..]).unwrap_or(&text);
+        Ok(format!("{prefix}{aligned}"))
     }
 }
 
 /// Opens a directory in the system file manager (Explorer / Finder / xdg-open).
 pub fn open_directory_in_file_manager(dir: &Path) -> Result<(), String> {
-    let _ = fs::create_dir_all(dir);
+    fs::create_dir_all(dir).map_err(|err| format!("无法创建目录 {}：{err}", dir.display()))?;
     #[cfg(target_os = "windows")]
     {
         Command::new("explorer.exe")
@@ -580,9 +593,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn runtime_log_follows_saved_preference_and_console_override() {
+        let dir = std::env::temp_dir().join(format!("mica-log-test-{}", uuid::Uuid::new_v4()));
+        let paths = AppPaths::from_root(&dir).unwrap();
+        let log = RuntimeLog::new(paths.runtime_log_path.clone(), false);
+        log.configure(false).unwrap();
+        (&log).write_all(b"off\n").unwrap();
+        assert!(!paths.runtime_log_path.exists());
+
+        log.configure(true).unwrap();
+        (&log).write_all(b"first\n").unwrap();
+
+        log.configure(false).unwrap();
+        (&log).write_all(b"off again\n").unwrap();
+
+        log.configure(true).unwrap();
+        (&log).write_all(b"resumed\n").unwrap();
+        drop(log);
+
+        let console = RuntimeLog::new(paths.runtime_log_path.clone(), true);
+        console.configure(false).unwrap();
+        (&console).write_all(b"console\n").unwrap();
+        let content = fs::read_to_string(&paths.runtime_log_path).unwrap();
+        assert!(content.contains("first\n"));
+        assert!(!content.contains("off\n"));
+        assert!(!content.contains("off again\n"));
+        assert!(content.contains("resumed\n"));
+        assert!(content.contains("console\n"));
+        drop(console);
+
+        let invalid = RuntimeLog::new(dir.clone(), false);
+        assert!(invalid.configure(true).is_err());
+        assert!(!invalid.enabled.load(Ordering::Acquire));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn recent_logs_reads_crash_and_runtime_tails() {
         let tmp = std::env::temp_dir().join(format!("mica-log-test-{}", uuid::Uuid::new_v4()));
         let paths = AppPaths::from_root(&tmp).expect("create temp AppPaths");
+        assert!(read_recent_logs(&paths, 4096).contains("暂无日志内容"));
+        fs::create_dir(&paths.runtime_log_path).unwrap();
+        assert!(read_recent_logs(&paths, 4096).contains("读取日志失败"));
+        fs::remove_dir(&paths.runtime_log_path).unwrap();
         fs::write(&paths.runtime_log_path, "line1: hello\nline2: ssh ok\n").unwrap();
         fs::write(&paths.crash_log_path, "panic: simulated crash\n").unwrap();
 
