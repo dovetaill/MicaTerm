@@ -5,6 +5,7 @@ pub mod sftp_panel;
 pub mod sidebar;
 pub mod terminal_view;
 pub mod theme;
+pub mod theme_catalog;
 pub mod welcome_view;
 pub mod workspace;
 

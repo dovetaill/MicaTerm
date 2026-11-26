@@ -54,6 +54,7 @@ pub struct PanePreferences {
     pub font_family: String,
     pub default_font_size: f32,
     pub dark_mode: bool,
+    pub theme_id: String,
     pub scrollback_lines: usize,
     pub semantic: SemanticOptions,
     pub right_click_action: RightClickAction,
@@ -104,7 +105,7 @@ pub struct TerminalPaneView {
     search_input: Option<Entity<InputState>>,
     font_family: SharedString,
     default_font_size: f32,
-    dark_mode: bool,
+    palette: TerminalPalette,
     scrollback_lines: usize,
     semantic_opts: SemanticOptions,
     right_click_action: RightClickAction,
@@ -271,7 +272,7 @@ impl TerminalPaneView {
             search_input: None,
             font_family: prefs.font_family.into(),
             default_font_size: prefs.default_font_size,
-            dark_mode: prefs.dark_mode,
+            palette: TerminalPalette::for_theme_id(&prefs.theme_id, prefs.dark_mode),
             scrollback_lines: prefs.scrollback_lines,
             semantic_opts: prefs.semantic,
             right_click_action: prefs.right_click_action,
@@ -296,7 +297,7 @@ impl TerminalPaneView {
     pub fn sync_preferences(&mut self, prefs: &PanePreferences, cx: &mut Context<Self>) {
         self.font_family = SharedString::from(prefs.font_family.clone());
         self.default_font_size = prefs.default_font_size;
-        self.dark_mode = prefs.dark_mode;
+        self.palette = TerminalPalette::for_theme_id(&prefs.theme_id, prefs.dark_mode);
         self.scrollback_lines = prefs.scrollback_lines;
         self.semantic_opts = prefs.semantic;
         self.copy_on_select = prefs.copy_on_select;
@@ -921,7 +922,7 @@ impl TerminalPaneView {
 impl Render for TerminalPaneView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_focused = self.focus_handle.is_focused(window);
-        let palette = TerminalPalette::for_mode(self.dark_mode);
+        let palette = self.palette.clone();
         let sem_opts = self.semantic_opts;
         let (font_size_f32, search_open, snapshot) = self.session.update(cx, |s, _| {
             (

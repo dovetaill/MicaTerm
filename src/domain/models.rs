@@ -12,14 +12,30 @@ use crate::domain::shortcuts::{DoubleClickAction, RightClickAction, ShortcutConf
 
 pub const BUNDLED_SARASA_FONT_FAMILY: &str = "Sarasa Term SC Nerd";
 pub const BUNDLED_MAPLE_FONT_FAMILY: &str = "JetBrains Maple Mono";
+pub const DEFAULT_DARK_THEME_ID: &str = "rex-obsidian";
+pub const DEFAULT_LIGHT_THEME_ID: &str = "rex-daylight";
 
 fn default_true() -> bool {
     true
 }
 
+fn default_dark_theme() -> String {
+    DEFAULT_DARK_THEME_ID.to_string()
+}
+
+fn default_light_theme() -> String {
+    DEFAULT_LIGHT_THEME_ID.to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppSettings {
     pub dark_mode: bool,
+    #[serde(default = "default_dark_theme")]
+    pub dark_theme: String,
+    #[serde(default = "default_light_theme")]
+    pub light_theme: String,
+    #[serde(default = "default_true")]
+    pub tint_ui_with_theme: bool,
     pub font_family: String,
     pub font_size: f32,
     pub scrollback_lines: usize,
@@ -50,10 +66,23 @@ pub struct AppSettings {
     pub typography_v2_migrated: bool,
 }
 
+impl AppSettings {
+    pub fn active_theme_id(&self) -> &str {
+        if self.dark_mode {
+            &self.dark_theme
+        } else {
+            &self.light_theme
+        }
+    }
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             dark_mode: true,
+            dark_theme: default_dark_theme(),
+            light_theme: default_light_theme(),
+            tint_ui_with_theme: true,
             font_family: default_terminal_font_family(),
             font_size: default_terminal_font_size(),
             scrollback_lines: 5_000,

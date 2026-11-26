@@ -20,7 +20,7 @@ use gpui_kit::{
 
 use crate::domain::{FlatHostRow, KeychainEntry, KeychainKind, ShortcutAction, SnippetItem, tooltip};
 use crate::ui::theme::{
-    macos_env_badge_colors, macos_hex, macos_segmented_track, macos_squircle_badge,
+    macos_env_badge_colors, macos_segmented_track, macos_squircle_badge,
 };
 use crate::ui::workspace::MicaWorkspace;
 
@@ -313,11 +313,7 @@ fn render_host_row(
     let id_ctx6 = id.clone();
 
     let leading_visual = if is_folder {
-        let folder_tint = if cx.theme().is_dark() {
-            macos_hex(0x5AC8FA, 1.0)
-        } else {
-            macos_hex(0x007AFF, 1.0)
-        };
+        let folder_tint = cx.theme().cyan;
         h_flex()
             .gap_1()
             .items_center()
@@ -602,11 +598,7 @@ fn render_snippet_row(
     let sid3 = sid.clone();
     let sid4 = sid.clone();
 
-    let purple = if cx.theme().is_dark() {
-        macos_hex(0xBF5AF2, 1.0)
-    } else {
-        macos_hex(0xAF52DE, 1.0)
-    };
+    let purple = cx.theme().magenta;
 
     h_flex()
         .id(SharedString::from(format!("snippet-row-{sid}")))

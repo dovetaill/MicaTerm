@@ -26,7 +26,7 @@ use crate::sftp::{
     format_bytes, join_remote_path, parent_remote_path,
 };
 use crate::ui::modals::{open_confirm_dialog, open_remote_editor_dialog, open_simple_name_dialog};
-use crate::ui::theme::{macos_hex, macos_squircle_badge};
+use crate::ui::theme::macos_squircle_badge;
 
 pub enum SftpPanelEvent {
     FollowChanged(bool),
@@ -664,11 +664,7 @@ fn render_sftp_entry_row(
         entry.name.clone()
     };
 
-    let folder_tint = if cx.theme().is_dark() {
-        macos_hex(0x5AC8FA, 1.0)
-    } else {
-        macos_hex(0x007AFF, 1.0)
-    };
+    let folder_tint = cx.theme().cyan;
 
     let p_click = panel_ent.clone();
     let entry_click = entry.clone();

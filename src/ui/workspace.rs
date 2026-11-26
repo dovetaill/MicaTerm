@@ -34,13 +34,14 @@ use crate::terminal::{
     session::{SessionEntityEvent, SessionPhase},
 };
 use crate::ui::modals::{
-    SshHostModalInit, open_confirm_dialog, open_keychain_modal, open_settings_modal,
-    open_simple_name_dialog, open_snippet_modal, open_ssh_host_modal,
+    SettingsTab, SshHostModalInit, open_confirm_dialog, open_keychain_modal, open_settings_modal,
+    open_settings_modal_at, open_simple_name_dialog, open_snippet_modal, open_ssh_host_modal,
 };
 use crate::ui::sftp_panel::{SftpPanelEvent, SftpPanelView};
 use crate::ui::sidebar::{LeftSidebar, SidebarSection};
 use crate::ui::terminal_view::{PanePreferences, TerminalPaneEvent, TerminalPaneView};
-use crate::ui::theme::apply_macos_theme;
+use crate::ui::theme::apply_workspace_theme;
+use crate::ui::theme_catalog::ThemeRegistry;
 use crate::ui::welcome_view::{QuickConnectItem, WelcomeView};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -236,7 +237,7 @@ impl MicaWorkspace {
     pub fn new(
         paths: AppPaths,
         store: WorkspaceStore,
-        snap: WorkspaceSnapshot,
+        mut snap: WorkspaceSnapshot,
         credentials: Arc<dyn CredentialStore>,
         tokio_handle: tokio::runtime::Handle,
         window: &mut Window,
@@ -244,10 +245,14 @@ impl MicaWorkspace {
     ) -> Self {
         let known_hosts = KnownHostsStore::new(&paths.known_hosts_path);
         crate::syntax::SyntaxRegistry::global().reload_from_dir(Some(&paths.syntaxes_dir));
+        let theme_pack = ThemeRegistry::global().reload_from_dir(Some(&paths.themes_dir));
+        if theme_pack.reconcile_settings(&mut snap.settings) {
+            let _ = store.save_settings(&snap.settings);
+        }
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window, cx);
 
-        apply_macos_theme(snap.settings.dark_mode, Some(window), cx);
+        apply_workspace_theme(&snap.settings, Some(window), cx);
 
         let sidebar_search_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("搜索主机、IP、片段..."));
@@ -318,6 +323,7 @@ impl MicaWorkspace {
             font_family: self.settings.font_family.clone(),
             default_font_size: self.settings.font_size,
             dark_mode: self.settings.dark_mode,
+            theme_id: self.settings.active_theme_id().to_string(),
             scrollback_lines: self.settings.scrollback_lines,
             right_click_action: self.settings.right_click_action,
             copy_on_select: self.settings.copy_on_select,
@@ -359,12 +365,165 @@ impl MicaWorkspace {
     pub fn set_dark_mode(&mut self, dark: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.settings.dark_mode = dark;
         let _ = self.store.save_settings(&self.settings);
-        apply_macos_theme(dark, Some(window), cx);
+        apply_workspace_theme(&self.settings, Some(window), cx);
         self.propagate_pane_preferences(cx);
         if !window.has_active_dialog(cx) {
             self.focus_active_pane(window, cx);
         }
         cx.notify();
+    }
+
+    pub fn select_theme(&mut self, theme_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let pack = ThemeRegistry::global().current();
+        let Some(spec) = pack.get(theme_id).cloned() else {
+            return;
+        };
+        if spec.dark {
+            self.settings.dark_theme = spec.id;
+            self.settings.dark_mode = true;
+        } else {
+            self.settings.light_theme = spec.id;
+            self.settings.dark_mode = false;
+        }
+        let _ = self.store.save_settings(&self.settings);
+        apply_workspace_theme(&self.settings, Some(window), cx);
+        self.propagate_pane_preferences(cx);
+        if !window.has_active_dialog(cx) {
+            self.focus_active_pane(window, cx);
+        }
+        cx.notify();
+    }
+
+    pub fn set_tint_ui_with_theme(
+        &mut self,
+        enabled: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings.tint_ui_with_theme = enabled;
+        let _ = self.store.save_settings(&self.settings);
+        apply_workspace_theme(&self.settings, Some(window), cx);
+        cx.notify();
+    }
+
+    pub fn reload_custom_themes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let pack = ThemeRegistry::global().reload_from_dir(Some(&self.paths.themes_dir));
+        if pack.reconcile_settings(&mut self.settings) {
+            let _ = self.store.save_settings(&self.settings);
+        }
+        let loaded = pack.loaded_custom_count();
+        let failed = pack.custom_entries.len().saturating_sub(loaded);
+        apply_workspace_theme(&self.settings, Some(window), cx);
+        self.propagate_pane_preferences(cx);
+        let msg = if failed > 0 {
+            format!("主题库已重载：成功加载 {loaded} 个外部主题，{failed} 个条目存在读取或格式错误")
+        } else {
+            format!(
+                "主题库已重载：内置 {} 款主题，已加载 {loaded} 个自定义主题",
+                pack.builtin_count
+            )
+        };
+        window.push_notification(Notification::info(msg), cx);
+        window.refresh();
+        cx.notify();
+    }
+
+    pub fn import_custom_themes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let themes_dir = self.paths.themes_dir.clone();
+        let win_handle = window.window_handle();
+
+        cx.spawn(async move |weak, cx| {
+            let picked = rfd::AsyncFileDialog::new()
+                .set_title("选择要导入的终端主题文件 (Ghostty / iTerm2 .itermcolors)")
+                .add_filter(
+                    "主题配色文件",
+                    &["itermcolors", "ghostty", "conf", "theme", "txt", "toml"],
+                )
+                .add_filter("所有文件 (含无后缀 Ghostty 主题)", &["*"])
+                .pick_files()
+                .await;
+            let Some(handles) = picked else {
+                return;
+            };
+            let source_paths: Vec<std::path::PathBuf> =
+                handles.into_iter().map(|h| h.path().to_path_buf()).collect();
+            let selected_count = source_paths.len();
+            let first_fname = source_paths
+                .first()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned());
+            let import_res = cx
+                .background_executor()
+                .spawn(async move {
+                    ThemeRegistry::global().import_files(&themes_dir, &source_paths)
+                })
+                .await;
+
+            let _ = cx.update_window(win_handle, |_, window, cx| {
+                if let Some(ws_ent) = weak.upgrade() {
+                    ws_ent.update(cx, |ws, cx| {
+                        match import_res {
+                            Ok(pack) => {
+                                if let Some(fname) = first_fname
+                                    && let Some(entry) =
+                                        pack.custom_entries.iter().find(|e| e.file_name == fname)
+                                    && let Some(ref tid) = entry.theme_id
+                                {
+                                    ws.select_theme(tid, window, cx);
+                                } else {
+                                    if pack.reconcile_settings(&mut ws.settings) {
+                                        let _ = ws.store.save_settings(&ws.settings);
+                                    }
+                                    apply_workspace_theme(&ws.settings, Some(window), cx);
+                                    ws.propagate_pane_preferences(cx);
+                                }
+                                let loaded = pack.loaded_custom_count();
+                                window.push_notification(
+                                    Notification::success(format!(
+                                        "已导入 {selected_count} 个主题文件（当前生效自定义主题 {loaded} 个）",
+                                    )),
+                                    cx,
+                                );
+                            }
+                            Err(err) => {
+                                window.push_notification(
+                                    Notification::error(format!("导入主题文件失败：{err:#}")),
+                                    cx,
+                                );
+                            }
+                        }
+                        window.refresh();
+                        cx.notify();
+                    });
+                }
+            });
+        })
+        .detach();
+    }
+
+    pub fn remove_custom_theme(
+        &mut self,
+        file_name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match ThemeRegistry::global().remove_custom_file(&self.paths.themes_dir, file_name) {
+            Ok(pack) => {
+                if pack.reconcile_settings(&mut self.settings) {
+                    let _ = self.store.save_settings(&self.settings);
+                }
+                apply_workspace_theme(&self.settings, Some(window), cx);
+                self.propagate_pane_preferences(cx);
+                window.refresh();
+                cx.notify();
+            }
+            Err(err) => {
+                window.push_notification(
+                    Notification::error(format!("移除主题文件失败：{err:#}")),
+                    cx,
+                );
+            }
+        }
     }
 
     pub fn adjust_default_font_size(&mut self, delta: f32, cx: &mut Context<Self>) {
@@ -1614,16 +1773,27 @@ impl MicaWorkspace {
         let ws_split_h = ws_ent.clone();
         let ws_split_v = ws_ent.clone();
         let ws_sftp = ws_ent.clone();
+        let ws_palette = ws_ent.clone();
         let ws_theme = ws_ent.clone();
         let ws_settings = ws_ent.clone();
 
         let show_sidebar = self.settings.show_left_sidebar;
         let show_sftp = self.settings.show_sftp_panel;
         let dark_mode = self.settings.dark_mode;
+        let theme_pack = ThemeRegistry::global().current();
+        let active_theme_name = theme_pack
+            .resolve(self.settings.active_theme_id(), dark_mode)
+            .name;
+        let alt_theme_name = if dark_mode {
+            theme_pack.resolve(&self.settings.light_theme, false).name
+        } else {
+            theme_pack.resolve(&self.settings.dark_theme, true).name
+        };
         let has_active_tab = self.active_tab_id.is_some();
         let sftp_busy = self.sftp_panel.read(cx).has_active_transfers();
         let shortcut_tooltip = |label: &str, action| tooltip(label, self.settings.shortcuts.get(action).as_ref());
         let app_paths = self.paths.clone();
+        let app_paths_palette = self.paths.clone();
         let paths_for_logs = self.paths.clone();
 
         let tab_elements: Vec<AnyElement> = self
@@ -1821,6 +1991,27 @@ impl MicaWorkspace {
                             }),
                     )
                     .child(
+                        Button::new("open-theme-gallery-btn")
+                            .tab_stop(false)
+                            .ghost()
+                            .xsmall()
+                            .compact()
+                            .icon(LucideIcon::Palette)
+                            .tooltip(format!(
+                                "当前主题：{active_theme_name}（点击切换 {} 款精选配色）",
+                                theme_pack.themes.len()
+                            ))
+                            .on_click(move |_, window, cx| {
+                                open_settings_modal_at(
+                                    ws_palette.clone(),
+                                    app_paths_palette.clone(),
+                                    SettingsTab::Themes,
+                                    window,
+                                    cx,
+                                );
+                            }),
+                    )
+                    .child(
                         Button::new("quick-theme-toggle-btn")
                             .tab_stop(false)
                             .ghost()
@@ -1832,9 +2023,9 @@ impl MicaWorkspace {
                                 LucideIcon::Moon
                             })
                             .tooltip(if dark_mode {
-                                "切换为浅色模式"
+                                format!("切换为浅色模式 ({alt_theme_name})")
                             } else {
-                                "切换为深色模式"
+                                format!("切换为深色模式 ({alt_theme_name})")
                             })
                             .on_click(move |_, window, cx| {
                                 ws_theme.update(cx, |ws, cx| {

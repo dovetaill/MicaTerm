@@ -1,13 +1,18 @@
-//! Terminal color palettes (Dark & Light), ANSI/256/TrueColor -> GPUI Hsla resolution,
-//! and semantic developer overlay colors (OSC 133 command blocks, output rules, input tokens).
+//! Terminal color palettes (Dark, Light & Full Theme Catalog), ANSI/256/TrueColor -> GPUI Hsla
+//! resolution, and theme-adaptive semantic developer overlay colors (OSC 133 command blocks,
+//! output rules, input tokens, and terminal code highlighting).
 
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::color::Colors;
 use alacritty_terminal::vte::ansi::{Color, NamedColor, Rgb};
 use gpui_kit::{Hsla, Rgba};
 
+use crate::domain::{DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID};
 use crate::syntax::CodeTokenRole;
 use crate::terminal::semantic::{CommandBlockStatus, OverviewMarkerKind, SemanticRole};
+use crate::ui::theme_catalog::{
+    ThemeRegistry, ThemeSpec, contrasting_ink, ensure_readable_fg, mix_hex, u32_to_rgb,
+};
 
 #[derive(Debug, Clone)]
 pub struct TerminalPalette {
@@ -25,111 +30,126 @@ pub struct TerminalPalette {
     pub block_divider: Hsla,
     pub search_marker: Hsla,
     pub ansi: [Rgb; 16],
+    syn_comment: Hsla,
+    syn_comment_doc: Hsla,
+    syn_string: Hsla,
+    syn_cyan: Hsla,
+    syn_number: Hsla,
+    syn_yellow: Hsla,
+    syn_keyword: Hsla,
+    syn_blue: Hsla,
+    syn_input_cmd: Hsla,
+    syn_red: Hsla,
+    syn_green: Hsla,
+    syn_orange: Hsla,
+    syn_variable: Hsla,
 }
 
 impl TerminalPalette {
-    pub fn dark() -> Self {
+    pub fn from_theme(spec: &ThemeSpec) -> Self {
+        let dark = spec.dark;
+        let bg = spec.term_bg;
+        let min_c = if dark { 3.6 } else { 3.4 };
+
+        let rd = |hex: u32| ensure_readable_fg(hex, bg, dark, min_c);
+        let to_hsla = |hex: u32, alpha: f32| {
+            let rgb = u32_to_rgb(hex);
+            rgba_u8(rgb.r, rgb.g, rgb.b, alpha)
+        };
+
+        let comment_hex = ensure_readable_fg(
+            mix_hex(spec.muted_fg, spec.ansi[8], 0.35),
+            bg,
+            dark,
+            if dark { 2.7 } else { 2.6 },
+        );
+        let comment_doc_hex = ensure_readable_fg(mix_hex(comment_hex, spec.term_fg, 0.25), bg, dark, 3.0);
+
+        let red_hex = rd(if dark { spec.ansi[9] } else { spec.ansi[1] });
+        let green_hex = rd(spec.ansi[2]);
+        let yellow_hex = rd(if dark { spec.ansi[11] } else { spec.ansi[3] });
+        let blue_hex = rd(spec.ansi[4]);
+        let magenta_hex = rd(spec.ansi[5]);
+        let cyan_hex = rd(spec.ansi[6]);
+        let orange_hex = rd(mix_hex(yellow_hex, red_hex, 0.42));
+        let var_hex = rd(mix_hex(magenta_hex, spec.term_fg, 0.28));
+
+        // Guarantee distinctness from raw ANSI[1] so semantic/syntax tokens never accidentally collide
+        let fn_blue_hex = if blue_hex == spec.ansi[1] {
+            rd(spec.accent)
+        } else {
+            blue_hex
+        };
+        let mut input_cmd_hex = rd(if dark {
+            mix_hex(spec.ansi[12], 0xFFFFFF, 0.16)
+        } else {
+            mix_hex(spec.ansi[12], 0x000000, 0.16)
+        });
+        if input_cmd_hex == fn_blue_hex {
+            input_cmd_hex = if dark {
+                mix_hex(fn_blue_hex, 0xFFFFFF, 0.20)
+            } else {
+                mix_hex(fn_blue_hex, 0x000000, 0.20)
+            };
+        }
+
+        let warn_marker_hex = spec.ansi[3];
+        let fail_hex = spec.ansi[1];
+        let run_hex = spec.accent;
+
         Self {
-            dark: true,
-            foreground: Rgb {
-                r: 0xe5,
-                g: 0xe5,
-                b: 0xea,
+            dark,
+            foreground: u32_to_rgb(spec.term_fg),
+            background: u32_to_rgb(spec.term_bg),
+            cursor: u32_to_rgb(spec.cursor),
+            cursor_text: u32_to_rgb(
+                spec.cursor_text
+                    .unwrap_or_else(|| contrasting_ink(spec.cursor)),
+            ),
+            selection_bg: to_hsla(spec.selection, if dark { 0.30 } else { 0.20 }),
+            search_match_bg: to_hsla(warn_marker_hex, if dark { 0.28 } else { 0.24 }),
+            search_active_bg: to_hsla(warn_marker_hex, if dark { 0.66 } else { 0.56 }),
+            block_running: to_hsla(run_hex, 0.88),
+            block_success: if dark {
+                rgba_u8(0xff, 0xff, 0xff, 0.22)
+            } else {
+                rgba_u8(0x00, 0x00, 0x00, 0.18)
             },
-            background: Rgb {
-                r: 0x19,
-                g: 0x19,
-                b: 0x1c,
+            block_failure: to_hsla(fail_hex, 0.90),
+            block_divider: if dark {
+                rgba_u8(0xff, 0xff, 0xff, 0.065)
+            } else {
+                rgba_u8(0x00, 0x00, 0x00, 0.065)
             },
-            cursor: Rgb {
-                r: 0x0a,
-                g: 0x84,
-                b: 0xff,
-            },
-            cursor_text: Rgb {
-                r: 0xff,
-                g: 0xff,
-                b: 0xff,
-            },
-            selection_bg: rgba_u8(0x0a, 0x84, 0xff, 0.30),
-            search_match_bg: rgba_u8(0xff, 0x9f, 0x0a, 0.28),
-            search_active_bg: rgba_u8(0xff, 0x9f, 0x0a, 0.68),
-            block_running: rgba_u8(0x0a, 0x84, 0xff, 0.90),
-            block_success: rgba_u8(0xff, 0xff, 0xff, 0.24),
-            block_failure: rgba_u8(0xff, 0x45, 0x3a, 0.92),
-            block_divider: rgba_u8(0xff, 0xff, 0xff, 0.065),
-            search_marker: rgba_u8(0xff, 0x9f, 0x0a, 0.92),
-            ansi: [
-                Rgb { r: 0x2c, g: 0x2c, b: 0x2e }, // 0 Black
-                Rgb { r: 0xff, g: 0x45, b: 0x3a }, // 1 Red (Apple Dark Red)
-                Rgb { r: 0x30, g: 0xd1, b: 0x58 }, // 2 Green (Apple Dark Green)
-                Rgb { r: 0xff, g: 0xd6, b: 0x0a }, // 3 Yellow
-                Rgb { r: 0x0a, g: 0x84, b: 0xff }, // 4 Blue (Apple Dark Blue)
-                Rgb { r: 0xbf, g: 0x5a, b: 0xf2 }, // 5 Magenta (Apple Dark Purple)
-                Rgb { r: 0x64, g: 0xd2, b: 0xff }, // 6 Cyan (Apple Dark Cyan)
-                Rgb { r: 0xd1, g: 0xd1, b: 0xd6 }, // 7 White
-                Rgb { r: 0x63, g: 0x63, b: 0x66 }, // 8 Bright Black
-                Rgb { r: 0xff, g: 0x69, b: 0x61 }, // 9 Bright Red
-                Rgb { r: 0x4c, g: 0xd9, b: 0x64 }, // 10 Bright Green
-                Rgb { r: 0xff, g: 0xe0, b: 0x66 }, // 11 Bright Yellow
-                Rgb { r: 0x5e, g: 0xb0, b: 0xff }, // 12 Bright Blue
-                Rgb { r: 0xd9, g: 0x82, b: 0xff }, // 13 Bright Magenta
-                Rgb { r: 0x85, g: 0xe0, b: 0xff }, // 14 Bright Cyan
-                Rgb { r: 0xf2, g: 0xf2, b: 0xf7 }, // 15 Bright White
-            ],
+            search_marker: to_hsla(warn_marker_hex, 0.90),
+            ansi: spec.ansi.map(u32_to_rgb),
+            syn_comment: to_hsla(comment_hex, 1.0),
+            syn_comment_doc: to_hsla(comment_doc_hex, 1.0),
+            syn_string: to_hsla(green_hex, 1.0),
+            syn_cyan: to_hsla(cyan_hex, 1.0),
+            syn_number: to_hsla(orange_hex, 1.0),
+            syn_yellow: to_hsla(yellow_hex, 1.0),
+            syn_keyword: to_hsla(magenta_hex, 1.0),
+            syn_blue: to_hsla(fn_blue_hex, 1.0),
+            syn_input_cmd: to_hsla(input_cmd_hex, 1.0),
+            syn_red: to_hsla(red_hex, 1.0),
+            syn_green: to_hsla(rd(spec.ansi[10]), 1.0),
+            syn_orange: to_hsla(orange_hex, 1.0),
+            syn_variable: to_hsla(var_hex, 1.0),
         }
     }
 
+    pub fn for_theme_id(theme_id: &str, dark_fallback: bool) -> Self {
+        let spec = ThemeRegistry::global().resolve(theme_id, dark_fallback);
+        Self::from_theme(&spec)
+    }
+
+    pub fn dark() -> Self {
+        Self::for_theme_id(DEFAULT_DARK_THEME_ID, true)
+    }
+
     pub fn light() -> Self {
-        Self {
-            dark: false,
-            foreground: Rgb {
-                r: 0x1d,
-                g: 0x1d,
-                b: 0x1f,
-            },
-            background: Rgb {
-                r: 0xff,
-                g: 0xff,
-                b: 0xff,
-            },
-            cursor: Rgb {
-                r: 0x00,
-                g: 0x7a,
-                b: 0xff,
-            },
-            cursor_text: Rgb {
-                r: 0xff,
-                g: 0xff,
-                b: 0xff,
-            },
-            selection_bg: rgba_u8(0x00, 0x7a, 0xff, 0.20),
-            search_match_bg: rgba_u8(0xff, 0x95, 0x00, 0.24),
-            search_active_bg: rgba_u8(0xff, 0x95, 0x00, 0.58),
-            block_running: rgba_u8(0x00, 0x7a, 0xff, 0.86),
-            block_success: rgba_u8(0x00, 0x00, 0x00, 0.20),
-            block_failure: rgba_u8(0xff, 0x3b, 0x30, 0.90),
-            block_divider: rgba_u8(0x00, 0x00, 0x00, 0.065),
-            search_marker: rgba_u8(0xff, 0x95, 0x00, 0.90),
-            ansi: [
-                Rgb { r: 0x1d, g: 0x1d, b: 0x1f }, // 0 Black
-                Rgb { r: 0xd7, g: 0x00, b: 0x15 }, // 1 Red
-                Rgb { r: 0x1d, g: 0x83, b: 0x30 }, // 2 Green
-                Rgb { r: 0x9e, g: 0x63, b: 0x00 }, // 3 Yellow
-                Rgb { r: 0x00, g: 0x66, b: 0xd6 }, // 4 Blue
-                Rgb { r: 0x89, g: 0x44, b: 0xab }, // 5 Magenta
-                Rgb { r: 0x00, g: 0x71, b: 0x85 }, // 6 Cyan
-                Rgb { r: 0x6e, g: 0x6e, b: 0x73 }, // 7 White
-                Rgb { r: 0x8e, g: 0x8e, b: 0x93 }, // 8 Bright Black
-                Rgb { r: 0xff, g: 0x3b, b: 0x30 }, // 9 Bright Red
-                Rgb { r: 0x28, g: 0xcd, b: 0x41 }, // 10 Bright Green
-                Rgb { r: 0xc9, g: 0x82, b: 0x00 }, // 11 Bright Yellow
-                Rgb { r: 0x00, g: 0x7a, b: 0xff }, // 12 Bright Blue
-                Rgb { r: 0xaf, g: 0x52, b: 0xde }, // 13 Bright Magenta
-                Rgb { r: 0x32, g: 0xad, b: 0xe6 }, // 14 Bright Cyan
-                Rgb { r: 0x1d, g: 0x1d, b: 0x1f }, // 15 Bright White
-            ],
-        }
+        Self::for_theme_id(DEFAULT_LIGHT_THEME_ID, false)
     }
 
     pub fn for_mode(dark_mode: bool) -> Self {
@@ -159,87 +179,41 @@ impl TerminalPalette {
 
     /// Returns `(fg_color, add_bold, add_underline)` for a semantic token role.
     pub fn semantic_style(&self, role: SemanticRole) -> (Hsla, bool, bool) {
-        if self.dark {
-            match role {
-                SemanticRole::OutputUrl => (rgba_u8(0x6c, 0xb6, 0xff, 1.0), false, false),
-                SemanticRole::OutputFileLine => (rgba_u8(0x56, 0xc2, 0xc6, 1.0), false, false),
-                SemanticRole::OutputPath => (rgba_u8(0x7d, 0xcf, 0xff, 1.0), false, false),
-                SemanticRole::OutputEndpoint => (rgba_u8(0xc6, 0x78, 0xdd, 1.0), false, false),
-                SemanticRole::DiagnosticError => (rgba_u8(0xf0, 0x80, 0x89, 1.0), true, false),
-                SemanticRole::DiagnosticWarn => (rgba_u8(0xe5, 0xc0, 0x7b, 1.0), true, false),
-                SemanticRole::InputCommand => (rgba_u8(0x79, 0xc0, 0xff, 1.0), true, false),
-                SemanticRole::InputSubcommand => (rgba_u8(0x70, 0xc8, 0xd4, 1.0), false, false),
-                SemanticRole::InputOption => (rgba_u8(0xf0, 0xd1, 0x92, 1.0), false, false),
-                SemanticRole::InputString => (rgba_u8(0xa9, 0xd4, 0x8b, 1.0), false, false),
-                SemanticRole::InputOperator => (rgba_u8(0xff, 0x9e, 0x64, 1.0), true, false),
-                SemanticRole::InputVariable => (rgba_u8(0xd8, 0x92, 0xef, 1.0), false, false),
-            }
-        } else {
-            match role {
-                SemanticRole::OutputUrl => (rgba_u8(0x09, 0x69, 0xda, 1.0), false, false),
-                SemanticRole::OutputFileLine => (rgba_u8(0x1b, 0x7c, 0x83, 1.0), false, false),
-                SemanticRole::OutputPath => (rgba_u8(0x05, 0x50, 0xae, 1.0), false, false),
-                SemanticRole::OutputEndpoint => (rgba_u8(0x82, 0x50, 0xdf, 1.0), false, false),
-                SemanticRole::DiagnosticError => (rgba_u8(0xcf, 0x22, 0x2e, 1.0), true, false),
-                SemanticRole::DiagnosticWarn => (rgba_u8(0x9a, 0x67, 0x00, 1.0), true, false),
-                SemanticRole::InputCommand => (rgba_u8(0x09, 0x69, 0xda, 1.0), true, false),
-                SemanticRole::InputSubcommand => (rgba_u8(0x1b, 0x7c, 0x83, 1.0), false, false),
-                SemanticRole::InputOption => (rgba_u8(0x9a, 0x67, 0x00, 1.0), false, false),
-                SemanticRole::InputString => (rgba_u8(0x1a, 0x7f, 0x37, 1.0), false, false),
-                SemanticRole::InputOperator => (rgba_u8(0xbc, 0x4c, 0x00, 1.0), true, false),
-                SemanticRole::InputVariable => (rgba_u8(0x82, 0x50, 0xdf, 1.0), false, false),
-            }
+        match role {
+            SemanticRole::OutputUrl => (self.syn_blue, false, false),
+            SemanticRole::OutputFileLine => (self.syn_cyan, false, false),
+            SemanticRole::OutputPath => (self.syn_cyan, false, false),
+            SemanticRole::OutputEndpoint => (self.syn_keyword, false, false),
+            SemanticRole::DiagnosticError => (self.syn_red, true, false),
+            SemanticRole::DiagnosticWarn => (self.syn_yellow, true, false),
+            SemanticRole::InputCommand => (self.syn_input_cmd, true, false),
+            SemanticRole::InputSubcommand => (self.syn_cyan, false, false),
+            SemanticRole::InputOption => (self.syn_yellow, false, false),
+            SemanticRole::InputString => (self.syn_string, false, false),
+            SemanticRole::InputOperator => (self.syn_orange, true, false),
+            SemanticRole::InputVariable => (self.syn_variable, false, false),
         }
     }
 
     /// Returns `(fg_color, add_bold, add_underline)` for a syntax-highlighted code token in terminal output.
     pub fn code_token_style(&self, role: CodeTokenRole) -> (Hsla, bool, bool) {
-        if self.dark {
-            match role {
-                CodeTokenRole::Comment => (rgba_u8(0x7f, 0x84, 0x8e, 1.0), false, false),
-                CodeTokenRole::CommentDoc => (rgba_u8(0x8b, 0x94, 0x9e, 1.0), false, false),
-                CodeTokenRole::String => (rgba_u8(0x98, 0xc3, 0x79, 1.0), false, false),
-                CodeTokenRole::StringEscape => (rgba_u8(0x56, 0xb6, 0xc2, 1.0), false, false),
-                CodeTokenRole::Number | CodeTokenRole::Boolean => {
-                    (rgba_u8(0xd1, 0x9a, 0x66, 1.0), false, false)
-                }
-                CodeTokenRole::Constant => (rgba_u8(0xe5, 0xc0, 0x7b, 1.0), false, false),
-                CodeTokenRole::Keyword => (rgba_u8(0xc6, 0x78, 0xdd, 1.0), false, false),
-                CodeTokenRole::Operator => (rgba_u8(0x56, 0xb6, 0xc2, 1.0), false, false),
-                CodeTokenRole::Function => (rgba_u8(0x61, 0xaf, 0xef, 1.0), false, false),
-                CodeTokenRole::Type => (rgba_u8(0xe5, 0xc0, 0x7b, 1.0), false, false),
-                CodeTokenRole::Tag => (rgba_u8(0xe0, 0x6c, 0x75, 1.0), false, false),
-                CodeTokenRole::Attribute | CodeTokenRole::Property => {
-                    (rgba_u8(0x7d, 0xcf, 0xff, 1.0), false, false)
-                }
-                CodeTokenRole::Variable => (rgba_u8(0xd8, 0x92, 0xef, 1.0), false, false),
-                CodeTokenRole::Heading => (rgba_u8(0x61, 0xaf, 0xef, 1.0), true, false),
-                CodeTokenRole::Inserted => (rgba_u8(0x30, 0xd1, 0x58, 1.0), false, false),
-                CodeTokenRole::Deleted => (rgba_u8(0xff, 0x45, 0x3a, 1.0), false, false),
-            }
-        } else {
-            match role {
-                CodeTokenRole::Comment => (rgba_u8(0x6e, 0x77, 0x81, 1.0), false, false),
-                CodeTokenRole::CommentDoc => (rgba_u8(0x57, 0x60, 0x6a, 1.0), false, false),
-                CodeTokenRole::String => (rgba_u8(0x1a, 0x7f, 0x37, 1.0), false, false),
-                CodeTokenRole::StringEscape => (rgba_u8(0x05, 0x50, 0xae, 1.0), false, false),
-                CodeTokenRole::Number | CodeTokenRole::Boolean => {
-                    (rgba_u8(0x95, 0x38, 0x00, 1.0), false, false)
-                }
-                CodeTokenRole::Constant => (rgba_u8(0x05, 0x50, 0xae, 1.0), false, false),
-                CodeTokenRole::Keyword => (rgba_u8(0x82, 0x50, 0xdf, 1.0), false, false),
-                CodeTokenRole::Operator => (rgba_u8(0x05, 0x50, 0xae, 1.0), false, false),
-                CodeTokenRole::Function => (rgba_u8(0x09, 0x69, 0xda, 1.0), false, false),
-                CodeTokenRole::Type => (rgba_u8(0x95, 0x38, 0x00, 1.0), false, false),
-                CodeTokenRole::Tag => (rgba_u8(0x11, 0x63, 0x29, 1.0), false, false),
-                CodeTokenRole::Attribute | CodeTokenRole::Property => {
-                    (rgba_u8(0x05, 0x50, 0xae, 1.0), false, false)
-                }
-                CodeTokenRole::Variable => (rgba_u8(0x82, 0x50, 0xdf, 1.0), false, false),
-                CodeTokenRole::Heading => (rgba_u8(0x09, 0x69, 0xda, 1.0), true, false),
-                CodeTokenRole::Inserted => (rgba_u8(0x1a, 0x7f, 0x37, 1.0), false, false),
-                CodeTokenRole::Deleted => (rgba_u8(0xcf, 0x22, 0x2e, 1.0), false, false),
-            }
+        match role {
+            CodeTokenRole::Comment => (self.syn_comment, false, false),
+            CodeTokenRole::CommentDoc => (self.syn_comment_doc, false, false),
+            CodeTokenRole::String => (self.syn_string, false, false),
+            CodeTokenRole::StringEscape => (self.syn_cyan, false, false),
+            CodeTokenRole::Number | CodeTokenRole::Boolean => (self.syn_number, false, false),
+            CodeTokenRole::Constant => (self.syn_yellow, false, false),
+            CodeTokenRole::Keyword => (self.syn_keyword, false, false),
+            CodeTokenRole::Operator => (self.syn_cyan, false, false),
+            CodeTokenRole::Function => (self.syn_blue, false, false),
+            CodeTokenRole::Type => (self.syn_yellow, false, false),
+            CodeTokenRole::Tag => (self.syn_red, false, false),
+            CodeTokenRole::Attribute | CodeTokenRole::Property => (self.syn_cyan, false, false),
+            CodeTokenRole::Variable => (self.syn_variable, false, false),
+            CodeTokenRole::Heading => (self.syn_blue, true, false),
+            CodeTokenRole::Inserted => (self.syn_green, false, false),
+            CodeTokenRole::Deleted => (self.syn_red, false, false),
         }
     }
 

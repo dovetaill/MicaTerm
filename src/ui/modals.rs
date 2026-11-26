@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use gpui_kit::assets::IconName as LucideIcon;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _, WindowExt as _,
+    ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     dialog::DialogFooter,
     notification::Notification,
@@ -18,9 +18,10 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    App, AppContext as _, ClipboardItem, Context, Entity, FocusHandle, Focusable as _, FontWeight,
-    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Render, SharedString,
-    Styled as _, Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, AppContext as _, ClipboardItem, Context, Entity, FocusHandle, Focusable as _,
+    FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Render,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use crate::domain::{
@@ -32,7 +33,8 @@ use crate::domain::{
 use crate::logging::{open_directory_in_file_manager, read_recent_logs};
 use crate::storage::AppPaths;
 use crate::syntax::SyntaxRegistry;
-use crate::ui::theme::{macos_inset_group, macos_segmented_track};
+use crate::ui::theme::{macos_hex, macos_inset_group, macos_segmented_track};
+use crate::ui::theme_catalog::{ThemeCategory, ThemeRegistry, ThemeSpec};
 use crate::ui::workspace::MicaWorkspace;
 
 fn field_block(label: &'static str, control: impl IntoElement, cx: &App) -> gpui_kit::Div {
@@ -417,7 +419,14 @@ pub fn open_remote_editor_dialog(
                             .h(px(412.0))
                             .readonly(saving.get())
                             .font_family(editor_font.clone())
-                            .text_size(px(editor_px)),
+                            .text_size(px(editor_px))
+                            .text_color(
+                                cx.theme()
+                                    .highlight_theme
+                                    .style
+                                    .editor_foreground
+                                    .unwrap_or(cx.theme().foreground),
+                            ),
                     ),
             )
             .footer(
@@ -1744,16 +1753,304 @@ impl Render for ShortcutRecorder {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsTab {
+    Themes,
+    General,
+    Shortcuts,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ThemeModeFilter {
+    All,
+    Dark,
+    Light,
+}
+
+#[inline(never)]
+fn render_theme_preview_card(
+    spec: &ThemeSpec,
+    is_active_now: bool,
+    is_saved_dark: bool,
+    is_saved_light: bool,
+    workspace: Entity<MicaWorkspace>,
+    cx: &App,
+) -> AnyElement {
+    let tid = spec.id.clone();
+    let titlebar_c = macos_hex(spec.titlebar_bg, 1.0);
+    let sidebar_c = macos_hex(spec.sidebar_bg, 1.0);
+    let term_bg_c = macos_hex(spec.term_bg, 1.0);
+    let term_fg_c = macos_hex(spec.term_fg, 1.0);
+    let surface_c = macos_hex(spec.surface_bg, 1.0);
+    let muted_c = macos_hex(spec.muted_fg, 1.0);
+    let accent_c = macos_hex(spec.accent, 1.0);
+    let cursor_c = macos_hex(spec.cursor, 1.0);
+    let divider_c = macos_hex(if spec.dark { 0xFFFFFF } else { 0x000000 }, 0.09);
+
+    let dot_red = macos_hex(spec.ansi[1], 1.0);
+    let dot_yellow = macos_hex(spec.ansi[3], 1.0);
+    let dot_green = macos_hex(spec.ansi[2], 1.0);
+    let prompt_cyan = macos_hex(spec.ansi[6], 1.0);
+    let cmd_blue = macos_hex(spec.ansi[4], 1.0);
+
+    let swatch_colors = [
+        spec.ansi[1],
+        spec.ansi[2],
+        spec.ansi[3],
+        spec.ansi[4],
+        spec.ansi[5],
+        spec.ansi[6],
+        spec.accent,
+        spec.ansi[13],
+    ];
+
+    let status_pill = if is_active_now {
+        Some(("当前生效", cx.theme().primary.opacity(0.18), cx.theme().primary))
+    } else if is_saved_dark {
+        Some((
+            "深色预设",
+            cx.theme().secondary,
+            cx.theme().muted_foreground,
+        ))
+    } else if is_saved_light {
+        Some((
+            "浅色预设",
+            cx.theme().secondary,
+            cx.theme().muted_foreground,
+        ))
+    } else {
+        None
+    };
+
+    let tid_key = tid.clone();
+    let ws_key = workspace.clone();
+
+    v_flex()
+        .id(SharedString::from(format!("theme-card-{}", spec.id)))
+        .tab_stop(true)
+        .flex_1()
+        .min_w(px(0.0))
+        .rounded(px(9.0))
+        .overflow_hidden()
+        .cursor_pointer()
+        .border_1()
+        .border_color(if is_active_now {
+            cx.theme().primary
+        } else {
+            cx.theme().border
+        })
+        .bg(if is_active_now {
+            cx.theme().list_active
+        } else {
+            cx.theme().group_box
+        })
+        .hover(|s| {
+            if is_active_now {
+                s
+            } else {
+                s.border_color(cx.theme().primary.opacity(0.55))
+            }
+        })
+        .on_key_down(move |ev: &KeyDownEvent, window, cx| {
+            if matches!(ev.keystroke.key.as_str(), "enter" | "space") {
+                cx.stop_propagation();
+                ws_key.update(cx, |ws, cx| ws.select_theme(&tid_key, window, cx));
+                window.refresh();
+            }
+        })
+        .on_click(move |_, window, cx| {
+            workspace.update(cx, |ws, cx| ws.select_theme(&tid, window, cx));
+            window.refresh();
+        })
+        .child(
+            // Mini Rex/Termius window + terminal canvas preview
+            v_flex()
+                .h(px(62.0))
+                .w_full()
+                .border_b_1()
+                .border_color(divider_c)
+                .child(
+                    h_flex()
+                        .h(px(15.0))
+                        .px_2()
+                        .gap_1()
+                        .items_center()
+                        .bg(titlebar_c)
+                        .border_b_1()
+                        .border_color(divider_c)
+                        .child(div().w(px(5.0)).h(px(5.0)).rounded_full().bg(dot_red))
+                        .child(div().w(px(5.0)).h(px(5.0)).rounded_full().bg(dot_yellow))
+                        .child(div().w(px(5.0)).h(px(5.0)).rounded_full().bg(dot_green))
+                        .child(
+                            div()
+                                .ml_1p5()
+                                .w(px(36.0))
+                                .h(px(8.0))
+                                .rounded(px(3.0))
+                                .bg(surface_c),
+                        ),
+                )
+                .child(
+                    h_flex()
+                        .flex_1()
+                        .w_full()
+                        .child(
+                            v_flex()
+                                .w(px(46.0))
+                                .h_full()
+                                .px_1p5()
+                                .py_1p5()
+                                .gap_1()
+                                .bg(sidebar_c)
+                                .border_r_1()
+                                .border_color(divider_c)
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .h(px(6.0))
+                                        .rounded(px(2.5))
+                                        .bg(accent_c.opacity(0.35)),
+                                )
+                                .child(
+                                    div()
+                                        .w(px(26.0))
+                                        .h(px(5.0))
+                                        .rounded(px(2.5))
+                                        .bg(muted_c.opacity(0.32)),
+                                )
+                                .child(
+                                    div()
+                                        .w(px(30.0))
+                                        .h(px(5.0))
+                                        .rounded(px(2.5))
+                                        .bg(muted_c.opacity(0.22)),
+                                ),
+                        )
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .h_full()
+                                .px_2()
+                                .py_1()
+                                .justify_between()
+                                .bg(term_bg_c)
+                                .child(
+                                    h_flex()
+                                        .gap_1()
+                                        .items_center()
+                                        .text_xs()
+                                        .font_family(cx.theme().mono_font_family.clone())
+                                        .child(div().text_color(prompt_cyan).child("~"))
+                                        .child(div().text_color(accent_c).child("❯"))
+                                        .child(div().text_color(cmd_blue).child("ssh"))
+                                        .child(div().text_color(term_fg_c).child("prod-01"))
+                                        .child(
+                                            div()
+                                                .w(px(5.5))
+                                                .h(px(10.5))
+                                                .rounded(px(1.5))
+                                                .bg(cursor_c),
+                                        ),
+                                )
+                                .child(
+                                    h_flex().gap_1().items_center().children(
+                                        swatch_colors.into_iter().map(|hex| {
+                                            div()
+                                                .w(px(11.0))
+                                                .h(px(5.5))
+                                                .rounded(px(2.0))
+                                                .bg(macos_hex(hex, 1.0))
+                                        }),
+                                    ),
+                                ),
+                        ),
+                ),
+        )
+        .child(
+            v_flex()
+                .px_2p5()
+                .py_2()
+                .gap_0p5()
+                .child(
+                    h_flex()
+                        .justify_between()
+                        .items_center()
+                        .gap_1p5()
+                        .child(
+                            h_flex()
+                                .min_w_0()
+                                .flex_1()
+                                .gap_1p5()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .text_xs()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(cx.theme().foreground)
+                                        .child(spec.name.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .flex_shrink_0()
+                                        .px_1p5()
+                                        .rounded(px(4.0))
+                                        .bg(cx.theme().secondary)
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(spec.badge.clone()),
+                                ),
+                        )
+                        .children(status_pill.map(|(txt, bg, fg)| {
+                            div()
+                                .flex_shrink_0()
+                                .px_1p5()
+                                .rounded(px(4.0))
+                                .bg(bg)
+                                .text_xs()
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(fg)
+                                .child(txt)
+                        })),
+                )
+                .child(
+                    div()
+                        .truncate()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!(
+                            "{} · {}",
+                            if spec.dark { "深色" } else { "浅色" },
+                            spec.subtitle
+                        )),
+                ),
+        )
+        .into_any_element()
+}
+
 pub fn open_settings_modal(
     workspace: Entity<MicaWorkspace>,
     paths: AppPaths,
     window: &mut Window,
     cx: &mut App,
 ) {
+    open_settings_modal_at(workspace, paths, SettingsTab::Themes, window, cx);
+}
+
+pub fn open_settings_modal_at(
+    workspace: Entity<MicaWorkspace>,
+    paths: AppPaths,
+    initial_tab: SettingsTab,
+    window: &mut Window,
+    cx: &mut App,
+) {
     let data_dir_display = paths.root_dir.display().to_string();
     let logs_dir_display = paths.logs_dir.display().to_string();
     let init_settings = workspace.read(cx).settings.clone();
-    let shortcuts_page = Rc::new(Cell::new(false));
+    let active_page = Rc::new(Cell::new(initial_tab));
+    let mode_filter = Rc::new(Cell::new(ThemeModeFilter::All));
+    let category_filter: Rc<Cell<Option<ThemeCategory>>> = Rc::new(Cell::new(None));
+    let theme_query = Rc::new(RefCell::new(String::new()));
     let tabs_focus = cx.focus_handle();
     let recorder = cx.new(|cx| ShortcutRecorder {
         workspace: workspace.clone(),
@@ -1761,6 +2058,22 @@ pub fn open_settings_modal(
         recording_action: None,
         status: "点击按键即可录制新组合键；录制中按 Backspace 置空，按 Esc 取消".into(),
     });
+    let theme_search_in = cx.new(|cx| {
+        InputState::new(window, cx)
+            .placeholder("搜索主题：Rex、Termius、Catppuccin、Tokyo Night、Dracula、Flexoki...")
+    });
+    {
+        let q_ref = theme_query.clone();
+        workspace.update(cx, |_, cx| {
+            cx.subscribe_in(&theme_search_in, window, move |_, state, ev, window, cx| {
+                if matches!(ev, InputEvent::Change) {
+                    *q_ref.borrow_mut() = state.read(cx).value().to_string();
+                    window.refresh();
+                }
+            })
+            .detach();
+        });
+    }
     let font_in = cx.new(|cx| {
         let mut s = InputState::new(window, cx).placeholder(BUNDLED_SARASA_FONT_FAMILY);
         s.set_value(init_settings.font_family.clone(), window, cx);
@@ -1782,26 +2095,35 @@ pub fn open_settings_modal(
         let ws_apply_font = workspace.clone();
         let f_in = font_in.clone();
         let tabs = macos_segmented_track(cx).track_focus(&tabs_focus).children(
-            [("settings-general-tab", "通用与外观", false), ("settings-shortcuts-tab", "快捷键", true)]
-                .into_iter().map(|(id, label, shortcuts)| {
-                    let page = shortcuts_page.clone();
-                    let focus = tabs_focus.clone();
-                    let recorder = recorder.clone();
-                    Button::new(id).ghost().small().flex_1().label(label)
-                        .selected(page.get() == shortcuts)
-                        .on_click(move |_, window, cx| {
-                            page.set(shortcuts);
-                            recorder.update(cx, |r, cx| {
-                                r.recording_action = None;
-                                cx.notify();
-                            });
-                            focus.focus(window, cx);
-                            window.refresh();
-                        })
-                }),
+            [
+                ("settings-themes-tab", "外观与主题", SettingsTab::Themes),
+                ("settings-general-tab", "通用与终端", SettingsTab::General),
+                ("settings-shortcuts-tab", "快捷键", SettingsTab::Shortcuts),
+            ]
+            .into_iter()
+            .map(|(id, label, tab_kind)| {
+                let page = active_page.clone();
+                let focus = tabs_focus.clone();
+                let recorder = recorder.clone();
+                Button::new(id)
+                    .ghost()
+                    .small()
+                    .flex_1()
+                    .label(label)
+                    .selected(page.get() == tab_kind)
+                    .on_click(move |_, window, cx| {
+                        page.set(tab_kind);
+                        recorder.update(cx, |r, cx| {
+                            r.recording_action = None;
+                            cx.notify();
+                        });
+                        focus.focus(window, cx);
+                        window.refresh();
+                    })
+            }),
         );
-        let body = dialog_body().gap_2().child(tabs);
-        let dialog = dialog.title("偏好设置").w(px(600.0)).footer(
+        let body = dialog_body().gap_2p5().child(tabs);
+        let dialog = dialog.title("偏好设置").w(px(690.0)).footer(
             DialogFooter::new().child(
                 Button::new("settings-done")
                     .primary()
@@ -1814,8 +2136,500 @@ pub fn open_settings_modal(
                     }),
             ),
         );
-        if shortcuts_page.get() {
-            return dialog.child(body.child(recorder.clone()));
+        match active_page.get() {
+            SettingsTab::Shortcuts => return dialog.child(body.child(recorder.clone())),
+            SettingsTab::Themes => {
+                let cur = workspace.read(cx).settings.clone();
+                let pack = ThemeRegistry::global().current();
+                let dark_spec = pack.resolve(&cur.dark_theme, true);
+                let light_spec = pack.resolve(&cur.light_theme, false);
+                let active_id = if cur.dark_mode {
+                    dark_spec.id.clone()
+                } else {
+                    light_spec.id.clone()
+                };
+
+                let total_cnt = pack.themes.len();
+                let dark_cnt = pack.themes.iter().filter(|t| t.dark).count();
+                let light_cnt = total_cnt.saturating_sub(dark_cnt);
+                let has_custom = pack
+                    .themes
+                    .iter()
+                    .any(|t| t.category == ThemeCategory::Custom);
+
+                let q = theme_query.borrow().trim().to_lowercase();
+                let cur_mode_f = mode_filter.get();
+                let cur_cat_f = category_filter.get();
+
+                let filtered: Vec<&ThemeSpec> = pack
+                    .themes
+                    .iter()
+                    .filter(|t| match cur_mode_f {
+                        ThemeModeFilter::All => true,
+                        ThemeModeFilter::Dark => t.dark,
+                        ThemeModeFilter::Light => !t.dark,
+                    })
+                    .filter(|t| cur_cat_f.is_none_or(|cat| t.category == cat))
+                    .filter(|t| {
+                        if q.is_empty() {
+                            return true;
+                        }
+                        t.name.to_lowercase().contains(&q)
+                            || t.id.to_lowercase().contains(&q)
+                            || t.subtitle.to_lowercase().contains(&q)
+                            || t.badge.to_lowercase().contains(&q)
+                            || t.category.label().to_lowercase().contains(&q)
+                    })
+                    .collect();
+
+                let mut grid_rows: Vec<AnyElement> = Vec::new();
+                for pair in filtered.chunks(2) {
+                    let first = render_theme_preview_card(
+                        pair[0],
+                        pair[0].id == active_id,
+                        pair[0].id == dark_spec.id,
+                        pair[0].id == light_spec.id,
+                        workspace.clone(),
+                        cx,
+                    );
+                    let second = if let Some(sec) = pair.get(1) {
+                        render_theme_preview_card(
+                            sec,
+                            sec.id == active_id,
+                            sec.id == dark_spec.id,
+                            sec.id == light_spec.id,
+                            workspace.clone(),
+                            cx,
+                        )
+                    } else {
+                        div().flex_1().min_w(px(0.0)).into_any_element()
+                    };
+                    grid_rows.push(h_flex().gap_2p5().child(first).child(second).into_any_element());
+                }
+
+                let ws_mode_dark = workspace.clone();
+                let ws_mode_light = workspace.clone();
+                let ws_tint = workspace.clone();
+                let ws_import_theme = workspace.clone();
+                let ws_reload_theme = workspace.clone();
+                let themes_dir_open = paths.themes_dir.clone();
+
+                let mut cat_options: Vec<(String, Option<ThemeCategory>, String)> = vec![(
+                    "cat-all".to_string(),
+                    None,
+                    "全部分类".to_string(),
+                )];
+                for cat in ThemeCategory::BUILTIN_FILTERS {
+                    cat_options.push((
+                        format!("cat-{:?}", cat),
+                        Some(cat),
+                        cat.label().to_string(),
+                    ));
+                }
+                if has_custom {
+                    cat_options.push((
+                        "cat-custom".to_string(),
+                        Some(ThemeCategory::Custom),
+                        ThemeCategory::Custom.label().to_string(),
+                    ));
+                }
+
+                return dialog.child(
+                    body.child(
+                        v_flex()
+                            .gap_2p5()
+                            .max_h(px(480.0))
+                            .overflow_y_scrollbar()
+                            .child(
+                                macos_inset_group(cx)
+                                    .flex_shrink_0()
+                                    .child(
+                                        h_flex()
+                                            .px_3p5()
+                                            .py_2p5()
+                                            .justify_between()
+                                            .items_center()
+                                            .gap_2()
+                                            .child(
+                                                v_flex()
+                                                    .min_w_0()
+                                                    .flex_1()
+                                                    .child(
+                                                        div()
+                                                            .text_sm()
+                                                            .font_weight(FontWeight::MEDIUM)
+                                                            .text_color(cx.theme().foreground)
+                                                            .child("深浅双模式独立主题预设"),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .text_color(
+                                                                cx.theme().muted_foreground,
+                                                            )
+                                                            .child(
+                                                                "分别记住深色与浅色主题，点击顶栏太阳/月亮一键无缝切换",
+                                                            ),
+                                                    ),
+                                            )
+                                            .child(
+                                                h_flex()
+                                                    .gap_1p5()
+                                                    .child(
+                                                        Button::new("slot-dark-btn")
+                                                            .secondary()
+                                                            .xsmall()
+                                                            .icon(LucideIcon::Moon)
+                                                            .selected(cur.dark_mode)
+                                                            .label(format!(
+                                                                "深色 · {}",
+                                                                dark_spec.name
+                                                            ))
+                                                            .on_click(move |_, window, cx| {
+                                                                ws_mode_dark.update(
+                                                                    cx,
+                                                                    |ws, cx| {
+                                                                        ws.set_dark_mode(
+                                                                            true, window, cx,
+                                                                        )
+                                                                    },
+                                                                );
+                                                                window.refresh();
+                                                            }),
+                                                    )
+                                                    .child(
+                                                        Button::new("slot-light-btn")
+                                                            .secondary()
+                                                            .xsmall()
+                                                            .icon(LucideIcon::Sun)
+                                                            .selected(!cur.dark_mode)
+                                                            .label(format!(
+                                                                "浅色 · {}",
+                                                                light_spec.name
+                                                            ))
+                                                            .on_click(move |_, window, cx| {
+                                                                ws_mode_light.update(
+                                                                    cx,
+                                                                    |ws, cx| {
+                                                                        ws.set_dark_mode(
+                                                                            false, window, cx,
+                                                                        )
+                                                                    },
+                                                                );
+                                                                window.refresh();
+                                                            }),
+                                                    ),
+                                            ),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .px_3p5()
+                                            .py_2p5()
+                                            .border_t_1()
+                                            .border_color(cx.theme().border)
+                                            .justify_between()
+                                            .items_center()
+                                            .child(
+                                                v_flex()
+                                                    .child(
+                                                        div()
+                                                            .text_sm()
+                                                            .font_weight(FontWeight::MEDIUM)
+                                                            .text_color(cx.theme().foreground)
+                                                            .child("界面材质随主题同步染色"),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .text_color(
+                                                                cx.theme().muted_foreground,
+                                                            )
+                                                            .child(
+                                                                "Superlogical Rex 风格：顶栏、侧边栏、卡片与编辑器与终端浑然一体",
+                                                            ),
+                                                    ),
+                                            )
+                                            .child(
+                                                Switch::new("settings-tint-ui-theme")
+                                                    .checked(cur.tint_ui_with_theme)
+                                                    .on_change(move |val, window, cx| {
+                                                        ws_tint.update(cx, |ws, cx| {
+                                                            ws.set_tint_ui_with_theme(
+                                                                *val, window, cx,
+                                                            );
+                                                        });
+                                                        window.refresh();
+                                                    }),
+                                            ),
+                                    ),
+                            )
+                            .child(
+                                v_flex()
+                                    .flex_shrink_0()
+                                    .gap_2()
+                                    .child(
+                                        h_flex()
+                                            .gap_2()
+                                            .items_center()
+                                            .child(
+                                                div().flex_1().child(
+                                                    Input::new(&theme_search_in)
+                                                        .small()
+                                                        .prefix(
+                                                            Icon::new(LucideIcon::Search)
+                                                                .xsmall()
+                                                                .text_color(
+                                                                    cx.theme().muted_foreground,
+                                                                ),
+                                                        )
+                                                        .cleanable(true),
+                                                ),
+                                            )
+                                            .child(
+                                                h_flex().gap_1().children(
+                                                    [
+                                                        (
+                                                            "tm-all",
+                                                            ThemeModeFilter::All,
+                                                            format!("全部 ({total_cnt})"),
+                                                        ),
+                                                        (
+                                                            "tm-dark",
+                                                            ThemeModeFilter::Dark,
+                                                            format!("深色 ({dark_cnt})"),
+                                                        ),
+                                                        (
+                                                            "tm-light",
+                                                            ThemeModeFilter::Light,
+                                                            format!("浅色 ({light_cnt})"),
+                                                        ),
+                                                    ]
+                                                    .into_iter()
+                                                    .map(|(id, mf, lbl)| {
+                                                        let mf_cell = mode_filter.clone();
+                                                        Button::new(id)
+                                                            .secondary()
+                                                            .xsmall()
+                                                            .tab_stop(false)
+                                                            .selected(cur_mode_f == mf)
+                                                            .label(lbl)
+                                                            .on_click(move |_, window, _| {
+                                                                mf_cell.set(mf);
+                                                                window.refresh();
+                                                            })
+                                                    }),
+                                                ),
+                                            ),
+                                    )
+                                    .child(
+                                        h_flex().flex_wrap().gap_1p5().children(
+                                            cat_options.into_iter().map(|(id, cat, lbl)| {
+                                                let cat_cell = category_filter.clone();
+                                                Button::new(SharedString::from(id))
+                                                    .secondary()
+                                                    .xsmall()
+                                                    .tab_stop(false)
+                                                    .selected(cur_cat_f == cat)
+                                                    .label(lbl)
+                                                    .on_click(move |_, window, _| {
+                                                        cat_cell.set(cat);
+                                                        window.refresh();
+                                                    })
+                                            }),
+                                        ),
+                                    ),
+                            )
+                            .child(if grid_rows.is_empty() {
+                                macos_inset_group(cx)
+                                    .flex_shrink_0()
+                                    .py_8()
+                                    .items_center()
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child("没有找到匹配的主题，请尝试更换搜索词或筛选条件"),
+                                    )
+                                    .into_any_element()
+                            } else {
+                                v_flex()
+                                    .flex_shrink_0()
+                                    .gap_2p5()
+                                    .children(grid_rows)
+                                    .into_any_element()
+                            })
+                            .child(
+                                macos_inset_group(cx)
+                                    .flex_shrink_0()
+                                    .px_3p5()
+                                    .py_2p5()
+                                    .gap_2()
+                                    .child(
+                                        h_flex()
+                                            .justify_between()
+                                            .items_center()
+                                            .gap_2()
+                                            .child(
+                                                v_flex()
+                                                    .gap_0p5()
+                                                    .child(
+                                                        div()
+                                                            .text_sm()
+                                                            .font_weight(FontWeight::MEDIUM)
+                                                            .text_color(cx.theme().foreground)
+                                                            .child("导入外部配色方案 (Ghostty / iTerm2)"),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .text_color(
+                                                                cx.theme().muted_foreground,
+                                                            )
+                                                            .child(format!(
+                                                                "内置 {} 款精选主题 · 已导入 {} 个自定义主题（兼容 .ghostty 与 .itermcolors）",
+                                                                pack.builtin_count,
+                                                                pack.loaded_custom_count()
+                                                            )),
+                                                    ),
+                                            )
+                                            .child(
+                                                h_flex()
+                                                    .gap_1p5()
+                                                    .child(
+                                                        Button::new("settings-import-theme")
+                                                            .secondary()
+                                                            .xsmall()
+                                                            .label("导入主题…")
+                                                            .on_click(move |_, window, cx| {
+                                                                ws_import_theme.update(
+                                                                    cx,
+                                                                    |ws, cx| {
+                                                                        ws.import_custom_themes(
+                                                                            window, cx,
+                                                                        )
+                                                                    },
+                                                                );
+                                                            }),
+                                                    )
+                                                    .child(
+                                                        Button::new("settings-open-themes-dir")
+                                                            .secondary()
+                                                            .xsmall()
+                                                            .label("打开目录")
+                                                            .on_click(move |_, window, cx| {
+                                                                if let Err(err) =
+                                                                    open_directory_in_file_manager(
+                                                                        &themes_dir_open,
+                                                                    )
+                                                                {
+                                                                    window.push_notification(
+                                                                        Notification::error(err),
+                                                                        cx,
+                                                                    );
+                                                                }
+                                                            }),
+                                                    )
+                                                    .child(
+                                                        Button::new("settings-reload-themes")
+                                                            .secondary()
+                                                            .xsmall()
+                                                            .label("重载")
+                                                            .on_click(move |_, window, cx| {
+                                                                ws_reload_theme.update(
+                                                                    cx,
+                                                                    |ws, cx| {
+                                                                        ws.reload_custom_themes(
+                                                                            window, cx,
+                                                                        )
+                                                                    },
+                                                                );
+                                                            }),
+                                                    ),
+                                            ),
+                                    )
+                                    .children((!pack.custom_entries.is_empty()).then(|| {
+                                        v_flex()
+                                            .pt_1()
+                                            .gap_1p5()
+                                            .border_t_1()
+                                            .border_color(cx.theme().border)
+                                            .children(pack.custom_entries.iter().map(|entry| {
+                                                let fname = entry.file_name.clone();
+                                                let ws_rm = workspace.clone();
+                                                let has_err = entry.error.is_some();
+                                                let subtitle = if let Some(ref err) = entry.error {
+                                                    err.clone()
+                                                } else {
+                                                    let tname = entry
+                                                        .theme_name
+                                                        .as_deref()
+                                                        .unwrap_or("自定义主题");
+                                                    let mode_lbl = if entry.dark.unwrap_or(true) {
+                                                        "深色"
+                                                    } else {
+                                                        "浅色"
+                                                    };
+                                                    format!("{tname} ({mode_lbl})")
+                                                };
+                                                h_flex()
+                                                    .justify_between()
+                                                    .items_center()
+                                                    .gap_2()
+                                                    .child(
+                                                        v_flex()
+                                                            .min_w_0()
+                                                            .flex_1()
+                                                            .child(
+                                                                div()
+                                                                    .truncate()
+                                                                    .text_xs()
+                                                                    .font_weight(
+                                                                        FontWeight::MEDIUM,
+                                                                    )
+                                                                    .text_color(
+                                                                        cx.theme().foreground,
+                                                                    )
+                                                                    .child(
+                                                                        entry.file_name.clone(),
+                                                                    ),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .truncate()
+                                                                    .text_xs()
+                                                                    .text_color(if has_err {
+                                                                        cx.theme().danger
+                                                                    } else {
+                                                                        cx.theme().muted_foreground
+                                                                    })
+                                                                    .child(subtitle),
+                                                            ),
+                                                    )
+                                                    .child(
+                                                        Button::new(SharedString::from(format!(
+                                                            "rm-theme-{}",
+                                                            entry.file_name
+                                                        )))
+                                                        .ghost()
+                                                        .xsmall()
+                                                        .compact()
+                                                        .icon(LucideIcon::Trash)
+                                                        .tooltip("移除该主题文件")
+                                                        .on_click(move |_, window, cx| {
+                                                            ws_rm.update(cx, |ws, cx| {
+                                                                ws.remove_custom_theme(
+                                                                    &fname, window, cx,
+                                                                );
+                                                            });
+                                                        }),
+                                                    )
+                                            }))
+                                    })),
+                            ),
+                    ),
+                );
+            }
+            SettingsTab::General => {}
         }
         let cur = workspace.read(cx).settings.clone();
         let ws_dark = workspace.clone();

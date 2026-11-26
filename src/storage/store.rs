@@ -28,6 +28,7 @@ pub struct AppPaths {
     pub db_path: PathBuf,
     pub secrets_dir: PathBuf,
     pub syntaxes_dir: PathBuf,
+    pub themes_dir: PathBuf,
     pub known_hosts_path: PathBuf,
     pub downloads_dir: PathBuf,
     pub logs_dir: PathBuf,
@@ -54,6 +55,7 @@ impl AppPaths {
         let root_dir = root_dir.as_ref().to_path_buf();
         let secrets_dir = root_dir.join("secrets");
         let syntaxes_dir = root_dir.join("syntaxes");
+        let themes_dir = root_dir.join("themes");
         let logs_dir = root_dir.join("logs");
         let downloads_dir = directories::UserDirs::new()
             .and_then(|u| u.download_dir().map(Path::to_path_buf))
@@ -71,6 +73,7 @@ impl AppPaths {
             root_dir,
             secrets_dir,
             syntaxes_dir,
+            themes_dir,
             downloads_dir,
             logs_dir,
         })
