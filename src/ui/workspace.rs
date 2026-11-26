@@ -16,10 +16,10 @@ use gpui_kit::component::{
     v_flex, v_resizable,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable as _, FontWeight,
-    InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton,
+    AnyElement, App, AppContext as _, Context, Decorations, Entity, FocusHandle, Focusable as _,
+    FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
     ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window,
-    div, prelude::FluentBuilder as _, px,
+    WindowControlArea, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::domain::{
@@ -301,7 +301,6 @@ impl MicaWorkspace {
                         session.update(cx, |s, _| s.remember_sftp_directory(path.clone()));
                     }
                 }
-                SftpPanelEvent::CloseRequested => this.toggle_sftp_panel(window, cx),
             },
         )
         .detach();
@@ -1832,7 +1831,7 @@ impl MicaWorkspace {
     }
 
     #[inline(never)]
-    fn render_titlebar_element(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_titlebar_element(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let ws_ent = cx.entity().clone();
         let ws_sidebar = ws_ent.clone();
         let ws_new_local = ws_ent.clone();
@@ -1866,10 +1865,58 @@ impl MicaWorkspace {
             .map(|tab| self.render_single_tab_pill(tab, ws_ent.clone(), cx))
             .collect();
 
-        TitleBar::new()
-            .h(px(40.0))
-            .border_b_0()
-            .bg(cx.theme().title_bar)
+        let linux_client = cfg!(target_os = "linux")
+            && matches!(window.window_decorations(), Decorations::Client { .. });
+        let drag_space = div()
+            .flex_1()
+            .min_w(px(24.0))
+            .h_full()
+            .when(cfg!(target_os = "windows"), |area| {
+                area.window_control_area(WindowControlArea::Drag)
+            })
+            .when(linux_client, |area| {
+                // Hand the compositor a drag only after motion so a stationary double-click survives.
+                let pressed = window.use_state(cx, |_, _| false);
+                area.on_mouse_down(
+                    MouseButton::Left,
+                    window.listener_for(&pressed, |pressed, event: &MouseDownEvent, window, _| {
+                        window.prevent_default();
+                        *pressed = event.click_count == 1;
+                        if event.click_count == 2 {
+                            window.zoom_window();
+                        }
+                    }),
+                )
+                .on_mouse_down_out(
+                    window.listener_for(&pressed, |pressed, _, _, _| *pressed = false),
+                )
+                .on_mouse_up(
+                    MouseButton::Left,
+                    window.listener_for(&pressed, |pressed, _, _, _| *pressed = false),
+                )
+                .on_mouse_move(window.listener_for(
+                    &pressed,
+                    |pressed, event: &MouseMoveEvent, window, _| {
+                        if std::mem::take(pressed) && event.pressed_button == Some(MouseButton::Left) {
+                            window.start_window_move();
+                        }
+                    },
+                ))
+                .on_mouse_down(MouseButton::Right, |event, window, _| {
+                    window.show_window_menu(event.position);
+                })
+            });
+        let icon_button = |id| {
+            Button::new(id)
+                .tab_stop(false)
+                .ghost()
+                .small()
+                .size(px(28.0))
+        };
+        let tools_and_tabs = h_flex()
+            .h_full()
+            .min_w_0()
+            .flex_1()
             .child(
                 h_flex()
                     .h_full()
@@ -1883,11 +1930,7 @@ impl MicaWorkspace {
                                 window.prevent_default();
                             })
                             .child(
-                                Button::new("toggle-left-sidebar")
-                                    .tab_stop(false)
-                                    .ghost()
-                                    .xsmall()
-                                    .compact()
+                                icon_button("toggle-left-sidebar")
                                     .selected(show_sidebar)
                                     .icon(if show_sidebar {
                                         LucideIcon::PanelLeftClose
@@ -1910,18 +1953,7 @@ impl MicaWorkspace {
                             .bg(cx.theme().border),
                     )
                     .children(self.tabs.is_empty().then(|| {
-                        h_flex()
-                            .px_1p5()
-                            .gap_1p5()
-                            .items_center()
-                            .child(crate::ui::brand::brand_mark_icon_element(16.0))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(cx.theme().foreground)
-                                    .child("Mica Term"),
-                            )
+                        div().px_1p5().child(crate::ui::brand::brand_mark_icon_element(16.0))
                     }))
                     .children((!tab_elements.is_empty()).then(|| {
                         h_flex()
@@ -1939,11 +1971,7 @@ impl MicaWorkspace {
                                 window.prevent_default();
                             })
                             .child(
-                                Button::new("new-local-tab-btn")
-                                    .tab_stop(false)
-                                    .ghost()
-                                    .xsmall()
-                                    .compact()
+                                icon_button("new-local-tab-btn")
                                     .icon(LucideIcon::Plus)
                                     .tooltip(shortcut_tooltip(ShortcutAction::NewLocalTab.label(), ShortcutAction::NewLocalTab))
                                     .on_click(move |_, window, cx| {
@@ -1953,11 +1981,7 @@ impl MicaWorkspace {
                                     }),
                             )
                             .child(
-                                Button::new("new-session-more-menu")
-                                    .tab_stop(false)
-                                    .ghost()
-                                    .xsmall()
-                                    .compact()
+                                icon_button("new-session-more-menu")
                                     .icon(LucideIcon::ChevronDown)
                                     .tooltip("新建 SSH 或本地会话")
                                     .dropdown_menu(move |menu, _, _| {
@@ -1984,12 +2008,13 @@ impl MicaWorkspace {
                                     }),
                             ),
                     )
-                    .child(div().flex_1().min_w(px(24.0)).h_full()),
+                    .child(drag_space),
             )
             .child(
                 h_flex()
                     .h_full()
-                    .pr_2()
+                    .flex_shrink_0()
+                    .pr_1p5()
                     .gap_1()
                     .items_center()
                     .on_mouse_down(MouseButton::Left, |_, window, _| {
@@ -2001,11 +2026,7 @@ impl MicaWorkspace {
                             .pr_1()
                             .items_center()
                             .child(
-                                Button::new("title-split-h")
-                                    .tab_stop(false)
-                                    .ghost()
-                                    .xsmall()
-                                    .compact()
+                                icon_button("title-split-h")
                                     .icon(LucideIcon::Columns2)
                                     .tooltip(shortcut_tooltip(ShortcutAction::SplitHorizontal.label(), ShortcutAction::SplitHorizontal))
                                     .on_click(move |_, window, cx| {
@@ -2019,11 +2040,7 @@ impl MicaWorkspace {
                                     }),
                             )
                             .child(
-                                Button::new("title-split-v")
-                                    .tab_stop(false)
-                                    .ghost()
-                                    .xsmall()
-                                    .compact()
+                                icon_button("title-split-v")
                                     .icon(LucideIcon::Rows2)
                                     .tooltip(shortcut_tooltip(ShortcutAction::SplitVertical.label(), ShortcutAction::SplitVertical))
                                     .on_click(move |_, window, cx| {
@@ -2034,11 +2051,9 @@ impl MicaWorkspace {
                             )
                     }))
                     .child(
-                        Button::new("toggle-sftp-panel")
-                            .tab_stop(false)
-                            .ghost()
-                            .xsmall()
-                            .compact()
+                        icon_button("toggle-sftp-panel")
+                            .w_auto()
+                            .px_2p5()
                             .selected(show_sftp)
                             .icon(if show_sftp {
                                 LucideIcon::PanelRightClose
@@ -2059,11 +2074,7 @@ impl MicaWorkspace {
                             }),
                     )
                     .child(
-                        Button::new("quick-theme-toggle-btn")
-                            .tab_stop(false)
-                            .ghost()
-                            .xsmall()
-                            .compact()
+                        icon_button("quick-theme-toggle-btn")
                             .icon(if dark_mode {
                                 LucideIcon::Sun
                             } else {
@@ -2081,13 +2092,9 @@ impl MicaWorkspace {
                             }),
                     )
                     .when(self.settings.debug_logging, |bar| bar.child(
-                        Button::new("open-logs-btn")
-                            .tab_stop(false)
-                            .ghost()
-                            .xsmall()
-                            .compact()
+                        icon_button("open-logs-btn")
                             .icon(LucideIcon::Terminal)
-                            .label("日志")
+                            .accessibility_label("诊断日志")
                             .tooltip("查看运行与崩溃诊断日志")
                             .on_click(move |_, window, cx| {
                                 crate::ui::modals::open_logs_modal(
@@ -2098,11 +2105,7 @@ impl MicaWorkspace {
                             }),
                     ))
                     .child(
-                        Button::new("open-settings-btn")
-                            .tab_stop(false)
-                            .ghost()
-                            .xsmall()
-                            .compact()
+                        icon_button("open-settings-btn")
                             .icon(LucideIcon::SlidersHorizontal)
                             .tooltip(shortcut_tooltip("偏好设置", ShortcutAction::OpenSettings))
                             .on_click(move |_, window, cx| {
@@ -2113,6 +2116,96 @@ impl MicaWorkspace {
                                     cx,
                                 );
                             }),
+                    ),
+            );
+
+        if !cfg!(target_os = "windows") && !linux_client {
+            return TitleBar::new()
+                .h(px(38.0))
+                .border_b_0()
+                .bg(cx.theme().title_bar)
+                .child(tools_and_tabs)
+                .into_any_element();
+        }
+
+        let supported = window.window_controls();
+        let maximized = window.is_maximized();
+        let control = |label: &'static str, area, icon, click: fn(&mut Window)| {
+            let theme = cx.theme();
+            let (hover_bg, active_bg, interaction_fg) = if area == WindowControlArea::Close {
+                (theme.danger, theme.danger_active, gpui_kit::white())
+            } else {
+                (theme.secondary_hover, theme.secondary_active, theme.foreground)
+            };
+            div()
+                .id(label)
+                .role(gpui_kit::Role::Button)
+                .aria_label(label)
+                .flex()
+                .flex_shrink_0()
+                .w(px(46.0))
+                .h(px(32.0))
+                .justify_center()
+                .items_center()
+                .text_color(theme.foreground)
+                .hover(|style| style.bg(hover_bg).text_color(interaction_fg))
+                .active(|style| style.bg(active_bg).text_color(interaction_fg))
+                .when(cfg!(target_os = "windows"), |button| {
+                    button.window_control_area(area)
+                })
+                .when(linux_client, |button| {
+                    button
+                        .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                        })
+                        .on_click(move |_, window, _| click(window))
+                })
+                .child(Icon::new(icon).small())
+        };
+        let buttons = h_flex()
+            .h(px(32.0))
+            .when(supported.minimize, |bar| {
+                bar.child(control(
+                    "最小化",
+                    WindowControlArea::Min,
+                    LucideIcon::WindowMinimize,
+                    |window| window.minimize_window(),
+                ))
+            })
+            .when(supported.maximize, |bar| {
+                bar.child(control(
+                    if maximized { "还原" } else { "最大化" },
+                    WindowControlArea::Max,
+                    if maximized {
+                        LucideIcon::WindowRestore
+                    } else {
+                        LucideIcon::WindowMaximize
+                    },
+                    |window| window.zoom_window(),
+                ))
+            })
+            .child(control(
+                "关闭窗口",
+                WindowControlArea::Close,
+                LucideIcon::WindowClose,
+                Window::remove_window,
+            ));
+        h_flex()
+            .flex_shrink_0()
+            .h(px(38.0))
+            .pl_2()
+            .bg(cx.theme().title_bar)
+            .child(tools_and_tabs)
+            .child(
+                v_flex()
+                    .h_full()
+                    .flex_shrink_0()
+                    .child(buttons)
+                    .child(
+                        div().w_full().h(px(6.0)).when(cfg!(target_os = "windows"), |strip| {
+                            strip.window_control_area(WindowControlArea::Drag)
+                        }),
                     ),
             )
             .into_any_element()
@@ -2150,8 +2243,8 @@ impl MicaWorkspace {
 }
 
 impl Render for MicaWorkspace {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let title_bar = self.render_titlebar_element(cx);
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let title_bar = self.render_titlebar_element(window, cx);
         let center_content = self.render_center_workspace(cx);
 
         let show_left = self.settings.show_left_sidebar;

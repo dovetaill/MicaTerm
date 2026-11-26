@@ -80,8 +80,9 @@ pub fn apply_theme_specs(
 
     Theme::update(cx, |theme| {
         theme.mono_font_family = SharedString::from(BUNDLED_MAPLE_FONT_FAMILY);
-        theme.radius = px(7.0);
-        theme.radius_lg = px(11.0);
+        theme.focus_ring = false;
+        theme.radius = px(6.0);
+        theme.radius_lg = px(10.0);
         theme.shadow = true;
         theme.highlight_theme = hl_theme;
 
@@ -113,51 +114,64 @@ pub fn apply_theme_specs(
         } else {
             chrome.titlebar_bg
         };
-        let surface = if dark {
-            chrome.ui_bg
+        let surface = chrome.ui_bg;
+        let popover = if dark {
+            mix_hex(surface, 0xFFFFFF, 0.065)
         } else {
-            chrome.surface_bg
+            mix_hex(chrome.surface_bg, 0xFFFFFF, 0.80)
         };
-        // The same secondary text appears on both the shell and the canvas.
-        let contrast_bg = if (relative_luminance(shell) > relative_luminance(surface)) == dark {
+        let sidebar = if dark {
+            mix_hex(popover, 0x000000, 0.22)
+        } else {
             shell
-        } else {
-            surface
         };
-        let secondary_bg = shell;
-        let secondary_hover = mix_hex(shell, pole, 0.06);
-        let secondary_active = mix_hex(shell, pole, 0.11);
+        let secondary_bg = if dark {
+            mix_hex(popover, pole, 0.04)
+        } else {
+            mix_hex(shell, popover, 0.30)
+        };
+        let secondary_hover = mix_hex(secondary_bg, pole, 0.06);
+        let secondary_active = mix_hex(secondary_bg, pole, 0.11);
 
+        // One foreground has to remain legible on every surface where it is drawn.
+        let contrast_bg = [surface, popover, sidebar, secondary_active]
+            .into_iter()
+            .fold(shell, |worst, bg| {
+                if (relative_luminance(bg) > relative_luminance(worst)) == dark {
+                    bg
+                } else {
+                    worst
+                }
+            });
+
+        let readable = |color| ensure_readable_fg(color, contrast_bg, dark, 4.5);
         theme.background = macos_hex(surface, 1.0);
-        theme.foreground = macos_hex(chrome.term_fg, 1.0);
+        theme.foreground = macos_hex(readable(chrome.term_fg), 1.0);
         theme.muted = macos_hex(shell, 1.0);
-        theme.muted_foreground = macos_hex(
-            ensure_readable_fg(chrome.muted_fg, contrast_bg, dark, 4.5),
-            1.0,
-        );
+        theme.muted_foreground = macos_hex(readable(chrome.muted_fg), 1.0);
 
         theme.title_bar = macos_hex(shell, 1.0);
         theme.title_bar_border = theme.transparent;
-        theme.sidebar = theme.title_bar;
-        theme.sidebar_foreground = macos_hex(chrome.term_fg, 1.0);
+        theme.sidebar = macos_hex(sidebar, 1.0);
+        theme.sidebar_foreground = theme.foreground;
         theme.border = macos_hex(pole, if dark { 0.14 } else { 0.15 });
         theme.sidebar_border = theme.border;
-        theme.sidebar_accent = macos_hex(accent, if dark { 0.20 } else { 0.14 });
-        theme.sidebar_accent_foreground = if dark {
-            macos_hex(0xFFFFFF, 1.0)
+        theme.sidebar_accent = if dark {
+            macos_hex(pole, 0.09)
         } else {
-            macos_hex(ensure_readable_fg(accent, shell, false, 3.5), 1.0)
+            macos_hex(mix_hex(sidebar, chrome.term_fg, 0.075), 1.0)
         };
+        theme.sidebar_accent_foreground = theme.foreground;
         theme.sidebar_primary = macos_hex(accent, 1.0);
         theme.sidebar_primary_foreground = primary_fg;
 
-        theme.popover = theme.background;
-        theme.popover_foreground = macos_hex(chrome.term_fg, 1.0);
+        theme.popover = macos_hex(popover, 1.0);
+        theme.popover_foreground = theme.foreground;
         theme.group_box = theme.background;
-        theme.group_box_foreground = macos_hex(chrome.term_fg, 1.0);
+        theme.group_box_foreground = theme.foreground;
 
-        theme.input = macos_hex(pole, if dark { 0.135 } else { 0.125 });
-        theme.ring = macos_hex(accent, if dark { 0.50 } else { 0.42 });
+        theme.input = macos_hex(pole, if dark { 0.22 } else { 0.17 });
+        theme.ring = macos_hex(readable(accent), if dark { 0.85 } else { 0.80 });
         theme.caret = macos_hex(accent, 1.0);
         theme.selection = macos_hex(chrome.selection, if dark { 0.30 } else { 0.20 });
 
@@ -174,7 +188,7 @@ pub fn apply_theme_specs(
         theme.secondary = macos_hex(secondary_bg, 1.0);
         theme.secondary_hover = macos_hex(secondary_hover, 1.0);
         theme.secondary_active = macos_hex(secondary_active, 1.0);
-        theme.secondary_foreground = macos_hex(chrome.term_fg, 1.0);
+        theme.secondary_foreground = theme.foreground;
 
         theme.button_secondary = theme.secondary;
         theme.button_secondary_hover = theme.secondary_hover;
@@ -188,7 +202,7 @@ pub fn apply_theme_specs(
 
         theme.accent = macos_hex(accent, if dark { 0.22 } else { 0.13 });
         theme.accent_foreground = if dark {
-            macos_hex(chrome.term_fg, 1.0)
+            theme.foreground
         } else {
             macos_hex(ensure_readable_fg(accent, chrome.ui_bg, false, 3.5), 1.0)
         };
@@ -203,7 +217,7 @@ pub fn apply_theme_specs(
         theme.tab = macos_hex(inv_pole, 0.0);
         theme.tab_active = theme.background;
         theme.tab_foreground = theme.muted_foreground;
-        theme.tab_active_foreground = macos_hex(chrome.term_fg, 1.0);
+        theme.tab_active_foreground = theme.foreground;
 
         theme.switch = macos_hex(secondary_bg, 1.0);
         theme.switch_thumb = macos_hex(0xFFFFFF, 1.0);
@@ -248,7 +262,7 @@ pub fn apply_theme_specs(
         theme.cyan = macos_hex(cyan_hex, 1.0);
         theme.cyan_light = macos_hex(chrome.ansi[14], 1.0);
 
-        theme.overlay = macos_hex(0x000000, if dark { 0.48 } else { 0.28 });
+        theme.overlay = macos_hex(0x000000, if dark { 0.56 } else { 0.30 });
 
         // Replace default TitleBar / Button gradients with clean solid tokens
         theme.tokens.title_bar = ThemeToken::from(theme.colors.title_bar);

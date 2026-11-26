@@ -193,7 +193,10 @@ fn render_quick_host_row(
             Button::new(SharedString::from(format!("quick-btn-{}", item.id)))
                 .tab_stop(false)
                 .secondary()
-                .xsmall()
+                .small()
+                .h(px(28.0))
+                .px_3()
+                .border_1()
                 .label("连接")
                 .on_click(move |_, window, cx| {
                     cx.stop_propagation();
@@ -238,13 +241,12 @@ impl RenderOnce for WelcomeView {
                 .into_any_element()
         } else {
             let on_connect = self.on_connect_host;
-            let rows: Vec<AnyElement> = self
+            let rows = self
                 .quick_hosts
                 .into_iter()
                 .enumerate()
-                .map(|(idx, item)| render_quick_host_row(item, idx > 0, on_connect.clone(), cx))
-                .collect();
-            v_flex().children(rows).into_any_element()
+                .map(|(idx, item)| render_quick_host_row(item, idx > 0, on_connect.clone(), cx));
+            macos_inset_group(cx).children(rows).into_any_element()
         };
 
         div()

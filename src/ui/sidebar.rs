@@ -18,7 +18,7 @@ use gpui_kit::{
     Window, div, px,
 };
 
-use crate::domain::{FlatHostRow, KeychainEntry, KeychainKind, ShortcutAction, SnippetItem, tooltip};
+use crate::domain::{FlatHostRow, KeychainEntry, KeychainKind, SnippetItem};
 use crate::ui::theme::{
     macos_env_badge_colors, macos_segmented_track, macos_squircle_badge,
 };
@@ -77,7 +77,7 @@ fn render_segment_pill(
     div()
         .id(id)
         .flex_1()
-        .h(px(23.0))
+        .h(px(24.0))
         .rounded(px(5.5))
         .cursor_pointer()
         .flex()
@@ -126,7 +126,6 @@ fn render_sidebar_header(
     let ws_create_folder = workspace.clone();
     let ws_create_snippet = workspace.clone();
     let ws_create_key = workspace.clone();
-    let ws_collapse = workspace.clone();
 
     let create_control = match section {
         SidebarSection::Hosts => Button::new("sidebar-create-host-menu")
@@ -188,6 +187,7 @@ fn render_sidebar_header(
         .justify_between()
         .child(
             macos_segmented_track(cx)
+                .h(px(28.0))
                 .flex_1()
                 .child(render_segment_pill(
                     "seg-hosts",
@@ -214,27 +214,7 @@ fn render_sidebar_header(
                     cx,
                 )),
         )
-        .child(
-            h_flex()
-                .gap_0p5()
-                .items_center()
-                .child(create_control)
-                .child(
-                    Button::new("sidebar-collapse-btn")
-                        .tab_stop(false)
-                        .ghost()
-                        .xsmall()
-                        .compact()
-                        .icon(LucideIcon::PanelLeftClose)
-                        .tooltip(tooltip(
-                            "隐藏左侧边栏",
-                            ws_collapse.read(cx).settings.shortcuts.get(ShortcutAction::ToggleLeftSidebar).as_ref(),
-                        ))
-                        .on_click(move |_, window, cx| {
-                            ws_collapse.update(cx, |ws, cx| ws.toggle_left_sidebar(window, cx));
-                        }),
-                ),
-        )
+        .child(create_control)
         .into_any_element()
 }
 
@@ -259,7 +239,8 @@ impl RenderOnce for LeftSidebar {
             .child(
                 div().px_2p5().pb_2().child(
                     Input::new(&self.search_input)
-                        .xsmall()
+                        .small()
+                        .min_h(px(28.0))
                         .prefix(
                             Icon::new(LucideIcon::Search)
                                 .xsmall()

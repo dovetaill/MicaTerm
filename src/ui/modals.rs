@@ -7,22 +7,22 @@ use std::rc::Rc;
 use gpui_kit::assets::IconName as LucideIcon;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _, WindowExt as _,
-    button::{Button, ButtonVariants as _},
-    dialog::{DialogContent, DialogFooter},
-    select::{Select, SelectEvent, SelectState},
-    notification::Notification,
+    button::{Button, ButtonCustomVariant, ButtonVariants as _},
+    dialog::{Dialog, DialogContent, DialogFooter},
     h_flex,
     input::{Editor, EditorState, Input, InputEvent, InputState, Textarea, TextareaState},
     menu::{DropdownMenu as _, PopupMenuItem},
+    notification::Notification,
     scroll::ScrollableElement as _,
+    select::{Select, SelectEvent, SelectState},
     switch::Switch,
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext as _, ClipboardItem, Context, Entity, FocusHandle, Focusable as _,
-    FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Render,
-    SharedString, StatefulInteractiveElement as _, Styled as _, TextAlign, TextRun, Window, canvas, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, App, AppContext as _, ClipboardItem, Context, ElementId, Entity, FocusHandle,
+    Focusable as _, FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent,
+    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
+    TextAlign, TextRun, Window, canvas, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::domain::{
@@ -41,7 +41,7 @@ use crate::ui::workspace::MicaWorkspace;
 
 fn field_block(label: &'static str, control: impl IntoElement, cx: &App) -> gpui_kit::Div {
     v_flex()
-        .gap_1()
+        .gap_1p5()
         .child(
             div()
                 .text_xs()
@@ -52,10 +52,67 @@ fn field_block(label: &'static str, control: impl IntoElement, cx: &App) -> gpui
         .child(control)
 }
 
-/// Reserves vertical room inside `Dialog`'s `overflow_hidden` / `overflow_y_scrollbar` body
-/// (`pl/pr = 16px`, `pt/pb = 0px`) so `gpui-component`'s 3px outer focus ring is not clipped.
+fn modal_shell(dialog: Dialog, cx: &App) -> Dialog {
+    dialog
+        .bg(cx.theme().popover)
+        .rounded(cx.theme().radius_lg)
+        .p_6()
+}
+
 fn dialog_body() -> gpui_kit::Div {
-    v_flex().w_full().min_w_0().py_1()
+    v_flex().w_full().min_w_0().gap_3p5()
+}
+
+fn modal_footer(cx: &App) -> DialogFooter {
+    DialogFooter::new()
+        .pt_3p5()
+        .border_t_1()
+        .border_color(cx.theme().border)
+        .gap_2()
+}
+
+fn footer_button(id: &'static str) -> Button {
+    Button::new(id).px_3p5().border_1()
+}
+
+fn small_button(id: impl Into<ElementId>) -> Button {
+    Button::new(id).small().h(px(28.0)).px_3().border_1()
+}
+
+fn choice_button(id: impl Into<ElementId>, selected: bool, cx: &App) -> Button {
+    small_button(id)
+        .secondary()
+        .selected(selected)
+        .when(selected, |button| button.border_color(cx.theme().primary))
+}
+
+fn form_segments<T: Copy + Eq + 'static>(
+    selection: &Rc<Cell<T>>,
+    options: impl IntoIterator<Item = (&'static str, T, &'static str)>,
+    cx: &App,
+) -> gpui_kit::Div {
+    let style = ButtonCustomVariant::new(cx)
+        .hover(cx.theme().list_hover)
+        .active(cx.theme().tab_active);
+    macos_segmented_track(cx)
+        .h(px(32.0))
+        .p(px(3.0))
+        .children(options.into_iter().map(|(id, value, label)| {
+            let selection = selection.clone();
+            Button::new(id)
+                .custom(style)
+                .border_1()
+                .selected(selection.get() == value)
+                .small()
+                .flex_1()
+                .h(px(26.0))
+                .rounded(px(5.0))
+                .label(label)
+                .on_click(move |_, window, _| {
+                    selection.set(value);
+                    window.refresh();
+                })
+        }))
 }
 
 pub fn open_confirm_dialog(
@@ -73,27 +130,26 @@ pub fn open_confirm_dialog(
 
     window.open_dialog(cx, move |dialog, _, cx| {
         let cb = confirm_cb.clone();
-        dialog
+        modal_shell(dialog, cx)
             .title(title.clone())
-            .w(px(400.0))
+            .w(px(420.0))
             .child(
                 div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_sm()
+                    .line_height(px(21.0))
+                    .text_color(cx.theme().foreground)
                     .child(message.clone()),
             )
             .footer(
-                DialogFooter::new()
+                modal_footer(cx)
                     .child(
-                        Button::new("confirm-dialog-cancel")
-                            .small()
+                        footer_button("confirm-dialog-cancel")
                             .label("取消")
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
-                        Button::new("confirm-dialog-ok")
+                        footer_button("confirm-dialog-ok")
                             .danger()
-                            .small()
                             .label(confirm_label.clone())
                             .on_click(move |_, window, cx| {
                                 window.close_dialog(cx);
@@ -175,22 +231,20 @@ pub fn open_simple_name_dialog(
         let inp_ok = input.clone();
         let cb = submit_cb.clone();
 
-        dialog
+        modal_shell(dialog, cx)
             .title(title)
-            .w(px(400.0))
-            .child(dialog_body().gap_3().child(field_block(label, Input::new(&input).small(), cx)))
+            .w(px(420.0))
+            .child(dialog_body().child(field_block(label, Input::new(&input), cx)))
             .footer(
-                DialogFooter::new()
+                modal_footer(cx)
                     .child(
-                        Button::new("simple-dialog-cancel")
-                            .small()
+                        footer_button("simple-dialog-cancel")
                             .label("取消")
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
-                        Button::new("simple-dialog-ok")
+                        footer_button("simple-dialog-ok")
                             .primary()
-                            .small()
                             .label("确定")
                             .on_click(move |_, window, cx| {
                                 let val = inp_ok.read(cx).value().trim().to_string();
@@ -292,12 +346,11 @@ pub fn open_remote_editor_dialog(
                 .unwrap_or_else(|| cur_lang.clone())
         };
 
-        dialog
+        modal_shell(dialog, cx)
             .title(title_str.clone())
-            .w(px(760.0))
+            .w(px(820.0))
             .child(
                 dialog_body()
-                    .gap_2()
                     .child(
                         h_flex()
                             .justify_between()
@@ -313,10 +366,9 @@ pub fn open_remote_editor_dialog(
                                     .child(path_str.clone()),
                             )
                             .child(
-                                Button::new("remote-editor-lang-picker")
+                                small_button("remote-editor-lang-picker")
                                     .flex_shrink_0()
                                     .secondary()
-                                    .xsmall()
                                     .icon(LucideIcon::Code)
                                     .label(format!("语法: {lang_badge_label}"))
                                     .dropdown_menu(move |mut menu, _, _| {
@@ -433,18 +485,16 @@ pub fn open_remote_editor_dialog(
                     ),
             )
             .footer(
-                DialogFooter::new()
+                modal_footer(cx)
                     .child(
-                        Button::new("remote-edit-cancel")
-                            .small()
+                        footer_button("remote-edit-cancel")
                             .disabled(saving.get())
                             .label("取消")
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
-                        Button::new("remote-edit-save")
+                        footer_button("remote-edit-save")
                             .primary()
-                            .small()
                             .disabled(saving.get())
                             .label(if saving.get() { "保存中…" } else { "保存到服务器" })
                             .on_click(move |_, window, cx| {
@@ -711,16 +761,6 @@ pub fn open_ssh_host_modal(
         let cur_jump = selected_jump.borrow().clone();
         let cur_err = error_msg.borrow().clone();
 
-        let at1 = auth_tab.clone();
-        let at2 = auth_tab.clone();
-        let at3 = auth_tab.clone();
-        let at4 = auth_tab.clone();
-
-        let pt1 = proxy_tab.clone();
-        let pt2 = proxy_tab.clone();
-        let pt3 = proxy_tab.clone();
-        let pt4 = proxy_tab.clone();
-
         let folder_selector = if folders.is_empty() {
             None
         } else {
@@ -730,10 +770,7 @@ pub fn open_ssh_host_modal(
                     .flex_wrap()
                     .gap_1()
                     .child(
-                        Button::new("folder-opt-root")
-                            .ghost()
-                            .xsmall()
-                            .selected(cur_parent.is_none())
+                        choice_button("folder-opt-root", cur_parent.is_none(), cx)
                             .label("根目录")
                             .on_click(move |_, window, _| {
                                 *sp_none.borrow_mut() = None;
@@ -745,10 +782,7 @@ pub fn open_ssh_host_modal(
                         let flabel = flabel.clone();
                         let sp = selected_parent.clone();
                         let active = cur_parent.as_deref() == Some(fid.as_str());
-                        Button::new(SharedString::from(format!("folder-opt-{fid}")))
-                            .ghost()
-                            .xsmall()
-                            .selected(active)
+                        choice_button(SharedString::from(format!("folder-opt-{fid}")), active, cx)
                             .label(flabel)
                             .on_click(move |_, window, _| {
                                 *sp.borrow_mut() = Some(fid.clone());
@@ -759,29 +793,29 @@ pub fn open_ssh_host_modal(
         };
 
         let auth_section = match cur_auth {
-            DraftAuthTab::Password => field_block("登录密码", Input::new(&pass_in).small(), cx),
+            DraftAuthTab::Password => field_block("登录密码", Input::new(&pass_in).mask_toggle(), cx),
             DraftAuthTab::KeyPath => v_flex()
-                .gap_2()
+                .gap_3p5()
                 .child(field_block(
                     "本机私钥文件路径",
-                    Input::new(&key_path_in).small(),
+                    Input::new(&key_path_in),
                     cx,
                 ))
                 .child(field_block(
                     "私钥密码短语（选填）",
-                    Input::new(&passphrase_in).small(),
+                    Input::new(&passphrase_in).mask_toggle(),
                     cx,
                 )),
             DraftAuthTab::KeyInline => v_flex()
-                .gap_2()
+                .gap_3p5()
                 .child(field_block(
                     "PEM / OpenSSH 私钥内容",
-                    Textarea::new(&key_pem_in).h(px(96.0)),
+                    Textarea::new(&key_pem_in).h(px(128.0)),
                     cx,
                 ))
                 .child(field_block(
                     "私钥密码短语（选填）",
-                    Input::new(&passphrase_in).small(),
+                    Input::new(&passphrase_in).mask_toggle(),
                     cx,
                 )),
             DraftAuthTab::Keychain => {
@@ -801,10 +835,7 @@ pub fn open_ssh_host_modal(
                                 let kid = kc.id.clone();
                                 let skc = selected_kc.clone();
                                 let active = cur_kc == kid;
-                                Button::new(SharedString::from(format!("pick-kc-{kid}")))
-                                    .secondary()
-                                    .xsmall()
-                                    .selected(active)
+                                choice_button(SharedString::from(format!("pick-kc-{kid}")), active, cx)
                                     .label(format!("{} ({})", kc.name, kc.kind.label()))
                                     .on_click(move |_, window, _| {
                                         *skc.borrow_mut() = kid.clone();
@@ -817,68 +848,61 @@ pub fn open_ssh_host_modal(
         };
 
         let proxy_section = match cur_proxy {
-            DraftProxyTab::None => div(),
-            DraftProxyTab::Socks5 | DraftProxyTab::Http => v_flex()
-                .gap_2()
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .child(
-                            div()
-                                .flex_1()
-                                .child(field_block("代理地址", Input::new(&px_host_in).small(), cx)),
-                        )
-                        .child(
-                            div()
-                                .w(px(100.0))
-                                .child(field_block("端口", Input::new(&px_port_in).small(), cx)),
-                        ),
-                )
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .child(
-                            div().flex_1().child(field_block(
+            DraftProxyTab::None => None,
+            DraftProxyTab::Socks5 | DraftProxyTab::Http => Some(
+                v_flex()
+                    .gap_3p5()
+                    .child(
+                        h_flex()
+                            .gap_3p5()
+                            .child(div().flex_1().child(field_block(
+                                "代理地址",
+                                Input::new(&px_host_in),
+                                cx,
+                            )))
+                            .child(div().w(px(100.0)).child(field_block(
+                                "端口",
+                                Input::new(&px_port_in),
+                                cx,
+                            ))),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_3p5()
+                            .child(div().flex_1().child(field_block(
                                 "代理账号",
-                                Input::new(&px_user_in).small(),
+                                Input::new(&px_user_in),
                                 cx,
-                            )),
-                        )
-                        .child(
-                            div().flex_1().child(field_block(
+                            )))
+                            .child(div().flex_1().child(field_block(
                                 "代理密码",
-                                Input::new(&px_pass_in).small(),
+                                Input::new(&px_pass_in).mask_toggle(),
                                 cx,
-                            )),
-                        ),
-                ),
-            DraftProxyTab::JumpHost => {
-                if jump_candidates.is_empty() {
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("暂无其他已保存主机可作为跳板机")
-                } else {
-                    h_flex()
-                        .flex_wrap()
-                        .gap_1()
-                        .children(jump_candidates.iter().map(|(jid, jname)| {
-                            let jid = jid.clone();
-                            let jname = jname.clone();
-                            let sj = selected_jump.clone();
-                            let active = cur_jump == jid;
-                            Button::new(SharedString::from(format!("pick-jump-{jid}")))
-                                .secondary()
-                                .xsmall()
-                                .selected(active)
-                                .label(jname)
-                                .on_click(move |_, window, _| {
-                                    *sj.borrow_mut() = jid.clone();
-                                    window.refresh();
-                                })
-                        }))
-                }
-            }
+                            ))),
+                    ),
+            ),
+            DraftProxyTab::JumpHost => Some(if jump_candidates.is_empty() {
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("暂无其他已保存主机可作为跳板机")
+            } else {
+                h_flex()
+                    .flex_wrap()
+                    .gap_1()
+                    .children(jump_candidates.iter().map(|(jid, jname)| {
+                        let jid = jid.clone();
+                        let jname = jname.clone();
+                        let sj = selected_jump.clone();
+                        let active = cur_jump == jid;
+                        choice_button(SharedString::from(format!("pick-jump-{jid}")), active, cx)
+                            .label(jname)
+                            .on_click(move |_, window, _| {
+                                *sj.borrow_mut() = jid.clone();
+                                window.refresh();
+                            })
+                    }))
+            }),
         };
 
         let build_save = {
@@ -1031,16 +1055,15 @@ pub fn open_ssh_host_modal(
         let save_only = build_save.clone();
         let save_and_connect = build_save;
 
-        dialog
+        modal_shell(dialog, cx)
             .title(if is_edit {
                 "编辑 SSH 主机"
             } else {
                 "新建 SSH 主机"
             })
-            .w(px(540.0))
+            .w(px(620.0))
             .child(
                 dialog_body()
-                    .gap_3()
                     .children(cur_err.map(|msg| {
                         div()
                             .px_3()
@@ -1053,202 +1076,105 @@ pub fn open_ssh_host_modal(
                     }))
                     .child(
                         h_flex()
-                            .gap_2()
+                            .gap_3p5()
                             .child(
                                 div()
+                                    .min_w_0()
                                     .flex_1()
-                                    .child(field_block("显示名称", Input::new(&name_in).small(), cx)),
+                                    .child(field_block("显示名称", Input::new(&name_in), cx)),
                             )
                             .child(
                                 div()
-                                    .w(px(120.0))
-                                    .child(field_block("环境标签", Input::new(&env_in).small(), cx)),
+                                    .w(px(148.0))
+                                    .child(field_block("环境标签", Input::new(&env_in), cx)),
                             ),
                     )
                     .children(folder_selector.map(|fs| field_block("所属分组文件夹", fs, cx)))
                     .child(
                         h_flex()
-                            .gap_2()
+                            .gap_3p5()
                             .child(
                                 div()
+                                    .min_w_0()
                                     .flex_1()
-                                    .child(field_block("主机地址 *", Input::new(&host_in).small(), cx)),
+                                    .child(field_block("主机地址 *", Input::new(&host_in), cx)),
                             )
                             .child(
                                 div()
-                                    .w(px(86.0))
-                                    .child(field_block("端口", Input::new(&port_in).small(), cx)),
+                                    .w(px(92.0))
+                                    .child(field_block("端口", Input::new(&port_in), cx)),
                             )
                             .child(
                                 div()
-                                    .w(px(120.0))
-                                    .child(field_block("用户名", Input::new(&user_in).small(), cx)),
+                                    .w(px(148.0))
+                                    .child(field_block("用户名", Input::new(&user_in), cx)),
                             ),
                     )
-                    .child(
-                        v_flex()
-                            .gap_1p5()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("认证方式"),
-                            )
-                            .child(
-                                macos_segmented_track(cx)
-                                    .child(
-                                        Button::new("auth-tab-pwd")
-                                            .ghost()
-                                            .xsmall()
-                                            .flex_1()
-                                            .selected(cur_auth == DraftAuthTab::Password)
-                                            .label("密码")
-                                            .on_click(move |_, w, _| {
-                                                at1.set(DraftAuthTab::Password);
-                                                w.refresh();
-                                            }),
-                                    )
-                                    .child(
-                                        Button::new("auth-tab-keypath")
-                                            .ghost()
-                                            .xsmall()
-                                            .flex_1()
-                                            .selected(cur_auth == DraftAuthTab::KeyPath)
-                                            .label("私钥文件")
-                                            .on_click(move |_, w, _| {
-                                                at2.set(DraftAuthTab::KeyPath);
-                                                w.refresh();
-                                            }),
-                                    )
-                                    .child(
-                                        Button::new("auth-tab-keyinline")
-                                            .ghost()
-                                            .xsmall()
-                                            .flex_1()
-                                            .selected(cur_auth == DraftAuthTab::KeyInline)
-                                            .label("粘贴私钥")
-                                            .on_click(move |_, w, _| {
-                                                at3.set(DraftAuthTab::KeyInline);
-                                                w.refresh();
-                                            }),
-                                    )
-                                    .child(
-                                        Button::new("auth-tab-kc")
-                                            .ghost()
-                                            .xsmall()
-                                            .flex_1()
-                                            .selected(cur_auth == DraftAuthTab::Keychain)
-                                            .label("密钥库凭据")
-                                            .on_click(move |_, w, _| {
-                                                at4.set(DraftAuthTab::Keychain);
-                                                w.refresh();
-                                            }),
-                                    ),
-                            )
-                            .child(auth_section),
-                    )
-                    .child(
-                        v_flex()
-                            .gap_1p5()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("网络代理 / 跳板机"),
-                            )
-                            .child(
-                                macos_segmented_track(cx)
-                                    .child(
-                                        Button::new("px-tab-none")
-                                            .ghost()
-                                            .xsmall()
-                                            .flex_1()
-                                            .selected(cur_proxy == DraftProxyTab::None)
-                                            .label("直连")
-                                            .on_click(move |_, w, _| {
-                                                pt1.set(DraftProxyTab::None);
-                                                w.refresh();
-                                            }),
-                                    )
-                                    .child(
-                                        Button::new("px-tab-socks5")
-                                            .ghost()
-                                            .xsmall()
-                                            .flex_1()
-                                            .selected(cur_proxy == DraftProxyTab::Socks5)
-                                            .label("SOCKS5")
-                                            .on_click(move |_, w, _| {
-                                                pt2.set(DraftProxyTab::Socks5);
-                                                w.refresh();
-                                            }),
-                                    )
-                                    .child(
-                                        Button::new("px-tab-http")
-                                            .ghost()
-                                            .xsmall()
-                                            .flex_1()
-                                            .selected(cur_proxy == DraftProxyTab::Http)
-                                            .label("HTTP")
-                                            .on_click(move |_, w, _| {
-                                                pt3.set(DraftProxyTab::Http);
-                                                w.refresh();
-                                            }),
-                                    )
-                                    .child(
-                                        Button::new("px-tab-jump")
-                                            .ghost()
-                                            .xsmall()
-                                            .flex_1()
-                                            .selected(cur_proxy == DraftProxyTab::JumpHost)
-                                            .label("SSH 跳板机")
-                                            .on_click(move |_, w, _| {
-                                                pt4.set(DraftProxyTab::JumpHost);
-                                                w.refresh();
-                                            }),
-                                    ),
-                            )
-                            .child(proxy_section),
-                    )
+                    .child(field_block(
+                        "认证方式",
+                        form_segments(
+                            &auth_tab,
+                            [
+                                ("auth-tab-pwd", DraftAuthTab::Password, "密码"),
+                                ("auth-tab-keypath", DraftAuthTab::KeyPath, "私钥文件"),
+                                ("auth-tab-keyinline", DraftAuthTab::KeyInline, "粘贴私钥"),
+                                ("auth-tab-kc", DraftAuthTab::Keychain, "密钥库凭据"),
+                            ],
+                            cx,
+                        ),
+                        cx,
+                    ))
+                    .child(auth_section)
+                    .child(field_block(
+                        "网络代理 / 跳板机",
+                        form_segments(
+                            &proxy_tab,
+                            [
+                                ("px-tab-none", DraftProxyTab::None, "直连"),
+                                ("px-tab-socks5", DraftProxyTab::Socks5, "SOCKS5"),
+                                ("px-tab-http", DraftProxyTab::Http, "HTTP"),
+                                ("px-tab-jump", DraftProxyTab::JumpHost, "SSH 跳板机"),
+                            ],
+                            cx,
+                        ),
+                        cx,
+                    ))
+                    .children(proxy_section)
                     .child(
                         h_flex()
-                            .gap_2()
+                            .gap_3p5()
                             .child(
                                 div().flex_1().child(field_block(
                                     "SFTP 初始远程路径（选填）",
-                                    Input::new(&dir_in).small(),
+                                    Input::new(&dir_in),
                                     cx,
                                 )),
                             )
                             .child(
                                 div().flex_1().child(field_block(
                                     "备注（选填）",
-                                    Input::new(&remark_in).small(),
+                                    Input::new(&remark_in),
                                     cx,
                                 )),
                             ),
                     ),
             )
             .footer(
-                DialogFooter::new()
+                modal_footer(cx)
                     .child(
-                        Button::new("ssh-modal-cancel")
-                            .small()
+                        footer_button("ssh-modal-cancel")
                             .label("取消")
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
-                        Button::new("ssh-modal-save")
+                        footer_button("ssh-modal-save")
                             .secondary()
-                            .small()
                             .label("仅保存")
                             .on_click(move |_, window, cx| save_only(false, window, cx)),
                     )
                     .child(
-                        Button::new("ssh-modal-connect")
+                        footer_button("ssh-modal-connect")
                             .primary()
-                            .small()
                             .label("保存并连接")
                             .on_click(move |_, window, cx| save_and_connect(true, window, cx)),
                     ),
@@ -1328,8 +1254,6 @@ pub fn open_keychain_modal(
 
     window.open_dialog(cx, move |dialog, _, cx| {
         let k = kind_cell.get();
-        let kc1 = kind_cell.clone();
-        let kc2 = kind_cell.clone();
 
         let ws = workspace.clone();
         let eid = entry_id.clone();
@@ -1341,76 +1265,54 @@ pub fn open_keychain_modal(
         let ph_in = pp_in.clone();
         let kc_save = kind_cell.clone();
 
-        dialog
+        modal_shell(dialog, cx)
             .title(if is_edit {
                 "编辑密钥凭据"
             } else {
                 "新建密钥凭据"
             })
-            .w(px(460.0))
+            .w(px(520.0))
             .child(
                 dialog_body()
-                    .gap_3()
-                    .child(
-                        macos_segmented_track(cx)
-                            .child(
-                                Button::new("kc-kind-pwd")
-                                    .ghost()
-                                    .xsmall()
-                                    .flex_1()
-                                    .selected(k == KeychainKind::PasswordIdentity)
-                                    .label("账号密码")
-                                    .on_click(move |_, w, _| {
-                                        kc1.set(KeychainKind::PasswordIdentity);
-                                        w.refresh();
-                                    }),
-                            )
-                            .child(
-                                Button::new("kc-kind-ssh")
-                                    .ghost()
-                                    .xsmall()
-                                    .flex_1()
-                                    .selected(k == KeychainKind::SshKey)
-                                    .label("SSH 私钥")
-                                    .on_click(move |_, w, _| {
-                                        kc2.set(KeychainKind::SshKey);
-                                        w.refresh();
-                                    }),
-                            ),
-                    )
-                    .child(field_block("凭据名称", Input::new(&name_in).small(), cx))
-                    .child(field_block("关联用户名", Input::new(&user_in).small(), cx))
+                    .child(form_segments(
+                        &kind_cell,
+                        [
+                            ("kc-kind-pwd", KeychainKind::PasswordIdentity, "账号密码"),
+                            ("kc-kind-ssh", KeychainKind::SshKey, "SSH 私钥"),
+                        ],
+                        cx,
+                    ))
+                    .child(field_block("凭据名称", Input::new(&name_in), cx))
+                    .child(field_block("关联用户名", Input::new(&user_in), cx))
                     .child(match k {
                         KeychainKind::PasswordIdentity => {
-                            field_block("密码", Input::new(&pwd_in).small(), cx)
+                            field_block("密码", Input::new(&pwd_in).mask_toggle(), cx)
                         }
                         KeychainKind::SshKey => v_flex()
-                            .gap_2()
+                            .gap_3p5()
                             .child(field_block(
                                 "私钥内容 (PEM / OpenSSH)",
-                                Textarea::new(&pem_in).h(px(120.0)),
+                                Textarea::new(&pem_in).h(px(136.0)),
                                 cx,
                             ))
                             .child(field_block(
                                 "密码短语（选填）",
-                                Input::new(&pp_in).small(),
+                                Input::new(&pp_in).mask_toggle(),
                                 cx,
                             )),
                     })
-                    .child(field_block("备注", Input::new(&remark_in).small(), cx)),
+                    .child(field_block("备注", Input::new(&remark_in), cx)),
             )
             .footer(
-                DialogFooter::new()
+                modal_footer(cx)
                     .child(
-                        Button::new("kc-cancel")
-                            .small()
+                        footer_button("kc-cancel")
                             .label("取消")
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
-                        Button::new("kc-save")
+                        footer_button("kc-save")
                             .primary()
-                            .small()
                             .label("保存凭据")
                             .on_click(move |_, window, cx| {
                                 let name = n_in.read(cx).value().trim().to_string();
@@ -1487,26 +1389,24 @@ pub fn open_snippet_modal(
         let g_in = group_in.clone();
         let c_in = cmd_in.clone();
 
-        dialog
+        modal_shell(dialog, cx)
             .title(if is_edit {
                 "编辑命令片段"
             } else {
                 "新建命令片段"
             })
-            .w(px(460.0))
+            .w(px(520.0))
             .child(
                 dialog_body()
-                    .gap_3()
-                    .child(field_block("片段名称", Input::new(&title_in).small(), cx))
-                    .child(field_block("分组标签", Input::new(&group_in).small(), cx))
+                    .child(field_block("片段名称", Input::new(&title_in), cx))
+                    .child(field_block("分组标签", Input::new(&group_in), cx))
                     .child(field_block(
                         "Shell 命令内容",
-                        Textarea::new(&cmd_in).h(px(110.0)),
+                        Textarea::new(&cmd_in).h(px(136.0)),
                         cx,
                     ))
                     .child(
                         Switch::new("snippet-auto-enter")
-                            .small()
                             .checked(checked)
                             .label("发送后自动附加回车立即执行")
                             .on_change(move |val, window, _| {
@@ -1516,17 +1416,15 @@ pub fn open_snippet_modal(
                     ),
             )
             .footer(
-                DialogFooter::new()
+                modal_footer(cx)
                     .child(
-                        Button::new("snip-cancel")
-                            .small()
+                        footer_button("snip-cancel")
                             .label("取消")
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
-                        Button::new("snip-save")
+                        footer_button("snip-save")
                             .primary()
-                            .small()
                             .label("保存片段")
                             .on_click(move |_, window, cx| {
                                 let title = t_in.read(cx).value().trim().to_string();
@@ -1554,6 +1452,13 @@ struct ShortcutRecorder {
     recorder_focus: FocusHandle,
     recording_action: Option<ShortcutAction>,
     status: SharedString,
+}
+
+fn settings_heading(label: impl Into<SharedString>) -> gpui_kit::Div {
+    div()
+        .text_sm()
+        .font_weight(FontWeight::SEMIBOLD)
+        .child(label.into())
 }
 
 impl ShortcutRecorder {
@@ -1628,17 +1533,15 @@ impl ShortcutRecorder {
                 .unwrap_or_else(|| "未设置".into())
         };
         h_flex()
-            .px_3()
-            .py_1p5()
-            .gap_1()
+            .py_3()
+            .gap_2()
             .items_center()
             .border_t_1()
             .border_color(cx.theme().border)
             .child(div().min_w_0().flex_1().text_sm().child(action.label()))
             .child(
-                Button::new(("record-shortcut", action as usize))
+                small_button(("record-shortcut", action as usize))
                     .flex_shrink_0()
-                    .small()
                     .secondary()
                     .tab_stop(false)
                     .when(recording, |b| b.primary())
@@ -1670,8 +1573,8 @@ impl ShortcutRecorder {
                     Button::new(("reset-shortcut", action as usize))
                         .flex_shrink_0()
                         .ghost()
-                        .xsmall()
-                        .compact()
+                        .small()
+                        .size(px(28.0))
                         .tab_stop(false)
                         .icon(LucideIcon::RotateCcw)
                         .tooltip("恢复默认快捷键")
@@ -1697,7 +1600,7 @@ impl Render for ShortcutRecorder {
             .any(|&a| shortcuts.is_customized(a));
         let status = self.status.clone();
         v_flex()
-            .gap_2()
+            .gap_6()
             .track_focus(&self.recorder_focus)
             .when(self.recording_action.is_some(), |container| {
                 container
@@ -1717,10 +1620,9 @@ impl Render for ShortcutRecorder {
                             .child(status),
                     )
                     .child(
-                        Button::new("reset-all-shortcuts")
+                        small_button("reset-all-shortcuts")
                             .flex_shrink_0()
                             .secondary()
-                            .small()
                             .tab_stop(false)
                             .label("全部恢复默认")
                             .disabled(!customized)
@@ -1733,20 +1635,13 @@ impl Render for ShortcutRecorder {
                             })),
                     ),
             )
-            .child(v_flex().gap_2().w_full().min_w_0().children(
+            .child(v_flex().gap_6().w_full().min_w_0().children(
                 ShortcutCategory::ALL.into_iter().map(|category| {
                     v_flex()
                         .w_full()
                         .min_w_0()
                         .flex_shrink_0()
-                        .child(
-                            div()
-                                .px_3()
-                                .py_2()
-                                .text_xs()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child(category.label()),
-                        )
+                        .child(settings_heading(category.label()).pb_2())
                         .children(
                             ShortcutAction::ALL
                                 .iter()
@@ -1776,7 +1671,6 @@ enum ThemeModeFilter {
 #[inline(never)]
 fn render_theme_preview_card(
     spec: &ThemeSpec,
-    is_active_now: bool,
     is_saved: bool,
     workspace: Entity<MicaWorkspace>,
     cx: &App,
@@ -1787,7 +1681,12 @@ fn render_theme_preview_card(
     let fg = macos_hex(spec.term_fg, 1.0);
     v_flex()
         .id(SharedString::from(format!("theme-card-{id}")))
+        .focusable()
         .tab_stop(true)
+        .rounded(cx.theme().radius)
+        .border_1()
+        .border_color(cx.theme().transparent)
+        .focus_visible(|style| style.border_color(cx.theme().ring))
         .w(px(130.0))
         .flex_shrink_0()
         .gap_1()
@@ -1856,12 +1755,6 @@ fn render_theme_preview_card(
                 })
                 .child(spec.name.clone()),
         )
-        .children(is_active_now.then(|| {
-            div()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child("当前生效")
-        }))
         .into_any_element()
 }
 
@@ -1940,22 +1833,28 @@ pub fn open_settings_modal_at(
             (SettingsTab::Shortcuts, "快捷键", LucideIcon::Keyboard),
         ];
         let current = active_page.get();
+        let nav_style = ButtonCustomVariant::new(cx)
+            .hover(cx.theme().list_hover)
+            .active(cx.theme().sidebar_accent);
         let tabs = v_flex()
-            .w(px(192.))
+            .w(px(208.))
             .h_full()
             .flex_shrink_0()
-            .p_3()
+            .px_3()
+            .py_4()
             .gap_1()
             .bg(cx.theme().sidebar)
+            .rounded_l(px(9.0))
             .border_r_1()
             .border_color(cx.theme().border)
             .track_focus(&tabs_focus)
             .child(
                 div()
-                    .px_2()
-                    .py_3()
-                    .text_sm()
+                    .px_3()
+                    .pb_2()
+                    .text_xs()
                     .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(cx.theme().muted_foreground)
                     .child("偏好设置"),
             )
             .children(pages.map(|(tab, label, icon)| {
@@ -1963,12 +1862,14 @@ pub fn open_settings_modal_at(
                 let focus = tabs_focus.clone();
                 let recorder = recorder.clone();
                 Button::new(("settings-page", tab as usize))
-                    .ghost()
-                    .small()
+                    .custom(nav_style)
+                    .border_1()
+                    .h(px(34.0))
+                    .px_3()
                     .w_full()
-                    .justify_start()
                     .icon(icon)
                     .label(label)
+                    .child(div().flex_1())
                     .selected(current == tab)
                     .on_click(move |_, window, cx| {
                         page.set(tab);
@@ -1980,27 +1881,56 @@ pub fn open_settings_modal_at(
                         window.refresh();
                     })
             }));
-        let title = match current {
-            SettingsTab::Themes => "外观与主题",
-            SettingsTab::General => "通用与终端",
-            SettingsTab::Shortcuts => "快捷键",
+        let (title, subtitle) = match current {
+            SettingsTab::Themes => (
+                "外观与主题",
+                "定制深浅双模式终端配色、界面材质联动与外部主题方案",
+            ),
+            SettingsTab::General => (
+                "通用与终端",
+                "配置等宽字体度量、输出高亮、缓存行数与运行诊断",
+            ),
+            SettingsTab::Shortcuts => ("快捷键", "管理工作区与终端全局快捷键绑定"),
+        };
+        let inset = if window.viewport_size().width < px(900.) {
+            px(24.)
+        } else {
+            px(44.)
         };
         let right = v_flex()
             .flex_1()
             .min_w_0()
             .h_full()
+            .bg(cx.theme().popover)
+            .rounded_r(px(9.0))
+            .child(
+                v_flex()
+                    .flex_shrink_0()
+                    .pl(inset)
+                    .pr(px(52.0))
+                    .pt(px(26.0))
+                    .pb(px(16.0))
+                    .gap_1()
+                    .child(
+                        div()
+                            .text_xl()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(subtitle),
+                    ),
+            );
+        let body = v_flex()
+            .flex_1()
+            .min_h_0()
             .overflow_y_scrollbar()
             .id(("settings-scroll", current as usize))
-            .px_6()
-            .py_5()
-            .gap_3()
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .text_lg()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(title),
-            );
+            .px(inset)
+            .pb_6();
         let page = |page: AnyElement| {
             content.size_full().min_h_0().child(
                 h_flex()
@@ -2008,7 +1938,7 @@ pub fn open_settings_modal_at(
                     .min_h_0()
                     .items_start()
                     .child(tabs)
-                    .child(right.child(page)),
+                    .child(right.child(body.child(page))),
             )
         };
         match current {
@@ -2018,11 +1948,6 @@ pub fn open_settings_modal_at(
                 let pack = ThemeRegistry::global().current();
                 let dark_spec = pack.resolve(&cur.dark_theme, true);
                 let light_spec = pack.resolve(&cur.light_theme, false);
-                let active_id = if cur.dark_mode {
-                    dark_spec.id.clone()
-                } else {
-                    light_spec.id.clone()
-                };
 
                 let short_theme_name = |name: &str| match name.char_indices().nth(12) {
                     Some((end, _)) => format!("{}…", &name[..end]),
@@ -2069,7 +1994,6 @@ pub fn open_settings_modal_at(
                         .map(|spec| {
                             render_theme_preview_card(
                                 spec,
-                                spec.id == active_id,
                                 spec.id == dark_spec.id || spec.id == light_spec.id,
                                 workspace.clone(),
                                 cx,
@@ -2087,12 +2011,7 @@ pub fn open_settings_modal_at(
                                 .w_full()
                                 .min_w_0()
                                 .gap_2()
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .child(section_label),
-                                )
+                                .child(settings_heading(section_label))
                                 .child(
                                     h_flex()
                                         .w_full()
@@ -2136,16 +2055,16 @@ pub fn open_settings_modal_at(
 
                 return page(
                         v_flex()
-                            .gap_2p5()
+                            .gap_6()
                             .w_full()
                             .min_w_0()
                             .child(
                                 v_flex().w_full().min_w_0()
                                     .flex_shrink_0()
+                                    .child(settings_heading("主题偏好"))
                                     .child(
                                         h_flex()
-                                            .px_3p5()
-                                            .py_2p5()
+                                            .py_3()
                                             .justify_between()
                                             .items_center()
                                             .gap_2()
@@ -2177,11 +2096,8 @@ pub fn open_settings_modal_at(
                                                     .items_center()
                                                     .gap_1p5()
                                                     .child(
-                                                        Button::new("slot-dark-btn")
-                                                            .secondary()
-                                                            .xsmall()
+                                                        choice_button("slot-dark-btn", cur.dark_mode, cx)
                                                             .icon(LucideIcon::Moon)
-                                                            .selected(cur.dark_mode)
                                                             .label(format!(
                                                                 "深色 · {}",
                                                                 short_theme_name(&dark_spec.name)
@@ -2199,11 +2115,8 @@ pub fn open_settings_modal_at(
                                                             }),
                                                     )
                                                     .child(
-                                                        Button::new("slot-light-btn")
-                                                            .secondary()
-                                                            .xsmall()
+                                                        choice_button("slot-light-btn", !cur.dark_mode, cx)
                                                             .icon(LucideIcon::Sun)
-                                                            .selected(!cur.dark_mode)
                                                             .label(format!(
                                                                 "浅色 · {}",
                                                                 short_theme_name(&light_spec.name)
@@ -2224,8 +2137,7 @@ pub fn open_settings_modal_at(
                                     )
                                     .child(
                                         h_flex()
-                                            .px_3p5()
-                                            .py_2p5()
+                                            .py_3()
                                             .border_t_1()
                                             .border_color(cx.theme().border)
                                             .justify_between()
@@ -2278,7 +2190,6 @@ pub fn open_settings_modal_at(
                                             .child(
                                                 div().min_w_0().flex_1().child(
                                                     Input::new(&theme_search_in)
-                                                        .small()
                                                         .prefix(
                                                             Icon::new(LucideIcon::Search)
                                                                 .xsmall()
@@ -2311,11 +2222,8 @@ pub fn open_settings_modal_at(
                                                     .into_iter()
                                                     .map(|(id, mf, lbl)| {
                                                         let mf_cell = mode_filter.clone();
-                                                        Button::new(id)
-                                                            .secondary()
-                                                            .xsmall()
+                                                        choice_button(id, cur_mode_f == mf, cx)
                                                             .tab_stop(false)
-                                                            .selected(cur_mode_f == mf)
                                                             .label(lbl)
                                                             .on_click(move |_, window, _| {
                                                                 mf_cell.set(mf);
@@ -2329,11 +2237,8 @@ pub fn open_settings_modal_at(
                                         h_flex().flex_wrap().gap_1p5().children(
                                             cat_options.into_iter().map(|(id, cat, lbl)| {
                                                 let cat_cell = category_filter.clone();
-                                                Button::new(SharedString::from(id))
-                                                    .secondary()
-                                                    .xsmall()
+                                                choice_button(SharedString::from(id), cur_cat_f == cat, cx)
                                                     .tab_stop(false)
-                                                    .selected(cur_cat_f == cat)
                                                     .label(lbl)
                                                     .on_click(move |_, window, _| {
                                                         cat_cell.set(cat);
@@ -2360,15 +2265,14 @@ pub fn open_settings_modal_at(
                                     .w_full()
                                     .min_w_0()
                                     .flex_shrink_0()
-                                    .gap_2p5()
+                                    .gap_6()
                                     .children(swatches)
                                     .into_any_element()
                             })
                             .child(
                                 v_flex().w_full().min_w_0()
                                     .flex_shrink_0()
-                                    .px_3p5()
-                                    .py_2p5()
+                                    .py_3()
                                     .gap_2()
                                     .child(
                                         h_flex()
@@ -2381,11 +2285,7 @@ pub fn open_settings_modal_at(
                                                     .flex_1()
                                                     .gap_0p5()
                                                     .child(
-                                                        div()
-                                                            .text_sm()
-                                                            .font_weight(FontWeight::MEDIUM)
-                                                            .text_color(cx.theme().foreground)
-                                                            .child("导入外部配色方案 (Ghostty / iTerm2)"),
+                                                        settings_heading("导入外部配色方案 (Ghostty / iTerm2)"),
                                                     )
                                                     .child(
                                                         div()
@@ -2406,9 +2306,8 @@ pub fn open_settings_modal_at(
                                                     .items_center()
                                                     .gap_1p5()
                                                     .child(
-                                                        Button::new("settings-import-theme")
+                                                        small_button("settings-import-theme")
                                                             .secondary()
-                                                            .xsmall()
                                                             .label("导入主题…")
                                                             .on_click(move |_, window, cx| {
                                                                 ws_import_theme.update(
@@ -2422,9 +2321,8 @@ pub fn open_settings_modal_at(
                                                             }),
                                                     )
                                                     .child(
-                                                        Button::new("settings-open-themes-dir")
+                                                        small_button("settings-open-themes-dir")
                                                             .secondary()
-                                                            .xsmall()
                                                             .label("打开目录")
                                                             .on_click(move |_, window, cx| {
                                                                 if let Err(err) =
@@ -2440,9 +2338,8 @@ pub fn open_settings_modal_at(
                                                             }),
                                                     )
                                                     .child(
-                                                        Button::new("settings-reload-themes")
+                                                        small_button("settings-reload-themes")
                                                             .secondary()
-                                                            .xsmall()
                                                             .label("重载")
                                                             .on_click(move |_, window, cx| {
                                                                 ws_reload_theme.update(
@@ -2561,14 +2458,14 @@ pub fn open_settings_modal_at(
 
         page(
             v_flex()
-                .w_full().min_w_0().gap_3()
+                .w_full().min_w_0().gap_6()
                 .child(
                     v_flex().w_full().min_w_0()
                         .flex_shrink_0()
+                        .child(settings_heading("外观与字体"))
                         .child(
                                 h_flex()
-                                    .px_3p5()
-                                    .py_2p5()
+                                    .py_3()
                                     .justify_between()
                                     .items_center()
                                     .gap_2()
@@ -2603,8 +2500,7 @@ pub fn open_settings_modal_at(
                             )
                             .child(
                                 h_flex()
-                                    .px_3p5()
-                                    .py_2p5()
+                                    .py_3()
                                     .border_t_1()
                                     .border_color(cx.theme().border)
                                     .justify_between()
@@ -2625,9 +2521,8 @@ pub fn open_settings_modal_at(
                                             .gap_2()
                                             .items_center()
                                             .child(
-                                                Button::new("settings-font-dec")
+                                                small_button("settings-font-dec")
                                                     .secondary()
-                                                    .xsmall()
                                                     .label("-")
                                                     .on_click(move |_, window, cx| {
                                                         ws_fminus.update(cx, |ws, cx| {
@@ -2644,9 +2539,8 @@ pub fn open_settings_modal_at(
                                                     .child(format!("{} px", cur.font_size as i32)),
                                             )
                                             .child(
-                                                Button::new("settings-font-inc")
+                                                small_button("settings-font-inc")
                                                     .secondary()
-                                                    .xsmall()
                                                     .label("+")
                                                     .on_click(move |_, window, cx| {
                                                         ws_fplus.update(cx, |ws, cx| {
@@ -2659,21 +2553,19 @@ pub fn open_settings_modal_at(
                             )
                             .child(
                                 v_flex()
-                                    .px_3p5()
-                                    .py_2p5()
+                                    .py_3()
                                     .gap_2()
                                     .border_t_1()
                                     .border_color(cx.theme().border)
                                     .child(h_flex().items_center().justify_between().gap_2()
                                         .child(div().text_sm().font_weight(FontWeight::MEDIUM).child("终端等宽字体"))
-                                        .child(Select::new(&font_select).small().w(px(260.)).menu_width(px(300.))
+                                        .child(Select::new(&font_select).w(px(260.)).menu_width(px(300.))
                                             .accessibility_label("终端等宽字体").search_placeholder("搜索字体")))
                                     .child(preview),
                             )
                             .child(
                                 h_flex()
-                                    .px_3p5()
-                                    .py_2p5()
+                                    .py_3()
                                     .border_t_1()
                                     .border_color(cx.theme().border)
                                     .justify_between()
@@ -2691,10 +2583,11 @@ pub fn open_settings_modal_at(
                                     .child(h_flex().flex_shrink_0().gap_1().children(
                                         [1500usize, 5000, 10000, 30000].into_iter().map(|lines| {
                                             let ws_sb = workspace.clone();
-                                            Button::new(SharedString::from(format!("sb-{lines}")))
-                                                .secondary()
-                                                .xsmall()
-                                                .selected(cur.scrollback_lines == lines)
+                                            choice_button(
+                                                SharedString::from(format!("sb-{lines}")),
+                                                cur.scrollback_lines == lines,
+                                                cx,
+                                            )
                                                 .label(format!("{lines}"))
                                                 .on_click(move |_, window, cx| {
                                                     ws_sb.update(cx, |ws, cx| {
@@ -2709,10 +2602,10 @@ pub fn open_settings_modal_at(
                     .child(
                         v_flex().w_full().min_w_0()
                             .flex_shrink_0()
+                            .child(settings_heading("终端行为"))
                             .child(
                                 h_flex()
-                                    .px_3p5()
-                                    .py_2p5()
+                                    .py_3()
                                     .justify_between()
                                     .items_center()
                                     .gap_2()
@@ -2746,7 +2639,7 @@ pub fn open_settings_modal_at(
                                     ),
                             )
                             .child(
-                                h_flex().px_3p5().py_2p5().border_t_1().border_color(cx.theme().border)
+                                h_flex().py_3().border_t_1().border_color(cx.theme().border)
                                     .justify_between().items_center().gap_2()
                                     .child(div().min_w_0().flex_1().text_sm().font_weight(FontWeight::MEDIUM).child("终端右键动作"))
                                     .child(h_flex().flex_shrink_0().gap_1().children([
@@ -2754,8 +2647,9 @@ pub fn open_settings_modal_at(
                                         ("right-click-smart", RightClickAction::SmartCopyPaste, "智能复制粘贴"),
                                     ].into_iter().map(|(id, action, label)| {
                                         let ws = workspace.clone();
-                                        Button::new(id).secondary().xsmall().tab_stop(false)
-                                            .selected(cur.right_click_action == action).label(label)
+                                        choice_button(id, cur.right_click_action == action, cx)
+                                            .tab_stop(false)
+                                            .label(label)
                                             .on_click(move |_, window, cx| {
                                                 ws.update(cx, |ws, cx| ws.set_right_click_action(action, cx));
                                                 window.refresh();
@@ -2763,7 +2657,7 @@ pub fn open_settings_modal_at(
                                     }))),
                             )
                             .child(
-                                h_flex().px_3p5().py_2p5().border_t_1().border_color(cx.theme().border)
+                                h_flex().py_3().border_t_1().border_color(cx.theme().border)
                                     .justify_between().items_center().gap_2()
                                     .child(div().min_w_0().flex_1().text_sm().font_weight(FontWeight::MEDIUM).child("选中文本自动复制"))
                                     .child(Switch::new("copy-on-select").flex_shrink_0().checked(cur.copy_on_select)
@@ -2774,8 +2668,7 @@ pub fn open_settings_modal_at(
                             )
                             .child(
                                 h_flex()
-                                    .px_3p5()
-                                    .py_2p5()
+                                    .py_3()
                                     .border_t_1()
                                     .border_color(cx.theme().border)
                                     .justify_between()
@@ -2812,8 +2705,7 @@ pub fn open_settings_modal_at(
                             )
                             .child(
                                 h_flex()
-                                    .px_3p5()
-                                    .py_2p5()
+                                    .py_3()
                                     .border_t_1()
                                     .border_color(cx.theme().border)
                                     .justify_between()
@@ -2850,8 +2742,7 @@ pub fn open_settings_modal_at(
                             )
                             .child(
                                 h_flex()
-                                    .px_3p5()
-                                    .py_2p5()
+                                    .py_3()
                                     .border_t_1()
                                     .border_color(cx.theme().border)
                                     .justify_between()
@@ -2879,8 +2770,7 @@ pub fn open_settings_modal_at(
                             )
                             .child(
                                 h_flex()
-                                    .px_3p5()
-                                    .py_2p5()
+                                    .py_3()
                                     .border_t_1()
                                     .border_color(cx.theme().border)
                                     .justify_between()
@@ -2910,8 +2800,7 @@ pub fn open_settings_modal_at(
                     .child(
                         v_flex().w_full().min_w_0()
                             .flex_shrink_0()
-                            .px_3p5()
-                            .py_2p5()
+                            .py_3()
                             .gap_2()
                             .child(
                                 h_flex()
@@ -2924,11 +2813,7 @@ pub fn open_settings_modal_at(
                                             .flex_1()
                                             .gap_0p5()
                                             .child(
-                                                div()
-                                                    .text_sm()
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .text_color(cx.theme().foreground)
-                                                    .child("多语言语法拓展库"),
+                                                settings_heading("多语言语法拓展库"),
                                             )
                                             .child(
                                                 div()
@@ -2947,9 +2832,8 @@ pub fn open_settings_modal_at(
                                             .items_center()
                                             .gap_1p5()
                                             .child(
-                                                Button::new("settings-import-syntax")
+                                                small_button("settings-import-syntax")
                                                     .secondary()
-                                                    .xsmall()
                                                     .label("导入语法…")
                                                     .on_click(move |_, window, cx| {
                                                         ws_syn_import.update(cx, |ws, cx| {
@@ -2959,9 +2843,8 @@ pub fn open_settings_modal_at(
                                             )
                                             .child({
                                                 let syn_dir_open = paths.syntaxes_dir.clone();
-                                                Button::new("settings-open-syntaxes-dir")
+                                                small_button("settings-open-syntaxes-dir")
                                                     .secondary()
-                                                    .xsmall()
                                                     .label("打开目录")
                                                     .on_click(move |_, window, cx| {
                                                         if let Err(err) = open_directory_in_file_manager(&syn_dir_open) {
@@ -2970,9 +2853,8 @@ pub fn open_settings_modal_at(
                                                     })
                                             })
                                             .child(
-                                                Button::new("settings-reload-syntaxes")
+                                                small_button("settings-reload-syntaxes")
                                                     .secondary()
-                                                    .xsmall()
                                                     .label("重载")
                                                     .on_click(move |_, window, cx| {
                                                         ws_syn_reload.update(cx, |ws, cx| {
@@ -3066,10 +2948,10 @@ pub fn open_settings_modal_at(
                     .child(
                         v_flex().w_full().min_w_0()
                             .flex_shrink_0()
+                            .child(settings_heading("运行诊断"))
                             .child(
                                 h_flex()
-                                    .px_3p5()
-                                    .py_2p5()
+                                    .py_3()
                                     .justify_between()
                                     .items_center()
                                     .gap_2()
@@ -3110,8 +2992,7 @@ pub fn open_settings_modal_at(
                                 v_flex()
                                     .w_full()
                                     .min_w_0()
-                                    .px_3p5()
-                                    .py_2p5()
+                                    .py_3()
                                     .gap_1p5()
                                     .border_t_1()
                                     .border_color(cx.theme().border)
@@ -3139,9 +3020,8 @@ pub fn open_settings_modal_at(
                                                     .gap_1p5()
                                                     .child({
                                                         let paths_open = paths.clone();
-                                                        Button::new("settings-open-logs-dir")
+                                                        small_button("settings-open-logs-dir")
                                                             .secondary()
-                                                            .xsmall()
                                                             .label("打开日志目录")
                                                             .on_click(move |_, window, cx| {
                                                                 if let Err(err) = open_directory_in_file_manager(&paths_open.logs_dir) {
@@ -3151,9 +3031,8 @@ pub fn open_settings_modal_at(
                                                     })
                                                     .child({
                                                         let paths_view = paths.clone();
-                                                        Button::new("settings-view-logs")
+                                                        small_button("settings-view-logs")
                                                             .secondary()
-                                                            .xsmall()
                                                             .label("查看运行日志")
                                                             .on_click(move |_, window, cx| {
                                                                 window.close_dialog(cx);
@@ -3187,12 +3066,13 @@ pub fn open_settings_modal_at(
                             })),
                     ).into_any_element())
     };
-    window.open_dialog(cx, move |dialog, _, _| {
-        dialog
+    window.open_dialog(cx, move |dialog, window, cx| {
+        let view = window.viewport_size();
+        modal_shell(dialog, cx)
             .centered()
-            .w(px(880.0))
+            .w((view.width * 0.88).clamp(px(760.0), px(1080.0)))
+            .h((view.height * 0.84).clamp(px(500.0), px(688.0)))
             .p_0()
-            .h(px(580.0))
             .overflow_hidden()
             .content(settings_content.clone())
     });
@@ -3298,12 +3178,11 @@ pub fn open_logs_modal(paths: AppPaths, window: &mut Window, cx: &mut App) {
         let paths_refresh = paths.clone();
         let paths_dir = paths.clone();
 
-        dialog
+        modal_shell(dialog, cx)
             .title("运行与崩溃诊断日志")
-            .w(px(680.0))
+            .w(px(720.0))
             .child(
                 dialog_body()
-                    .gap_2p5()
                     .child(
                         macos_inset_group(cx)
                             .px_3()
@@ -3331,11 +3210,10 @@ pub fn open_logs_modal(paths: AppPaths, window: &mut Window, cx: &mut App) {
                     .child(Textarea::new(&area_view).h(px(340.0))),
             )
             .footer(
-                DialogFooter::new()
+                modal_footer(cx)
                     .child(
-                        Button::new("logs-refresh-btn")
+                        footer_button("logs-refresh-btn")
                             .secondary()
-                            .small()
                             .label("刷新")
                             .on_click(move |_, window, cx| {
                                 let fresh = read_recent_logs(&paths_refresh, 48 * 1024);
@@ -3344,9 +3222,8 @@ pub fn open_logs_modal(paths: AppPaths, window: &mut Window, cx: &mut App) {
                             }),
                     )
                     .child(
-                        Button::new("logs-copy-btn")
+                        footer_button("logs-copy-btn")
                             .secondary()
-                            .small()
                             .label("复制日志")
                             .on_click(move |_, _, cx| {
                                 let content = area_copy.read(cx).value().to_string();
@@ -3354,9 +3231,8 @@ pub fn open_logs_modal(paths: AppPaths, window: &mut Window, cx: &mut App) {
                             }),
                     )
                     .child(
-                        Button::new("logs-open-dir-btn")
+                        footer_button("logs-open-dir-btn")
                             .secondary()
-                            .small()
                             .label("打开日志目录")
                             .on_click(move |_, window, cx| {
                                 if let Err(err) = open_directory_in_file_manager(&paths_dir.logs_dir) {
@@ -3365,9 +3241,8 @@ pub fn open_logs_modal(paths: AppPaths, window: &mut Window, cx: &mut App) {
                             }),
                     )
                     .child(
-                        Button::new("logs-close-btn")
+                        footer_button("logs-close-btn")
                             .primary()
-                            .small()
                             .label("关闭")
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ),

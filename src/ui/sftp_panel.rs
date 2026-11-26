@@ -48,7 +48,6 @@ pub enum SftpPanelEvent {
         path: String,
     },
     FollowChanged(bool),
-    CloseRequested,
 }
 
 pub struct SftpPanelView {
@@ -1056,24 +1055,13 @@ impl Render for SftpPanelView {
                                                     this.prompt_mkdir(window, cx)
                                                 });
                                             }),
-                                    )
-                                    .child(
-                                        Button::new("sftp-close-panel-btn")
-                                            .tab_stop(false)
-                                            .ghost()
-                                            .xsmall()
-                                            .compact()
-                                            .icon(LucideIcon::PanelRightClose)
-                                            .tooltip("隐藏 SFTP 面板")
-                                            .on_click(cx.listener(|_, _, _, cx| {
-                                                cx.emit(SftpPanelEvent::CloseRequested);
-                                            })),
                                     ),
                             ),
                     )
                     .child(
                         Input::new(&path_input)
-                            .xsmall()
+                            .small()
+                            .min_h(px(28.0))
                             .prefix(
                                 Icon::new(LucideIcon::Folder)
                                     .xsmall()
