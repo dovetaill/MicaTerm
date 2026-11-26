@@ -541,8 +541,13 @@ impl MicaWorkspace {
     }
 
     pub fn set_font_family(&mut self, family: String, cx: &mut Context<Self>) {
-        if !family.is_empty() && self.settings.font_family != family {
-            self.settings.font_family = family;
+        let normalized = if family.trim().is_empty() {
+            crate::domain::default_terminal_font_family()
+        } else {
+            family.trim().to_owned()
+        };
+        if self.settings.font_family != normalized {
+            self.settings.font_family = normalized;
             let _ = self.store.save_settings(&self.settings);
             self.propagate_pane_preferences(cx);
             cx.notify();

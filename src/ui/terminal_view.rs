@@ -10,7 +10,6 @@
 use std::cell::Cell;
 use std::ops::Range;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use alacritty_terminal::term::TermMode;
 use gpui_kit::assets::IconName as LucideIcon;
@@ -24,7 +23,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     App, AppContext as _, Bounds, ClipboardItem, Context, ElementInputHandler, Entity,
-    EntityInputHandler, EventEmitter, FocusHandle, Focusable, Font, FontFallbacks, FontFeatures,
+    EntityInputHandler, EventEmitter, FocusHandle, Focusable,
     FontStyle, FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render,
     ScrollDelta, ScrollEvent, SharedString, StrikethroughStyle, Styled as _, TextAlign, TextRun,
@@ -35,13 +34,13 @@ use gpui_kit::{
 use gpui_kit::{CursorStyle, HoverListenerMode, Modifiers, StatefulInteractiveElement as _, Task};
 
 use crate::domain::{
-    BUNDLED_SARASA_FONT_FAMILY, RightClickAction, ShortcutAction, ShortcutConfig, ShortcutScope,
-    default_terminal_font_family, tooltip,
+    RightClickAction, ShortcutAction, ShortcutConfig, ShortcutScope, tooltip,
 };
 use crate::terminal::{
     MouseReportKind, RenderCursorShape, SemanticOptions, TerminalPalette, TerminalSessionEntity,
     session::SessionPhase,
 };
+use crate::ui::fonts::TerminalFont;
 use crate::ui::theme::macos_squircle_badge;
 
 pub enum TerminalPaneEvent {
@@ -103,7 +102,7 @@ pub struct TerminalPaneView {
     pub is_active_pane: bool,
     focus_handle: FocusHandle,
     search_input: Option<Entity<InputState>>,
-    font_family: SharedString,
+    terminal_font: TerminalFont,
     default_font_size: f32,
     palette: TerminalPalette,
     scrollback_lines: usize,
@@ -264,15 +263,18 @@ impl TerminalPaneView {
             }
         })
         .detach();
+        let palette = TerminalPalette::for_theme_id(&prefs.theme_id, prefs.dark_mode);
         Self {
             session,
             is_split_member: false,
             is_active_pane: true,
             focus_handle,
             search_input: None,
-            font_family: prefs.font_family.into(),
+            terminal_font: TerminalFont::resolve(&prefs.font_family, palette.dark, || {
+                cx.text_system().all_font_names()
+            }),
             default_font_size: prefs.default_font_size,
-            palette: TerminalPalette::for_theme_id(&prefs.theme_id, prefs.dark_mode),
+            palette,
             scrollback_lines: prefs.scrollback_lines,
             semantic_opts: prefs.semantic,
             right_click_action: prefs.right_click_action,
@@ -295,9 +297,11 @@ impl TerminalPaneView {
     }
 
     pub fn sync_preferences(&mut self, prefs: &PanePreferences, cx: &mut Context<Self>) {
-        self.font_family = SharedString::from(prefs.font_family.clone());
-        self.default_font_size = prefs.default_font_size;
         self.palette = TerminalPalette::for_theme_id(&prefs.theme_id, prefs.dark_mode);
+        self.terminal_font = TerminalFont::resolve(&prefs.font_family, self.palette.dark, || {
+            cx.text_system().all_font_names()
+        });
+        self.default_font_size = prefs.default_font_size;
         self.scrollback_lines = prefs.scrollback_lines;
         self.semantic_opts = prefs.semantic;
         self.copy_on_select = prefs.copy_on_select;
@@ -1045,7 +1049,7 @@ impl Render for TerminalPaneView {
         let marked_for_paint = self.marked_text.clone();
         let palette_for_paint = palette.clone();
         let session_for_canvas = self.session.clone();
-        let font_family = self.font_family.clone();
+        let terminal_font = self.terminal_font.clone();
         let snap_rows = snapshot.rows;
         let snap_cols = snapshot.cols;
         let bg_hsla = snapshot.background;
@@ -1372,29 +1376,9 @@ impl Render for TerminalPaneView {
                             ),
                         };
 
-                        let font_size = px(font_size_f32);
-                        let base_font = resolve_mono_font(&font_family);
-                        let probe_run = TextRun {
-                            len: 1,
-                            font: base_font.clone(),
-                            color: snapshot.foreground,
-                            background_color: None,
-                            underline: None,
-                            strikethrough: None,
-                        };
-                        let probe = window.text_system().shape_line(
-                            "M".into(),
-                            font_size,
-                            &[probe_run],
-                            None,
-                        );
-                        let cell_w = if f32::from(probe.width()) > 2.0 {
-                            probe.width()
-                        } else {
-                            px((font_size_f32 * 0.6).round().max(5.0))
-                        };
-                        let cell_h = px((font_size_f32 * 1.50).round().max(14.0));
-
+                        let metrics = terminal_font.measure(font_size_f32, window.text_system());
+                        let cell_w = metrics.cell_w;
+                        let cell_h = metrics.cell_h;
                         let fit_cols = (f32::from(inner_bounds.size.width) / f32::from(cell_w))
                             .floor() as usize;
                         let fit_rows = (f32::from(inner_bounds.size.height) / f32::from(cell_h))
@@ -1412,12 +1396,16 @@ impl Render for TerminalPaneView {
                             });
                         }
 
-                        (inner_bounds, cell_w, cell_h, font_size, base_font, snapshot)
+                        (inner_bounds, metrics, terminal_font, snapshot)
                     },
                     move |outer_bounds,
-                          (inner_bounds, cell_w, cell_h, font_size, base_font, snapshot),
+                          (inner_bounds, metrics, terminal_font, snapshot),
                           window,
                           cx| {
+                        let cell_w = metrics.cell_w;
+                        let cell_h = metrics.cell_h;
+                        let font_size = metrics.font_size;
+                        let base_font = &terminal_font.font;
                         let pane = view_for_ime.clone();
                         window.on_mouse_event(move |ev: &MouseMoveEvent, phase, _, cx| {
                             if phase.capture()
@@ -1519,7 +1507,7 @@ impl Render for TerminalPaneView {
                             for run in &row_snap.text_runs {
                                 let mut font = base_font.clone();
                                 if run.bold {
-                                    font.weight = FontWeight::BOLD;
+                                    font.weight = terminal_font.tuning.bold_weight;
                                 }
                                 if run.italic {
                                     font.style = FontStyle::Italic;
@@ -1542,7 +1530,7 @@ impl Render for TerminalPaneView {
                                     ),
                                 };
                                 let force_cell =
-                                    Some(if run.wide { cell_w * 2.0 } else { cell_w });
+                                    Some(metrics.advance(run.wide));
                                 let shaped = window.text_system().shape_line(
                                     SharedString::from(run.text.clone()),
                                     font_size,
@@ -1551,7 +1539,7 @@ impl Render for TerminalPaneView {
                                 );
                                 let x = origin_x + cell_w * (run.start_col as f32);
                                 let _ = shaped.paint(
-                                    point(x, y),
+                                    metrics.text_origin(x, y, run.wide),
                                     cell_h,
                                     TextAlign::Left,
                                     None,
@@ -1565,7 +1553,7 @@ impl Render for TerminalPaneView {
                         if let Some(cur) = &snapshot.cursor {
                             let cx_pos = origin_x + cell_w * (cur.col as f32);
                             let cy_pos = origin_y + cell_h * (cur.row as f32);
-                            let cw = if cur.wide { cell_w * 2.0 } else { cell_w };
+                            let cw = metrics.advance(cur.wide);
 
                             if let Some(ref preedit) = marked_for_paint {
                                 let pre_cols = preedit
@@ -1600,7 +1588,7 @@ impl Render for TerminalPaneView {
                                     None,
                                 );
                                 let _ = shaped.paint(
-                                    point(cx_pos, cy_pos),
+                                    metrics.text_origin(cx_pos, cy_pos, false),
                                     cell_h,
                                     TextAlign::Left,
                                     None,
@@ -1634,7 +1622,7 @@ impl Render for TerminalPaneView {
                                                 Some(cw),
                                             );
                                             let _ = shaped.paint(
-                                                point(cx_pos, cy_pos),
+                                                metrics.text_origin(cx_pos, cy_pos, cur.wide),
                                                 cell_h,
                                                 TextAlign::Left,
                                                 None,
@@ -1806,57 +1794,8 @@ fn take_pixel_lines(remainder: &mut f32, delta: f32) -> i32 {
     whole as i32
 }
 
-fn resolve_mono_font(family: &str) -> Font {
-    let name = if family.trim().is_empty() {
-        default_terminal_font_family()
-    } else {
-        family.trim().to_string()
-    };
-    let mut fallback_families = Vec::with_capacity(5);
-    if name != BUNDLED_SARASA_FONT_FAMILY {
-        fallback_families.push(BUNDLED_SARASA_FONT_FAMILY.to_string());
-    }
-    #[cfg(target_os = "windows")]
-    {
-        fallback_families.push("Consolas".to_string());
-        fallback_families.push("Microsoft YaHei UI".to_string());
-        fallback_families.push("Segoe UI Emoji".to_string());
-        fallback_families.push("Segoe UI Symbol".to_string());
-    }
-    #[cfg(target_os = "macos")]
-    {
-        fallback_families.push("Menlo".to_string());
-        fallback_families.push("PingFang SC".to_string());
-        fallback_families.push("Apple Color Emoji".to_string());
-    }
-    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    {
-        fallback_families.push("DejaVu Sans Mono".to_string());
-        fallback_families.push("Noto Sans CJK SC".to_string());
-    }
-
-    let weight = if name == BUNDLED_SARASA_FONT_FAMILY {
-        FontWeight::SEMIBOLD
-    } else {
-        FontWeight::MEDIUM
-    };
-    Font {
-        family: SharedString::from(name),
-        features: FontFeatures(Arc::new(vec![
-            ("calt".into(), 0),
-            ("liga".into(), 0),
-            ("clig".into(), 0),
-        ])),
-        fallbacks: Some(FontFallbacks::from_fonts(fallback_families)),
-        weight,
-        style: FontStyle::Normal,
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::domain::BUNDLED_MAPLE_FONT_FAMILY;
 
     #[test]
     fn paste_guard_includes_trailing_returns_and_preserves_bracketed_paste() {
@@ -1889,24 +1828,5 @@ mod tests {
         for (delta, lines) in [(0.25, 0), (0.5, 0), (0.5, 1), (-0.75, 0), (-0.25, -1)] {
             assert_eq!(take_pixel_lines(&mut remainder, delta), lines);
         }
-    }
-
-    #[test]
-    fn terminal_fonts_keep_grid_ligatures_off_and_sarasa_first() {
-        let default = resolve_mono_font("");
-        assert_eq!(default.family.as_str(), BUNDLED_SARASA_FONT_FAMILY);
-        assert_eq!(default.weight, FontWeight::SEMIBOLD);
-
-        let maple = resolve_mono_font(BUNDLED_MAPLE_FONT_FAMILY);
-        assert_eq!(maple.weight, FontWeight::MEDIUM);
-        assert_eq!(
-            maple.fallbacks.unwrap().fallback_list()[0],
-            BUNDLED_SARASA_FONT_FAMILY
-        );
-        assert_eq!(maple.features, default.features);
-        assert_eq!(
-            maple.features.tag_value_list(),
-            &[("calt".into(), 0), ("liga".into(), 0), ("clig".into(), 0)]
-        );
     }
 }

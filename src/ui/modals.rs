@@ -20,12 +20,12 @@ use gpui_kit::component::{
 use gpui_kit::{
     AnyElement, App, AppContext as _, ClipboardItem, Context, Entity, FocusHandle, Focusable as _,
     FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, Render,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
+    SharedString, StatefulInteractiveElement as _, Styled as _, TextAlign, TextRun, Window, canvas, div,
     prelude::FluentBuilder as _, px,
 };
 
 use crate::domain::{
-    BUNDLED_MAPLE_FONT_FAMILY, BUNDLED_SARASA_FONT_FAMILY, HostNode, HostNodeKind, KeychainEntry,
+    BUNDLED_SARASA_FONT_FAMILY, HostNode, HostNodeKind, KeychainEntry,
     KeychainKind, RightClickAction, SecretPayload, ShortcutAction, ShortcutCategory, ShortcutChord,
     ShortcutConfig, SnippetItem, SshAuthConfig, SshHostConfig, SshProxyConfig, format_chord,
     system_monospace_font_family,
@@ -33,6 +33,8 @@ use crate::domain::{
 use crate::logging::{open_directory_in_file_manager, read_recent_logs};
 use crate::storage::AppPaths;
 use crate::syntax::SyntaxRegistry;
+use crate::terminal::{TerminalPalette, colors::rgb_to_hsla};
+use crate::ui::fonts::{TERMINAL_FONT_PRESETS, TerminalFont};
 use crate::ui::theme::{macos_hex, macos_inset_group, macos_segmented_track};
 use crate::ui::theme_catalog::{ThemeCategory, ThemeRegistry, ThemeSpec};
 use crate::ui::workspace::MicaWorkspace;
@@ -259,11 +261,9 @@ pub fn open_remote_editor_dialog(
         .iter()
         .filter_map(|e| e.syntax_name.clone())
         .collect();
-    let editor_font = SharedString::from(if font_family.trim().is_empty() {
-        BUNDLED_SARASA_FONT_FAMILY.to_string()
-    } else {
-        font_family.trim().to_string()
-    });
+    let editor_font = TerminalFont::resolve(font_family, cx.theme().mode.is_dark(), || {
+        cx.text_system().all_font_names()
+    }).font.family;
     let editor_px = font_size.clamp(11.0, 24.0);
     let title_str = format!("编辑远程文件 · {file_name}");
     let path_str = remote_path.to_string();
@@ -2080,18 +2080,19 @@ pub fn open_settings_modal_at(
         s
     });
     workspace.update(cx, |_, cx| {
-        cx.subscribe_in(&font_in, window, |ws, state, ev, _, cx| {
-            if matches!(ev, InputEvent::Blur | InputEvent::PressEnter { .. }) {
-                let fam = state.read(cx).value().trim().to_string();
-                if !fam.is_empty() {
-                    ws.set_font_family(fam, cx);
+        cx.subscribe_in(&font_in, window, |ws, state, ev, window, cx| {
+            match ev {
+                InputEvent::Change => window.refresh(),
+                InputEvent::Blur | InputEvent::PressEnter { .. } => {
+                    ws.set_font_family(state.read(cx).value().to_string(), cx);
                 }
+                _ => {}
             }
         })
         .detach();
     });
 
-    window.open_dialog(cx, move |dialog, _, cx| {
+    window.open_dialog(cx, move |dialog, window, cx| {
         let ws_apply_font = workspace.clone();
         let f_in = font_in.clone();
         let tabs = macos_segmented_track(cx).track_focus(&tabs_focus).children(
@@ -2130,7 +2131,7 @@ pub fn open_settings_modal_at(
                     .small()
                     .label("完成")
                     .on_click(move |_, window, cx| {
-                        let fam = f_in.read(cx).value().trim().to_string();
+                        let fam = f_in.read(cx).value().to_string();
                         ws_apply_font.update(cx, |ws, cx| ws.set_font_family(fam, cx));
                         window.close_dialog(cx);
                     }),
@@ -2645,38 +2646,42 @@ pub fn open_settings_modal_at(
         let ws_syn_reload = workspace.clone();
         let syn_pack = SyntaxRegistry::global().current();
         let sys_mono = system_monospace_font_family();
-        let font_presets = [
-            (
-                "font-preset-sarasa",
-                BUNDLED_SARASA_FONT_FAMILY,
-                "Sarasa Term SC Nerd (推荐)".into(),
-            ),
-            (
-                "font-preset-maple",
-                BUNDLED_MAPLE_FONT_FAMILY,
-                BUNDLED_MAPLE_FONT_FAMILY.into(),
-            ),
-            (
-                "font-preset-sys",
-                sys_mono,
-                SharedString::from(format!("系统等宽 ({sys_mono})")),
-            ),
-        ]
-        .into_iter()
-        .map(|(id, family, label)| {
-            let input = font_in.clone();
-            let ws = workspace.clone();
-            Button::new(id)
-                .secondary()
-                .xsmall()
-                .selected(cur.font_family == family)
-                .label(label)
-                .on_click(move |_, window, cx| {
-                    input.update(cx, |st, cx| st.set_value(family, window, cx));
-                    ws.update(cx, |ws, cx| ws.set_font_family(family.to_string(), cx));
-                    window.refresh();
-                })
+        let sys_preset_family = if TERMINAL_FONT_PRESETS
+            .iter()
+            .any(|p| p.family.eq_ignore_ascii_case(sys_mono))
+        {
+            "Consolas"
+        } else {
+            sys_mono
+        };
+        let palette = TerminalPalette::for_theme_id(cur.active_theme_id(), cur.dark_mode);
+        let preview_font = TerminalFont::resolve(&font_in.read(cx).value(), palette.dark, || {
+            cx.text_system().all_font_names()
         });
+        let preview = terminal_font_preview(&preview_font, cur.font_size, &palette, window, cx);
+        let font_presets = TERMINAL_FONT_PRESETS
+            .iter()
+            .map(|p| (p.family, SharedString::from(p.label)))
+            .chain(std::iter::once((
+                sys_preset_family,
+                format!("系统等宽 ({sys_preset_family})").into(),
+            )))
+            .enumerate()
+            .map(|(index, (family, label))| {
+                let input = font_in.clone();
+                let ws = workspace.clone();
+                Button::new(("font-preset", index))
+                    .font_family(family)
+                    .secondary()
+                    .xsmall()
+                    .selected(preview_font.font.family == family)
+                    .label(label)
+                    .on_click(move |_, window, cx| {
+                        input.update(cx, |st, cx| st.set_value(family, window, cx));
+                        ws.update(cx, |ws, cx| ws.set_font_family(family.to_string(), cx));
+                        window.refresh();
+                    })
+            });
 
         dialog.child(body.child(
             v_flex()
@@ -2783,7 +2788,8 @@ pub fn open_settings_modal_at(
                                         Input::new(&font_in).small(),
                                         cx,
                                     ))
-                                    .child(h_flex().flex_wrap().gap_1p5().children(font_presets)),
+                                    .child(h_flex().min_w_0().flex_wrap().gap_1p5().children(font_presets))
+                                    .child(preview),
                             )
                             .child(
                                 h_flex()
@@ -3220,6 +3226,73 @@ pub fn open_settings_modal_at(
                     ),
         ))
     });
+}
+
+fn terminal_font_preview(
+    font: &TerminalFont,
+    size: f32,
+    palette: &TerminalPalette,
+    window: &Window,
+    cx: &App,
+) -> impl IntoElement {
+    let metrics = font.measure(size, window.text_system());
+    let height = metrics.cell_h * 2.0;
+    let regular_font = font.font.clone();
+    let mut bold_font = regular_font.clone();
+    bold_font.weight = font.tuning.bold_weight;
+    let fg = rgb_to_hsla(palette.foreground, 1.0);
+    let prompt = rgb_to_hsla(palette.ansi[2], 1.0);
+    let path_fg = rgb_to_hsla(palette.ansi[6], 1.0);
+    div()
+        .w_full()
+        .min_w_0()
+        .px_2p5()
+        .py_2()
+        .rounded_md()
+        .border_1()
+        .border_color(cx.theme().border)
+        .overflow_hidden()
+        .bg(rgb_to_hsla(palette.background, 1.0))
+        .child(
+            canvas(
+                |_, _, _| (),
+                move |bounds, (), window, cx| {
+                    for (row, col, sample, wide, bold, color) in [
+                        (0, 0, "mica@prod", false, true, prompt),
+                        (0, 10, "~", false, false, path_fg),
+                        (0, 12, "| 0O 1lI {} [] != ->", false, false, fg),
+                        (1, 0, "中文等宽对齐", true, false, fg),
+                        (1, 12, "| 200 OK  1234567890", false, false, fg),
+                    ] {
+                        let run = TextRun {
+                            len: sample.len(),
+                            font: if bold {
+                                bold_font.clone()
+                            } else {
+                                regular_font.clone()
+                            },
+                            color,
+                            ..Default::default()
+                        };
+                        let line = window.text_system().shape_line(
+                            sample.into(),
+                            metrics.font_size,
+                            &[run],
+                            Some(metrics.advance(wide)),
+                        );
+                        let origin = metrics.text_origin(
+                            bounds.origin.x + metrics.cell_w * col as f32,
+                            bounds.origin.y + metrics.cell_h * row as f32,
+                            wide,
+                        );
+                        let _ =
+                            line.paint(origin, metrics.cell_h, TextAlign::Left, None, window, cx);
+                    }
+                },
+            )
+            .w_full()
+            .h(height),
+        )
 }
 
 pub fn open_logs_modal(paths: AppPaths, window: &mut Window, cx: &mut App) {

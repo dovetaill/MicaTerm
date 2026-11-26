@@ -205,11 +205,11 @@ if [[ -f "${ROOT_DIR}/assets/icons/windows/mica-term-gpui.ico" ]]; then
     cp -f "${ROOT_DIR}/assets/icons/windows/mica-term-gpui.ico" "${STAGE_DIR}/mica-term-gpui.ico"
 fi
 
-for font_dir in SarasaTermSCNerd JetBrainsMapleMono; do
-    [[ -f "${ROOT_DIR}/assets/fonts/${font_dir}/LICENSE.txt" ]] || continue
-    mkdir -p "${STAGE_DIR}/licenses/fonts/${font_dir}"
-    cp -f "${ROOT_DIR}/assets/fonts/${font_dir}/LICENSE.txt" \
-        "${STAGE_DIR}/licenses/fonts/${font_dir}/LICENSE.txt"
+for font_dir in "${ROOT_DIR}"/assets/fonts/*; do
+    [[ -f "${font_dir}/LICENSE.txt" ]] || continue
+    license_dir="${STAGE_DIR}/licenses/fonts/${font_dir##*/}"
+    mkdir -p "${license_dir}"
+    cp -f "${font_dir}/LICENSE.txt" "${license_dir}/LICENSE.txt"
 done
 
 log "Creating archive ${DIST_ZIP}..."
