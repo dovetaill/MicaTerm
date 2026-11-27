@@ -1,11 +1,14 @@
 //! Root `MicaWorkspace`: unified macOS Sonoma/Sequoia Toolbar + `h_resizable` 3-pane adaptive layout
 //! (Finder Source-List Left Sidebar | Multi-Tab & Recursive Split-Tree Terminal Workspace | Right SFTP Inspector).
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui_kit::assets::IconName as LucideIcon;
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, Selectable as _, Sizable as _, TitleBar, WindowExt as _,
+    ActiveTheme as _, GlobalState, Icon, ResizableState, Selectable as _, Sizable as _,
+    WindowExt as _,
     button::{Button, ButtonVariants as _},
     h_flex, h_resizable,
     input::{InputEvent, InputState},
@@ -15,11 +18,13 @@ use gpui_kit::component::{
     scroll::ScrollableElement as _,
     v_flex, v_resizable,
 };
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Decorations, Entity, FocusHandle, Focusable as _,
-    FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    ParentElement as _, Render, SharedString, StatefulInteractiveElement as _, Styled as _, Window,
-    WindowControlArea, div, prelude::FluentBuilder as _, px,
+    AnyElement, AnyView, App, AppContext as _, Axis, Bounds, Context, Decorations, Entity,
+    FocusHandle, Focusable as _, FontWeight, InteractiveElement as _, IntoElement, KeyDownEvent,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point,
+    Render, SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled as _,
+    WeakEntity, Window, WindowControlArea, canvas, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::domain::{
@@ -33,6 +38,10 @@ use crate::terminal::{
     SemanticOptions, TerminalSessionEntity,
     session::{SessionEntityEvent, SessionPhase},
 };
+use crate::ui::floating_pane::{
+    FloatingBorderParticles, FloatingRect, ResizeEdge, apply_resize_delta, clamp_floating_rect,
+    render_floating_pane_shell,
+};
 use crate::ui::modals::{
     SshHostModalInit, open_confirm_dialog, open_keychain_modal, open_settings_modal,
     open_simple_name_dialog, open_snippet_modal, open_ssh_host_modal,
@@ -40,14 +49,65 @@ use crate::ui::modals::{
 use crate::ui::sftp_panel::{SftpBindingKey, SftpPanelEvent, SftpPanelView, SftpTarget};
 use crate::ui::sidebar::{LeftSidebar, SidebarSection};
 use crate::ui::terminal_view::{PanePreferences, TerminalPaneEvent, TerminalPaneView};
-use crate::ui::theme::apply_workspace_theme;
+use crate::ui::theme::{apply_workspace_theme, terminal_tab_chrome};
 use crate::ui::theme_catalog::ThemeRegistry;
 use crate::ui::welcome_view::{QuickConnectItem, WelcomeView};
+
+const SPLIT_HALF_GAP: f32 = 3.0;
+
+fn cached_pane_element(pane: &Entity<TerminalPaneView>) -> AnyElement {
+    AnyView::from(pane.clone())
+        .cached(StyleRefinement::default().size_full())
+        .into_any_element()
+}
+
+fn with_gap_handle(
+    group: gpui_kit::component::ResizablePanelGroup,
+) -> gpui_kit::component::ResizablePanelGroup {
+    group.with_handle_appearance(Rc::new(|handle, _window, cx| {
+        if handle.state() == Default::default() {
+            // Transparent idle handle so the 6px shell channel between cards stays clean
+            return Some(div().size_full().into_any_element());
+        }
+        let axis = handle.axis();
+        let (length, opacity) = if handle.is_active() {
+            (px(36.0), 0.82)
+        } else {
+            (px(22.0), 0.42)
+        };
+        let pill = div()
+            .flex_none()
+            .rounded_full()
+            .bg(cx.theme().muted_foreground.opacity(opacity))
+            .map(|p| match axis {
+                Axis::Horizontal => p.w(px(3.0)).h(length).ml(px(-1.0)),
+                Axis::Vertical => p.h(px(3.0)).w(length).mt(px(-1.0)),
+            });
+        Some(
+            div()
+                .flex_none()
+                .flex()
+                .map(|line| match axis {
+                    Axis::Horizontal => line.w(px(1.0)).h_full().items_center(),
+                    Axis::Vertical => line.h(px(1.0)).w_full().items_start().justify_center(),
+                })
+                .child(pill)
+                .into_any_element(),
+        )
+    }))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TabSplitAxis {
     Horizontal,
     Vertical,
+}
+
+#[derive(Clone)]
+pub struct DockAnchor {
+    pub neighbor: WeakEntity<TerminalPaneView>,
+    pub axis: TabSplitAxis,
+    pub before: bool,
 }
 
 /// Recursive 2D split layout tree inside a single workspace tab.
@@ -57,6 +117,7 @@ pub enum PaneLayoutNode {
     Split {
         id: String,
         axis: TabSplitAxis,
+        state: Entity<ResizableState>,
         children: Vec<PaneLayoutNode>,
     },
 }
@@ -73,21 +134,82 @@ impl PaneLayoutNode {
         }
     }
 
+    fn first_leaf(&self) -> Option<Entity<TerminalPaneView>> {
+        match self {
+            Self::Leaf(p) => Some(p.clone()),
+            Self::Split { children, .. } => children.first().and_then(Self::first_leaf),
+        }
+    }
+
+    fn last_leaf(&self) -> Option<Entity<TerminalPaneView>> {
+        match self {
+            Self::Leaf(p) => Some(p.clone()),
+            Self::Split { children, .. } => children.last().and_then(Self::last_leaf),
+        }
+    }
+
+    pub fn find_dock_anchor(&self, target: &Entity<TerminalPaneView>) -> Option<DockAnchor> {
+        match self {
+            Self::Leaf(_) => None,
+            Self::Split { axis, children, .. } => {
+                if let Some(pos) = children
+                    .iter()
+                    .position(|child| matches!(child, Self::Leaf(p) if p == target))
+                {
+                    if let Some(next_node) = children.get(pos + 1)
+                        && let Some(neighbor) = next_node.first_leaf()
+                    {
+                        return Some(DockAnchor {
+                            neighbor: neighbor.downgrade(),
+                            axis: *axis,
+                            before: true,
+                        });
+                    }
+                    if pos > 0
+                        && let Some(prev_node) = children.get(pos - 1)
+                        && let Some(neighbor) = prev_node.last_leaf()
+                    {
+                        return Some(DockAnchor {
+                            neighbor: neighbor.downgrade(),
+                            axis: *axis,
+                            before: false,
+                        });
+                    }
+                }
+                for child in children {
+                    if let Some(found) = child.find_dock_anchor(target) {
+                        return Some(found);
+                    }
+                }
+                None
+            }
+        }
+    }
+
     pub fn split_target(
         &mut self,
         target: &Entity<TerminalPaneView>,
         axis: TabSplitAxis,
         new_pane: Entity<TerminalPaneView>,
+        insert_before: bool,
+        cx: &mut App,
     ) -> bool {
         match self {
             Self::Leaf(existing) => {
                 if existing == target {
                     let old_leaf = Self::Leaf(existing.clone());
                     let new_leaf = Self::Leaf(new_pane);
+                    let children = if insert_before {
+                        vec![new_leaf, old_leaf]
+                    } else {
+                        vec![old_leaf, new_leaf]
+                    };
+                    let state = cx.new(|_| ResizableState::default());
                     *self = Self::Split {
                         id: uuid::Uuid::new_v4().to_string(),
                         axis,
-                        children: vec![old_leaf, new_leaf],
+                        state,
+                        children,
                     };
                     true
                 } else {
@@ -96,6 +218,7 @@ impl PaneLayoutNode {
             }
             Self::Split {
                 axis: cur_axis,
+                state,
                 children,
                 ..
             } => {
@@ -104,11 +227,18 @@ impl PaneLayoutNode {
                         .iter()
                         .position(|child| matches!(child, Self::Leaf(p) if p == target))
                 {
-                    children.insert(pos + 1, Self::Leaf(new_pane));
+                    let insert_ix = if insert_before { pos } else { pos + 1 };
+                    children.insert(insert_ix, Self::Leaf(new_pane));
+                    state.update(cx, |s, cx| {
+                        if !s.sizes().is_empty() {
+                            let hint = s.sizes().get(pos).copied().map(|sz| sz * 0.5);
+                            s.insert_panel(hint, Some(insert_ix), cx);
+                        }
+                    });
                     return true;
                 }
                 for child in children.iter_mut() {
-                    if child.split_target(target, axis, new_pane.clone()) {
+                    if child.split_target(target, axis, new_pane.clone(), insert_before, cx) {
                         return true;
                     }
                 }
@@ -117,24 +247,45 @@ impl PaneLayoutNode {
         }
     }
 
-    /// Removes `target` from the tree, collapsing single-child splits.
+    /// Removes `target` from the tree, collapsing single-child splits while keeping `ResizableState` slots aligned.
     /// Returns `None` when the entire subtree becomes empty.
-    pub fn remove_pane(self, target: &Entity<TerminalPaneView>) -> Option<Self> {
+    pub fn remove_pane(self, target: &Entity<TerminalPaneView>, cx: &mut App) -> Option<Self> {
         match self {
             Self::Leaf(pane) => (&pane != target).then_some(Self::Leaf(pane)),
-            Self::Split { id, axis, children } => {
-                let mut kept: Vec<Self> = children
-                    .into_iter()
-                    .filter_map(|c| c.remove_pane(target))
-                    .collect();
+            Self::Split {
+                id,
+                axis,
+                state,
+                children,
+            } => {
+                let mut kept = Vec::with_capacity(children.len());
+                let mut removed_indices = Vec::new();
+                for (ix, child) in children.into_iter().enumerate() {
+                    match child.remove_pane(target, cx) {
+                        Some(node) => kept.push(node),
+                        None => removed_indices.push(ix),
+                    }
+                }
                 match kept.len() {
                     0 => None,
                     1 => kept.pop(),
-                    _ => Some(Self::Split {
-                        id,
-                        axis,
-                        children: kept,
-                    }),
+                    _ => {
+                        if !removed_indices.is_empty() {
+                            state.update(cx, |s, cx| {
+                                for &rm_ix in removed_indices.iter().rev() {
+                                    if rm_ix < s.sizes().len() {
+                                        s.remove_panel(rm_ix, cx);
+                                    }
+                                }
+                            });
+                        }
+                        Some(Self::Split {
+                            id,
+                            axis,
+                            state,
+                            children: kept,
+                        })
+                    }
                 }
             }
         }
@@ -143,21 +294,55 @@ impl PaneLayoutNode {
     #[inline(never)]
     pub fn render_element(&self) -> AnyElement {
         match self {
-            Self::Leaf(pane) => div().size_full().child(pane.clone()).into_any_element(),
-            Self::Split { id, axis, children } => {
+            Self::Leaf(pane) => cached_pane_element(pane),
+            Self::Split {
+                id,
+                axis,
+                state,
+                children,
+            } => {
                 let group_id = SharedString::from(format!("split-node-{id}"));
+                let count = children.len();
                 match axis {
                     TabSplitAxis::Horizontal => {
-                        let mut group = h_resizable(group_id);
-                        for child in children {
-                            group = group.child(resizable_panel().child(child.render_element()));
+                        let mut group = with_gap_handle(h_resizable(group_id)).with_state(state);
+                        for (ix, child) in children.iter().enumerate() {
+                            let pad_l = if ix > 0 { px(SPLIT_HALF_GAP) } else { px(0.0) };
+                            let pad_r = if ix + 1 < count {
+                                px(SPLIT_HALF_GAP)
+                            } else {
+                                px(0.0)
+                            };
+                            group = group.child(
+                                resizable_panel().child(
+                                    div()
+                                        .size_full()
+                                        .pl(pad_l)
+                                        .pr(pad_r)
+                                        .child(child.render_element()),
+                                ),
+                            );
                         }
                         group.into_any_element()
                     }
                     TabSplitAxis::Vertical => {
-                        let mut group = v_resizable(group_id);
-                        for child in children {
-                            group = group.child(resizable_panel().child(child.render_element()));
+                        let mut group = with_gap_handle(v_resizable(group_id)).with_state(state);
+                        for (ix, child) in children.iter().enumerate() {
+                            let pad_t = if ix > 0 { px(SPLIT_HALF_GAP) } else { px(0.0) };
+                            let pad_b = if ix + 1 < count {
+                                px(SPLIT_HALF_GAP)
+                            } else {
+                                px(0.0)
+                            };
+                            group = group.child(
+                                resizable_panel().child(
+                                    div()
+                                        .size_full()
+                                        .pt(pad_t)
+                                        .pb(pad_b)
+                                        .child(child.render_element()),
+                                ),
+                            );
                         }
                         group.into_any_element()
                     }
@@ -167,43 +352,132 @@ impl PaneLayoutNode {
     }
 }
 
+#[derive(Clone)]
+pub struct FloatingPaneEntry {
+    pub pane: Entity<TerminalPaneView>,
+    pub rect: FloatingRect,
+    pub collapsed: bool,
+    pub dock_anchor: Option<DockAnchor>,
+    pub particles: Entity<FloatingBorderParticles>,
+}
+
 pub struct WorkspaceTab {
     pub id: String,
-    pub title: String,
     pub root: PaneLayoutNode,
+    pub floating: Vec<FloatingPaneEntry>,
     pub active_pane: Entity<TerminalPaneView>,
+    pub maximized_pane: Option<Entity<TerminalPaneView>>,
 }
 
 impl WorkspaceTab {
-    pub fn panes(&self) -> Vec<Entity<TerminalPaneView>> {
+    pub fn new(id: String, pane: Entity<TerminalPaneView>) -> Self {
+        Self {
+            id,
+            root: PaneLayoutNode::Leaf(pane.clone()),
+            floating: Vec::new(),
+            active_pane: pane,
+            maximized_pane: None,
+        }
+    }
+
+    pub fn tiled_panes(&self) -> Vec<Entity<TerminalPaneView>> {
         let mut out = Vec::new();
         self.root.collect_panes(&mut out);
         out
     }
 
-    pub fn active_pane(&self) -> Option<Entity<TerminalPaneView>> {
-        let panes = self.panes();
-        if panes.contains(&self.active_pane) {
-            Some(self.active_pane.clone())
-        } else {
-            panes.into_iter().next()
+    /// Returns all panes owned by this tab (both tiled tree leaves and in-stage floating panes).
+    pub fn panes(&self) -> Vec<Entity<TerminalPaneView>> {
+        let mut out = self.tiled_panes();
+        for entry in &self.floating {
+            out.push(entry.pane.clone());
         }
+        out
     }
 
-    pub fn refresh_split_flags(&self, cx: &mut App) {
-        let panes = self.panes();
-        let is_split = panes.len() > 1;
-        for pane in panes {
+    pub fn active_pane(&self) -> Option<Entity<TerminalPaneView>> {
+        debug_assert!(
+            self.panes().contains(&self.active_pane),
+            "WorkspaceTab.active_pane invariant violated: active_pane is missing from tab"
+        );
+        Some(self.active_pane.clone())
+    }
+
+    pub fn title(&self, cx: &App) -> String {
+        self.active_pane.read(cx).session.read(cx).tab_title()
+    }
+
+    pub fn sync_pane_states(&self, is_tab_active: bool, cx: &mut App) {
+        let total = self.panes().len();
+        let max_target = self.maximized_pane.as_ref();
+
+        for pane in self.tiled_panes() {
             let active = pane == self.active_pane;
+            let maximized = max_target == Some(&pane);
             pane.update(cx, |p, cx| {
-                if p.is_split_member != is_split || p.is_active_pane != active {
-                    p.is_split_member = is_split;
+                if p.pane_count_in_tab != total
+                    || p.is_active_pane != active
+                    || p.is_maximized_pane != maximized
+                    || p.is_floating_pane
+                    || p.is_floating_collapsed
+                {
+                    p.pane_count_in_tab = total;
                     p.is_active_pane = active;
+                    p.is_maximized_pane = maximized;
+                    p.is_floating_pane = false;
+                    p.is_floating_collapsed = false;
+                    cx.notify();
+                }
+            });
+        }
+
+        for entry in &self.floating {
+            let active = entry.pane == self.active_pane;
+            let maximized = max_target == Some(&entry.pane);
+            // A maximized floating pane temporarily shows its body without mutating `entry.collapsed`
+            let eff_collapsed = entry.collapsed && !maximized;
+            entry.pane.update(cx, |p, cx| {
+                if p.pane_count_in_tab != total
+                    || p.is_active_pane != active
+                    || p.is_maximized_pane != maximized
+                    || !p.is_floating_pane
+                    || p.is_floating_collapsed != eff_collapsed
+                {
+                    p.pane_count_in_tab = total;
+                    p.is_active_pane = active;
+                    p.is_maximized_pane = maximized;
+                    p.is_floating_pane = true;
+                    p.is_floating_collapsed = eff_collapsed;
+                    cx.notify();
+                }
+            });
+
+            let particles_visible = is_tab_active && max_target.is_none();
+            entry.particles.update(cx, |pt, cx| {
+                if pt.active != active || pt.visible_in_foreground != particles_visible {
+                    pt.active = active;
+                    pt.visible_in_foreground = particles_visible;
                     cx.notify();
                 }
             });
         }
     }
+}
+
+enum ActiveFloatingDrag {
+    Move {
+        tab_id: String,
+        pane: Entity<TerminalPaneView>,
+        start_mouse: Point<Pixels>,
+        start_rect: FloatingRect,
+    },
+    Resize {
+        tab_id: String,
+        pane: Entity<TerminalPaneView>,
+        edge: ResizeEdge,
+        start_mouse: Point<Pixels>,
+        start_rect: FloatingRect,
+    },
 }
 
 pub struct MicaWorkspace {
@@ -227,7 +501,10 @@ pub struct MicaWorkspace {
 
     pub tabs: Vec<WorkspaceTab>,
     pub active_tab_id: Option<String>,
+    tab_scroll_handle: gpui_kit::ScrollHandle,
     local_shell_counter: usize,
+    center_stage_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    floating_drag: Option<ActiveFloatingDrag>,
 
     pub sftp_panel: Entity<SftpPanelView>,
 }
@@ -305,6 +582,12 @@ impl MicaWorkspace {
         )
         .detach();
         cx.observe(&sftp_panel, |_, _, cx| cx.notify()).detach();
+        cx.observe_window_activation(window, |this, window, cx| {
+            if !window.is_window_active() && this.floating_drag.take().is_some() {
+                cx.notify();
+            }
+        })
+        .detach();
 
         Self {
             paths,
@@ -324,7 +607,10 @@ impl MicaWorkspace {
             sidebar_search_input,
             tabs: Vec::new(),
             active_tab_id: None,
+            tab_scroll_handle: gpui_kit::ScrollHandle::new(),
             local_shell_counter: 0,
+            center_stage_bounds: Rc::new(Cell::new(None)),
+            floating_drag: None,
             sftp_panel,
         }
     }
@@ -786,15 +1072,7 @@ impl MicaWorkspace {
             &session,
             window,
             move |this, session_ent, event, window, cx| match event {
-                SessionEntityEvent::TitleChanged(new_title) => {
-                    for tab in &mut this.tabs {
-                        if tab
-                            .active_pane()
-                            .is_some_and(|p| &p.read(cx).session == session_ent)
-                        {
-                            tab.title = new_title.clone();
-                        }
-                    }
+                SessionEntityEvent::TitleChanged(_) => {
                     if this.is_active_session(session_ent, cx) {
                         this.sync_sftp_binding(Some(window), cx);
                     }
@@ -819,10 +1097,54 @@ impl MicaWorkspace {
         let pane = cx.new(|cx| TerminalPaneView::new(session, prefs, window, cx));
         cx.subscribe_in(&pane, window, |this, pane, event, window, cx| match event {
             TerminalPaneEvent::Activate => this.activate_pane(pane, Some(window), cx),
+            TerminalPaneEvent::SplitRequested(axis) => this.split_pane(pane, *axis, window, cx),
+            TerminalPaneEvent::ToggleFloatRequested => this.toggle_float_pane(pane, window, cx),
+            TerminalPaneEvent::ToggleMaximizeRequested => {
+                this.toggle_maximize_pane(pane, window, cx)
+            }
+            TerminalPaneEvent::ToggleCollapseFloatingRequested => {
+                this.toggle_collapse_floating_pane(pane, cx)
+            }
+            TerminalPaneEvent::BeginFloatingMove(pos) => this.begin_floating_move(pane, *pos, cx),
             TerminalPaneEvent::CloseRequested => this.close_pane(pane, window, cx),
         })
         .detach();
         pane
+    }
+
+    fn sync_all_tabs_pane_states(&self, cx: &mut App) {
+        let active_tid = self.active_tab_id.as_deref();
+        for tab in &self.tabs {
+            let is_tab_active = active_tid == Some(tab.id.as_str());
+            tab.sync_pane_states(is_tab_active, cx);
+        }
+    }
+
+    fn current_stage_dimensions(&self) -> (f32, f32) {
+        if let Some(b) = self.center_stage_bounds.get() {
+            (
+                f32::from(b.size.width).max(1.0),
+                f32::from(b.size.height).max(1.0),
+            )
+        } else {
+            (960.0, 640.0)
+        }
+    }
+
+    fn dock_floating_entry_into_root(
+        root: &mut PaneLayoutNode,
+        entry: FloatingPaneEntry,
+        cx: &mut App,
+    ) {
+        if let Some(anchor) = entry.dock_anchor
+            && let Some(neighbor) = anchor.neighbor.upgrade()
+            && root.split_target(&neighbor, anchor.axis, entry.pane.clone(), anchor.before, cx)
+        {
+            return;
+        }
+        if let Some(last) = root.last_leaf() {
+            let _ = root.split_target(&last, TabSplitAxis::Horizontal, entry.pane, false, cx);
+        }
     }
 
     fn is_active_session(&self, session: &Entity<TerminalSessionEntity>, cx: &App) -> bool {
@@ -844,16 +1166,260 @@ impl MicaWorkspace {
         window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
-        if let Some(tab) = self
-            .tabs
-            .iter_mut()
-            .find(|tab| tab.active_pane != *pane && tab.panes().contains(pane))
+        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.panes().contains(pane)) else {
+            return;
+        };
+        let mut changed = false;
+        if let Some(ix) = tab.floating.iter().position(|e| &e.pane == pane)
+            && ix + 1 < tab.floating.len()
         {
-            tab.title = pane.read(cx).session.read(cx).title.clone();
+            let entry = tab.floating.remove(ix);
+            tab.floating.push(entry);
+            changed = true;
+        }
+        if tab.maximized_pane.as_ref().is_some_and(|mp| mp != pane) {
+            tab.maximized_pane = None;
+            changed = true;
+        }
+        if tab.active_pane != *pane {
             tab.active_pane = pane.clone();
-            tab.refresh_split_flags(cx);
+            changed = true;
+        }
+        if changed {
+            self.sync_all_tabs_pane_states(cx);
             self.sync_sftp_binding(window, cx);
             cx.notify();
+        }
+    }
+
+    pub fn toggle_maximize_pane(
+        &mut self,
+        pane: &Entity<TerminalPaneView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.floating_drag = None;
+        let Some(tab) = self.tabs.iter_mut().find(|t| t.panes().contains(pane)) else {
+            return;
+        };
+        if tab.panes().len() <= 1 {
+            tab.maximized_pane = None;
+            return;
+        }
+        if tab.maximized_pane.as_ref() == Some(pane) {
+            tab.maximized_pane = None;
+        } else {
+            tab.maximized_pane = Some(pane.clone());
+        }
+        if let Some(ix) = tab.floating.iter().position(|e| &e.pane == pane)
+            && ix + 1 < tab.floating.len()
+        {
+            let entry = tab.floating.remove(ix);
+            tab.floating.push(entry);
+        }
+        tab.active_pane = pane.clone();
+        pane.focus_handle(cx).focus(window, cx);
+        self.sync_all_tabs_pane_states(cx);
+        self.sync_sftp_binding(Some(window), cx);
+        cx.notify();
+    }
+
+    pub fn toggle_float_pane(
+        &mut self,
+        pane: &Entity<TerminalPaneView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.floating_drag = None;
+        let (stage_w, stage_h) = self.current_stage_dimensions();
+        let Some(tab) = self.tabs.iter_mut().find(|t| t.panes().contains(pane)) else {
+            return;
+        };
+        if tab.panes().len() <= 1 {
+            return;
+        }
+
+        if let Some(ix) = tab.floating.iter().position(|e| &e.pane == pane) {
+            let entry = tab.floating.remove(ix);
+            Self::dock_floating_entry_into_root(&mut tab.root, entry, cx);
+            if tab.maximized_pane.as_ref() == Some(pane) {
+                tab.maximized_pane = None;
+            }
+            tab.active_pane = pane.clone();
+        } else {
+            // Preserve the invariant that `tab.root` always retains >= 1 tiled floor pane:
+            // if floating the sole tiled pane while other floating panes exist, dock the oldest floating pane first.
+            if tab.tiled_panes().len() == 1 && !tab.floating.is_empty() {
+                let oldest = tab.floating.remove(0);
+                Self::dock_floating_entry_into_root(&mut tab.root, oldest, cx);
+            }
+            let dock_anchor = tab.root.find_dock_anchor(pane);
+            let Some(new_root) = tab.root.clone().remove_pane(pane, cx) else {
+                return;
+            };
+            tab.root = new_root;
+            tab.maximized_pane = None;
+
+            let mut rect = FloatingRect::default_for_stage(stage_w, stage_h);
+            let stagger = (tab.floating.len() as f32) * 22.0;
+            rect.x = (rect.x - stagger).max(8.0);
+            rect.y = (rect.y - stagger).max(8.0);
+            let rect = clamp_floating_rect(rect, stage_w, stage_h, false);
+            let particles = cx.new(FloatingBorderParticles::new);
+            tab.floating.push(FloatingPaneEntry {
+                pane: pane.clone(),
+                rect,
+                collapsed: false,
+                dock_anchor,
+                particles,
+            });
+            tab.active_pane = pane.clone();
+        }
+
+        pane.focus_handle(cx).focus(window, cx);
+        self.sync_all_tabs_pane_states(cx);
+        self.sync_sftp_binding(Some(window), cx);
+        cx.notify();
+    }
+
+    pub fn toggle_collapse_floating_pane(
+        &mut self,
+        pane: &Entity<TerminalPaneView>,
+        cx: &mut Context<Self>,
+    ) {
+        self.floating_drag = None;
+        let (stage_w, stage_h) = self.current_stage_dimensions();
+        let Some(tab) = self.tabs.iter_mut().find(|t| t.panes().contains(pane)) else {
+            return;
+        };
+        let Some(entry) = tab.floating.iter_mut().find(|e| &e.pane == pane) else {
+            return;
+        };
+        entry.collapsed = !entry.collapsed;
+        entry.rect = clamp_floating_rect(entry.rect, stage_w, stage_h, entry.collapsed);
+        self.sync_all_tabs_pane_states(cx);
+        cx.notify();
+    }
+
+    fn begin_floating_move(
+        &mut self,
+        pane: &Entity<TerminalPaneView>,
+        mouse_pos: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        let (stage_w, stage_h) = self.current_stage_dimensions();
+        let Some(active_tid) = self.active_tab_id.clone() else {
+            return;
+        };
+        let Some(tab) = self.tabs.iter_mut().find(|t| t.id == active_tid) else {
+            return;
+        };
+        if tab.maximized_pane.is_some() {
+            return;
+        }
+        let Some(ix) = tab.floating.iter().position(|e| &e.pane == pane) else {
+            return;
+        };
+        let mut entry = tab.floating.remove(ix);
+        let start_rect = clamp_floating_rect(entry.rect, stage_w, stage_h, entry.collapsed);
+        entry.rect = start_rect;
+        tab.floating.push(entry);
+        tab.active_pane = pane.clone();
+        self.floating_drag = Some(ActiveFloatingDrag::Move {
+            tab_id: active_tid,
+            pane: pane.clone(),
+            start_mouse: mouse_pos,
+            start_rect,
+        });
+        self.sync_all_tabs_pane_states(cx);
+        cx.notify();
+    }
+
+    fn begin_floating_resize(
+        &mut self,
+        pane: Entity<TerminalPaneView>,
+        edge: ResizeEdge,
+        mouse_pos: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        pane.focus_handle(cx).focus(window, cx);
+        let (stage_w, stage_h) = self.current_stage_dimensions();
+        let Some(active_tid) = self.active_tab_id.clone() else {
+            return;
+        };
+        let Some(tab) = self.tabs.iter_mut().find(|t| t.id == active_tid) else {
+            return;
+        };
+        if tab.maximized_pane.is_some() {
+            return;
+        }
+        let Some(ix) = tab.floating.iter().position(|e| e.pane == pane) else {
+            return;
+        };
+        if tab.floating[ix].collapsed {
+            return;
+        }
+        let mut entry = tab.floating.remove(ix);
+        let start_rect = clamp_floating_rect(entry.rect, stage_w, stage_h, false);
+        entry.rect = start_rect;
+        tab.floating.push(entry);
+        tab.active_pane = pane.clone();
+        self.floating_drag = Some(ActiveFloatingDrag::Resize {
+            tab_id: active_tid,
+            pane,
+            edge,
+            start_mouse: mouse_pos,
+            start_rect,
+        });
+        self.sync_all_tabs_pane_states(cx);
+        self.sync_sftp_binding(Some(window), cx);
+        cx.notify();
+    }
+
+    fn update_floating_drag(&mut self, mouse_pos: Point<Pixels>, cx: &mut Context<Self>) {
+        let (stage_w, stage_h) = self.current_stage_dimensions();
+        match &self.floating_drag {
+            Some(ActiveFloatingDrag::Move {
+                tab_id,
+                pane,
+                start_mouse,
+                start_rect,
+            }) => {
+                let dx = f32::from(mouse_pos.x - start_mouse.x);
+                let dy = f32::from(mouse_pos.y - start_mouse.y);
+                let sr = *start_rect;
+                if let Some(tab) = self.tabs.iter_mut().find(|t| &t.id == tab_id)
+                    && let Some(entry) = tab.floating.iter_mut().find(|e| &e.pane == pane)
+                {
+                    let candidate = FloatingRect {
+                        x: sr.x + dx,
+                        y: sr.y + dy,
+                        ..sr
+                    };
+                    entry.rect = clamp_floating_rect(candidate, stage_w, stage_h, entry.collapsed);
+                    cx.notify();
+                }
+            }
+            Some(ActiveFloatingDrag::Resize {
+                tab_id,
+                pane,
+                edge,
+                start_mouse,
+                start_rect,
+            }) => {
+                let dx = f32::from(mouse_pos.x - start_mouse.x);
+                let dy = f32::from(mouse_pos.y - start_mouse.y);
+                let sr = *start_rect;
+                let resize_edge = *edge;
+                if let Some(tab) = self.tabs.iter_mut().find(|t| &t.id == tab_id)
+                    && let Some(entry) = tab.floating.iter_mut().find(|e| &e.pane == pane)
+                {
+                    entry.rect = apply_resize_delta(sr, resize_edge, dx, dy, stage_w, stage_h);
+                    cx.notify();
+                }
+            }
+            None => {}
         }
     }
 
@@ -863,30 +1429,68 @@ impl MicaWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .floating_drag
+            .as_ref()
+            .is_some_and(|drag| match drag {
+                ActiveFloatingDrag::Move { pane: p, .. }
+                | ActiveFloatingDrag::Resize { pane: p, .. } => p == pane,
+            })
+        {
+            self.floating_drag = None;
+        }
+
         let Some(tab) = self.tabs.iter_mut().find(|t| t.panes().contains(pane)) else {
             return;
         };
 
-        let Some(updated_root) = tab.root.clone().remove_pane(pane) else {
+        if tab.panes().len() <= 1 {
             let tab_id = tab.id.clone();
             self.close_tab(&tab_id, window, cx);
             return;
-        };
-
-        tab.root = updated_root;
-        if tab.active_pane == *pane
-            && let Some(next_pane) = tab.panes().pop()
-        {
-            next_pane.focus_handle(cx).focus(window, cx);
-            tab.title = next_pane.read(cx).session.read(cx).title.clone();
-            tab.active_pane = next_pane;
         }
-        tab.refresh_split_flags(cx);
+
+        if tab.maximized_pane.as_ref() == Some(pane) {
+            tab.maximized_pane = None;
+        }
+
+        if let Some(fl_ix) = tab.floating.iter().position(|e| &e.pane == pane) {
+            tab.floating.remove(fl_ix);
+        } else if let Some(updated_root) = tab.root.clone().remove_pane(pane, cx) {
+            tab.root = updated_root;
+        } else if !tab.floating.is_empty() {
+            // Closing the last tiled pane promotes the lowest Z-order floating pane to the tiled floor,
+            // keeping any topmost floating pane on top and ready to receive focus.
+            let promoted = tab.floating.remove(0);
+            tab.root = PaneLayoutNode::Leaf(promoted.pane);
+        } else {
+            let tab_id = tab.id.clone();
+            self.close_tab(&tab_id, window, cx);
+            return;
+        }
+
+        if tab.panes().len() <= 1 {
+            tab.maximized_pane = None;
+        }
+
+        if tab.active_pane == *pane {
+            let next_pane = tab
+                .floating
+                .last()
+                .map(|e| e.pane.clone())
+                .or_else(|| tab.tiled_panes().pop());
+            if let Some(next_pane) = next_pane {
+                next_pane.focus_handle(cx).focus(window, cx);
+                tab.active_pane = next_pane;
+            }
+        }
+        self.sync_all_tabs_pane_states(cx);
         self.sync_sftp_binding(Some(window), cx);
         cx.notify();
     }
 
     pub fn open_local_shell_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.floating_drag = None;
         self.local_shell_counter += 1;
         let title = format!("本地终端 {}", self.local_shell_counter);
         tracing::info!(title = %title, "打开新建本地终端标签页");
@@ -894,20 +1498,16 @@ impl MicaWorkspace {
         let sb = self.settings.scrollback_lines;
         let rt = self.tokio_handle.clone();
 
-        let session =
-            cx.new(|cx| TerminalSessionEntity::new_local(title.clone(), fsize, sb, rt, cx));
+        let session = cx.new(|cx| TerminalSessionEntity::new_local(title, fsize, sb, rt, cx));
         let pane = self.create_pane_for_session(session, window, cx);
         let focus = pane.focus_handle(cx);
 
         let tab_id = uuid::Uuid::new_v4().to_string();
-        self.tabs.push(WorkspaceTab {
-            id: tab_id.clone(),
-            title,
-            root: PaneLayoutNode::Leaf(pane.clone()),
-            active_pane: pane,
-        });
+        self.tabs.push(WorkspaceTab::new(tab_id.clone(), pane));
         self.active_tab_id = Some(tab_id);
+        self.sync_all_tabs_pane_states(cx);
         self.sync_sftp_binding(Some(window), cx);
+        self.scroll_active_tab_into_view();
         focus.focus(window, cx);
         cx.notify();
     }
@@ -942,8 +1542,8 @@ impl MicaWorkspace {
             user = %resolved.user,
             "发起新建 SSH 标签页连接"
         );
+        self.floating_drag = None;
         self.record_recent_host(host_id);
-        let title = resolved.name.clone();
         let kh = self.known_hosts.clone();
         let fsize = self.settings.font_size;
         let sb = self.settings.scrollback_lines;
@@ -955,14 +1555,11 @@ impl MicaWorkspace {
         let focus = pane.focus_handle(cx);
 
         let tab_id = uuid::Uuid::new_v4().to_string();
-        self.tabs.push(WorkspaceTab {
-            id: tab_id.clone(),
-            title,
-            root: PaneLayoutNode::Leaf(pane.clone()),
-            active_pane: pane,
-        });
+        self.tabs.push(WorkspaceTab::new(tab_id.clone(), pane));
         self.active_tab_id = Some(tab_id);
+        self.sync_all_tabs_pane_states(cx);
         self.sync_sftp_binding(Some(window), cx);
+        self.scroll_active_tab_into_view();
         focus.focus(window, cx);
         cx.notify();
     }
@@ -974,8 +1571,12 @@ impl MicaWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.active_tab_id.is_none() {
+        let Some(target_pane) = self.active_tab().and_then(WorkspaceTab::active_pane) else {
             self.connect_host_in_new_tab(host_id, window, cx);
+            return;
+        };
+        if self.active_tab().is_some_and(|t| t.panes().len() >= 6) {
+            window.push_notification(Notification::info("单个标签页最多支持 6 个分屏面板"), cx);
             return;
         }
         let resolved = match ResolvedSshConfig::resolve_from_tree(
@@ -1001,7 +1602,8 @@ impl MicaWorkspace {
         let session =
             cx.new(|cx| TerminalSessionEntity::new_ssh(resolved, kh, fsize, sb, rt, cx));
         let pane = self.create_pane_for_session(session, window, cx);
-        self.attach_split_pane(
+        self.attach_split_to_target(
+            &target_pane,
             pane,
             if horizontal {
                 TabSplitAxis::Horizontal
@@ -1019,16 +1621,27 @@ impl MicaWorkspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(active_id) = self.active_tab_id.clone() else {
+        let Some(cur_pane) = self.active_tab().and_then(WorkspaceTab::active_pane) else {
             return;
         };
-        let Some(tab) = self.tabs.iter().find(|t| t.id == active_id) else {
+        self.split_pane(&cur_pane, axis, window, cx);
+    }
+
+    pub fn split_pane(
+        &mut self,
+        target_pane: &Entity<TerminalPaneView>,
+        axis: TabSplitAxis,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(tab) = self.tabs.iter().find(|t| t.panes().contains(target_pane)) else {
             return;
         };
-        let Some(cur_pane) = tab.active_pane() else {
+        if tab.panes().len() >= 6 {
+            window.push_notification(Notification::info("单个标签页最多支持 6 个分屏面板"), cx);
             return;
-        };
-        let cur_kind = cur_pane.read(cx).session.read(cx).kind.clone();
+        }
+        let cur_kind = target_pane.read(cx).session.read(cx).kind.clone();
         let fsize = self.settings.font_size;
         let sb = self.settings.scrollback_lines;
         let rt = self.tokio_handle.clone();
@@ -1048,36 +1661,41 @@ impl MicaWorkspace {
         };
 
         let new_pane = self.create_pane_for_session(new_session, window, cx);
-        self.attach_split_pane(new_pane, axis, window, cx);
+        self.attach_split_to_target(target_pane, new_pane, axis, window, cx);
     }
 
-    fn attach_split_pane(
+    fn attach_split_to_target(
         &mut self,
-        pane: Entity<TerminalPaneView>,
+        target_pane: &Entity<TerminalPaneView>,
+        new_pane: Entity<TerminalPaneView>,
         axis: TabSplitAxis,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(active_id) = self.active_tab_id.clone() else {
+        self.floating_drag = None;
+        let focus = new_pane.focus_handle(cx);
+        let Some(tab) = self
+            .tabs
+            .iter_mut()
+            .find(|t| t.panes().contains(target_pane))
+        else {
             return;
         };
-        let focus = pane.focus_handle(cx);
-        if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == active_id) {
-            if tab.panes().len() >= 6 {
-                window.push_notification(
-                    Notification::info("单个标签页最多支持 6 个分屏面板"),
-                    cx,
-                );
-                return;
-            }
-            if let Some(target) = tab.active_pane()
-                && tab.root.split_target(&target, axis, pane.clone())
-            {
-                tab.title = pane.read(cx).session.read(cx).title.clone();
-                tab.active_pane = pane;
-                tab.refresh_split_flags(cx);
-            }
+        let tab_id = tab.id.clone();
+        tab.maximized_pane = None;
+        if let Some(fl_ix) = tab.floating.iter().position(|e| &e.pane == target_pane) {
+            let entry = tab.floating.remove(fl_ix);
+            Self::dock_floating_entry_into_root(&mut tab.root, entry, cx);
         }
+        if !tab
+            .root
+            .split_target(target_pane, axis, new_pane.clone(), false, cx)
+        {
+            return;
+        }
+        tab.active_pane = new_pane;
+        self.active_tab_id = Some(tab_id);
+        self.sync_all_tabs_pane_states(cx);
         self.sync_sftp_binding(Some(window), cx);
         focus.focus(window, cx);
         cx.notify();
@@ -1096,14 +1714,32 @@ impl MicaWorkspace {
         }
     }
 
+    pub fn tab_strip_scroll_handle(&self) -> &gpui_kit::ScrollHandle {
+        &self.tab_scroll_handle
+    }
+
+    fn scroll_active_tab_into_view(&self) {
+        if let Some(ix) = self
+            .tabs
+            .iter()
+            .position(|t| Some(&t.id) == self.active_tab_id.as_ref())
+        {
+            self.tab_scroll_handle.scroll_to_item(ix * 2);
+        }
+    }
+
     pub fn select_tab(&mut self, tab_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.floating_drag = None;
         self.active_tab_id = Some(tab_id.to_string());
+        self.sync_all_tabs_pane_states(cx);
         self.focus_active_pane(window, cx);
         self.sync_sftp_binding(Some(window), cx);
+        self.scroll_active_tab_into_view();
         cx.notify();
     }
 
     pub fn close_tab(&mut self, tab_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.floating_drag = None;
         let Some(idx) = self.tabs.iter().position(|t| t.id == tab_id) else {
             return;
         };
@@ -1117,16 +1753,21 @@ impl MicaWorkspace {
                 Some(self.tabs[next_idx].id.clone())
             };
         }
+        self.sync_all_tabs_pane_states(cx);
         self.focus_active_pane(window, cx);
         self.sync_sftp_binding(Some(window), cx);
+        self.scroll_active_tab_into_view();
         cx.notify();
     }
 
     pub fn close_other_tabs(&mut self, keep_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.floating_drag = None;
         self.tabs.retain(|t| t.id == keep_id);
         self.active_tab_id = self.tabs.first().map(|t| t.id.clone());
+        self.sync_all_tabs_pane_states(cx);
         self.focus_active_pane(window, cx);
         self.sync_sftp_binding(Some(window), cx);
+        self.scroll_active_tab_into_view();
         cx.notify();
     }
 
@@ -1144,7 +1785,7 @@ impl MicaWorkspace {
                 config,
                 known_hosts,
             } => {
-                let title = config.name.clone();
+                self.floating_drag = None;
                 let fsize = self.settings.font_size;
                 let sb = self.settings.scrollback_lines;
                 let rt = self.tokio_handle.clone();
@@ -1154,14 +1795,11 @@ impl MicaWorkspace {
                 let new_pane = self.create_pane_for_session(session, window, cx);
                 let focus = new_pane.focus_handle(cx);
                 let new_id = uuid::Uuid::new_v4().to_string();
-                self.tabs.push(WorkspaceTab {
-                    id: new_id.clone(),
-                    title,
-                    root: PaneLayoutNode::Leaf(new_pane.clone()),
-                    active_pane: new_pane,
-                });
+                self.tabs.push(WorkspaceTab::new(new_id.clone(), new_pane));
                 self.active_tab_id = Some(new_id);
+                self.sync_all_tabs_pane_states(cx);
                 self.sync_sftp_binding(Some(window), cx);
+                self.scroll_active_tab_into_view();
                 focus.focus(window, cx);
                 cx.notify();
             }
@@ -1181,7 +1819,7 @@ impl MicaWorkspace {
                             session_id: s.id.clone(),
                             conn_epoch: s.conn_epoch,
                         },
-                        session_label: s.title.clone(),
+                        session_label: s.tab_title(),
                         dir: s.sftp_directory(self.settings.follow_sftp_cwd)?.to_owned(),
                     },
                 ))
@@ -1668,6 +2306,8 @@ impl MicaWorkspace {
         let tid_ctx_close = tid.clone();
 
         let is_active = self.active_tab_id.as_deref() == Some(tid.as_str());
+        let tab_chrome = terminal_tab_chrome(cx);
+        let tab_title = tab.title(cx);
         let (is_ssh, dot_color) = tab
             .active_pane()
             .map(|p| {
@@ -1692,28 +2332,57 @@ impl MicaWorkspace {
         let ws_c_others = workspace.clone();
         let ws_c_close = workspace;
 
+        let badge = if is_ssh {
+            div()
+                .flex_shrink_0()
+                .w(px(18.0))
+                .h(px(18.0))
+                .rounded(px(4.5))
+                .bg(dot_color.opacity(0.16))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(Icon::new(LucideIcon::Server).size(px(11.5)).text_color(dot_color))
+        } else {
+            div()
+                .flex_shrink_0()
+                .w(px(18.0))
+                .h(px(18.0))
+                .rounded(px(4.5))
+                .bg(tab_chrome.local_badge_bg)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    Icon::new(LucideIcon::Terminal)
+                        .size(px(11.5))
+                        .text_color(tab_chrome.local_badge_fg),
+                )
+        };
+
         h_flex()
             .id(SharedString::from(format!("ws-tab-{tid}")))
             .flex_shrink_0()
-            .max_w(px(210.0))
+            .max_w(px(228.0))
             .h(px(30.0))
             .pl_2p5()
-            .pr_1p5()
-            .gap_1p5()
+            .pr_2()
+            .gap(px(7.0))
             .items_center()
-            .rounded(px(7.0))
+            .rounded(px(8.0))
             .cursor_pointer()
             .bg(if is_active {
-                cx.theme().tab_active
+                tab_chrome.active_bg
             } else {
                 cx.theme().transparent
             })
             .border_1()
             .border_color(if is_active {
-                cx.theme().border
+                tab_chrome.active_border
             } else {
                 cx.theme().transparent
             })
+            .when(is_active, |el| el.shadow_2xs())
             .hover(|s| {
                 if is_active {
                     s
@@ -1778,54 +2447,44 @@ impl MicaWorkspace {
                     }),
                 )
             })
+            .child(badge)
             .child(
                 div()
-                    .flex_shrink_0()
-                    .w(px(6.5))
-                    .h(px(6.5))
-                    .rounded_full()
-                    .bg(dot_color),
-            )
-            .child(
-                Icon::new(if is_ssh {
-                    LucideIcon::Server
-                } else {
-                    LucideIcon::Terminal
-                })
-                .xsmall()
-                .text_color(if is_active {
-                    cx.theme().tab_active_foreground
-                } else {
-                    cx.theme().muted_foreground
-                }),
-            )
-            .child(
-                div()
+                    .min_w_0()
                     .truncate()
                     .text_xs()
                     .font_weight(if is_active {
-                        FontWeight::MEDIUM
+                        FontWeight::SEMIBOLD
                     } else {
                         FontWeight::NORMAL
                     })
                     .text_color(if is_active {
-                        cx.theme().tab_active_foreground
+                        tab_chrome.active_fg
                     } else {
-                        cx.theme().muted_foreground
+                        tab_chrome.inactive_fg
                     })
-                    .child(tab.title.clone()),
+                    .child(tab_title),
             )
             .child(
-                Button::new(SharedString::from(format!("close-tab-{tid_close}")))
-                    .tab_stop(false)
-                    .ghost()
-                    .xsmall()
-                    .compact()
-                    .icon(LucideIcon::X)
-                    .on_click(move |_, window, cx| {
+                div()
+                    .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                        window.prevent_default();
                         cx.stop_propagation();
-                        ws_close.update(cx, |ws, cx| ws.close_tab(&tid_close, window, cx));
-                    }),
+                    })
+                    .child(
+                        Button::new(SharedString::from(format!("close-tab-{tid_close}")))
+                            .tab_stop(false)
+                            .ghost()
+                            .xsmall()
+                            .compact()
+                            .size(px(20.0))
+                            .icon(LucideIcon::X)
+                            .on_click(move |_, window, cx| {
+                                cx.stop_propagation();
+                                ws_close
+                                    .update(cx, |ws, cx| ws.close_tab(&tid_close, window, cx));
+                            }),
+                    ),
             )
             .into_any_element()
     }
@@ -1837,8 +2496,6 @@ impl MicaWorkspace {
         let ws_new_local = ws_ent.clone();
         let ws_menu_local = ws_ent.clone();
         let ws_menu_ssh = ws_ent.clone();
-        let ws_split_h = ws_ent.clone();
-        let ws_split_v = ws_ent.clone();
         let ws_sftp = ws_ent.clone();
         let ws_theme = ws_ent.clone();
         let ws_settings = ws_ent.clone();
@@ -1852,60 +2509,132 @@ impl MicaWorkspace {
         } else {
             theme_pack.resolve(&self.settings.dark_theme, true).name
         };
-        let has_active_tab = self.active_tab_id.is_some();
         let transfers = self.sftp_panel.read(cx).active_transfer_count();
         let shortcut_tooltip =
             |label: &str, action| tooltip(label, self.settings.shortcuts.get(action).as_ref());
         let app_paths = self.paths.clone();
         let paths_for_logs = self.paths.clone();
 
-        let tab_elements: Vec<AnyElement> = self
-            .tabs
-            .iter()
-            .map(|tab| self.render_single_tab_pill(tab, ws_ent.clone(), cx))
-            .collect();
+        let tab_chrome = terminal_tab_chrome(cx);
+        let active_tid = self.active_tab_id.as_deref();
+        let mut tab_strip_children: Vec<AnyElement> =
+            Vec::with_capacity(self.tabs.len().saturating_mul(2));
+        for (idx, tab) in self.tabs.iter().enumerate() {
+            if idx > 0 {
+                let prev_active = active_tid == Some(self.tabs[idx - 1].id.as_str());
+                let cur_active = active_tid == Some(tab.id.as_str());
+                // Fixed 1px slot prevents horizontal jitter when switching active tabs
+                tab_strip_children.push(
+                    div()
+                        .flex_shrink_0()
+                        .w(px(1.0))
+                        .h(px(14.0))
+                        .mx(px(2.0))
+                        .bg(if !prev_active && !cur_active {
+                            tab_chrome.divider
+                        } else {
+                            cx.theme().transparent
+                        })
+                        .into_any_element(),
+                );
+            }
+            tab_strip_children.push(self.render_single_tab_pill(tab, ws_ent.clone(), cx));
+        }
 
         let linux_client = cfg!(target_os = "linux")
             && matches!(window.window_decorations(), Decorations::Client { .. });
-        let drag_space = div()
-            .flex_1()
-            .min_w(px(24.0))
-            .h_full()
-            .when(cfg!(target_os = "windows"), |area| {
-                area.window_control_area(WindowControlArea::Drag)
-            })
-            .when(linux_client, |area| {
-                // Hand the compositor a drag only after motion so a stationary double-click survives.
-                let pressed = window.use_state(cx, |_, _| false);
-                area.on_mouse_down(
-                    MouseButton::Left,
-                    window.listener_for(&pressed, |pressed, event: &MouseDownEvent, window, _| {
-                        window.prevent_default();
-                        *pressed = event.click_count == 1;
-                        if event.click_count == 2 {
-                            window.zoom_window();
-                        }
-                    }),
-                )
-                .on_mouse_down_out(
-                    window.listener_for(&pressed, |pressed, _, _, _| *pressed = false),
-                )
-                .on_mouse_up(
-                    MouseButton::Left,
-                    window.listener_for(&pressed, |pressed, _, _, _| *pressed = false),
-                )
-                .on_mouse_move(window.listener_for(
-                    &pressed,
-                    |pressed, event: &MouseMoveEvent, window, _| {
-                        if std::mem::take(pressed) && event.pressed_button == Some(MouseButton::Left) {
-                            window.start_window_move();
-                        }
-                    },
-                ))
-                .on_mouse_down(MouseButton::Right, |event, window, _| {
-                    window.show_window_menu(event.position);
+        let client_move = linux_client || cfg!(target_os = "macos");
+        let drag_pressed = window.use_state(cx, |_, _| false);
+        let is_drag_armed = client_move && *drag_pressed.read(cx);
+
+        let bind_drag_region = |id: &'static str, area: gpui_kit::Div, window: &mut Window| {
+            let pressed = drag_pressed.clone();
+            area.id(id)
+                .when(cfg!(target_os = "windows"), |el| {
+                    el.window_control_area(WindowControlArea::Drag)
                 })
-            });
+                .when(client_move, |el| {
+                    // Arm drag on leaf mouse-down; window-level capture listener below starts
+                    // `start_window_move()` even if the first motion step exits the 8px understrip.
+                    el.on_mouse_down(
+                        MouseButton::Left,
+                        window.listener_for(
+                            &pressed,
+                            |pressed, event: &MouseDownEvent, window, cx| {
+                                GlobalState::suppress_text_selection(cx);
+                                *pressed = event.click_count == 1;
+                                cx.notify();
+                                if event.click_count == 2 {
+                                    if cfg!(target_os = "macos") {
+                                        window.titlebar_double_click();
+                                    } else {
+                                        window.zoom_window();
+                                    }
+                                }
+                            },
+                        ),
+                    )
+                    .when(linux_client, |el| {
+                        el.on_mouse_down(MouseButton::Right, |event, window, _| {
+                            window.show_window_menu(event.position);
+                        })
+                    })
+                })
+        };
+
+        let client_drag_tracker = is_drag_armed.then(|| {
+            let pressed_move = drag_pressed.clone();
+            let pressed_up = drag_pressed.clone();
+            canvas(
+                |_, _, _| {},
+                move |_, _, window, _| {
+                    window.on_mouse_event(move |ev: &MouseMoveEvent, phase, window, cx| {
+                        if phase.capture() {
+                            if ev.pressed_button == Some(MouseButton::Left) {
+                                let armed = pressed_move.update(cx, |p, cx| {
+                                    let was = std::mem::replace(p, false);
+                                    if was {
+                                        cx.notify();
+                                    }
+                                    was
+                                });
+                                if armed {
+                                    window.start_window_move();
+                                }
+                            } else {
+                                pressed_move.update(cx, |p, cx| {
+                                    if std::mem::replace(p, false) {
+                                        cx.notify();
+                                    }
+                                });
+                            }
+                        }
+                    });
+                    window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
+                        if phase.capture() {
+                            pressed_up.update(cx, |p, cx| {
+                                if std::mem::replace(p, false) {
+                                    cx.notify();
+                                }
+                            });
+                        }
+                    });
+                },
+            )
+            .size(px(0.0))
+        });
+
+        let drag_space = bind_drag_region(
+            "titlebar-drag-space",
+            div().flex_1().min_w(px(32.0)).h_full(),
+            window,
+        );
+        let understrip_drag = bind_drag_region(
+            "titlebar-controls-understrip",
+            div().w_full().h(px(8.0)),
+            window,
+        );
+
         let icon_button = |id| {
             Button::new(id)
                 .tab_stop(false)
@@ -1917,15 +2646,18 @@ impl MicaWorkspace {
             .h_full()
             .min_w_0()
             .flex_1()
+            .overflow_hidden()
             .child(
                 h_flex()
                     .h_full()
                     .min_w_0()
                     .flex_1()
+                    .overflow_hidden()
                     .gap_1p5()
                     .items_center()
                     .child(
                         div()
+                            .flex_shrink_0()
                             .on_mouse_down(MouseButton::Left, |_, window, _| {
                                 window.prevent_default();
                             })
@@ -1938,33 +2670,60 @@ impl MicaWorkspace {
                                         LucideIcon::PanelLeftOpen
                                     })
                                     .tooltip(shortcut_tooltip(
-                                        if show_sidebar { "隐藏左侧边栏" } else { "展开左侧边栏" },
+                                        if show_sidebar {
+                                            "隐藏左侧边栏"
+                                        } else {
+                                            "展开左侧边栏"
+                                        },
                                         ShortcutAction::ToggleLeftSidebar,
                                     ))
                                     .on_click(move |_, window, cx| {
-                                        ws_sidebar.update(cx, |ws, cx| ws.toggle_left_sidebar(window, cx));
+                                        ws_sidebar.update(cx, |ws, cx| {
+                                            ws.toggle_left_sidebar(window, cx)
+                                        });
                                     }),
                             ),
                     )
                     .child(
                         div()
+                            .flex_shrink_0()
                             .w(px(1.0))
                             .h(px(14.0))
                             .bg(cx.theme().border),
                     )
                     .children(self.tabs.is_empty().then(|| {
-                        div().px_1p5().child(crate::ui::brand::brand_mark_icon_element(16.0))
+                        div()
+                            .flex_shrink_0()
+                            .px_1p5()
+                            .child(crate::ui::brand::brand_mark_icon_element(16.0))
                     }))
-                    .children((!tab_elements.is_empty()).then(|| {
-                        h_flex()
+                    .children((!tab_strip_children.is_empty()).then(|| {
+                        // `.w_auto()` + `min_w_0()` + `overflow_hidden()` keeps `+` hugging the last tab when few tabs
+                        // exist while dropping Taffy `min-content` propagation so 15+ tabs shrink & scroll cleanly.
+                        div()
+                            .relative()
+                            .flex()
+                            .flex_row()
+                            .w_auto()
                             .min_w_0()
-                            .overflow_x_scrollbar()
-                            .gap_1()
-                            .items_center()
-                            .children(tab_elements)
+                            .h_full()
+                            .overflow_hidden()
+                            .child(
+                                h_flex()
+                                    .id("workspace-tab-strip")
+                                    .w_auto()
+                                    .min_w_0()
+                                    .h_full()
+                                    .items_center()
+                                    .overflow_x_scroll()
+                                    .track_scroll(&self.tab_scroll_handle)
+                                    .children(tab_strip_children),
+                            )
+                            .horizontal_scrollbar(&self.tab_scroll_handle)
                     }))
                     .child(
                         h_flex()
+                            .flex_shrink_0()
                             .gap_0p5()
                             .items_center()
                             .on_mouse_down(MouseButton::Left, |_, window, _| {
@@ -1973,7 +2732,10 @@ impl MicaWorkspace {
                             .child(
                                 icon_button("new-local-tab-btn")
                                     .icon(LucideIcon::Plus)
-                                    .tooltip(shortcut_tooltip(ShortcutAction::NewLocalTab.label(), ShortcutAction::NewLocalTab))
+                                    .tooltip(shortcut_tooltip(
+                                        ShortcutAction::NewLocalTab.label(),
+                                        ShortcutAction::NewLocalTab,
+                                    ))
                                     .on_click(move |_, window, cx| {
                                         ws_new_local.update(cx, |ws, cx| {
                                             ws.open_local_shell_tab(window, cx)
@@ -2020,36 +2782,6 @@ impl MicaWorkspace {
                     .on_mouse_down(MouseButton::Left, |_, window, _| {
                         window.prevent_default();
                     })
-                    .children(has_active_tab.then(|| {
-                        h_flex()
-                            .gap_0p5()
-                            .pr_1()
-                            .items_center()
-                            .child(
-                                icon_button("title-split-h")
-                                    .icon(LucideIcon::Columns2)
-                                    .tooltip(shortcut_tooltip(ShortcutAction::SplitHorizontal.label(), ShortcutAction::SplitHorizontal))
-                                    .on_click(move |_, window, cx| {
-                                        ws_split_h.update(cx, |ws, cx| {
-                                            ws.split_active_tab(
-                                                TabSplitAxis::Horizontal,
-                                                window,
-                                                cx,
-                                            )
-                                        });
-                                    }),
-                            )
-                            .child(
-                                icon_button("title-split-v")
-                                    .icon(LucideIcon::Rows2)
-                                    .tooltip(shortcut_tooltip(ShortcutAction::SplitVertical.label(), ShortcutAction::SplitVertical))
-                                    .on_click(move |_, window, cx| {
-                                        ws_split_v.update(cx, |ws, cx| {
-                                            ws.split_active_tab(TabSplitAxis::Vertical, window, cx)
-                                        });
-                                    }),
-                            )
-                    }))
                     .child(
                         icon_button("toggle-sftp-panel")
                             .w_auto()
@@ -2091,19 +2823,21 @@ impl MicaWorkspace {
                                 });
                             }),
                     )
-                    .when(self.settings.debug_logging, |bar| bar.child(
-                        icon_button("open-logs-btn")
-                            .icon(LucideIcon::Terminal)
-                            .accessibility_label("诊断日志")
-                            .tooltip("查看运行与崩溃诊断日志")
-                            .on_click(move |_, window, cx| {
-                                crate::ui::modals::open_logs_modal(
-                                    paths_for_logs.clone(),
-                                    window,
-                                    cx,
-                                );
-                            }),
-                    ))
+                    .when(self.settings.debug_logging, |bar| {
+                        bar.child(
+                            icon_button("open-logs-btn")
+                                .icon(LucideIcon::Terminal)
+                                .accessibility_label("诊断日志")
+                                .tooltip("查看运行与崩溃诊断日志")
+                                .on_click(move |_, window, cx| {
+                                    crate::ui::modals::open_logs_modal(
+                                        paths_for_logs.clone(),
+                                        window,
+                                        cx,
+                                    );
+                                }),
+                        )
+                    })
                     .child(
                         icon_button("open-settings-btn")
                             .icon(LucideIcon::SlidersHorizontal)
@@ -2120,10 +2854,20 @@ impl MicaWorkspace {
             );
 
         if !cfg!(target_os = "windows") && !linux_client {
-            return TitleBar::new()
-                .h(px(38.0))
-                .border_b_0()
+            let left_pad = if cfg!(target_os = "macos") && !window.is_fullscreen() {
+                px(80.0)
+            } else {
+                px(12.0)
+            };
+            return h_flex()
+                .id("mica-title-bar")
+                .flex_shrink_0()
+                .w_full()
+                .h(px(40.0))
+                .pl(left_pad)
+                .overflow_hidden()
                 .bg(cx.theme().title_bar)
+                .children(client_drag_tracker)
                 .child(tools_and_tabs)
                 .into_any_element();
         }
@@ -2135,7 +2879,11 @@ impl MicaWorkspace {
             let (hover_bg, active_bg, interaction_fg) = if area == WindowControlArea::Close {
                 (theme.danger, theme.danger_active, gpui_kit::white())
             } else {
-                (theme.secondary_hover, theme.secondary_active, theme.foreground)
+                (
+                    theme.secondary_hover,
+                    theme.secondary_active,
+                    theme.foreground,
+                )
             };
             div()
                 .id(label)
@@ -2193,20 +2941,19 @@ impl MicaWorkspace {
             ));
         h_flex()
             .flex_shrink_0()
-            .h(px(38.0))
+            .w_full()
+            .h(px(40.0))
             .pl_2()
+            .overflow_hidden()
             .bg(cx.theme().title_bar)
+            .children(client_drag_tracker)
             .child(tools_and_tabs)
             .child(
                 v_flex()
                     .h_full()
                     .flex_shrink_0()
                     .child(buttons)
-                    .child(
-                        div().w_full().h(px(6.0)).when(cfg!(target_os = "windows"), |strip| {
-                            strip.window_control_area(WindowControlArea::Drag)
-                        }),
-                    ),
+                    .child(understrip_drag),
             )
             .into_any_element()
     }
@@ -2238,7 +2985,57 @@ impl MicaWorkspace {
             .into_any_element();
         };
 
-        tab.root.render_element()
+        let stage_bounds_cell = self.center_stage_bounds.clone();
+        let (stage_w, stage_h) = self.current_stage_dimensions();
+
+        // Render ONLY the maximized pane when maximized so hidden panes do not fight over PTY dimensions or IME
+        if let Some(ref max_pane) = tab.maximized_pane {
+            return div()
+                .id("mica-center-stage")
+                .relative()
+                .size_full()
+                .on_prepaint(move |b, _, _| stage_bounds_cell.set(Some(b)))
+                .child(cached_pane_element(max_pane))
+                .into_any_element();
+        }
+
+        let ws_ent = cx.entity().clone();
+        let floating_elements: Vec<AnyElement> = tab
+            .floating
+            .iter()
+            .enumerate()
+            .map(|(ix, entry)| {
+                let rect = clamp_floating_rect(entry.rect, stage_w, stage_h, entry.collapsed);
+                let active = entry.pane == tab.active_pane;
+                let pane_for_resize = entry.pane.clone();
+                let ws_resize = ws_ent.clone();
+                let suffix = format!("{}-{ix}", tab.id);
+                render_floating_pane_shell(
+                    &suffix,
+                    rect,
+                    entry.collapsed,
+                    active,
+                    entry.particles.clone(),
+                    cached_pane_element(&entry.pane),
+                    move |edge, pos, window, cx| {
+                        let p = pane_for_resize.clone();
+                        ws_resize.update(cx, |ws, cx| {
+                            ws.begin_floating_resize(p, edge, pos, window, cx)
+                        });
+                    },
+                    cx,
+                )
+            })
+            .collect();
+
+        div()
+            .id("mica-center-stage")
+            .relative()
+            .size_full()
+            .on_prepaint(move |b, _, _| stage_bounds_cell.set(Some(b)))
+            .child(tab.root.render_element())
+            .children(floating_elements)
+            .into_any_element()
     }
 }
 
@@ -2263,7 +3060,7 @@ impl Render for MicaWorkspace {
                 (false, true) => "main-layout-cr",
                 (false, false) => "main-layout-c",
             };
-            let mut group = h_resizable(layout_key);
+            let mut group = with_gap_handle(h_resizable(layout_key));
 
             if show_left {
                 let sidebar = LeftSidebar::new(
@@ -2279,24 +3076,72 @@ impl Render for MicaWorkspace {
                     resizable_panel()
                         .size(px(260.0))
                         .size_range(px(200.0)..px(420.0))
-                        .child(sidebar),
+                        .child(div().size_full().pr(px(SPLIT_HALF_GAP)).child(sidebar)),
                 );
             }
 
-            group = group.child(resizable_panel().child(center_content));
+            let center_pad_l = if show_left { px(SPLIT_HALF_GAP) } else { px(0.0) };
+            let center_pad_r = if show_right { px(SPLIT_HALF_GAP) } else { px(0.0) };
+            group = group.child(
+                resizable_panel().child(
+                    div()
+                        .size_full()
+                        .pl(center_pad_l)
+                        .pr(center_pad_r)
+                        .child(center_content),
+                ),
+            );
 
             if show_right {
                 group = group.child(
                     resizable_panel()
                         .size(px(344.0))
                         .size_range(px(260.0)..px(560.0))
-                        .child(self.sftp_panel.clone()),
+                        .child(
+                            div()
+                                .size_full()
+                                .pl(px(SPLIT_HALF_GAP))
+                                .child(self.sftp_panel.clone()),
+                        ),
                 );
             }
 
             div().flex_1().min_h_0().child(group).into_any_element()
         };
 
+        let floating_drag_capture = self.floating_drag.is_some().then(|| {
+            let ws_move = cx.entity().downgrade();
+            let ws_up = cx.entity().downgrade();
+            canvas(
+                |_, _, _| {},
+                move |_, _, window, _| {
+                    window.on_mouse_event(move |ev: &MouseMoveEvent, phase, _, cx| {
+                        if phase.capture() {
+                            let _ = ws_move.update(cx, |this, cx| {
+                                if ev.pressed_button == Some(MouseButton::Left) {
+                                    this.update_floating_drag(ev.position, cx);
+                                } else if this.floating_drag.take().is_some() {
+                                    cx.notify();
+                                }
+                            });
+                        }
+                    });
+                    window.on_mouse_event(move |ev: &MouseUpEvent, phase, _, cx| {
+                        if phase.capture() && ev.button == MouseButton::Left {
+                            let _ = ws_up.update(cx, |this, cx| {
+                                if this.floating_drag.take().is_some() {
+                                    cx.notify();
+                                }
+                            });
+                        }
+                    });
+                },
+            )
+            .size(px(0.0))
+        });
+
+        // `.track_focus` lives on `#mica-workspace-stage` BELOW `title_bar` so clicking the
+        // titlebar drag area never calls `window.prevent_default()` to swallow Win32 `HTCAPTION`!
         v_flex()
             .id("mica-workspace-root")
             .on_modifiers_changed(cx.listener(
@@ -2308,7 +3153,7 @@ impl Render for MicaWorkspace {
                     }
                 },
             ))
-            .track_focus(&self.focus_handle)
+            .children(floating_drag_capture)
             .capture_key_down(cx.listener(Self::handle_capture_key_down))
             .size_full()
             .bg(cx.theme().title_bar)
@@ -2316,15 +3161,13 @@ impl Render for MicaWorkspace {
             .child(title_bar)
             .child(
                 v_flex()
+                    .id("mica-workspace-stage")
+                    .track_focus(&self.focus_handle)
                     .flex_1()
                     .min_h_0()
                     .mx(px(6.0))
                     .mb(px(6.0))
-                    .rounded(px(8.0))
-                    .overflow_hidden()
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().background)
+                    .bg(cx.theme().title_bar)
                     .child(body),
             )
     }

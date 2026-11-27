@@ -1,4 +1,5 @@
 pub mod brand;
+pub mod floating_pane;
 pub mod fonts;
 pub mod modals;
 pub mod sftp_panel;

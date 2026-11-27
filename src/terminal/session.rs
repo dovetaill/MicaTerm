@@ -68,11 +68,77 @@ pub struct TerminalSessionEntity {
     backend: ActiveBackend,
     sftp: Option<SftpService>,
     pub conn_epoch: u64,
+    local_shell_name: String,
+    local_cwd: Option<String>,
+    local_home_dir: Option<String>,
+    local_windows_style: bool,
     remote_cwd: Option<String>,
     sftp_cwd: Option<String>,
     remote_cwd_seq: u64,
     sftp_synced_cwd_seq: u64,
     tokio_handle: tokio::runtime::Handle,
+}
+
+const LOCAL_TAB_PATH_MAX_CHARS: usize = 12;
+
+fn strip_non_root_separator(path: &str, windows_style: bool) -> String {
+    let trimmed = path.trim();
+    if windows_style {
+        crate::terminal::semantic::normalize_windows_display_path(trimmed)
+            .unwrap_or_else(|| trimmed.to_owned())
+    } else if trimmed.len() > 1 {
+        trimmed.trim_end_matches('/').to_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+fn paths_match_home(cwd: &str, home: &str, windows_style: bool) -> bool {
+    let a = strip_non_root_separator(cwd, windows_style);
+    let b = strip_non_root_separator(home, windows_style);
+    if windows_style {
+        a.eq_ignore_ascii_case(&b)
+    } else {
+        a == b
+    }
+}
+
+/// Formats `(pane_title, tab_title)` for a local shell session from a single source of truth:
+/// - Home directory -> `<shell> ~` in both pane header and tab pill.
+/// - Other directories -> `<shell> <full_path>` in pane header; `<shell> <first_12_chars>...` in tab pill when `> 12` chars.
+pub fn format_local_shell_titles(
+    shell_name: &str,
+    cwd: Option<&str>,
+    home_dir: Option<&str>,
+    windows_style: bool,
+) -> (String, String) {
+    let shell = match shell_name.trim() {
+        "" => "shell",
+        s => s,
+    };
+    let Some(raw_cwd) = cwd.map(str::trim).filter(|s| !s.is_empty()) else {
+        return (shell.to_owned(), shell.to_owned());
+    };
+    let clean_cwd = strip_non_root_separator(raw_cwd, windows_style);
+    if home_dir
+        .map(str::trim)
+        .filter(|h| !h.is_empty())
+        .is_some_and(|home| paths_match_home(&clean_cwd, home, windows_style))
+    {
+        let home_label = format!("{shell} ~");
+        return (home_label.clone(), home_label);
+    }
+
+    let pane_title = format!("{shell} {clean_cwd}");
+    let mut chars = clean_cwd.chars();
+    let head: String = chars.by_ref().take(LOCAL_TAB_PATH_MAX_CHARS).collect();
+    let tab_path = if chars.next().is_some() {
+        format!("{head}...")
+    } else {
+        head
+    };
+    let tab_title = format!("{shell} {tab_path}");
+    (pane_title, tab_title)
 }
 
 impl EventEmitter<SessionEntityEvent> for TerminalSessionEntity {}
@@ -97,6 +163,10 @@ impl TerminalSessionEntity {
             backend: ActiveBackend::None,
             sftp: None,
             conn_epoch: 0,
+            local_shell_name: "shell".to_string(),
+            local_cwd: None,
+            local_home_dir: None,
+            local_windows_style: cfg!(target_os = "windows"),
             remote_cwd: None,
             sftp_cwd: None,
             remote_cwd_seq: 0,
@@ -104,6 +174,7 @@ impl TerminalSessionEntity {
             tokio_handle,
         };
         this.engine.is_windows_local_pty = cfg!(target_os = "windows");
+        this.engine.windows_paths = cfg!(target_os = "windows");
         this.start_backend(cx);
         this
     }
@@ -132,6 +203,10 @@ impl TerminalSessionEntity {
             backend: ActiveBackend::None,
             sftp: None,
             conn_epoch: 0,
+            local_shell_name: String::new(),
+            local_cwd: None,
+            local_home_dir: None,
+            local_windows_style: false,
             remote_cwd: None,
             sftp_cwd: None,
             remote_cwd_seq: 0,
@@ -140,6 +215,36 @@ impl TerminalSessionEntity {
         };
         this.start_backend(cx);
         this
+    }
+
+    pub fn pane_title(&self) -> String {
+        match &self.kind {
+            SessionKind::LocalShell => {
+                format_local_shell_titles(
+                    &self.local_shell_name,
+                    self.local_cwd.as_deref(),
+                    self.local_home_dir.as_deref(),
+                    self.local_windows_style,
+                )
+                .0
+            }
+            SessionKind::Ssh { config, .. } => config.name.clone(),
+        }
+    }
+
+    pub fn tab_title(&self) -> String {
+        match &self.kind {
+            SessionKind::LocalShell => {
+                format_local_shell_titles(
+                    &self.local_shell_name,
+                    self.local_cwd.as_deref(),
+                    self.local_home_dir.as_deref(),
+                    self.local_windows_style,
+                )
+                .1
+            }
+            SessionKind::Ssh { config, .. } => config.name.clone(),
+        }
     }
 
     pub fn is_ssh(&self) -> bool {
@@ -184,12 +289,15 @@ impl TerminalSessionEntity {
         let (rows, cols) = self.engine.dimensions();
         self.engine = AlacrittyTerminalEngine::new(rows, cols, scrollback_lines);
         self.engine.is_windows_local_pty = cfg!(target_os = "windows") && !self.is_ssh();
+        self.engine.windows_paths = cfg!(target_os = "windows") && !self.is_ssh();
         self.sftp = None;
+        self.local_cwd = None;
         self.remote_cwd = None;
         self.sftp_cwd = None;
         self.remote_cwd_seq = 0;
         self.sftp_synced_cwd_seq = 0;
         self.start_backend(cx);
+        cx.emit(SessionEntityEvent::TitleChanged(self.tab_title()));
         cx.emit(SessionEntityEvent::PhaseChanged);
         cx.notify();
     }
@@ -217,8 +325,20 @@ impl TerminalSessionEntity {
             SessionKind::LocalShell => {
                 let (tx, rx) = mpsc::unbounded_channel::<LocalPtyEvent>();
                 match LocalPtyBackend::spawn(rows as u16, cols as u16, None, tx) {
-                    Ok(pty) => {
-                        self.backend = ActiveBackend::Local(pty);
+                    Ok(spawned) => {
+                        self.local_shell_name = spawned.shell_name;
+                        self.local_home_dir = spawned
+                            .home_dir
+                            .map(|p| p.to_string_lossy().into_owned());
+                        self.local_cwd = spawned
+                            .initial_cwd
+                            .map(|p| p.to_string_lossy().into_owned());
+                        if !self.local_windows_style {
+                            self.engine
+                                .set_remote_home_dir(self.local_home_dir.clone());
+                        }
+                        self.title = self.tab_title();
+                        self.backend = ActiveBackend::Local(spawned.backend);
                         self.phase = SessionPhase::Connected;
                         self.spawn_local_pump(rx, cx);
                     }
@@ -398,23 +518,29 @@ impl TerminalSessionEntity {
         for effect in effects {
             match effect {
                 EngineSideEffect::PtyReply(reply) => self.write_raw(reply),
-                EngineSideEffect::TitleChanged(new_title) => {
-                    if !new_title.trim().is_empty() && matches!(self.kind, SessionKind::LocalShell)
-                    {
-                        self.title = new_title.trim().to_string();
-                        cx.emit(SessionEntityEvent::TitleChanged(self.title.clone()));
-                    }
+                EngineSideEffect::TitleChanged(_) => {
+                    // Local shell titles are derived deterministically from (shell_name, local_cwd)
+                    // rather than raw ConPTY `.exe` or arbitrary window title strings.
                 }
                 EngineSideEffect::ClipboardStore(text) => {
                     cx.write_to_clipboard(ClipboardItem::new_string(text));
                 }
-                EngineSideEffect::CurrentDirChanged(dir) => {
-                    if self.remote_cwd.as_ref() != Some(&dir) {
-                        self.remote_cwd = Some(dir);
-                        self.remote_cwd_seq += 1;
-                        cx.emit(SessionEntityEvent::RemoteCwdChanged);
+                EngineSideEffect::CurrentDirChanged(dir) => match self.kind {
+                    SessionKind::LocalShell => {
+                        if self.local_cwd.as_ref() != Some(&dir) {
+                            self.local_cwd = Some(dir);
+                            self.title = self.tab_title();
+                            cx.emit(SessionEntityEvent::TitleChanged(self.title.clone()));
+                        }
                     }
-                }
+                    SessionKind::Ssh { .. } => {
+                        if self.remote_cwd.as_ref() != Some(&dir) {
+                            self.remote_cwd = Some(dir);
+                            self.remote_cwd_seq += 1;
+                            cx.emit(SessionEntityEvent::RemoteCwdChanged);
+                        }
+                    }
+                },
                 EngineSideEffect::Bell => {}
             }
         }
@@ -680,6 +806,10 @@ mod tests {
             backend: ActiveBackend::None,
             sftp: None,
             conn_epoch: 1,
+            local_shell_name: "bash".into(),
+            local_cwd: None,
+            local_home_dir: None,
+            local_windows_style: false,
             remote_cwd: Some("/home".into()),
             remote_cwd_seq: 1,
             sftp_cwd: None,
@@ -698,5 +828,66 @@ mod tests {
         assert_eq!(a.sftp_directory(false), Some("/manual/a"));
         assert_eq!(a.sftp_directory(true), Some("/latest"));
         assert_eq!(b.sftp_directory(true), Some("/manual/b"));
+    }
+
+    #[test]
+    fn formats_rex_powershell_and_local_shell_titles_accurately() {
+        let home = Some(r"C:\Users\L");
+        // Home directory (including case/trailing-slash variants) -> `powershell ~`
+        for variant in [r"C:\Users\L", r"c:\users\l\", r"C:/Users/L/"] {
+            assert_eq!(
+                format_local_shell_titles("powershell", Some(variant), home, true),
+                ("powershell ~".to_string(), "powershell ~".to_string()),
+                "{variant}"
+            );
+        }
+
+        // <= 12 chars (`C:\Users` = 8 chars; `C:\123456789` = 12 chars) -> no ellipsis
+        assert_eq!(
+            format_local_shell_titles("powershell", Some(r"C:\Users"), home, true),
+            (
+                r"powershell C:\Users".to_string(),
+                r"powershell C:\Users".to_string()
+            )
+        );
+        assert_eq!(
+            format_local_shell_titles("powershell", Some(r"C:\123456789"), home, true),
+            (
+                r"powershell C:\123456789".to_string(),
+                r"powershell C:\123456789".to_string()
+            )
+        );
+
+        // 13 chars -> 12 chars + `...`
+        assert_eq!(
+            format_local_shell_titles("powershell", Some(r"C:\1234567890"), home, true),
+            (
+                r"powershell C:\1234567890".to_string(),
+                r"powershell C:\123456789...".to_string()
+            )
+        );
+
+        // Exact screenshot case (`xlwapm.png`): `C:\Users\Administrator` -> `powershell C:\Users\Adm...`
+        assert_eq!(
+            format_local_shell_titles("powershell", Some(r"C:\Users\Administrator"), home, true),
+            (
+                r"powershell C:\Users\Administrator".to_string(),
+                r"powershell C:\Users\Adm...".to_string()
+            )
+        );
+
+        // CJK multi-byte characters truncate on Unicode `char` boundary (12 chars + `...`)
+        assert_eq!(
+            format_local_shell_titles(
+                "powershell",
+                Some(r"D:\项目源码\云母终端工作区测试"),
+                home,
+                true,
+            ),
+            (
+                r"powershell D:\项目源码\云母终端工作区测试".to_string(),
+                r"powershell D:\项目源码\云母终端...".to_string()
+            )
+        );
     }
 }

@@ -5,7 +5,7 @@ use std::env;
 #[cfg(any(target_os = "windows", test))]
 use std::ffi::OsStr;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::thread;
 
 use anyhow::{Context, Result};
@@ -30,13 +30,33 @@ pub struct LocalPtyBackend {
     child_killer: Mutex<Box<dyn portable_pty::ChildKiller + Send + Sync>>,
 }
 
+pub struct SpawnedLocalPty {
+    pub backend: LocalPtyBackend,
+    pub shell_name: String,
+    pub initial_cwd: Option<PathBuf>,
+    pub home_dir: Option<PathBuf>,
+}
+
+pub fn normalize_shell_program_name(shell: &Path) -> String {
+    let raw = shell.to_string_lossy();
+    let trimmed = raw.trim().rsplit(['/', '\\']).next().unwrap_or("");
+    let lower = trimmed.to_ascii_lowercase();
+    let stem = lower.strip_suffix(".exe").unwrap_or(&lower);
+    match stem {
+        "" => "shell".to_string(),
+        "pwsh" | "powershell" => "powershell".to_string(),
+        "cmd" => "cmd".to_string(),
+        _ => stem.to_string(),
+    }
+}
+
 impl LocalPtyBackend {
     pub fn spawn(
         rows: u16,
         cols: u16,
         working_dir: Option<PathBuf>,
         event_tx: mpsc::UnboundedSender<LocalPtyEvent>,
-    ) -> Result<Self> {
+    ) -> Result<SpawnedLocalPty> {
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -48,15 +68,15 @@ impl LocalPtyBackend {
             .context("打开本地 PTY 失败")?;
 
         let shell = detect_default_shell();
+        let shell_name = normalize_shell_program_name(&shell);
+        let home_dir = directories::UserDirs::new().map(|u| u.home_dir().to_path_buf());
         let mut cmd = CommandBuilder::new(&shell);
         #[cfg(unix)]
         {
             cmd.arg("-l");
         }
         #[cfg(target_os = "windows")]
-        if shell.file_name().is_some_and(|name| {
-            name.eq_ignore_ascii_case("pwsh.exe") || name.eq_ignore_ascii_case("powershell.exe")
-        }) {
+        if shell_name == "powershell" {
             cmd.arg("-NoLogo");
         }
         cmd.env("TERM", "xterm-256color");
@@ -71,11 +91,12 @@ impl LocalPtyBackend {
             );
         }
 
-        if let Some(cwd) = working_dir
-            .or_else(|| directories::UserDirs::new().map(|u| u.home_dir().to_path_buf()))
+        let mut initial_cwd = None;
+        if let Some(cwd) = working_dir.or_else(|| home_dir.clone())
             && cwd.is_dir()
         {
-            cmd.cwd(cwd);
+            cmd.cwd(&cwd);
+            initial_cwd = Some(cwd);
         }
 
         let mut child = pair
@@ -134,10 +155,15 @@ impl LocalPtyBackend {
                 let _ = reader_tx.send(LocalPtyEvent::Exited(code));
             })?;
 
-        Ok(Self {
-            master: Mutex::new(pair.master),
-            write_tx,
-            child_killer: Mutex::new(child_killer),
+        Ok(SpawnedLocalPty {
+            backend: Self {
+                master: Mutex::new(pair.master),
+                write_tx,
+                child_killer: Mutex::new(child_killer),
+            },
+            shell_name,
+            initial_cwd,
+            home_dir,
         })
     }
 
@@ -243,9 +269,30 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_shell_program_names_across_platforms() {
+        for (raw, expected) in [
+            (r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "powershell"),
+            (r"C:\Program Files\PowerShell\7\pwsh.EXE", "powershell"),
+            ("/usr/local/bin/pwsh", "powershell"),
+            (r"C:\Windows\System32\cmd.exe", "cmd"),
+            ("/bin/bash", "bash"),
+            ("/usr/bin/zsh", "zsh"),
+            ("/opt/homebrew/bin/fish", "fish"),
+            ("/opt/终端", "终端"),
+            ("/opt/终端.EXE", "终端"),
+        ] {
+            // Handle Windows backslashes even when tested on Unix hosts
+            let tail = raw.rsplit(['/', '\\']).next().unwrap_or(raw);
+            assert_eq!(normalize_shell_program_name(Path::new(tail)), expected, "{raw}");
+        }
+    }
+
+    #[test]
     fn spawns_local_pty_and_renders_command_output() {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let pty = LocalPtyBackend::spawn(24, 80, None, tx).expect("spawn local pty");
+        let spawned = LocalPtyBackend::spawn(24, 80, None, tx).expect("spawn local pty");
+        assert!(!spawned.shell_name.is_empty());
+        let pty = spawned.backend;
         pty.write(b"echo MICA_GPUI_OK\r".to_vec());
 
         let mut engine = AlacrittyTerminalEngine::new(24, 80, 500);

@@ -251,53 +251,61 @@ impl RenderOnce for WelcomeView {
 
         div()
             .size_full()
-            .overflow_y_scrollbar()
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(cx.theme().border)
+            .overflow_hidden()
             .bg(cx.theme().background)
-            .flex()
-            .justify_center()
             .child(
-                v_flex()
-                    .w_full()
-                    .max_w(px(720.0))
-                    .px_8()
-                    .py(px(56.0))
-                    .gap_8()
-                    .child(
-                        h_flex()
-                            .gap_3p5()
-                            .items_center()
-                            .child(brand_app_icon_element(48.0))
-                            .child(
-                                v_flex()
-                                    .gap_0p5()
-                                    .child(
-                                        div()
-                                            .text_xl()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(cx.theme().foreground)
-                                            .child("Mica Term"),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child("本地终端与远程 SSH 工作区"),
-                                    ),
-                            ),
-                    )
-                    .child(h_flex().gap_3p5().child(local_card).child(ssh_card))
+                div()
+                    .size_full()
+                    .overflow_y_scrollbar()
+                    .flex()
+                    .justify_center()
                     .child(
                         v_flex()
-                            .gap_2()
+                            .w_full()
+                            .max_w(px(720.0))
+                            .px_8()
+                            .py(px(56.0))
+                            .gap_8()
                             .child(
-                                div()
-                                    .px_1()
-                                    .text_xs()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("最近与常用主机"),
+                                h_flex()
+                                    .gap_3p5()
+                                    .items_center()
+                                    .child(brand_app_icon_element(48.0))
+                                    .child(
+                                        v_flex()
+                                            .gap_0p5()
+                                            .child(
+                                                div()
+                                                    .text_xl()
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .text_color(cx.theme().foreground)
+                                                    .child("Mica Term"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child("本地终端与远程 SSH 工作区"),
+                                            ),
+                                    ),
                             )
-                            .child(quick_section),
+                            .child(h_flex().gap_3p5().child(local_card).child(ssh_card))
+                            .child(
+                                v_flex()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .px_1()
+                                            .text_xs()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child("最近与常用主机"),
+                                    )
+                                    .child(quick_section),
+                            ),
                     ),
             )
     }

@@ -805,6 +805,84 @@ pub fn extract_cwd_from_prompt_line(line: &str, remote_home: Option<&str>) -> Op
     }
 }
 
+/// Normalizes a local Windows filesystem directory path (drive root `C:\`, subdirectory `C:\Users\Admin`,
+/// or UNC share `\\server\share\dir`), rejecting non-filesystem providers such as `HKLM:` or `Env:`.
+pub fn normalize_windows_display_path(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_matches('"').trim();
+    if trimmed.is_empty()
+        || trimmed
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '<' | '>' | '|' | '"' | '?' | '*'))
+    {
+        return None;
+    }
+
+    let bytes = trimmed.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        if bytes.get(2).is_some_and(|&c| c != b'\\' && c != b'/') {
+            return None;
+        }
+        let mut normalized = trimmed.replace('/', "\\");
+        if normalized.len() == 2 {
+            normalized.push('\\');
+            return Some(normalized);
+        }
+        while normalized.len() > 3 && normalized.ends_with('\\') {
+            normalized.pop();
+        }
+        return Some(normalized);
+    }
+
+    if trimmed.starts_with("\\\\") || trimmed.starts_with("//") {
+        let normalized = trimmed.replace('/', "\\");
+        let after_slashes = normalized.strip_prefix("\\\\")?;
+        if after_slashes.is_empty() || after_slashes.starts_with('\\') || after_slashes.contains(':')
+        {
+            return None;
+        }
+        let (server, rest) = after_slashes.split_once('\\')?;
+        let rest_trimmed = rest.trim_end_matches('\\');
+        let share = rest_trimmed.split('\\').next().unwrap_or("");
+        if server.is_empty() || share.is_empty() {
+            return None;
+        }
+        return Some(format!("\\\\{server}\\{rest_trimmed}"));
+    }
+
+    None
+}
+
+/// Extracts a local Windows directory from an idle PowerShell (`PS C:\Users\L> `) or CMD (`C:\Users>`) prompt line.
+pub fn extract_windows_cwd_from_prompt_line(line: &str) -> Option<String> {
+    let mut rest = line.trim_start();
+    while rest.starts_with('(') {
+        let (env_tag, after) = rest.split_once(") ")?;
+        if env_tag.contains('>') {
+            return None;
+        }
+        rest = after.trim_start();
+    }
+    // `>` is illegal in Win32/NTFS paths, so the first `>` terminates the prompt;
+    // an idle prompt has no command tokens (nor a second `>` from `>>`) after it.
+    let (prefix, after_gt) = rest.split_once('>')?;
+    if prefix.is_empty() || !after_gt.trim().is_empty() {
+        return None;
+    }
+    let has_ps = prefix.starts_with("PS ");
+    let body = prefix.strip_prefix("PS ").unwrap_or(prefix);
+    if !has_ps && body.ends_with(char::is_whitespace) {
+        return None;
+    }
+    let candidate = body
+        .strip_prefix("Microsoft.PowerShell.Core\\FileSystem::")
+        .or_else(|| body.strip_prefix("FileSystem::"))
+        .unwrap_or(body);
+    if candidate.starts_with(['\\', '/']) && !has_ps {
+        return None;
+    }
+    normalize_windows_display_path(candidate)
+}
+
 /// Determines whether a command string (after the shell prompt) produces syntax-highlightable
 /// output on stdout, returning either a file/language hint or first-line fallback.
 pub fn detect_command_syntax_target(cmd_line: &str) -> Option<CommandSyntaxTarget> {
@@ -1403,6 +1481,42 @@ mod tests {
     }
 
     #[test]
+    fn windows_idle_prompts_extract_filesystem_cwd_and_reject_providers() {
+        for (line, expected) in [
+            (r"PS C:\Users\L> ", r"C:\Users\L"),
+            (r"PS C:\Users\Administrator> ", r"C:\Users\Administrator"),
+            (r"PS C:\>", r"C:\"),
+            (r"(venv) PS D:\Projects\mica\> ", r"D:\Projects\mica"),
+            (r"C:\Users>", r"C:\Users"),
+            (
+                r"PS Microsoft.PowerShell.Core\FileSystem::\\nas\share\docs\> ",
+                r"\\nas\share\docs",
+            ),
+        ] {
+            assert_eq!(
+                extract_windows_cwd_from_prompt_line(line).as_deref(),
+                Some(expected),
+                "{line}"
+            );
+        }
+        for rejected in [
+            r"PS C:\Users\L> cd ..",
+            r"PS HKLM:\Software> ",
+            r"PS Env:\> ",
+            r"PS Variable:> ",
+            r">> ",
+            r"C:\Users > ",
+            r"\\nas\share>",
+        ] {
+            assert_eq!(
+                extract_windows_cwd_from_prompt_line(rejected),
+                None,
+                "{rejected}"
+            );
+        }
+    }
+
+    #[test]
     fn extracts_cwd_from_standard_bash_titles() {
         assert_eq!(
             extract_cwd_from_window_title("ubuntu@prod-01: /etc/nginx", Some("/home/ubuntu"))
@@ -1475,5 +1589,13 @@ mod tests {
         );
         assert_eq!(detect_command_syntax_target("ls -la /var/log"), None);
         assert_eq!(detect_command_syntax_target("ps aux"), None);
+        assert_eq!(
+            extract_windows_cwd_from_prompt_line("PS C:\\my-build-> "),
+            Some("C:\\my-build-".into())
+        );
+        assert_eq!(
+            extract_windows_cwd_from_prompt_line("PS C:\\Users> echo hi > "),
+            None
+        );
     }
 }

@@ -14,11 +14,11 @@ use std::rc::Rc;
 use alacritty_terminal::term::TermMode;
 use gpui_kit::assets::IconName as LucideIcon;
 use gpui_kit::component::{
-    ActiveTheme as _, Sizable as _,
+    ActiveTheme as _, Icon, Sizable as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Input, InputEvent, InputState},
-    menu::{ContextMenuExt as _, PopupMenuItem},
+    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
     v_flex,
 };
 use gpui_kit::{
@@ -31,6 +31,7 @@ use gpui_kit::{
     px, size,
 };
 
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::{CursorStyle, HoverListenerMode, Modifiers, StatefulInteractiveElement as _, Task};
 
 use crate::domain::{
@@ -42,9 +43,17 @@ use crate::terminal::{
 };
 use crate::ui::fonts::{TerminalFont, installed_font_names};
 use crate::ui::theme::macos_squircle_badge;
+use crate::ui::workspace::TabSplitAxis;
+
+pub const TERMINAL_PANE_HEADER_HEIGHT: f32 = 28.0;
 
 pub enum TerminalPaneEvent {
     Activate,
+    SplitRequested(TabSplitAxis),
+    ToggleFloatRequested,
+    ToggleMaximizeRequested,
+    ToggleCollapseFloatingRequested,
+    BeginFloatingMove(Point<Pixels>),
     CloseRequested,
 }
 
@@ -98,8 +107,13 @@ fn link_modifier(mods: Modifiers) -> bool {
 
 pub struct TerminalPaneView {
     pub session: Entity<TerminalSessionEntity>,
-    pub is_split_member: bool,
+    pub pane_count_in_tab: usize,
     pub is_active_pane: bool,
+    pub is_maximized_pane: bool,
+    pub is_floating_pane: bool,
+    pub is_floating_collapsed: bool,
+    card_hovered: bool,
+    last_header_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     focus_handle: FocusHandle,
     search_input: Option<Entity<InputState>>,
     terminal_font: TerminalFont,
@@ -250,8 +264,13 @@ impl TerminalPaneView {
         let focus_handle = cx.focus_handle();
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
 
+        cx.on_focus(&focus_handle, window, |_, _, cx| {
+            cx.notify();
+        })
+        .detach();
         cx.on_blur(&focus_handle, window, |this, window, cx| {
             this.cancel_gestures(window.mouse_position(), cx);
+            cx.notify();
         })
         .detach();
         cx.observe_window_activation(window, |this, window, cx| {
@@ -259,15 +278,21 @@ impl TerminalPaneView {
                 this.cancel_gestures(window.mouse_position(), cx);
                 this.hover_pointer = None;
                 this.hover_modifiers = Modifiers::default();
-                cx.notify();
+                this.card_hovered = false;
             }
+            cx.notify();
         })
         .detach();
         let palette = TerminalPalette::for_theme_id(&prefs.theme_id, prefs.dark_mode);
         Self {
             session,
-            is_split_member: false,
+            pane_count_in_tab: 1,
             is_active_pane: true,
+            is_maximized_pane: false,
+            is_floating_pane: false,
+            is_floating_collapsed: false,
+            card_hovered: false,
+            last_header_bounds: Rc::new(Cell::new(None)),
             focus_handle,
             search_input: None,
             terminal_font: TerminalFont::resolve(&prefs.font_family, palette.dark, || {
@@ -312,6 +337,14 @@ impl TerminalPaneView {
 
     pub fn has_marked_text(&self) -> bool {
         self.marked_text.is_some()
+    }
+
+    pub fn last_header_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.last_header_bounds.get()
+    }
+
+    pub fn last_grid_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.last_grid_bounds.get()
     }
 
     pub fn open_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -661,6 +694,13 @@ impl TerminalPaneView {
         }
     }
 
+    fn handle_card_hover(&mut self, inside: &bool, _: &mut Window, cx: &mut Context<Self>) {
+        if self.card_hovered != *inside {
+            self.card_hovered = *inside;
+            cx.notify();
+        }
+    }
+
     #[inline(never)]
     fn render_phase_overlay(&self, cx: &mut Context<Self>) -> Option<gpui_kit::AnyElement> {
         let session_ref = self.session.read(cx);
@@ -671,6 +711,7 @@ impl TerminalPaneView {
                 let subtitle = session_ref.endpoint_subtitle();
                 Some(
                     div()
+                        .id("phase-overlay-connecting")
                         .absolute()
                         .occlude()
                         .inset_0()
@@ -678,9 +719,13 @@ impl TerminalPaneView {
                         .items_center()
                         .justify_center()
                         .bg(cx.theme().background.opacity(0.76))
+                        .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
+                        .on_hover(cx.listener(Self::handle_card_hover))
                         .child(
                             h_flex()
-                                .w(px(380.0))
+                                .w_full()
+                                .max_w(px(380.0))
+                                .mx_3()
                                 .p_4()
                                 .gap_3p5()
                                 .items_center()
@@ -726,6 +771,7 @@ impl TerminalPaneView {
                 let session_reject = self.session.clone();
                 Some(
                     div()
+                        .id("phase-overlay-hostkey")
                         .absolute()
                         .occlude()
                         .inset_0()
@@ -733,9 +779,13 @@ impl TerminalPaneView {
                         .items_center()
                         .justify_center()
                         .bg(cx.theme().background.opacity(0.82))
+                        .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
+                        .on_hover(cx.listener(Self::handle_card_hover))
                         .child(
                             v_flex()
-                                .w(px(440.0))
+                                .w_full()
+                                .max_w(px(440.0))
+                                .mx_3()
                                 .p_5()
                                 .gap_3p5()
                                 .rounded(px(12.0))
@@ -869,6 +919,7 @@ impl TerminalPaneView {
                 let scrollback = self.scrollback_lines;
                 Some(
                     div()
+                        .id("phase-overlay-error")
                         .absolute()
                         .occlude()
                         .inset_0()
@@ -876,9 +927,13 @@ impl TerminalPaneView {
                         .items_center()
                         .justify_center()
                         .bg(cx.theme().background.opacity(0.82))
+                        .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
+                        .on_hover(cx.listener(Self::handle_card_hover))
                         .child(
                             v_flex()
-                                .w(px(440.0))
+                                .w_full()
+                                .max_w(px(440.0))
+                                .mx_3()
                                 .p_5()
                                 .gap_3p5()
                                 .rounded(px(12.0))
@@ -936,6 +991,520 @@ impl Render for TerminalPaneView {
         let is_focused = self.focus_handle.is_focused(window);
         let palette = self.palette.clone();
         let sem_opts = self.semantic_opts;
+        let entity_id = cx.entity_id();
+        let multi_pane = self.pane_count_in_tab > 1;
+        let is_maximized = self.is_maximized_pane;
+        let is_floating = self.is_floating_pane;
+        let is_collapsed = self.is_floating_collapsed;
+        let show_header_actions = !multi_pane
+            || self.is_active_pane
+            || self.card_hovered
+            || is_floating
+            || is_maximized;
+        let header_bounds_cell = self.last_header_bounds.clone();
+        let compact_header_actions = self
+            .last_header_bounds
+            .get()
+            .is_some_and(|b| b.size.width < px(190.0));
+
+        let (pane_title, is_ssh, ssh_dot_color) = {
+            let s = self.session.read(cx);
+            let status_color = match s.phase {
+                SessionPhase::Connected => cx.theme().success,
+                SessionPhase::Connecting(_) | SessionPhase::AwaitingHostKey(_) => {
+                    cx.theme().warning
+                }
+                SessionPhase::Error(_) => cx.theme().danger,
+                SessionPhase::Disconnected(_) => cx.theme().muted_foreground.opacity(0.6),
+            };
+            (s.pane_title(), s.is_ssh(), status_color)
+        };
+        let header_bg = crate::terminal::colors::rgb_to_hsla(palette.background, 1.0);
+
+        let pane_header = {
+            let pane_for_h = cx.entity();
+            let pane_for_v = cx.entity();
+            let pane_for_float = cx.entity();
+            let pane_for_max = cx.entity();
+            let pane_for_col = cx.entity();
+            let pane_for_close = cx.entity();
+            let pane_for_menu = cx.entity();
+
+            let split_h_tip = tooltip(
+                ShortcutAction::SplitHorizontal.label(),
+                self.shortcuts.get(ShortcutAction::SplitHorizontal).as_ref(),
+            );
+            let split_v_tip = tooltip(
+                ShortcutAction::SplitVertical.label(),
+                self.shortcuts.get(ShortcutAction::SplitVertical).as_ref(),
+            );
+            let close_tip = tooltip(
+                "关闭当前分屏",
+                self.shortcuts.get(ShortcutAction::ClosePaneOrTab).as_ref(),
+            );
+            let float_label = if is_floating {
+                "停靠回分屏布局"
+            } else {
+                "在终端区域内浮动"
+            };
+            let max_label = if is_maximized {
+                "还原分屏大小"
+            } else {
+                "最大化当前分屏"
+            };
+            let collapse_label = if is_collapsed {
+                "展开浮动面板"
+            } else {
+                "收起浮动面板"
+            };
+
+            h_flex()
+                .id(SharedString::from(format!("term-pane-header-{entity_id}")))
+                .relative()
+                .flex_shrink_0()
+                .h(px(TERMINAL_PANE_HEADER_HEIGHT))
+                .pl_3()
+                .pr_2()
+                .gap_2()
+                .items_center()
+                .justify_between()
+                .bg(header_bg)
+                .on_prepaint(move |b, _, _| {
+                    header_bounds_cell.set(Some(b));
+                })
+                .when(is_floating && !is_maximized, |bar| {
+                    bar.cursor(CursorStyle::PointingHand)
+                })
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, ev: &MouseDownEvent, window, cx| {
+                        this.focus_handle.focus(window, cx);
+                        window.prevent_default();
+                        cx.emit(TerminalPaneEvent::Activate);
+                        if ev.click_count == 2 && this.pane_count_in_tab > 1 {
+                            cx.stop_propagation();
+                            cx.emit(TerminalPaneEvent::ToggleMaximizeRequested);
+                        } else if this.is_floating_pane
+                            && !this.is_maximized_pane
+                            && ev.click_count == 1
+                        {
+                            cx.stop_propagation();
+                            cx.emit(TerminalPaneEvent::BeginFloatingMove(ev.position));
+                        }
+                    }),
+                )
+                .child(
+                    h_flex()
+                        .min_w_0()
+                        .flex_1()
+                        .gap_1p5()
+                        .items_center()
+                        .child(
+                            Icon::new(if is_ssh {
+                                LucideIcon::Server
+                            } else {
+                                LucideIcon::Terminal
+                            })
+                            .xsmall()
+                            .text_color(if is_ssh {
+                                ssh_dot_color
+                            } else {
+                                cx.theme().muted_foreground
+                            }),
+                        )
+                        .child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .text_xs()
+                                .text_color(if self.is_active_pane {
+                                    cx.theme().foreground.opacity(0.86)
+                                } else {
+                                    cx.theme().muted_foreground
+                                })
+                                .child(pane_title),
+                        ),
+                )
+                .when(show_header_actions, |bar| {
+                    if multi_pane && compact_header_actions {
+                        let p_menu = pane_for_menu.clone();
+                        let p_max = pane_for_max.clone();
+                        let p_close = pane_for_close.clone();
+                        bar.child(
+                            h_flex()
+                                .flex_shrink_0()
+                                .gap_0p5()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                                            window.prevent_default();
+                                            cx.stop_propagation();
+                                        })
+                                        .child(
+                                            Button::new(SharedString::from(format!(
+                                                "pane-more-{entity_id}"
+                                            )))
+                                            .tab_stop(false)
+                                            .ghost()
+                                            .xsmall()
+                                            .compact()
+                                            .size(px(22.0))
+                                            .icon(LucideIcon::Ellipsis)
+                                            .tooltip("分屏操作菜单")
+                                            .dropdown_menu(move |menu, _, _| {
+                                                let ph = p_menu.clone();
+                                                let pv = p_menu.clone();
+                                                let pf = p_menu.clone();
+                                                let pc = p_menu.clone();
+                                                let menu = menu
+                                                    .item(
+                                                        PopupMenuItem::new("向右水平分屏")
+                                                            .icon(LucideIcon::Columns2)
+                                                            .on_click(move |_, _, cx| {
+                                                                ph.update(cx, |_, cx| {
+                                                                    cx.emit(
+                                                                        TerminalPaneEvent::SplitRequested(
+                                                                            TabSplitAxis::Horizontal,
+                                                                        ),
+                                                                    )
+                                                                });
+                                                            }),
+                                                    )
+                                                    .item(
+                                                        PopupMenuItem::new("向下垂直分屏")
+                                                            .icon(LucideIcon::Rows2)
+                                                            .on_click(move |_, _, cx| {
+                                                                pv.update(cx, |_, cx| {
+                                                                    cx.emit(
+                                                                        TerminalPaneEvent::SplitRequested(
+                                                                            TabSplitAxis::Vertical,
+                                                                        ),
+                                                                    )
+                                                                });
+                                                            }),
+                                                    )
+                                                    .separator()
+                                                    .item(
+                                                        PopupMenuItem::new(float_label)
+                                                            .icon(if is_floating {
+                                                                LucideIcon::Dock
+                                                            } else {
+                                                                LucideIcon::PictureInPicture2
+                                                            })
+                                                            .on_click(move |_, _, cx| {
+                                                                pf.update(cx, |_, cx| {
+                                                                    cx.emit(
+                                                                        TerminalPaneEvent::ToggleFloatRequested,
+                                                                    )
+                                                                });
+                                                            }),
+                                                    );
+                                                if is_floating && !is_maximized {
+                                                    menu.item(
+                                                        PopupMenuItem::new(collapse_label)
+                                                            .icon(if is_collapsed {
+                                                                LucideIcon::CirclePlus
+                                                            } else {
+                                                                LucideIcon::CircleMinus
+                                                            })
+                                                            .on_click(move |_, _, cx| {
+                                                                pc.update(cx, |_, cx| {
+                                                                    cx.emit(
+                                                                        TerminalPaneEvent::ToggleCollapseFloatingRequested,
+                                                                    )
+                                                                });
+                                                            }),
+                                                    )
+                                                } else {
+                                                    menu
+                                                }
+                                            }),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                                            window.prevent_default();
+                                            cx.stop_propagation();
+                                        })
+                                        .child(
+                                            Button::new(SharedString::from(format!(
+                                                "pane-max-{entity_id}"
+                                            )))
+                                            .tab_stop(false)
+                                            .ghost()
+                                            .xsmall()
+                                            .compact()
+                                            .size(px(22.0))
+                                            .icon(if is_maximized {
+                                                LucideIcon::Minimize2
+                                            } else {
+                                                LucideIcon::Maximize2
+                                            })
+                                            .tooltip(max_label)
+                                            .on_click(move |_, _, cx| {
+                                                cx.stop_propagation();
+                                                p_max.update(cx, |_, cx| {
+                                                    cx.emit(
+                                                        TerminalPaneEvent::ToggleMaximizeRequested,
+                                                    )
+                                                });
+                                            }),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                                            window.prevent_default();
+                                            cx.stop_propagation();
+                                        })
+                                        .child(
+                                            Button::new(SharedString::from(format!(
+                                                "close-pane-{entity_id}"
+                                            )))
+                                            .tab_stop(false)
+                                            .ghost()
+                                            .xsmall()
+                                            .compact()
+                                            .size(px(22.0))
+                                            .icon(LucideIcon::X)
+                                            .tooltip(close_tip.clone())
+                                            .on_click(move |_, _, cx| {
+                                                cx.stop_propagation();
+                                                p_close.update(cx, |_, cx| {
+                                                    cx.emit(TerminalPaneEvent::CloseRequested)
+                                                });
+                                            }),
+                                        ),
+                                ),
+                        )
+                    } else {
+                        bar.child(
+                            h_flex()
+                                .flex_shrink_0()
+                                .gap_0p5()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                                            window.prevent_default();
+                                            cx.stop_propagation();
+                                        })
+                                        .child(
+                                            Button::new(SharedString::from(format!(
+                                                "pane-split-h-{entity_id}"
+                                            )))
+                                            .tab_stop(false)
+                                            .ghost()
+                                            .xsmall()
+                                            .compact()
+                                            .size(px(22.0))
+                                            .icon(LucideIcon::Columns2)
+                                            .tooltip(split_h_tip)
+                                            .on_click(move |_, _, cx| {
+                                                cx.stop_propagation();
+                                                pane_for_h.update(cx, |_, cx| {
+                                                    cx.emit(TerminalPaneEvent::SplitRequested(
+                                                        TabSplitAxis::Horizontal,
+                                                    ))
+                                                });
+                                            }),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                                            window.prevent_default();
+                                            cx.stop_propagation();
+                                        })
+                                        .child(
+                                            Button::new(SharedString::from(format!(
+                                                "pane-split-v-{entity_id}"
+                                            )))
+                                            .tab_stop(false)
+                                            .ghost()
+                                            .xsmall()
+                                            .compact()
+                                            .size(px(22.0))
+                                            .icon(LucideIcon::Rows2)
+                                            .tooltip(split_v_tip)
+                                            .on_click(move |_, _, cx| {
+                                                cx.stop_propagation();
+                                                pane_for_v.update(cx, |_, cx| {
+                                                    cx.emit(TerminalPaneEvent::SplitRequested(
+                                                        TabSplitAxis::Vertical,
+                                                    ))
+                                                });
+                                            }),
+                                        ),
+                                )
+                                .when(multi_pane, |row| {
+                                    row.child(
+                                        div()
+                                            .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                                                window.prevent_default();
+                                                cx.stop_propagation();
+                                            })
+                                            .child(
+                                                Button::new(SharedString::from(format!(
+                                                    "pane-float-{entity_id}"
+                                                )))
+                                                .tab_stop(false)
+                                                .ghost()
+                                                .xsmall()
+                                                .compact()
+                                                .size(px(22.0))
+                                                .icon(if is_floating {
+                                                    LucideIcon::Dock
+                                                } else {
+                                                    LucideIcon::PictureInPicture2
+                                                })
+                                                .tooltip(float_label)
+                                                .on_click(move |_, _, cx| {
+                                                    cx.stop_propagation();
+                                                    pane_for_float.update(cx, |_, cx| {
+                                                        cx.emit(
+                                                            TerminalPaneEvent::ToggleFloatRequested,
+                                                        )
+                                                    });
+                                                }),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                                                window.prevent_default();
+                                                cx.stop_propagation();
+                                            })
+                                            .child(
+                                                Button::new(SharedString::from(format!(
+                                                    "pane-max-{entity_id}"
+                                                )))
+                                                .tab_stop(false)
+                                                .ghost()
+                                                .xsmall()
+                                                .compact()
+                                                .size(px(22.0))
+                                                .icon(if is_maximized {
+                                                    LucideIcon::Minimize2
+                                                } else {
+                                                    LucideIcon::Maximize2
+                                                })
+                                                .tooltip(max_label)
+                                                .on_click(move |_, _, cx| {
+                                                    cx.stop_propagation();
+                                                    pane_for_max.update(cx, |_, cx| {
+                                                        cx.emit(
+                                                            TerminalPaneEvent::ToggleMaximizeRequested,
+                                                        )
+                                                    });
+                                                }),
+                                            ),
+                                    )
+                                    .when(is_floating && !is_maximized, |r| {
+                                        r.child(
+                                            div()
+                                                .on_mouse_down(
+                                                    MouseButton::Left,
+                                                    |_, window, cx| {
+                                                        window.prevent_default();
+                                                        cx.stop_propagation();
+                                                    },
+                                                )
+                                                .child(
+                                                    Button::new(SharedString::from(format!(
+                                                        "pane-collapse-{entity_id}"
+                                                    )))
+                                                    .tab_stop(false)
+                                                    .ghost()
+                                                    .xsmall()
+                                                    .compact()
+                                                    .size(px(22.0))
+                                                    .icon(if is_collapsed {
+                                                        LucideIcon::CirclePlus
+                                                    } else {
+                                                        LucideIcon::CircleMinus
+                                                    })
+                                                    .tooltip(collapse_label)
+                                                    .on_click(move |_, _, cx| {
+                                                        cx.stop_propagation();
+                                                        pane_for_col.update(cx, |_, cx| {
+                                                            cx.emit(
+                                                                TerminalPaneEvent::ToggleCollapseFloatingRequested,
+                                                            )
+                                                        });
+                                                    }),
+                                                ),
+                                        )
+                                    })
+                                    .child(
+                                        div()
+                                            .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                                                window.prevent_default();
+                                                cx.stop_propagation();
+                                            })
+                                            .child(
+                                                Button::new(SharedString::from(format!(
+                                                    "close-pane-{entity_id}"
+                                                )))
+                                                .tab_stop(false)
+                                                .ghost()
+                                                .xsmall()
+                                                .compact()
+                                                .size(px(22.0))
+                                                .icon(LucideIcon::X)
+                                                .tooltip(close_tip)
+                                                .on_click(move |_, _, cx| {
+                                                    cx.stop_propagation();
+                                                    pane_for_close.update(cx, |_, cx| {
+                                                        cx.emit(TerminalPaneEvent::CloseRequested)
+                                                    });
+                                                }),
+                                            ),
+                                    )
+                                }),
+                        )
+                    }
+                })
+        };
+
+        let card_border = if is_floating {
+            cx.theme()
+                .primary
+                .opacity(if self.is_active_pane { 0.48 } else { 0.28 })
+        } else if multi_pane && self.is_active_pane {
+            cx.theme().primary.opacity(0.42)
+        } else {
+            cx.theme().border
+        };
+
+        let card_shell = v_flex()
+            .id(SharedString::from(format!("term-pane-{entity_id}")))
+            .size_full()
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(card_border)
+            .overflow_hidden()
+            .bg(header_bg)
+            .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
+            .on_hover(cx.listener(Self::handle_card_hover))
+            .when(!self.is_active_pane, |el| {
+                el.capture_any_mouse_down(
+                    cx.listener(|_, _, _, cx| cx.emit(TerminalPaneEvent::Activate)),
+                )
+            });
+
+        // Collapsed floating panes keep a live FocusHandle on the card shell so workspace shortcuts
+        // stay active while completely skipping `render_snapshot` grid traversal.
+        if is_collapsed {
+            return card_shell
+                .track_focus(&self.focus_handle)
+                .key_context("TerminalPane")
+                .on_key_down(cx.listener(Self::handle_key_down))
+                .child(pane_header);
+        }
+
         let (font_size_f32, search_open, snapshot) = self.session.update(cx, |s, _| {
             (
                 s.font_size,
@@ -943,6 +1512,7 @@ impl Render for TerminalPaneView {
                 s.render_snapshot(&palette, is_focused, sem_opts),
             )
         });
+        let snapshot_bg = snapshot.background;
         if let Some(ref cur) = snapshot.cursor {
             self.last_cursor_cell = (cur.row, cur.col);
         }
@@ -956,15 +1526,11 @@ impl Render for TerminalPaneView {
             let bounds = self.search_bounds.clone();
             Some(
                 h_flex()
-                    .child(
-                        canvas(move |b, _, _| bounds.set(Some(b)), |_, _, _, _| {})
-                            .absolute()
-                            .inset_0(),
-                    )
+                    .on_prepaint(move |b, _, _| bounds.set(Some(b)))
                     .absolute()
                     .occlude()
-                    .top_2()
-                    .right_4()
+                    .top_1p5()
+                    .right_3()
                     .w(px(320.0))
                     .px_2()
                     .py_1p5()
@@ -1028,27 +1594,6 @@ impl Render for TerminalPaneView {
             None
         };
 
-        // Subtle close button on split panes so individual splits can be closed in 1 click
-        let split_close_badge = (self.is_split_member && !search_open).then(|| {
-            let pane = cx.entity();
-            div().absolute().occlude().top_1p5().right_3().child(
-                Button::new(SharedString::from(format!("close-pane-{}", cx.entity_id())))
-                    .tab_stop(false)
-                    .ghost()
-                    .xsmall()
-                    .compact()
-                    .icon(LucideIcon::X)
-                    .tooltip(tooltip(
-                        "关闭当前分屏",
-                        self.shortcuts.get(ShortcutAction::ClosePaneOrTab).as_ref(),
-                    ))
-                    .on_click(move |_, _, cx| {
-                        cx.stop_propagation();
-                        pane.update(cx, |_, cx| cx.emit(TerminalPaneEvent::CloseRequested));
-                    }),
-            )
-        });
-
         let phase_overlay = self.render_phase_overlay(cx);
         let grid_bounds_cell = self.last_grid_bounds.clone();
         let cell_size_cell = self.last_cell_size.clone();
@@ -1060,7 +1605,6 @@ impl Render for TerminalPaneView {
         let terminal_font = self.terminal_font.clone();
         let snap_rows = snapshot.rows;
         let snap_cols = snapshot.cols;
-        let bg_hsla = snapshot.background;
 
         let session_ctx_copy = self.session.clone();
         let view_paste = cx.entity();
@@ -1070,7 +1614,9 @@ impl Render for TerminalPaneView {
         let session_ctx_clear = self.session.clone();
         let session_ctx_reconnect = self.session.clone();
         let view_ctx = cx.entity();
-        let is_split_ctx = self.is_split_member;
+        let is_split_ctx = multi_pane;
+        let is_float_ctx = is_floating;
+        let is_max_ctx = is_maximized;
         let scrollback_ctx = self.scrollback_lines;
         let has_sel = self.session.read(cx).selected_text().is_some();
 
@@ -1348,13 +1894,77 @@ impl Render for TerminalPaneView {
                             }),
                     );
 
+                let ph = view_ctx.clone();
+                let pv = view_ctx.clone();
+                let menu = menu
+                    .separator()
+                    .item(
+                        PopupMenuItem::new("向右水平分屏")
+                            .icon(LucideIcon::Columns2)
+                            .on_click(move |_, _, cx| {
+                                ph.update(cx, |_, cx| {
+                                    cx.emit(TerminalPaneEvent::SplitRequested(
+                                        TabSplitAxis::Horizontal,
+                                    ))
+                                });
+                            }),
+                    )
+                    .item(
+                        PopupMenuItem::new("向下垂直分屏")
+                            .icon(LucideIcon::Rows2)
+                            .on_click(move |_, _, cx| {
+                                pv.update(cx, |_, cx| {
+                                    cx.emit(TerminalPaneEvent::SplitRequested(
+                                        TabSplitAxis::Vertical,
+                                    ))
+                                });
+                            }),
+                    );
+
                 if is_split_ctx {
-                    let pane = view_ctx.clone();
-                    menu.separator().item(
+                    let pf = view_ctx.clone();
+                    let pm = view_ctx.clone();
+                    let p_close = view_ctx.clone();
+                    menu.item(
+                        PopupMenuItem::new(if is_float_ctx {
+                            "停靠回分屏布局"
+                        } else {
+                            "在终端区域内浮动"
+                        })
+                        .icon(if is_float_ctx {
+                            LucideIcon::Dock
+                        } else {
+                            LucideIcon::PictureInPicture2
+                        })
+                        .on_click(move |_, _, cx| {
+                            pf.update(cx, |_, cx| cx.emit(TerminalPaneEvent::ToggleFloatRequested));
+                        }),
+                    )
+                    .item(
+                        PopupMenuItem::new(if is_max_ctx {
+                            "还原分屏大小"
+                        } else {
+                            "最大化当前分屏"
+                        })
+                        .icon(if is_max_ctx {
+                            LucideIcon::Minimize2
+                        } else {
+                            LucideIcon::Maximize2
+                        })
+                        .on_click(move |_, _, cx| {
+                            pm.update(cx, |_, cx| {
+                                cx.emit(TerminalPaneEvent::ToggleMaximizeRequested)
+                            });
+                        }),
+                    )
+                    .separator()
+                    .item(
                         PopupMenuItem::new("关闭当前分屏")
                             .icon(LucideIcon::X)
                             .on_click(move |_, _, cx| {
-                                pane.update(cx, |_, cx| cx.emit(TerminalPaneEvent::CloseRequested));
+                                p_close.update(cx, |_, cx| {
+                                    cx.emit(TerminalPaneEvent::CloseRequested)
+                                });
                             }),
                     )
                 } else {
@@ -1366,12 +1976,13 @@ impl Render for TerminalPaneView {
                     move |bounds, window, cx| {
                         let pad_left = px(12.0);
                         let pad_right = px(12.0);
-                        let pad_y = px(6.0);
+                        let pad_top = px(2.0);
+                        let pad_bottom = px(6.0);
                         let inner_bounds = Bounds {
-                            origin: point(bounds.origin.x + pad_left, bounds.origin.y + pad_y),
+                            origin: point(bounds.origin.x + pad_left, bounds.origin.y + pad_top),
                             size: size(
                                 (bounds.size.width - pad_left - pad_right).max(px(32.0)),
-                                (bounds.size.height - pad_y * 2.0).max(px(24.0)),
+                                (bounds.size.height - pad_top - pad_bottom).max(px(24.0)),
                             ),
                         };
 
@@ -1746,49 +2357,33 @@ impl Render for TerminalPaneView {
                 .size_full(),
             );
 
-        div()
-            .id(SharedString::from(format!("term-pane-{}", cx.entity_id())))
-            .relative()
-            .size_full()
-            .overflow_hidden()
-            .bg(bg_hsla)
-            .when(self.is_split_member && !self.is_active_pane, |el| {
-                el.capture_any_mouse_down(
-                    cx.listener(|_, _, _, cx| cx.emit(TerminalPaneEvent::Activate)),
-                )
-            })
-            .child(terminal_canvas)
-            .when(self.is_split_member && self.is_active_pane, |el| {
-                el.child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .right_0()
-                        .h(px(1.5))
-                        .bg(cx.theme().primary),
-                )
-            })
-            .when_some(host_hint, |el, host| {
-                el.child(
-                    div()
-                        .absolute()
-                        .bottom_2()
-                        .left_3()
-                        .px_2()
-                        .py_0p5()
-                        .rounded(px(5.0))
-                        .border_1()
-                        .border_color(cx.theme().border)
-                        .bg(cx.theme().popover)
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(format!("打开 {host}")),
-                )
-            })
-            .children(split_close_badge)
-            .children(search_bar)
-            .children(phase_overlay)
+        card_shell.bg(snapshot_bg).child(pane_header).child(
+            div()
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .min_w_0()
+                .child(terminal_canvas)
+                .when_some(host_hint, |el, host| {
+                    el.child(
+                        div()
+                            .absolute()
+                            .bottom_2()
+                            .left_3()
+                            .px_2()
+                            .py_0p5()
+                            .rounded(px(5.0))
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .bg(cx.theme().popover)
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("打开 {host}")),
+                    )
+                })
+                .children(search_bar)
+                .children(phase_overlay),
+        )
     }
 }
 

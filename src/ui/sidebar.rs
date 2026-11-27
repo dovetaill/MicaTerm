@@ -234,6 +234,10 @@ impl RenderOnce for LeftSidebar {
 
         v_flex()
             .size_full()
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(cx.theme().border)
+            .overflow_hidden()
             .bg(cx.theme().sidebar)
             .child(header)
             .child(

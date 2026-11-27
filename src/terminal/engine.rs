@@ -34,8 +34,8 @@ use crate::terminal::semantic::{
     SemanticOptions, SemanticRole, VisibleCommandBlock, detect_command_syntax_target,
     detect_input_spans_for_prompt_row, detect_output_spans_for_row,
     detect_prompt_command_byte_offset, extract_cwd_from_prompt_line, extract_cwd_from_window_title,
-    extract_http_url_byte_ranges, line_has_error_signature, openable_http_url,
-    validate_openable_http_url,
+    extract_http_url_byte_ranges, extract_windows_cwd_from_prompt_line, line_has_error_signature,
+    normalize_windows_display_path, openable_http_url, validate_openable_http_url,
 };
 
 const MAX_OSC133_RECORDS: usize = 512;
@@ -206,8 +206,9 @@ pub struct AlacrittyTerminalEngine {
     rows: usize,
     cols: usize,
     scrollback_limit: usize,
-    osc_tail: String,
+    osc_tail: Vec<u8>,
     last_cwd: Option<String>,
+    last_observed_prompt_line: Option<String>,
     remote_home_dir: Option<String>,
     osc133_records: VecDeque<Osc133Record>,
     search_query: String,
@@ -216,6 +217,7 @@ pub struct AlacrittyTerminalEngine {
     dirty_generation: u64,
     cached_overview: Option<(u64, String, Vec<OverviewMarker>, usize)>,
     pub(super) is_windows_local_pty: bool,
+    pub(super) windows_paths: bool,
     prompt_scan: PromptScanCache,
     block_syntax_cache: Option<BlockSyntaxCache>,
 }
@@ -240,8 +242,9 @@ impl AlacrittyTerminalEngine {
             rows,
             cols,
             scrollback_limit,
-            osc_tail: String::new(),
+            osc_tail: Vec::new(),
             last_cwd: None,
+            last_observed_prompt_line: None,
             remote_home_dir: None,
             osc133_records: VecDeque::new(),
             search_query: String::new(),
@@ -250,6 +253,7 @@ impl AlacrittyTerminalEngine {
             dirty_generation: 1,
             cached_overview: None,
             is_windows_local_pty: false,
+            windows_paths: false,
             prompt_scan: PromptScanCache::default(),
             block_syntax_cache: None,
         }
@@ -280,35 +284,43 @@ impl AlacrittyTerminalEngine {
                 detected_cwd = Some(dir);
             }
         }
+        let in_alt = self.mode().contains(TermMode::ALT_SCREEN);
+        if detected_cwd.is_some() && !in_alt {
+            self.last_observed_prompt_line = self.current_cursor_prompt_line();
+        }
         self.dirty_generation = self.dirty_generation.wrapping_add(1);
         let mut effects = self.proxy.drain();
 
-        // Fallback CWD extraction from standard OSC 0/2 shell prompt titles (`user@host:/path`)
-        if detected_cwd.is_none() {
+        // Fallback CWD extraction from standard POSIX OSC 0/2 shell prompt titles (`user@host:/path`)
+        if detected_cwd.is_none() && !self.windows_paths {
             for eff in &effects {
                 if let EngineSideEffect::TitleChanged(title) = eff
                     && let Some(cwd) =
                         extract_cwd_from_window_title(title, self.remote_home_dir.as_deref())
                 {
                     detected_cwd = Some(cwd);
+                    self.last_observed_prompt_line = self.current_cursor_prompt_line();
                 }
             }
         }
 
-        if detected_cwd.is_none() && !self.mode().contains(TermMode::ALT_SCREEN) {
-            let row = self.term.grid().cursor.point.line;
-            if !self.row_has_wrapline(row) {
-                let start = *self.logical_rows(row.0).start();
-                let line = if start == row.0 {
-                    self.extract_plain_grid_line(row)
-                } else {
-                    self.stitch_logical_line_at(start, row.0, row.0, &[]).text
-                };
-                detected_cwd = extract_cwd_from_prompt_line(&line, self.remote_home_dir.as_deref());
+        if detected_cwd.is_none()
+            && !in_alt
+            && let Some(trimmed) = self.current_cursor_prompt_line()
+            && self.last_observed_prompt_line.as_ref() != Some(&trimmed)
+        {
+            let parsed = if self.windows_paths {
+                extract_windows_cwd_from_prompt_line(&trimmed)
+            } else {
+                extract_cwd_from_prompt_line(&trimmed, self.remote_home_dir.as_deref())
+            };
+            self.last_observed_prompt_line = Some(trimmed);
+            if let Some(cwd) = parsed {
+                detected_cwd = Some(cwd);
             }
         }
         if let Some(cwd) = detected_cwd
-            && self.last_cwd.as_deref() != Some(cwd.as_str())
+            && self.last_cwd.as_ref() != Some(&cwd)
         {
             self.last_cwd = Some(cwd.clone());
             effects.push(EngineSideEffect::CurrentDirChanged(cwd));
@@ -404,6 +416,7 @@ impl AlacrittyTerminalEngine {
         self.prompt_scan = PromptScanCache::default();
         self.osc133_records.clear();
         self.term.resize(TermSize::new(cols, rows));
+        self.last_observed_prompt_line = self.current_cursor_prompt_line();
         self.dirty_generation = self.dirty_generation.wrapping_add(1);
         true
     }
@@ -1813,23 +1826,39 @@ impl AlacrittyTerminalEngine {
         (history + cur).max(0) as usize
     }
 
+    fn current_cursor_prompt_line(&self) -> Option<String> {
+        if self.mode().contains(TermMode::ALT_SCREEN) {
+            return None;
+        }
+        let row = self.term.grid().cursor.point.line;
+        if self.row_has_wrapline(row) {
+            return None;
+        }
+        let start = *self.logical_rows(row.0).start();
+        let line = if start == row.0 {
+            self.extract_plain_grid_line(row)
+        } else {
+            self.stitch_logical_line_at(start, row.0, row.0, &[]).text
+        };
+        Some(line.trim_end().to_owned())
+    }
+
     fn scan_osc_sequences(&mut self, bytes: &[u8]) -> Option<String> {
-        let chunk = String::from_utf8_lossy(bytes);
-        self.osc_tail.push_str(&chunk);
+        self.osc_tail.extend_from_slice(bytes);
         if self.osc_tail.len() > 8192 {
             let drain_to = self.osc_tail.len() - 4096;
-            let boundary = self.osc_tail.ceil_char_boundary(drain_to);
-            self.osc_tail.drain(..boundary);
+            self.osc_tail.drain(..drain_to);
         }
 
         let mut latest_dir = None;
-        while let Some(start) = self.osc_tail.find("\x1b]") {
+        while let Some(start) = find_subslice(&self.osc_tail, b"\x1b]") {
             let after = &self.osc_tail[start + 2..];
             let end_rel = after
-                .find('\x07')
+                .iter()
+                .position(|&b| b == 0x07)
                 .map(|i| (i, 1))
                 .into_iter()
-                .chain(after.find("\x1b\\").map(|i| (i, 2)))
+                .chain(find_subslice(after, b"\x1b\\").map(|i| (i, 2)))
                 .min();
             let Some((end_idx, term_len)) = end_rel else {
                 if start > 0 {
@@ -1838,25 +1867,40 @@ impl AlacrittyTerminalEngine {
                 break;
             };
 
-            let payload = after[..end_idx].to_string();
+            let payload_opt = std::str::from_utf8(&after[..end_idx])
+                .ok()
+                .map(str::to_owned);
             let consume = start + 2 + end_idx + term_len;
             self.osc_tail.drain(..consume);
+            let Some(payload) = payload_opt else {
+                continue;
+            };
 
             if let Some(uri) = payload.strip_prefix("7;") {
-                if let Some(parsed) = parse_osc7_file_uri(uri) {
+                if let Some(parsed) = parse_osc7_file_uri_with_mode(uri, self.windows_paths) {
+                    latest_dir = Some(parsed);
+                }
+            } else if let Some(osc9) = payload.strip_prefix("9;9;") {
+                if let Some(parsed) = parse_osc9_9_cwd(osc9, self.windows_paths) {
                     latest_dir = Some(parsed);
                 }
             } else if let Some(dir) = payload.strip_prefix("1337;CurrentDir=") {
-                if !dir.trim().is_empty() {
-                    latest_dir = Some(dir.trim().to_string());
+                let trimmed = dir.trim();
+                if !trimmed.is_empty() {
+                    latest_dir = if self.windows_paths {
+                        normalize_windows_display_path(trimmed)
+                    } else {
+                        Some(trimmed.to_string())
+                    };
                 }
             } else if let Some(osc133) = payload.strip_prefix("133;") {
                 self.handle_osc133_marker(osc133);
             }
         }
-        if !self.osc_tail.contains("\x1b]") {
-            let keep = usize::from(self.osc_tail.ends_with('\x1b'));
-            self.osc_tail.drain(..self.osc_tail.len() - keep);
+        if find_subslice(&self.osc_tail, b"\x1b]").is_none() {
+            let keep = usize::from(self.osc_tail.ends_with(b"\x1b"));
+            let len = self.osc_tail.len();
+            self.osc_tail.drain(..len - keep);
         }
         latest_dir
     }
@@ -1989,15 +2033,59 @@ fn project_segments_spans_to_viewport(
     }
 }
 
-pub fn parse_osc7_file_uri(uri: &str) -> Option<String> {
-    let rest = uri.strip_prefix("file://")?;
-    let slash_idx = rest.find('/')?;
-    let raw_path = &rest[slash_idx..];
-    let decoded = percent_decode(raw_path);
-    (!decoded.is_empty()).then_some(decoded)
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
-fn percent_decode(input: &str) -> String {
+fn parse_osc9_9_cwd(raw: &str, windows_paths: bool) -> Option<String> {
+    let unquoted = raw.trim().trim_matches('"').trim();
+    if unquoted.is_empty() {
+        return None;
+    }
+    if windows_paths {
+        normalize_windows_display_path(unquoted)
+    } else if unquoted.starts_with('/') && !unquoted.starts_with("//") {
+        Some(unquoted.to_string())
+    } else {
+        None
+    }
+}
+
+pub fn parse_osc7_file_uri(uri: &str) -> Option<String> {
+    parse_osc7_file_uri_with_mode(uri, false)
+}
+
+pub fn parse_osc7_file_uri_with_mode(uri: &str, windows_paths: bool) -> Option<String> {
+    let rest = uri.strip_prefix("file://")?;
+    let slash_idx = rest.find('/')?;
+    let host = &rest[..slash_idx];
+    let raw_path = &rest[slash_idx..];
+    let decoded = percent_decode(raw_path)?;
+    if decoded.is_empty() {
+        return None;
+    }
+    if !windows_paths {
+        return (decoded.starts_with('/') && !decoded.starts_with("//")).then_some(decoded);
+    }
+    // Support `file:///C:/...`, `file://localhost/C:/...`, and `file://MYPC/C:/...`
+    if decoded.len() >= 3
+        && decoded.as_bytes()[0] == b'/'
+        && decoded.as_bytes()[1].is_ascii_alphabetic()
+        && decoded.as_bytes()[2] == b':'
+    {
+        return normalize_windows_display_path(&decoded[1..]);
+    }
+    if host.is_empty() || host.eq_ignore_ascii_case("localhost") {
+        normalize_windows_display_path(&decoded)
+    } else {
+        normalize_windows_display_path(&format!("\\\\{host}{decoded}"))
+    }
+}
+
+fn percent_decode(input: &str) -> Option<String> {
     let bytes = input.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -2014,7 +2102,7 @@ fn percent_decode(input: &str) -> String {
         out.push(bytes[i]);
         i += 1;
     }
-    String::from_utf8_lossy(&out).into_owned()
+    String::from_utf8(out).ok()
 }
 
 #[cfg(test)]
@@ -2065,6 +2153,52 @@ mod tests {
             !effects
                 .iter()
                 .any(|e| matches!(e, EngineSideEffect::CurrentDirChanged(_)))
+        );
+    }
+
+    #[test]
+    fn windows_osc_split_utf8_and_stale_prompt_guard_work() {
+        let mut engine = AlacrittyTerminalEngine::new(6, 80, 100);
+        engine.windows_paths = true;
+
+        // 1. Prompt-based Windows CWD detection
+        let effects = engine.feed_bytes(b"PS C:\\Users\\L> ");
+        assert!(effects.iter().any(
+            |e| matches!(e, EngineSideEffect::CurrentDirChanged(dir) if dir == r"C:\Users\L")
+        ));
+
+        // 2. Multi-byte UTF-8 Chinese directory split mid-character across two PTY reads in OSC 9;9
+        let full_osc = "\x1b]9;9;\"D:\\项目源码\\云母终端\"\x07";
+        let bytes = full_osc.as_bytes();
+        // Split right inside the 3-byte UTF-8 sequence for '项'
+        let split_at = full_osc.find('项').unwrap() + 1;
+        assert!(
+            engine
+                .feed_bytes(&bytes[..split_at])
+                .into_iter()
+                .all(|e| !matches!(e, EngineSideEffect::CurrentDirChanged(_)))
+        );
+        let effects = engine.feed_bytes(&bytes[split_at..]);
+        assert!(effects.iter().any(
+            |e| matches!(e, EngineSideEffect::CurrentDirChanged(dir) if dir == r"D:\项目源码\云母终端")
+        ));
+
+        // 3. Subsequent SGR/cursor packet on the same line with old prompt text must NOT revert CWD
+        let effects = engine.feed_bytes(b"\x1b[0m");
+        assert!(
+            effects
+                .into_iter()
+                .all(|e| !matches!(e, EngineSideEffect::CurrentDirChanged(_)))
+        );
+
+        // 4. Windows OSC 7 file:///C:/... and UNC file://server/share/...
+        assert_eq!(
+            parse_osc7_file_uri_with_mode("file:///C:/Users/Administrator/", true).as_deref(),
+            Some(r"C:\Users\Administrator")
+        );
+        assert_eq!(
+            parse_osc7_file_uri_with_mode("file://nas/team/docs/", true).as_deref(),
+            Some(r"\\nas\team\docs")
         );
     }
 
@@ -2689,6 +2823,51 @@ mod tests {
                 .text_runs
                 .iter()
                 .any(|r| r.text.contains("if") && r.fg == keyword_fg)
+        );
+    }
+
+    #[test]
+    fn resize_and_full_scrollback_preserve_osc_cwd_and_reject_invalid_utf8() {
+        let mut eng = AlacrittyTerminalEngine::new(4, 60, 100);
+        eng.windows_paths = true;
+        assert_eq!(
+            parse_osc7_file_uri_with_mode("file://MYPC/C:/work/app", true),
+            Some("C:\\work\\app".into())
+        );
+        assert_eq!(parse_osc7_file_uri_with_mode("file:///work/%FF", false), None);
+
+        // Stale prompt on screen + OSC 9;9 + resize + SGR packet must NOT revert `D:\new` back to `C:\old`
+        let _ = eng.feed_bytes(b"PS C:\\old> ");
+        let effects = eng.feed_bytes(b"\x1b]9;9;D:\\new\x07");
+        assert!(
+            effects
+                .iter()
+                .any(|e| matches!(e, EngineSideEffect::CurrentDirChanged(p) if p == "D:\\new"))
+        );
+        assert!(eng.resize(4, 52));
+        let after_resize = eng.feed_bytes(b"\x1b[0m");
+        assert!(
+            !after_resize
+                .iter()
+                .any(|e| matches!(e, EngineSideEffect::CurrentDirChanged(_))),
+            "resize must not cause stale prompt C:\\old to overwrite OSC D:\\new: {after_resize:?}"
+        );
+
+        // At full scrollback capacity on the bottom row, an actual prompt change still updates CWD
+        for i in 0..120 {
+            let _ = eng.feed_bytes(format!("line {i}\r\n").as_bytes());
+        }
+        let effects_full_1 = eng.feed_bytes(b"PS E:\\alpha> ");
+        assert!(
+            effects_full_1
+                .iter()
+                .any(|e| matches!(e, EngineSideEffect::CurrentDirChanged(p) if p == "E:\\alpha"))
+        );
+        let effects_full_2 = eng.feed_bytes(b"\rPS F:\\beta> ");
+        assert!(
+            effects_full_2
+                .iter()
+                .any(|e| matches!(e, EngineSideEffect::CurrentDirChanged(p) if p == "F:\\beta"))
         );
     }
 }

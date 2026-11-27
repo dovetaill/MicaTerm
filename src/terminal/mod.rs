@@ -11,9 +11,11 @@ pub use engine::{
     TerminalRenderSnapshot, TerminalRowSnapshot, TerminalStyledRun,
 };
 pub use input::{MouseReportKind, encode_keystroke, encode_mouse_report, encode_paste};
-pub use pty_backend::{LocalPtyBackend, LocalPtyEvent};
+pub use pty_backend::{LocalPtyBackend, LocalPtyEvent, SpawnedLocalPty, normalize_shell_program_name};
 pub use semantic::{
     CommandBlockStatus, OverviewMarker, OverviewMarkerKind, SemanticOptions, SemanticRole,
     VisibleCommandBlock,
 };
-pub use session::{HostKeyPrompt, SessionKind, SessionPhase, TerminalSessionEntity};
+pub use session::{
+    HostKeyPrompt, SessionKind, SessionPhase, TerminalSessionEntity, format_local_shell_titles,
+};

@@ -418,6 +418,65 @@ pub fn macos_segmented_track(cx: &App) -> Div {
         .bg(cx.theme().tab_bar_segmented)
 }
 
+#[derive(Clone, Copy)]
+pub struct TerminalTabChrome {
+    pub active_bg: Hsla,
+    pub active_border: Hsla,
+    pub active_fg: Hsla,
+    pub inactive_fg: Hsla,
+    pub divider: Hsla,
+    pub local_badge_bg: Hsla,
+    pub local_badge_fg: Hsla,
+}
+
+#[inline]
+fn hsla_to_hex(color: Hsla) -> u32 {
+    let rgb = color.to_rgb();
+    let r = (rgb.r.clamp(0.0, 1.0) * 255.0).round() as u32;
+    let g = (rgb.g.clamp(0.0, 1.0) * 255.0).round() as u32;
+    let b = (rgb.b.clamp(0.0, 1.0) * 255.0).round() as u32;
+    (r << 16) | (g << 8) | b
+}
+
+/// Computes Rex-aligned elevated active tab capsule colors, unselected separator, and terminal badge colors
+/// without mutating `theme.tab_active` shared by segmented sidebar controls and modals.
+pub fn terminal_tab_chrome(cx: &App) -> TerminalTabChrome {
+    let theme = cx.theme();
+    let dark = theme.mode.is_dark();
+    let title_hex = hsla_to_hex(theme.title_bar);
+    let fg_hex = hsla_to_hex(theme.foreground);
+    let muted_hex = hsla_to_hex(theme.muted_foreground);
+
+    let active_bg_hex = if dark {
+        mix_hex(title_hex, 0xFFFFFF, 0.115)
+    } else if relative_luminance(title_hex) > 0.96 {
+        mix_hex(title_hex, 0x000000, 0.055)
+    } else {
+        0xFFFFFF
+    };
+
+    let active_fg_hex = ensure_readable_fg(fg_hex, active_bg_hex, dark, 4.8);
+    let inactive_fg_hex = ensure_readable_fg(muted_hex, title_hex, dark, 4.5);
+
+    let local_badge_bg_hex = if dark {
+        mix_hex(active_bg_hex, 0x000000, 0.35)
+    } else {
+        0x242830
+    };
+    let green_seed = hsla_to_hex(theme.success);
+    let local_badge_fg_hex = ensure_readable_fg(green_seed, local_badge_bg_hex, true, 3.6);
+
+    TerminalTabChrome {
+        active_bg: macos_hex(active_bg_hex, 1.0),
+        active_border: macos_hex(if dark { 0xFFFFFF } else { 0x000000 }, if dark { 0.16 } else { 0.12 }),
+        active_fg: macos_hex(active_fg_hex, 1.0),
+        inactive_fg: macos_hex(inactive_fg_hex, 1.0),
+        divider: macos_hex(if dark { 0xFFFFFF } else { 0x000000 }, if dark { 0.15 } else { 0.16 }),
+        local_badge_bg: macos_hex(local_badge_bg_hex, 1.0),
+        local_badge_fg: macos_hex(local_badge_fg_hex, 1.0),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
